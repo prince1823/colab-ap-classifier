@@ -1,43 +1,72 @@
 ---
 name: implement-issue
-description: Pick a Sprint 1 backend issue from GitHub, implement it on a feature branch, test it, and open a PR to dev.
+description: Pick a Sprint 1 issue (backend or frontend track) from GitHub, implement it on a feature branch, test it, and open a PR to dev.
 user-invocable: true
-argument-hint: "[issue-number or 'next' to auto-pick]"
+argument-hint: "[backend|frontend] [issue-number or 'next']"
 ---
 
 # Implement Issue
 
-You are implementing a GitHub issue for the Colab91 AP Classifier backend.
+You are implementing a GitHub issue for the Colab91 AP Classifier.
 
-**Argument:** `$ARGUMENTS` — either a GitHub issue number (e.g., `42`) or the word `next` to auto-select the next available issue based on dependency order.
+**Argument:** `$ARGUMENTS` — two tokens separated by a space:
+1. **Track:** `backend` or `frontend`
+2. **Selector:** a GitHub issue number (e.g., `42`) or the word `next` to auto-select the next available issue
+
+Examples:
+- `/implement-issue backend next` — auto-pick the next ready backend issue
+- `/implement-issue frontend 42` — implement frontend issue #42
+- `/implement-issue backend 15` — implement backend issue #15
+
+If the track is missing or invalid, **STOP** and report:
+> "Usage: `/implement-issue [backend|frontend] [issue-number|next]`"
 
 ---
 
 ## Phase 1: Issue Selection & Preparation
 
-### 1.1 Select the Issue
+### 1.1 Parse Arguments
 
-If `$ARGUMENTS` is a number:
-- Run: `gh issue view $ARGUMENTS --repo kavyald/colab-ap-classifier`
+Split `$ARGUMENTS` on whitespace into `TRACK` (first token) and `SELECTOR` (second token).
+
+- Validate `TRACK` is `backend` or `frontend`
+- Validate `SELECTOR` is a positive integer or `next`
+- If invalid, STOP and show usage
+
+### 1.2 Select the Issue
+
+If `SELECTOR` is a number:
+- Run: `gh issue view $SELECTOR --repo kavyald/colab-ap-classifier`
 - Read the issue body, labels, and comments
+- Verify the issue has the expected track label (`backend` or `frontend`). If not, warn:
+  > "Issue #N is labeled '{actual_label}', not '{TRACK}'. Did you mean `/implement-issue {actual_label} N`?"
 
-If `$ARGUMENTS` is `next` or empty:
-- Run: `gh issue list --repo kavyald/colab-ap-classifier --label sprint-1 --state open --json number,title,labels`
-- Read `.github/issues/DEPENDENCY_GRAPH.md` for dependency order
-- For each open issue (in dependency order), check if all its dependencies are closed:
+If `SELECTOR` is `next`:
+- Run: `gh issue list --repo kavyald/colab-ap-classifier --label sprint-1 --label $TRACK --state open --json number,title,labels`
+- Read the track-appropriate dependency graph:
+  - **Backend:** `.github/issues/DEPENDENCY_GRAPH.md`
+  - **Frontend:** `.github/issues/FRONTEND_DEPENDENCY_GRAPH.md`
+- Get the list of closed sprint-1 issues for this track:
   ```
-  gh issue list --repo kavyald/colab-ap-classifier --label sprint-1 --state closed --json number,title
+  gh issue list --repo kavyald/colab-ap-classifier --label sprint-1 --label $TRACK --state closed --json number,title
   ```
-- Pick the first issue whose dependencies are all closed
+- For frontend issues, also get closed backend issues (for cross-track prerequisites):
+  ```
+  gh issue list --repo kavyald/colab-ap-classifier --label sprint-1 --label backend --state closed --json number,title
+  ```
+- For each open issue (in dependency order from the graph), check if all its dependencies are closed — including cross-track prerequisites for frontend
+- Pick the first issue whose dependencies are all satisfied
 
-### 1.2 Check for Dependency Issues
+### 1.3 Check for Dependency Issues
 
 Read the issue body for the **Dependencies** section. For each dependency:
 - Verify the dependency issue is **closed** (merged)
 - If a dependency is still open, **STOP** and report: "Cannot implement this issue — dependency S1-XX is still open."
 - Read closed dependency issues and their PR comments for any deviations from the original plan
 
-### 1.3 Update Issue with Implementation Plan
+For **frontend** issues, also check the **Cross-Track Prerequisites** section in `FRONTEND_DEPENDENCY_GRAPH.md`. These are backend issues that must be closed before this frontend issue can start.
+
+### 1.4 Update Issue with Implementation Plan
 
 If any closed dependencies documented deviations:
 - Post a comment on the current issue with an updated plan:
@@ -49,16 +78,25 @@ If any closed dependencies documented deviations:
   - [updated approach if needed]"
   ```
 
-### 1.4 Create Feature Branch
+### 1.5 Create Feature Branch
 
 ```bash
 git fetch origin dev
 git checkout dev
 git pull origin dev
+```
+
+**Backend:**
+```bash
 git checkout -b feature/s1-{NN}-{short-slug}
 ```
 
-Where `{NN}` is the zero-padded issue suffix (e.g., `01`, `14`) and `{short-slug}` is a kebab-case description (e.g., `project-scaffolding`, `duckdb-service`).
+**Frontend:**
+```bash
+git checkout -b feature/s1-fe-{NN}-{short-slug}
+```
+
+Where `{NN}` is the zero-padded issue suffix (e.g., `01`, `14`) and `{short-slug}` is a kebab-case description (e.g., `project-scaffolding`, `upload-page`).
 
 ---
 
@@ -66,12 +104,20 @@ Where `{NN}` is the zero-padded issue suffix (e.g., `01`, `14`) and `{short-slug
 
 ### 2.1 Read the Specs
 
-Before writing any code, read the relevant spec documents referenced in the issue:
+Before writing any code, read the relevant spec documents referenced in the issue.
+
+**If TRACK is `backend`:**
 - `internal_docs/backend_spec.md` — architecture, agents
 - `internal_docs/ipc_contract.md` — IPC channel definitions, types
 - `internal_docs/schema.md` — DuckDB table definitions
 - `internal_docs/features.md` — business rules, feature definitions
-- `internal_docs/frontend_spec.md` — UI interactions (for context)
+- `internal_docs/frontend_spec.md` — UI interactions (for context on what the frontend expects)
+
+**If TRACK is `frontend`:**
+- `internal_docs/frontend_spec.md` — UI layouts, interactions, constraints
+- `internal_docs/ipc_contract.md` — IPC channels available from the renderer
+- `internal_docs/features.md` — business rules, feature definitions
+- `internal_docs/backend_spec.md` — architecture (for context on what the backend provides)
 
 Only read the sections relevant to the current issue.
 
@@ -79,12 +125,16 @@ Only read the sections relevant to the current issue.
 
 Before implementing:
 - Read existing files in the areas you'll modify
-- Understand patterns already established (e.g., how other services are structured)
+- Understand patterns already established (e.g., how other services/components are structured)
 - Check imports and dependencies
 
 ### 2.3 Implement the Feature
 
-Follow the acceptance criteria in the issue body. Key conventions:
+Follow the acceptance criteria in the issue body. Key conventions differ by track:
+
+---
+
+#### Backend Conventions
 
 **IPC Handlers:**
 - File: `src/main/ipc/{namespace}.ts`
@@ -109,7 +159,7 @@ Follow the acceptance criteria in the issue body. Key conventions:
 - Barrel export from `src/shared/types/index.ts`
 - Types are shared between main and renderer
 
-**Key Rules:**
+**Key Backend Rules:**
 - L1 taxonomy values: exactly `Direct`, `Indirect`, `Exempt`
 - Taxonomy paths: pipe-delimited (`"Direct|IT|Software"`)
 - Canonical column names: snake_case
@@ -117,9 +167,70 @@ Follow the acceptance criteria in the issue body. Key conventions:
 - UUIDs for all entity IDs
 - Timestamps in ISO format
 
+---
+
+#### Frontend Conventions
+
+**Pages (workflow tabs):**
+- File: `src/renderer/pages/{PageName}.tsx`
+- Each workflow step is a page component
+- Pages use hooks for data fetching and state management
+- Pages compose smaller, reusable components
+
+**Components (reusable UI elements):**
+- File: `src/renderer/components/{ComponentName}.tsx`
+- Props interface at top of file: `interface {ComponentName}Props { ... }`
+- Prefer composition over inheritance
+- Colocate styles alongside components
+
+**Hooks (data fetching & state):**
+- File: `src/renderer/hooks/use{Domain}.ts`
+- Wrap IPC calls: `const result = await window.electronAPI.namespace.method(args)`
+- Always check `result.success` before accessing `result.data`
+- Return `{ data, loading, error }` state tuple
+- Example pattern:
+  ```typescript
+  export function useProjectMetadata(projectId: string) {
+    const [data, setData] = useState<ProjectMetadata | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+      const fetch = async () => {
+        const result = await window.electronAPI.project.getMetadata(projectId);
+        if (result.success) {
+          setData(result.data);
+        } else {
+          setError(result.error);
+        }
+        setLoading(false);
+      };
+      fetch();
+    }, [projectId]);
+
+    return { data, loading, error };
+  }
+  ```
+
+**Types:**
+- Shared types: `src/shared/types/{domain}.ts` (shared with backend — never duplicate)
+- Frontend-only types (component props, UI state): `src/renderer/types/` if needed
+
+**Key Frontend Rules:**
+- All IPC calls go through `window.electronAPI` (exposed via preload contextBridge)
+- Always use the `IPCResponse<T>` pattern: check `.success` before accessing `.data`
+- Form state is cached locally (page reload must not lose in-progress work)
+- Disabled tabs show tooltips explaining why they are disabled
+- Only one classification job at a time — lock UI accordingly
+- Block uploads while classification is running
+
+---
+
 ### 2.4 Write Tests
 
-Every issue must have tests. Write them alongside the implementation:
+Every issue must have tests. Write them alongside the implementation.
+
+#### Backend Tests
 
 **Unit Tests:** `tests/unit/{service-or-agent}.test.ts`
 - Test service methods in isolation
@@ -127,7 +238,7 @@ Every issue must have tests. Write them alongside the implementation:
 - Mock LLM responses for agent tests
 - Test error cases and edge cases
 
-**Test Patterns:**
+**Test Pattern:**
 ```typescript
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -142,6 +253,63 @@ describe('ServiceName', () => {
 
   it('should do the thing', async () => {
     // Arrange, Act, Assert
+  });
+});
+```
+
+#### Frontend Tests
+
+**Component Tests:** `tests/unit/components/{ComponentName}.test.tsx`
+**Page Tests:** `tests/unit/pages/{PageName}.test.tsx`
+**Hook Tests:** `tests/unit/hooks/use{Domain}.test.ts`
+
+- Use `@testing-library/react` (`render`, `screen`, `fireEvent`, `waitFor`)
+- Mock `window.electronAPI` for all IPC calls
+- Test user interactions and rendered output
+- Test loading, success, and error states
+
+**Test Pattern:**
+```typescript
+import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { ComponentName } from '../../src/renderer/components/ComponentName';
+
+const mockElectronAPI = {
+  project: {
+    getMetadata: vi.fn(),
+    updateMetadata: vi.fn(),
+  },
+};
+
+beforeEach(() => {
+  (window as any).electronAPI = mockElectronAPI;
+});
+
+describe('ComponentName', () => {
+  it('should render data when IPC call succeeds', async () => {
+    mockElectronAPI.project.getMetadata.mockResolvedValue({
+      success: true,
+      data: { name: 'Test Project' },
+    });
+
+    render(<ComponentName projectId="test-id" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Project')).toBeInTheDocument();
+    });
+  });
+
+  it('should show error when IPC call fails', async () => {
+    mockElectronAPI.project.getMetadata.mockResolvedValue({
+      success: false,
+      error: 'Not found',
+    });
+
+    render(<ComponentName projectId="bad-id" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/error/i)).toBeInTheDocument();
+    });
   });
 });
 ```
@@ -184,6 +352,8 @@ npm run lint 2>/dev/null || echo "No lint script configured"
 ### 4.1 Commit
 
 Stage and commit with a descriptive message:
+
+**Backend:**
 ```bash
 git add src/ tests/
 git commit -m "feat(s1-{NN}): {short description}
@@ -196,14 +366,34 @@ Implements S1-{NN}: {issue title}
 Closes #{ISSUE_NUMBER}"
 ```
 
+**Frontend:**
+```bash
+git add src/ tests/
+git commit -m "feat(s1-fe-{NN}): {short description}
+
+Implements S1-FE-{NN}: {issue title}
+
+- {bullet point summary of what was built}
+- {another key point}
+
+Closes #{ISSUE_NUMBER}"
+```
+
 ### 4.2 Push
 
+**Backend:**
 ```bash
 git push -u origin feature/s1-{NN}-{short-slug}
 ```
 
+**Frontend:**
+```bash
+git push -u origin feature/s1-fe-{NN}-{short-slug}
+```
+
 ### 4.3 Create Pull Request
 
+**Backend:**
 ```bash
 gh pr create \
   --base dev \
@@ -217,6 +407,32 @@ Implements #{ISSUE_NUMBER}: {Issue Title}
 
 ## Testing
 - [ ] Unit tests added and passing
+- [ ] All existing tests still pass
+- [ ] TypeScript compilation clean
+
+## Acceptance Criteria
+{Copy acceptance criteria from issue with checkmarks}
+
+## Deviations from Plan
+{Document ANY deviations from the original issue spec. If none, write 'None.'}
+
+Closes #{ISSUE_NUMBER}"
+```
+
+**Frontend:**
+```bash
+gh pr create \
+  --base dev \
+  --title "S1-FE-{NN}: {Issue Title}" \
+  --body "## Summary
+
+Implements #{ISSUE_NUMBER}: {Issue Title}
+
+## Changes
+- {what was added/changed}
+
+## Testing
+- [ ] Component/page/hook tests added and passing
 - [ ] All existing tests still pass
 - [ ] TypeScript compilation clean
 
@@ -249,33 +465,73 @@ gh issue comment {ISSUE_NUMBER} --repo kavyald/colab-ap-classifier --body "## Im
 
 ## Architecture Quick Reference
 
+### Backend (Electron Main Process)
+
 ```
-src/main/           # Electron main process (Node.js)
-  ├── index.ts      # Entry point, creates BrowserWindow
-  ├── ipc/          # IPC handler files (one per namespace)
-  │   ├── index.ts  # Registers all handlers
-  │   └── {ns}.ts   # Handler for each IPC namespace
-  ├── services/     # Business logic services
+src/main/               # Electron main process (Node.js)
+  ├── index.ts          # Entry point, creates BrowserWindow
+  ├── ipc/              # IPC handler files (one per namespace)
+  │   ├── index.ts      # Registers all handlers
+  │   └── {ns}.ts       # Handler for each IPC namespace
+  ├── services/         # Business logic services
   │   └── {name}.ts
-  └── agents/       # LLM agent implementations
+  └── agents/           # LLM agent implementations
       └── {name}.ts
 
-src/shared/types/   # TypeScript interfaces (shared main ↔ renderer)
-  ├── index.ts      # Barrel export
+src/shared/types/       # TypeScript interfaces (shared main ↔ renderer)
+  ├── index.ts          # Barrel export
   └── {domain}.ts
 
-src/preload/        # Electron preload (contextBridge)
+src/preload/            # Electron preload (contextBridge)
   └── index.ts
+```
 
+### Frontend (React Renderer)
+
+```
+src/renderer/           # React frontend (Chromium renderer process)
+  ├── main.tsx          # React entry point
+  ├── App.tsx           # Root component, routing
+  ├── components/       # Reusable UI components
+  │   └── {Name}.tsx
+  ├── pages/            # Workflow tab pages
+  │   ├── UploadPage.tsx
+  │   ├── CanonicalizationPage.tsx
+  │   ├── DataReviewPage.tsx
+  │   ├── ClassificationPage.tsx
+  │   ├── ReviewPage.tsx
+  │   └── OutputPage.tsx
+  ├── hooks/            # Custom React hooks (IPC wrappers, state)
+  │   └── use{Domain}.ts
+  └── types/            # Frontend-only types (if needed)
+```
+
+### Tests
+
+```
 tests/
-  ├── unit/         # Unit tests (vitest)
-  ├── integration/  # Integration tests
-  └── helpers/      # Test utilities, fixtures
+  ├── unit/
+  │   ├── {service-or-agent}.test.ts   # Backend unit tests
+  │   ├── components/                   # Frontend component tests
+  │   │   └── {Name}.test.tsx
+  │   ├── pages/                        # Frontend page tests
+  │   │   └── {Name}.test.tsx
+  │   └── hooks/                        # Frontend hook tests
+  │       └── use{Domain}.test.ts
+  ├── integration/                      # Integration tests
+  └── helpers/                          # Test utilities, fixtures
 ```
 
 ## Troubleshooting
 
+### Backend
 - **DuckDB import errors:** Make sure to use the async bindings (`duckdb-async` or `@duckdb/node-bindings`)
 - **IPC not reaching renderer:** Check preload script is loaded in BrowserWindow config
 - **LLM mock in tests:** Use `vi.mock()` to mock the LLM client module
 - **Type errors across processes:** Types must be in `src/shared/types/`, not in main or renderer directories
+
+### Frontend
+- **IPC calls not working in tests:** Mock `window.electronAPI` in `beforeEach` — see test pattern above
+- **`@testing-library/react` not found:** Ensure it's in `devDependencies` (`npm i -D @testing-library/react @testing-library/jest-dom`)
+- **Component not re-rendering after IPC:** Ensure state updates happen inside the async callback, check `useEffect` dependency array
+- **Preload types not available:** Import types from `src/shared/types/`, ensure preload exposes the channel via `contextBridge`

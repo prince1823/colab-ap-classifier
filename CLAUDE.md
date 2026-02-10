@@ -104,25 +104,33 @@ Authoritative specs live in `internal_docs/` (dev branch only). Read before impl
 ### Branches
 - `dev` — active development (feature PRs target here)
 - `main` — stable (release PRs from dev)
-- `feature/s1-{NN}-{slug}` — per-issue feature branches off dev
+- `feature/s1-{NN}-{slug}` — backend feature branches off dev
+- `feature/s1-fe-{NN}-{slug}` — frontend feature branches off dev
 
 ### Development Workflow
 
 **Issue-driven development using `/implement-issue` skill:**
 
-1. **Pick an issue:** `/implement-issue next` (auto-picks next available) or `/implement-issue 42` (specific issue)
+Backend and frontend are developed as **separate tracks** with independent dependency graphs. They are tested together via integration tests.
+
+1. **Pick an issue:** `/implement-issue backend next` or `/implement-issue frontend 42`
 2. The skill will:
-   - Check dependency issues are closed
+   - Filter issues by track label (`backend` or `frontend`)
+   - Check dependency issues are closed (within-track + cross-track prerequisites for frontend)
    - Read closed dependencies for deviations
-   - Create a feature branch from dev
-   - Implement the issue per spec
+   - Create a track-appropriate feature branch from dev
+   - Implement the issue per spec with track-specific conventions
    - Write and run tests
    - Create a PR to dev
    - Document any deviations on the issue
 
 **Manual workflow:**
-1. Check `.github/issues/DEPENDENCY_GRAPH.md` for issue order
-2. Create feature branch: `git checkout -b feature/s1-{NN}-{slug} dev`
+1. Check the appropriate dependency graph:
+   - Backend: `.github/issues/DEPENDENCY_GRAPH.md`
+   - Frontend: `.github/issues/FRONTEND_DEPENDENCY_GRAPH.md`
+2. Create feature branch:
+   - Backend: `git checkout -b feature/s1-{NN}-{slug} dev`
+   - Frontend: `git checkout -b feature/s1-fe-{NN}-{slug} dev`
 3. Implement per the issue spec in `.github/issues/{NN}-*.md`
 4. Run all tests: `npm run test`
 5. Type check: `npx tsc --noEmit`
@@ -139,8 +147,8 @@ bash .github/issues/create-all-issues.sh
 ```
 
 ### Sprint 1 Issues
-25 backend issues tracked in `.github/issues/` with dependency graph.
-See `.github/issues/DEPENDENCY_GRAPH.md` for implementation order.
+- **Backend track:** 25 issues in `.github/issues/` — see `.github/issues/DEPENDENCY_GRAPH.md`
+- **Frontend track:** issues in `.github/issues/` — see `.github/issues/FRONTEND_DEPENDENCY_GRAPH.md`
 
 ## Current Status
 

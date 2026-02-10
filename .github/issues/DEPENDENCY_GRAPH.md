@@ -1,4 +1,7 @@
-# Sprint 1 Backend — Issue Dependency Graph
+# Sprint 1 Backend Track — Issue Dependency Graph
+
+> This is the **backend** track. See [FRONTEND_DEPENDENCY_GRAPH.md](./FRONTEND_DEPENDENCY_GRAPH.md) for the frontend track.
+> The two tracks are developed independently and integrated later.
 
 ## Issue Index
 

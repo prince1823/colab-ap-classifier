@@ -36,6 +36,10 @@ colab-ap-classifier/
 ├── CLAUDE.md
 ├── .gitignore
 ├── internal_docs/          # Specs — dev branch only, not pushed to main
+├── .claude/                # Claude Code skills
+│   └── skills/             # Slash command skills (/implement-issue)
+├── .github/                # GitHub issues, scripts
+│   └── issues/             # Issue body files + creation script
 ├── claude/                 # Claude Code config (agents, skills)
 ├── projects/               # .c91 project files (gitignored)
 ├── colabip/                # Local ColabIP clone
@@ -98,11 +102,48 @@ Authoritative specs live in `internal_docs/` (dev branch only). Read before impl
 ## Development
 
 ### Branches
-- `dev` — active development
-- `main` — stable, PRs target here
+- `dev` — active development (feature PRs target here)
+- `main` — stable (release PRs from dev)
+- `feature/s1-{NN}-{slug}` — per-issue feature branches off dev
+
+### Development Workflow
+
+**Issue-driven development using `/implement-issue` skill:**
+
+1. **Pick an issue:** `/implement-issue next` (auto-picks next available) or `/implement-issue 42` (specific issue)
+2. The skill will:
+   - Check dependency issues are closed
+   - Read closed dependencies for deviations
+   - Create a feature branch from dev
+   - Implement the issue per spec
+   - Write and run tests
+   - Create a PR to dev
+   - Document any deviations on the issue
+
+**Manual workflow:**
+1. Check `.github/issues/DEPENDENCY_GRAPH.md` for issue order
+2. Create feature branch: `git checkout -b feature/s1-{NN}-{slug} dev`
+3. Implement per the issue spec in `.github/issues/{NN}-*.md`
+4. Run all tests: `npm run test`
+5. Type check: `npx tsc --noEmit`
+6. PR to dev, not main
+
+### GitHub Setup
+
+```bash
+# Authenticate gh CLI (one-time)
+GH_TOKEN=ghp_your_token bash .github/setup-gh-auth.sh
+
+# Create all sprint issues (one-time)
+bash .github/issues/create-all-issues.sh
+```
+
+### Sprint 1 Issues
+25 backend issues tracked in `.github/issues/` with dependency graph.
+See `.github/issues/DEPENDENCY_GRAPH.md` for implementation order.
 
 ## Current Status
 
-**Pre-development.** No source code yet. Specs complete in `internal_docs/`.
+**Sprint 1 in progress.** Specs complete, issues created, implementation starting.
 - Sprint 1 (v1): in-progress — see `internal_docs/sprint_docs/sprint_1.md`
 - Sprint 2 (v2): not started

@@ -1,0 +1,2 @@
+- use memory to save as skills when we do repetitive actions
+- use memory to save best practices or arhctiectural decisions if user sepecifies them in the session, ask the user if this is something they want to save to memory

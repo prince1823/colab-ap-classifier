@@ -323,7 +323,7 @@ interface ClassificationStartOptions {
 }
 ```
 
-| **Notes** | Creates a `project_runs` row. Pipeline runs async: supplier research → rule sync → override rules → LLM classification → review scores. Progress emitted via `classification:progress` event. Only one job at a time. |
+| **Notes** | Creates an in-memory run tracker (no database table). Pipeline runs async: supplier research → rule sync → override rules → LLM classification → review scores. Progress emitted via `classification:progress` event. Only one job at a time. |
 
 ---
 
@@ -336,7 +336,7 @@ Get the status of the most recent classification run.
 | **Args** | none |
 | **Response** | `ProjectRun \| null` |
 
-| **Notes** | Returns null if no runs exist. Returns the latest run by `created_at`. |
+| **Notes** | Returns null if no classification has been started. Returns the current in-memory run state. |
 
 ---
 
@@ -1050,6 +1050,7 @@ interface RuleCondition {
 ```typescript
 type ClassificationScope = "all" | "new" | "filtered";
 
+// In-memory only — no database table. State resets when app restarts.
 type ProjectRunStatus =
   | "pending"
   | "researching"                             // Supplier research phase
@@ -1058,6 +1059,7 @@ type ProjectRunStatus =
   | "failed"
   | "cancelled";
 
+// In-memory run state — not persisted to database.
 interface ProjectRun {
   id: string;
   scope: ClassificationScope;

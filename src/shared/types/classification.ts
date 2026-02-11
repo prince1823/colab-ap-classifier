@@ -25,6 +25,7 @@ export interface ClassificationProgress {
   currentStep: string;
 }
 
+/** In-memory run state — not persisted to any database table. */
 export interface ProjectRun {
   id: string;
   scope: ClassificationScope;

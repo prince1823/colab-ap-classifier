@@ -43,7 +43,7 @@ flowchart TB
     subgraph Project["DuckDB Project (.c91)"]
         db1["settings"] ~~~ db2["company_context"] ~~~ db3["column_mappings"] ~~~ db4["invoice_grouping_columns"]
         db5["taxonomy"] ~~~ db6["transactions"] ~~~ db7["project_suppliers"] ~~~ db8["override_rules"]
-        db9["project_runs"] ~~~ db10["change_log"] ~~~ db11["system_feedback"]
+        db9["change_log"] ~~~ db10["system_feedback"]
     end
 
     ColabIP <--> Local <--> Project
@@ -89,7 +89,6 @@ flowchart TB
 - **transactions** — dynamic schema: fixed columns (id, raw_data, classification results with `review_score` 0-100 integer) + canonical columns added from column_mappings
 - **project_suppliers** — suppliers with parent_name, `supplier_type` (company/individual/government/null), supplier_info (JSON), Category A designation (`category_a`, `category_a_taxonomy_node_id`), transaction_count, total_spend
 - **override_rules** — rules with name, source (`project`/`taxonomy`/`supplier`), conditions (JSON), target_classification, priority_score. `supplier` and `taxonomy` rules synced at classification time; `project` rules created directly.
-- **project_runs** — classification job tracking: scope, status, started_at, completed_at, error_message
 - **change_log** — audit trail: change_type, source, affected_table, old/new values
 - **system_feedback** — AI-generated suggestions: feedback_type, action_details (JSON), status
 
@@ -207,18 +206,18 @@ flowchart TB
 
 **IPC Handlers:** `classification:start`, `classification:status`, `classification:cancel`
 
-1. Start classification → `classification:start` → creates new row in project_runs (taxonomy_id snapshot, company_context snapshot, `tail_spend_threshold`, `scope`, `status`="pending")
+1. Start classification → `classification:start` → creates in-memory run tracker (scope, status="pending")
    - `status` follows: `pending` → `researching` → `classifying` → `completed` / `failed` / `cancelled`
+   - Run state is tracked in-memory only (no database table). Only one job at a time.
 2. ClassificationPipeline orchestrates the job (operates on currently open project). See §3.3 for pipeline steps.
 3. Progress updates → emit `classification:progress` IPC event with progress_percentage
 4. Update transactions with classification results (classification_path, review_score, classification_reasoning)
-5. Update project_runs row (progress_processed, progress_percentage, status, completed_at)
 
 #### 3.2 Job Progress
 
 **IPC Handlers:** `classification:getStatus`, `classification:cancel`, `classification:progress` (event)
 
-- Poll status → `classification:getStatus` → returns current project_run with status, progress_total, progress_processed, progress_percentage
+- Poll status → `classification:getStatus` → returns current in-memory run state with status, progress_total, progress_processed, progress_percentage
 - Real-time updates → renderer listens to `classification:progress` IPC event
 - Cancel → `classification:cancel` → sets status="cancelled", stops pipeline processing
 
@@ -226,7 +225,7 @@ flowchart TB
 
 > See [features.md §5](./features.md) for priority hierarchy and classification rules. See [features.md §6](./features.md) for review score definition.
 
-**Input:** Project Run record (`taxonomy_id`, `company_context`, `tail_spend_threshold`, `scope`)
+**Input:** Classification options (`scope`, `filterCriteria`). Pipeline reads taxonomy, company_context, and tail_spend_threshold from the open project.
 
 **Step 1: Supplier research**
 
@@ -286,8 +285,9 @@ For each group:
 
 **Step 8: Finalize**
 
-- Update Project Runs row (`status`="completed", `completed_at`=CURRENT_TIMESTAMP)
-- If error mid-process → `status`="failed", store error message, rows processed so far remain classified
+- Update in-memory run state (`status`="completed", `completedAt`=now)
+- Log completion to change_log
+- If error mid-process → `status`="failed", store error message in-memory, rows processed so far remain classified
 
 ---
 

@@ -1,2 +1,11 @@
-// Shared TypeScript types — barrel export
-// Types will be added in S1-02: Shared TypeScript Types
+export * from './ipc';
+export * from './canonicalization';
+export * from './project';
+export * from './taxonomy';
+export * from './suppliers';
+export * from './rules';
+export * from './transactions';
+export * from './classification';
+export * from './feedback';
+export * from './changelog';
+export * from './settings';

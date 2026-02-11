@@ -1,0 +1,4 @@
+supplier_name,parent_company,supplier_type,website,industry
+GE Healthcare,General Electric,company,https://www.gehealthcare.com,Healthcare
+Pfizer Inc,,company,https://www.pfizer.com,Pharmaceuticals
+John Doe Consulting,,individual,,Consulting

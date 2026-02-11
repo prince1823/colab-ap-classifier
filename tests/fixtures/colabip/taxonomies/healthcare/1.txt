@@ -1,0 +1,2 @@
+clinical|clinical equipment|diagnostic imaging
+Diagnostic imaging equipment including X-ray, MRI, and CT scanners. Common suppliers: GE Healthcare, Siemens Healthineers

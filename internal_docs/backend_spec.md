@@ -174,15 +174,18 @@ flowchart TB
 - On insert → apply column_mappings to map columns to canonical fields
 - Store original row as `raw_data` JSON for reference
 
-#### 2.2 Canonicalization
+#### 2.2 Canonicalization (LLM-first)
 
-**IPC Handlers:** `canonicalization:suggest`, `canonicalization:save`
+**IPC Handlers:** `upload:parsePreview` (extended), `canonicalization:save`
 
-- User requests suggestions → `canonicalization:suggest` → CanonicalizationAgent LLM call with column names + sample values → returns:
+- `upload:parsePreview` now **automatically** calls the CanonicalizationAgent after parsing the CSV. The response includes both the CSV preview and the LLM's suggested mappings (`CSVPreviewWithMappings`):
+  - CSV columns, sample rows, total row count
   - Suggested mappings (canonical column → client column)
   - Confidence level and reasoning
   - Unmapped columns list
-- User confirms/edits mapping → `canonicalization:save` → update `column_mappings` table
+  - If the LLM call fails, the preview is still returned with an empty `CanonicalizationResult` (confidence: 'low', empty mappings) so the user can map manually
+- The separate `canonicalization:suggest` IPC channel has been **removed** — suggestions are bundled into the preview response
+- User reviews and edits the pre-populated mappings → `canonicalization:save` → update `column_mappings` table
 - User sets invoice grouping columns → update `invoice_grouping_columns` table
 - On confirmation:
   - Extract distinct suppliers from transactions using supplier_name column → insert into project_suppliers

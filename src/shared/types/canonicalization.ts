@@ -22,6 +22,14 @@ export interface CSVPreview {
   totalRows: number;
 }
 
+/**
+ * Extended preview that includes LLM-suggested column mappings (LLM-first flow).
+ * Returned by `upload:parsePreview`.
+ */
+export interface CSVPreviewWithMappings extends CSVPreview {
+  mappingSuggestion: CanonicalizationResult;
+}
+
 export interface CanonicalizationResult {
   mappings: CanonicalColumnMapping;
   confidence: ConfidenceLevel;

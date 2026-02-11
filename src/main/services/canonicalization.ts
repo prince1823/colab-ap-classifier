@@ -2,21 +2,12 @@ import fs from 'fs';
 import { parse } from 'csv-parse/sync';
 import { v4 as uuidv4 } from 'uuid';
 import { databaseService } from './database';
-import * as canonicalizationAgent from '../agents/canonicalization-agent';
 import type {
-  CanonicalizationResult,
   CanonicalColumnMapping,
 } from '../../shared/types/canonicalization';
 
-/**
- * Delegate to the canonicalization agent to suggest column mappings.
- */
-export async function suggestMappings(
-  columns: string[],
-  sampleData: Record<string, string>[]
-): Promise<CanonicalizationResult> {
-  return canonicalizationAgent.suggestMappings(columns, sampleData);
-}
+// NOTE: suggestMappings was removed from this service — LLM mapping suggestions
+// are now called directly from the upload service as part of parsePreview (LLM-first flow).
 
 /**
  * Persist canonical column mappings and invoice grouping columns to the database.

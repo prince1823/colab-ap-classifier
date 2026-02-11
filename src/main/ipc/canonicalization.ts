@@ -1,25 +1,13 @@
 import { registerHandler } from './register';
 import {
-  suggestMappings,
   saveMappings,
   importCSV,
 } from '../services/canonicalization';
 import type { CanonicalColumnMapping } from '../../shared/types/canonicalization';
 
 export function registerCanonicalizationHandlers(): void {
-  registerHandler(
-    'canonicalization:suggest',
-    async (
-      _event,
-      columns: unknown,
-      sampleData: unknown
-    ) => {
-      return suggestMappings(
-        columns as string[],
-        sampleData as Record<string, string>[]
-      );
-    }
-  );
+  // NOTE: canonicalization:suggest was removed — LLM mapping suggestions
+  // are now returned automatically as part of upload:parsePreview (LLM-first flow).
 
   registerHandler(
     'canonicalization:save',

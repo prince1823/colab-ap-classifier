@@ -160,6 +160,23 @@ function setupLLMMock(): void {
   const mockChat = vi.mocked(llmClient.chat);
 
   mockChat.mockImplementation(async (_systemPrompt: string, userPrompt: string) => {
+    // Canonicalization call — LLM-first mapping suggestion
+    if (userPrompt.includes('## CSV Column Headers')) {
+      return JSON.stringify({
+        mappings: {
+          supplier_name: 'Supplier',
+          spend_amount: 'Amount',
+          invoice_date: 'Date',
+          line_description: 'Description',
+        },
+        confidence: 'high',
+        unmappedClientColumns: ['Invoice Number'],
+        importantUnmappedColumns: [],
+        unmappedCanonicalColumns: ['gl_description', 'gl_code', 'department', 'creation_date', 'company', 'cost_center', 'po_number', 'supplier_address', 'currency', 'memo'],
+        reasoning: 'Mapped Supplier to supplier_name, Amount to spend_amount, Date to invoice_date, Description to line_description.',
+      });
+    }
+
     // Determine if this is a research call or classification call
     const isResearch = userPrompt.includes('## Supplier Name');
 
@@ -282,12 +299,14 @@ describe('Pipeline E2E Integration Test', () => {
   // Phase 3: CSV Upload & Import
   // ────────────────────────────────────────────────────────────────
 
-  it('Phase 3a: Preview CSV file', () => {
-    const preview = uploadService.parsePreview(CSV_PATH);
+  it('Phase 3a: Preview CSV file', async () => {
+    const preview = await uploadService.parsePreview(CSV_PATH);
 
     expect(preview.columns).toEqual(['Supplier', 'Invoice Number', 'Amount', 'Date', 'Description']);
     expect(preview.totalRows).toBe(5);
     expect(preview.sampleRows.length).toBe(5);
+    // LLM-first flow: mappingSuggestion is included in the preview
+    expect(preview.mappingSuggestion).toBeDefined();
 
     console.log(`  ✓ CSV preview: ${preview.totalRows} rows, columns: ${preview.columns.join(', ')}`);
   });

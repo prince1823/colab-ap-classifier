@@ -22,7 +22,7 @@
 ## 2. Data Import
 
 - Users upload CSV transaction files into a project. Each upload can create a new dataset or add rows to an existing dataset.
-- **Column canonicalization:** CSV columns are mapped to a standard schema (supplier_name, spend_amount, gl_description, line_description, etc.). The CanonicalizationAgent suggests mappings using column names and sample values; the user confirms or edits.
+- **Column canonicalization (LLM-first):** When a CSV is previewed, the CanonicalizationAgent automatically maps CSV columns to the standard schema (supplier_name, spend_amount, gl_description, line_description, etc.) using column names and sample values. The user's role is to **review, edit, and approve** the LLM's suggested mappings — not to configure them from scratch.
 - **Invoice grouping columns:** The user selects which canonical columns define an "invoice" for grouping during classification.
 - Only canonicalized columns are stored in duckdb.
 - After canonicalization is confirmed, distinct suppliers are extracted from transactions and inserted into the project's supplier list.

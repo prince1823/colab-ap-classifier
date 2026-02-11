@@ -1,7 +1,8 @@
 import fs from 'fs';
 import { dialog } from 'electron';
 import { parse } from 'csv-parse/sync';
-import type { CSVPreview } from '../../shared/types/canonicalization';
+import type { CSVPreview, CSVPreviewWithMappings, CanonicalizationResult } from '../../shared/types/canonicalization';
+import { CANONICAL_COLUMNS, suggestMappings } from '../agents/canonicalization-agent';
 
 const SAMPLE_ROW_LIMIT = 10;
 
@@ -141,12 +142,13 @@ function detectDelimiter(content: string): string {
 
 /**
  * Parse a CSV file and return a preview with columns, sample rows, and total row count.
+ * This is the synchronous CSV-only parsing step (no LLM call).
  *
  * - Automatically detects delimiter (comma, semicolon, tab)
  * - Handles quoted fields and newlines within quotes
  * - Detects encoding (UTF-8, Latin-1)
  */
-export function parsePreview(filePath: string): CSVPreview {
+export function parseCSVPreview(filePath: string): CSVPreview {
   if (!filePath || filePath.trim().length === 0) {
     throw new Error('File path must not be empty');
   }
@@ -183,4 +185,38 @@ export function parsePreview(filePath: string): CSVPreview {
   const totalRows = allRecords.length;
 
   return { columns, sampleRows, totalRows };
+}
+
+/**
+ * Build a fallback empty CanonicalizationResult for when the LLM call fails.
+ */
+function emptyMappingSuggestion(columns: string[]): CanonicalizationResult {
+  return {
+    mappings: {},
+    confidence: 'low',
+    unmappedClientColumns: columns,
+    importantUnmappedColumns: [],
+    unmappedCanonicalColumns: CANONICAL_COLUMNS.map((c) => c.name),
+    reasoning: 'LLM mapping suggestion unavailable.',
+  };
+}
+
+/**
+ * Parse a CSV file, return a preview, and automatically suggest column mappings
+ * via the CanonicalizationAgent (LLM-first flow).
+ *
+ * If the LLM call fails, the preview is still returned with empty mappings
+ * so the user can map manually.
+ */
+export async function parsePreview(filePath: string): Promise<CSVPreviewWithMappings> {
+  const preview = parseCSVPreview(filePath);
+
+  let mappingSuggestion: CanonicalizationResult;
+  try {
+    mappingSuggestion = await suggestMappings(preview.columns, preview.sampleRows);
+  } catch {
+    mappingSuggestion = emptyMappingSuggestion(preview.columns);
+  }
+
+  return { ...preview, mappingSuggestion };
 }

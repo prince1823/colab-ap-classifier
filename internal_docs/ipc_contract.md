@@ -232,22 +232,23 @@ Open a native file dialog for CSV selection.
 
 #### `upload:parsePreview`
 
-Parse a CSV file and return a preview for the canonicalization step.
+Parse a CSV file, return a preview, and **automatically suggest column mappings** via the CanonicalizationAgent (LLM-first).
 
 | | |
 |---|---|
 | **Args** | `filePath: string` |
-| **Response** | `CSVPreview` |
+| **Response** | `CSVPreviewWithMappings` |
 
 ```typescript
-interface CSVPreview {
+interface CSVPreviewWithMappings {
   columns: string[];                          // All CSV column headers
   sampleRows: Record<string, string>[];       // First 10 rows as key-value pairs
   totalRows: number;                          // Total row count in file
+  mappingSuggestion: CanonicalizationResult;  // LLM-suggested column mappings
 }
 ```
 
-| **Notes** | Does not insert data. Used for preview and canonicalization suggestions. |
+| **Notes** | Does not insert data. Automatically calls CanonicalizationAgent with headers + sample rows to produce mapping suggestions. If the LLM call fails, `mappingSuggestion` is returned with empty mappings and confidence 'low'. The frontend displays the pre-populated mappings for review. |
 
 ---
 
@@ -263,31 +264,9 @@ Import a full CSV file into the currently open project's transactions table.
 
 ---
 
-### canonicalization (2 channels)
+### canonicalization (1 channel)
 
----
-
-#### `canonicalization:suggest`
-
-Use the CanonicalizationAgent (LLM) to suggest column mappings.
-
-| | |
-|---|---|
-| **Args** | `columns: string[], sampleData: Record<string, string>[]` |
-| **Response** | `CanonicalizationResult` |
-
-```typescript
-interface CanonicalizationResult {
-  mappings: CanonicalColumnMapping;           // canonical_name → csv_column_name
-  confidence: ConfidenceLevel;
-  unmappedClientColumns: string[];
-  importantUnmappedColumns: string[];
-  unmappedCanonicalColumns: string[];
-  reasoning: string;
-}
-```
-
-| **Notes** | `columns` = CSV headers. `sampleData` = first ~5 rows for context. Does not save — user reviews first. |
+> **Note:** The `canonicalization:suggest` channel has been **removed**. LLM mapping suggestions are now returned automatically as part of `upload:parsePreview` (LLM-first flow). See the `upload:parsePreview` channel above.
 
 ---
 

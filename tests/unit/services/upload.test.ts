@@ -15,12 +15,56 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn(),
 }));
 
+// Mock the canonicalization agent
+vi.mock('../../../src/main/agents/canonicalization-agent', () => ({
+  CANONICAL_COLUMNS: [
+    { name: 'supplier_name', relevance: 'critical', type: 'text', aliases: ['Vendor', 'Supplier'], description: 'Supplier name' },
+    { name: 'spend_amount', relevance: 'critical', type: 'number', aliases: ['Amount', 'Cost'], description: 'Amount' },
+    { name: 'line_description', relevance: 'critical', type: 'log_text', aliases: ['Description'], description: 'Description' },
+    { name: 'gl_description', relevance: 'high', type: 'log_text', aliases: ['GL'], description: 'GL description' },
+    { name: 'gl_code', relevance: 'high', type: 'category', aliases: ['Account Code'], description: 'GL code' },
+    { name: 'department', relevance: 'medium', type: 'category', aliases: ['Dept'], description: 'Department' },
+    { name: 'invoice_date', relevance: 'high', type: 'date', aliases: ['Date'], description: 'Invoice date' },
+    { name: 'creation_date', relevance: 'low', type: 'date', aliases: ['Created'], description: 'Creation date' },
+    { name: 'company', relevance: 'medium', type: 'category', aliases: ['Entity'], description: 'Company' },
+    { name: 'cost_center', relevance: 'medium', type: 'category', aliases: ['Cost Center'], description: 'Cost center' },
+    { name: 'po_number', relevance: 'low', type: 'text', aliases: ['PO'], description: 'PO number' },
+    { name: 'supplier_address', relevance: 'low', type: 'text', aliases: ['Address'], description: 'Address' },
+    { name: 'currency', relevance: 'low', type: 'category', aliases: ['Currency Code'], description: 'Currency' },
+    { name: 'memo', relevance: 'low', type: 'log_text', aliases: ['Notes'], description: 'Memo' },
+  ],
+  suggestMappings: vi.fn(),
+}));
+
 import { dialog } from 'electron';
-import { selectFile, parsePreview } from '../../../src/main/services/upload';
+import { selectFile, parsePreview, parseCSVPreview } from '../../../src/main/services/upload';
+import * as canonicalizationAgent from '../../../src/main/agents/canonicalization-agent';
+import type { CanonicalizationResult } from '../../../src/shared/types/canonicalization';
+
+const mockedAgent = vi.mocked(canonicalizationAgent);
 
 const FIXTURES_DIR = path.resolve(__dirname, '../../fixtures/csv');
 
+const MOCK_MAPPING_RESULT: CanonicalizationResult = {
+  mappings: {
+    supplier_name: 'Supplier',
+    spend_amount: 'Amount',
+    invoice_date: 'Date',
+    line_description: 'Description',
+  },
+  confidence: 'high',
+  unmappedClientColumns: ['Invoice Number'],
+  importantUnmappedColumns: [],
+  unmappedCanonicalColumns: ['gl_description', 'gl_code'],
+  reasoning: 'Mapped based on column names',
+};
+
 describe('Upload Service', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedAgent.suggestMappings.mockResolvedValue(MOCK_MAPPING_RESULT);
+  });
+
   // -------------------------------------------------------------------
   // selectFile
   // -------------------------------------------------------------------
@@ -71,11 +115,11 @@ describe('Upload Service', () => {
   });
 
   // -------------------------------------------------------------------
-  // parsePreview — standard CSV
+  // parseCSVPreview — synchronous CSV-only parsing (internal helper)
   // -------------------------------------------------------------------
-  describe('parsePreview — standard CSV', () => {
+  describe('parseCSVPreview — standard CSV', () => {
     it('should parse columns correctly', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'standard.csv'));
 
       expect(result.columns).toEqual([
         'Supplier',
@@ -87,14 +131,14 @@ describe('Upload Service', () => {
     });
 
     it('should return all rows as sample rows when <= 10', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'standard.csv'));
 
       expect(result.sampleRows).toHaveLength(5);
       expect(result.totalRows).toBe(5);
     });
 
     it('should contain correct data in sample rows', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'standard.csv'));
 
       expect(result.sampleRows[0]).toEqual({
         Supplier: 'Acme Corp',
@@ -115,11 +159,11 @@ describe('Upload Service', () => {
   });
 
   // -------------------------------------------------------------------
-  // parsePreview — special characters and quotes
+  // parseCSVPreview — special characters and quotes
   // -------------------------------------------------------------------
-  describe('parsePreview — special characters and quotes', () => {
+  describe('parseCSVPreview — special characters and quotes', () => {
     it('should parse columns correctly', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
 
       expect(result.columns).toEqual([
         'Supplier',
@@ -130,25 +174,25 @@ describe('Upload Service', () => {
     });
 
     it('should handle apostrophes and ampersands in values', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
 
       expect(result.sampleRows[0].Supplier).toBe("O'Brien & Associates");
     });
 
     it('should handle commas within quoted fields', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
 
       expect(result.sampleRows[0].Description).toBe('Legal fees, consulting');
     });
 
     it('should handle non-ASCII characters (accented letters)', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
 
       expect(result.sampleRows[1].Supplier).toBe('Müller GmbH');
     });
 
     it('should handle escaped quotes within quoted fields', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
 
       expect(result.sampleRows[2].Description).toBe(
         'Catering for "Annual Gala"'
@@ -156,37 +200,37 @@ describe('Upload Service', () => {
     });
 
     it('should handle newlines within quoted fields', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
 
       expect(result.sampleRows[3].Supplier).toBe('Smith, Jones & Co.');
       expect(result.sampleRows[3].Description).toContain('spanning multiple lines');
     });
 
     it('should return correct total row count', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
 
       expect(result.totalRows).toBe(5);
     });
   });
 
   // -------------------------------------------------------------------
-  // parsePreview — large file
+  // parseCSVPreview — large file
   // -------------------------------------------------------------------
-  describe('parsePreview — large file', () => {
+  describe('parseCSVPreview — large file', () => {
     it('should return only 10 sample rows for a file with more than 10 rows', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'large.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
 
       expect(result.sampleRows).toHaveLength(10);
     });
 
     it('should report accurate totalRows count', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'large.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
 
       expect(result.totalRows).toBe(50);
     });
 
     it('should return all columns', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'large.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
 
       expect(result.columns).toEqual([
         'Supplier',
@@ -198,7 +242,7 @@ describe('Upload Service', () => {
     });
 
     it('should have sample rows from the beginning of the file', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'large.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
 
       expect(result.sampleRows[0].Supplier).toBe('Supplier_1');
       expect(result.sampleRows[9].Supplier).toBe('Supplier_10');
@@ -206,11 +250,11 @@ describe('Upload Service', () => {
   });
 
   // -------------------------------------------------------------------
-  // parsePreview — delimiter detection
+  // parseCSVPreview — delimiter detection
   // -------------------------------------------------------------------
-  describe('parsePreview — delimiter detection', () => {
+  describe('parseCSVPreview — delimiter detection', () => {
     it('should detect semicolon delimiter', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'semicolon.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'semicolon.csv'));
 
       expect(result.columns).toEqual([
         'Supplier',
@@ -224,7 +268,7 @@ describe('Upload Service', () => {
     });
 
     it('should detect tab delimiter', () => {
-      const result = parsePreview(path.join(FIXTURES_DIR, 'tab-delimited.csv'));
+      const result = parseCSVPreview(path.join(FIXTURES_DIR, 'tab-delimited.csv'));
 
       expect(result.columns).toEqual([
         'Supplier',
@@ -239,16 +283,16 @@ describe('Upload Service', () => {
   });
 
   // -------------------------------------------------------------------
-  // parsePreview — error handling
+  // parseCSVPreview — error handling
   // -------------------------------------------------------------------
-  describe('parsePreview — error handling', () => {
+  describe('parseCSVPreview — error handling', () => {
     it('should throw for an empty file path', () => {
-      expect(() => parsePreview('')).toThrow('File path must not be empty');
+      expect(() => parseCSVPreview('')).toThrow('File path must not be empty');
     });
 
     it('should throw for a non-existent file', () => {
       expect(() =>
-        parsePreview('/nonexistent/path/file.csv')
+        parseCSVPreview('/nonexistent/path/file.csv')
       ).toThrow('File not found');
     });
 
@@ -258,7 +302,7 @@ describe('Upload Service', () => {
       fs.writeFileSync(emptyFile, '');
 
       try {
-        expect(() => parsePreview(emptyFile)).toThrow('File is empty');
+        expect(() => parseCSVPreview(emptyFile)).toThrow('File is empty');
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
@@ -270,7 +314,7 @@ describe('Upload Service', () => {
       fs.writeFileSync(headerOnlyFile, 'Col1,Col2,Col3\n');
 
       try {
-        expect(() => parsePreview(headerOnlyFile)).toThrow(
+        expect(() => parseCSVPreview(headerOnlyFile)).toThrow(
           'CSV file contains no data rows'
         );
       } finally {
@@ -280,9 +324,9 @@ describe('Upload Service', () => {
   });
 
   // -------------------------------------------------------------------
-  // parsePreview — encoding detection
+  // parseCSVPreview — encoding detection
   // -------------------------------------------------------------------
-  describe('parsePreview — encoding detection', () => {
+  describe('parseCSVPreview — encoding detection', () => {
     it('should handle UTF-8 BOM', () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-test-'));
       const bomFile = path.join(tmpDir, 'bom.csv');
@@ -292,7 +336,7 @@ describe('Upload Service', () => {
       fs.writeFileSync(bomFile, Buffer.concat([bom, content]));
 
       try {
-        const result = parsePreview(bomFile);
+        const result = parseCSVPreview(bomFile);
         expect(result.columns).toEqual(['Name', 'Value']);
         expect(result.totalRows).toBe(2);
         expect(result.sampleRows[0].Name).toBe('Alice');
@@ -312,7 +356,7 @@ describe('Upload Service', () => {
       fs.writeFileSync(latin1File, content);
 
       try {
-        const result = parsePreview(latin1File);
+        const result = parseCSVPreview(latin1File);
         expect(result.columns).toEqual(['Name', 'City']);
         expect(result.totalRows).toBe(2);
         // Latin-1 decoded values
@@ -321,6 +365,87 @@ describe('Upload Service', () => {
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // parsePreview — async with LLM mapping suggestions (LLM-first flow)
+  // -------------------------------------------------------------------
+  describe('parsePreview — LLM-first mapping suggestions', () => {
+    it('should return CSV preview with mapping suggestions', async () => {
+      const result = await parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
+
+      expect(result.columns).toEqual([
+        'Supplier',
+        'Invoice Number',
+        'Amount',
+        'Date',
+        'Description',
+      ]);
+      expect(result.totalRows).toBe(5);
+      expect(result.sampleRows).toHaveLength(5);
+      expect(result.mappingSuggestion).toEqual(MOCK_MAPPING_RESULT);
+    });
+
+    it('should call canonicalization agent with columns and sample rows', async () => {
+      await parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
+
+      expect(mockedAgent.suggestMappings).toHaveBeenCalledOnce();
+      const [columns, sampleData] = mockedAgent.suggestMappings.mock.calls[0];
+      expect(columns).toEqual([
+        'Supplier',
+        'Invoice Number',
+        'Amount',
+        'Date',
+        'Description',
+      ]);
+      expect(sampleData).toHaveLength(5);
+      expect(sampleData[0].Supplier).toBe('Acme Corp');
+    });
+
+    it('should gracefully degrade when LLM call fails', async () => {
+      mockedAgent.suggestMappings.mockRejectedValueOnce(new Error('API key missing'));
+
+      const result = await parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
+
+      // CSV preview should still be returned
+      expect(result.columns).toEqual([
+        'Supplier',
+        'Invoice Number',
+        'Amount',
+        'Date',
+        'Description',
+      ]);
+      expect(result.totalRows).toBe(5);
+
+      // Mapping suggestion should be empty fallback
+      expect(result.mappingSuggestion.mappings).toEqual({});
+      expect(result.mappingSuggestion.confidence).toBe('low');
+      expect(result.mappingSuggestion.unmappedClientColumns).toEqual([
+        'Supplier',
+        'Invoice Number',
+        'Amount',
+        'Date',
+        'Description',
+      ]);
+      expect(result.mappingSuggestion.reasoning).toContain('unavailable');
+    });
+
+    it('should still throw for invalid file paths', async () => {
+      await expect(parsePreview('')).rejects.toThrow('File path must not be empty');
+      await expect(parsePreview('/nonexistent.csv')).rejects.toThrow('File not found');
+    });
+
+    it('should include mapping suggestions for large files', async () => {
+      const result = await parsePreview(path.join(FIXTURES_DIR, 'large.csv'));
+
+      expect(result.sampleRows).toHaveLength(10);
+      expect(result.totalRows).toBe(50);
+      expect(result.mappingSuggestion).toEqual(MOCK_MAPPING_RESULT);
+
+      // Agent should be called with sample rows (up to 10)
+      const [, sampleData] = mockedAgent.suggestMappings.mock.calls[0];
+      expect(sampleData).toHaveLength(10);
     });
   });
 });

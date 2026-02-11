@@ -9,10 +9,8 @@ vi.mock('../../../src/main/services/database', () => ({
   },
 }));
 
-// Mock the canonicalization agent
-vi.mock('../../../src/main/agents/canonicalization-agent', () => ({
-  suggestMappings: vi.fn(),
-}));
+// NOTE: canonicalization agent mock removed — suggestMappings is no longer
+// on the canonicalization service (moved to upload service / LLM-first flow).
 
 // Mock uuid to return predictable values
 let uuidCounter = 0;
@@ -35,18 +33,14 @@ vi.mock('fs', () => ({
 
 import fs from 'fs';
 import { databaseService } from '../../../src/main/services/database';
-import * as canonicalizationAgent from '../../../src/main/agents/canonicalization-agent';
 import {
-  suggestMappings,
   saveMappings,
   getMappings,
   getGroupingColumns,
   importCSV,
 } from '../../../src/main/services/canonicalization';
-import type { CanonicalizationResult } from '../../../src/shared/types/canonicalization';
 
 const mockedDb = vi.mocked(databaseService);
-const mockedAgent = vi.mocked(canonicalizationAgent);
 const mockedFs = vi.mocked(fs);
 
 describe('CanonicalizationService', () => {
@@ -55,50 +49,9 @@ describe('CanonicalizationService', () => {
     uuidCounter = 0;
   });
 
-  // -------------------------------------------------------------------
-  // suggestMappings
-  // -------------------------------------------------------------------
-  describe('suggestMappings', () => {
-    it('should delegate to the canonicalization agent', async () => {
-      const mockResult: CanonicalizationResult = {
-        mappings: {
-          supplier_name: 'Vendor',
-          spend_amount: 'Amount',
-        },
-        confidence: 'high',
-        unmappedClientColumns: ['Extra Col'],
-        importantUnmappedColumns: [],
-        unmappedCanonicalColumns: ['gl_code'],
-        reasoning: 'Mapped based on column names',
-      };
-
-      mockedAgent.suggestMappings.mockResolvedValue(mockResult);
-
-      const columns = ['Vendor', 'Amount', 'Extra Col'];
-      const sampleData = [
-        { Vendor: 'Acme', Amount: '1000', 'Extra Col': 'X' },
-      ];
-
-      const result = await suggestMappings(columns, sampleData);
-
-      expect(mockedAgent.suggestMappings).toHaveBeenCalledOnce();
-      expect(mockedAgent.suggestMappings).toHaveBeenCalledWith(
-        columns,
-        sampleData
-      );
-      expect(result).toEqual(mockResult);
-    });
-
-    it('should propagate errors from the agent', async () => {
-      mockedAgent.suggestMappings.mockRejectedValue(
-        new Error('LLM call failed')
-      );
-
-      await expect(
-        suggestMappings(['Col1'], [{ Col1: 'val' }])
-      ).rejects.toThrow('LLM call failed');
-    });
-  });
+  // NOTE: suggestMappings tests removed — suggestMappings is no longer on the
+  // canonicalization service. It was moved to the upload service (LLM-first flow).
+  // See tests/unit/services/upload.test.ts for the new tests.
 
   // -------------------------------------------------------------------
   // saveMappings

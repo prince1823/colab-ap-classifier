@@ -67,7 +67,6 @@ Sections are disabled until prerequisites are met (tooltip explains why on hover
 - Company context form: industry, sector, description, business focus, procurement nuances
 - Taxonomy selector (dropdown of available taxonomies from ColabIP, with auto-suggestion based on industry)
 - Preview of selected taxonomy (structure + descriptions)
-- Info note near taxonomy selector: L1 is constrained to Direct / Indirect / Exempt (see [features.md §3](./features.md) for definitions)
 - Override Rules section (rules applied with highest priority)
 - Tail Spend Threshold setting with input field (default: $10,000)
 
@@ -283,7 +282,7 @@ Sections are disabled until prerequisites are met (tooltip explains why on hover
 
 ### 5.1 Taxonomy
 
-> See [features.md §3](./features.md) for taxonomy structure and L1 constraints.
+> See [features.md §3](./features.md) for taxonomy structure.
 
 **Description:** Browse and edit the taxonomy for this project's industry. Edits here apply to this project only.
 

@@ -81,8 +81,7 @@ Authoritative specs live in `internal_docs/` (dev branch only). Read before impl
 
 ### Taxonomy
 - 3-level hierarchy: L1 → L2 → L3
-- L1 is constrained to exactly: **Direct**, **Indirect**, **Exempt**
-- Paths are pipe-delimited: `"Direct|IT|Software"`
+- Paths are pipe-delimited: `"Corporate Services|IT|Software"`
 - Each project has its own copy of the taxonomy (imported from ColabIP)
 
 ### Override Rules

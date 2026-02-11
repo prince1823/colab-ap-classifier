@@ -495,7 +495,7 @@ Get all taxonomy nodes for the current project.
 ```typescript
 interface TaxonomyNode {
   id: string;
-  fullPath: string;                           // Pipe-delimited: "Direct|IT|Software"
+  fullPath: string;                           // Pipe-delimited: "Corporate Services|IT|Software"
   l1: string;
   l2: string | null;
   l3: string | null;
@@ -506,7 +506,7 @@ interface TaxonomyNode {
 }
 ```
 
-| **Notes** | Returns all nodes (L1, L2, L3). Frontend builds tree structure from `parentPath`. L1 is constrained to: Direct, Indirect, Exempt. |
+| **Notes** | Returns all nodes (L1, L2, L3). Frontend builds tree structure from `parentPath`. |
 
 ---
 
@@ -523,7 +523,7 @@ Set/replace the taxonomy in the current project. Used when manually defining a t
 interface TaxonomySetInput {
   name: string;
   nodes: Array<{
-    path: string;                             // Pipe-delimited: "Direct|IT|Software"
+    path: string;                             // Pipe-delimited: "Corporate Services|IT|Software"
     description?: string;
   }>;
 }

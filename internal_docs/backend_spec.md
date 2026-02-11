@@ -271,7 +271,7 @@ For each rule (sorted by priority_score ascending), query all matching rows and 
 
 **Step 7: LLM classification**
 
-> See [features.md §5](./features.md) for description prioritization and L1 constraints.
+> See [features.md §5](./features.md) for description prioritization.
 
 For each group:
 1. Check if total spend < `tail_spend_threshold` → may use simplified prompt
@@ -281,7 +281,6 @@ For each group:
    - Supplier research info (type, offerings, website, industry) — prioritized over line/GL descriptions per [features.md §5](./features.md)
    - Supplier historical L1/L2/L3 classifications (provided to LLM for review score computation)
    - Transaction details (supplier_name, gl_description, line_description, spend_amount)
-   - L1 constrained to Direct/Indirect/Exempt per [features.md §3](./features.md)
 3. ClassificationAgent calls LLM provider (Anthropic Claude or OpenAI GPT based on config)
 4. LLM returns: classification_path (L1|L2|L3), review_score (0-100), reasoning, description_supplier_aligned (boolean — whether line/GL desc aligns with supplier info)
 5. Write classification results to transactions (`classification_path`, `review_score`, `classification_reasoning`)

@@ -31,10 +31,9 @@ interface ClassificationResult {
 
 **Prompt Construction:**
 1. **System prompt:** You are an AP transaction classifier. Rules:
-   - L1 must be exactly: Direct, Indirect, or Exempt
    - Always classify to full depth: L1|L2|L3
+   - Use the provided taxonomy to determine the correct classification
    - Prioritize supplier research info over line/GL descriptions
-   - Check for intercompany spend → classify as Exempt
    - Consider company industry and procurement nuances
 2. **User prompt includes:**
    - Full taxonomy tree (paths + descriptions)
@@ -47,27 +46,23 @@ interface ClassificationResult {
 **Model:** `claude-sonnet-4-20250514` or higher (complex reasoning needed, per spec)
 
 **Constraints:**
-- L1 ∈ {Direct, Indirect, Exempt} — validate in post-processing
+- L1 must exist in taxonomy — validate in post-processing
 - Depth must be exactly 3 — if LLM returns L1 or L1|L2, log warning and retry or best-effort
 - Classification path must exist in taxonomy — validate and find closest match if not
-- Intercompany detection: if supplier is subsidiary/division of the client company → Exempt
-- Government utilities exception: electricity/water/gas suppliers should NOT auto-classify as Exempt even if government type
 
 ### Tests
 - Mock LLM → verify prompt includes all required sections
-- Verify L1 validation (reject invalid L1)
+- Verify L1 validation (L1 must exist in taxonomy)
 - Verify depth enforcement (must be 3 levels)
-- Verify intercompany detection in prompt
 - Verify tail spend simplified prompt
 - Verify classification path exists in taxonomy
 
 ### Acceptance Criteria
 - [ ] Agent constructs comprehensive classification prompt
-- [ ] L1 constraint enforced in post-processing
+- [ ] L1 validated against taxonomy in post-processing
 - [ ] Minimum depth of 3 enforced
 - [ ] Taxonomy path validated against actual nodes
 - [ ] Tail spend optimization implemented
-- [ ] Intercompany detection included in prompt
 - [ ] Unit tests pass with mocked LLM
 
 ## Dependencies
@@ -87,7 +82,4 @@ interface ClassificationResult {
 - `src/main/agents/classification-agent.ts`
 - `tests/unit/agents/classification-agent.test.ts`
 
-**Deviations:**
-- **Government utilities exception not implemented.** The spec says electricity/water/gas suppliers should NOT auto-classify as Exempt even if government type. The current prompt does not include this special-case instruction. Should be added to the system prompt in a follow-up.
-
-**All other acceptance criteria met.** Agent constructs comprehensive classification prompt, L1 constraint enforced in post-processing, minimum depth of 3 enforced, taxonomy path validated, tail spend optimization implemented, intercompany detection included in prompt.
+**No deviations.** Agent constructs comprehensive classification prompt, L1 validated against taxonomy in post-processing, minimum depth of 3 enforced, taxonomy path validated, tail spend optimization implemented.

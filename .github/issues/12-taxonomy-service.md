@@ -22,7 +22,6 @@ Implement the Taxonomy service for importing, querying, and managing the 3-level
 - `importFromColabip(industryName: string): Promise<void>` — read taxonomy from ColabIP service → call setTaxonomy
 
 **Validation Rules:**
-- L1 must be exactly one of: `Direct`, `Indirect`, `Exempt`
 - Depth must be 1, 2, or 3
 - `full_path` must be unique
 - Parent paths must exist (referential integrity)
@@ -41,13 +40,11 @@ Implement the Taxonomy service for importing, querying, and managing the 3-level
 ### Tests
 - Set taxonomy → verify all nodes in DB with correct depth, parent_path
 - Import from ColabIP → verify nodes match source
-- L1 validation: reject paths starting with values other than Direct/Indirect/Exempt
 - Get metadata → correct name and count
 - Replace taxonomy → old nodes removed
 
 ### Acceptance Criteria
 - [ ] All 4 IPC handlers registered
-- [ ] L1 constraint enforced (Direct/Indirect/Exempt only)
 - [ ] Taxonomy hierarchy validated (parents exist)
 - [ ] Import from ColabIP works end-to-end
 - [ ] Unit tests pass
@@ -70,4 +67,4 @@ Implement the Taxonomy service for importing, querying, and managing the 3-level
 - `src/main/ipc/taxonomy.ts`
 - `tests/unit/services/taxonomy.test.ts`
 
-**No deviations.** All 4 IPC handlers registered, L1 constraint enforced, taxonomy hierarchy validated, import from ColabIP works end-to-end.
+**No deviations.** All 4 IPC handlers registered, taxonomy hierarchy validated, import from ColabIP works end-to-end.

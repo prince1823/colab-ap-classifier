@@ -32,10 +32,7 @@
 ## 3. Taxonomy
 
 - Classifications follow a 3-level hierarchy: L1 → L2 → L3.
-- **L1 is constrained** to one of three values:
-  - **Direct** — core services directly related to the company's primary business
-  - **Indirect** — support services (facilities, IT, HR, etc.)
-  - **Exempt** — government fees, third-party regulatory costs, inter-company transfers
+- L1 categories are user-defined and can be customized per taxonomy (e.g., "Direct", "Indirect", "Exempt" for procurement, or "Revenue", "Cost of Sales", "Operating Expenses" for finance).
 - Each project contains its own complete copy of the taxonomy, imported from ColabIP during project setup. This makes projects self-contained and portable. Taxonomy metadata (name) is stored in project settings.
 - Taxonomy nodes have descriptions that help the LLM understand what belongs in each category. Descriptions are authoritative — the LLM should follow them.
 - Users can add, rename, and delete taxonomy nodes. Deleting a node requires reassigning affected rows to another node.

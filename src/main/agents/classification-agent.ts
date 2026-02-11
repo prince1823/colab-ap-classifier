@@ -25,8 +25,6 @@ export interface ClassificationResult {
   descriptionSupplierAligned: boolean;
 }
 
-const VALID_L1_VALUES = ['Direct', 'Indirect', 'Exempt'];
-
 /**
  * Build the system prompt for the classification agent.
  */
@@ -35,10 +33,9 @@ export function buildSystemPrompt(isTailSpend: boolean): string {
     return `You are an AP transaction classifier specializing in tail spend categorization.
 
 ## Rules
-- L1 must be one of: Direct, Indirect, Exempt
 - Always classify to exactly depth 3 in the format L1|L2|L3
+- Use the provided taxonomy to determine the correct classification
 - Prioritize supplier research when available to determine the correct classification
-- Check for intercompany transactions - these should be classified under Exempt
 - For tail spend, focus on the supplier name and any available description to make a quick determination
 
 ## Response Format
@@ -53,18 +50,12 @@ You MUST respond with valid JSON only (no markdown fencing, no explanation text 
   return `You are an AP transaction classifier. Your task is to classify accounts payable transactions into a standardized taxonomy.
 
 ## Rules
-- L1 must be one of: Direct, Indirect, Exempt
 - Always classify to exactly depth 3 in the format L1|L2|L3
+- Use the provided taxonomy to determine the correct classification
 - Prioritize supplier research when available to determine the correct classification
-- Check for intercompany transactions - these should be classified under Exempt
 - Consider the company context and industry when making classification decisions
 - Use historical classifications as guidance for consistency, but do not blindly follow them if the data suggests otherwise
 - When the transaction description and supplier research conflict, weigh supplier research more heavily
-
-## Classification Guidance
-- **Direct**: Costs directly tied to production of goods/services (raw materials, manufacturing, direct labor)
-- **Indirect**: Costs not directly tied to production (office supplies, IT services, consulting, facilities)
-- **Exempt**: Intercompany transfers, taxes, employee reimbursements, non-procurement items
 
 ## Response Format
 You MUST respond with valid JSON only (no markdown fencing, no explanation text outside JSON):
@@ -271,20 +262,25 @@ export function parseResponse(responseText: string): ClassificationResult {
 }
 
 /**
- * Validate that L1 is one of the allowed values (Direct, Indirect, Exempt).
- * Returns the corrected path if L1 was invalid, or null if it cannot be corrected.
+ * Validate that L1 exists in the taxonomy.
+ * Returns the corrected path if a case-insensitive match is found in taxonomy L1 values.
  */
-export function validateL1(classificationPath: string): string | null {
+export function validateL1(classificationPath: string, taxonomy: TaxonomyNode[]): string | null {
   const parts = classificationPath.split('|');
   if (parts.length === 0) return null;
 
   const l1 = parts[0];
-  if (VALID_L1_VALUES.includes(l1)) {
+
+  // Get all unique L1 values from taxonomy
+  const taxonomyL1Values = [...new Set(taxonomy.map(node => node.l1))];
+
+  // Exact match
+  if (taxonomyL1Values.includes(l1)) {
     return classificationPath;
   }
 
   // Try case-insensitive match
-  const matched = VALID_L1_VALUES.find(
+  const matched = taxonomyL1Values.find(
     (v) => v.toLowerCase() === l1.toLowerCase()
   );
   if (matched) {
@@ -381,12 +377,21 @@ export function validateClassification(
   let path = result.classificationPath;
 
   // Validate L1
-  const validatedL1 = validateL1(path);
+  const validatedL1 = validateL1(path, taxonomy);
   if (validatedL1 === null) {
-    // Default to Indirect if L1 is unrecognizable
-    const parts = path.split('|');
-    parts[0] = 'Indirect';
-    path = parts.join('|');
+    // L1 is unrecognizable - attempt to find a taxonomy match
+    const closestMatch = findClosestTaxonomyMatch(path, taxonomy);
+    if (closestMatch !== path) {
+      path = closestMatch;
+    } else {
+      // Cannot fix L1; keep what we have and let depth validation handle it
+      const parts = path.split('|');
+      if (parts.length > 0 && taxonomy.length > 0) {
+        // Default to first L1 in taxonomy if L1 is invalid
+        parts[0] = taxonomy[0].l1;
+        path = parts.join('|');
+      }
+    }
   } else {
     path = validatedL1;
   }

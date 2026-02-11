@@ -3,8 +3,6 @@ import { databaseService } from './database';
 import { readTaxonomy } from './colabip';
 import type { TaxonomyNode, TaxonomyMetadata, TaxonomySetInput } from '../../shared/types';
 
-const VALID_L1_VALUES = ['Direct', 'Indirect', 'Exempt'] as const;
-
 interface TaxonomyRow {
   id: string;
   full_path: string;
@@ -33,7 +31,7 @@ function toTaxonomyNode(row: TaxonomyRow): TaxonomyNode {
 
 /**
  * Parse a pipe-delimited path into its l1, l2, l3 components.
- * E.g., "Direct|IT|Software" → { l1: "Direct", l2: "IT", l3: "Software", depth: 3 }
+ * E.g., "Corporate Services|IT|Software" → { l1: "Corporate Services", l2: "IT", l3: "Software", depth: 3 }
  */
 function parsePath(fullPath: string): {
   l1: string;
@@ -54,12 +52,6 @@ function parsePath(fullPath: string): {
   const l1 = parts[0];
   const l2 = parts[1] ?? null;
   const l3 = parts[2] ?? null;
-
-  if (!(VALID_L1_VALUES as readonly string[]).includes(l1)) {
-    throw new Error(
-      `Invalid L1 value "${l1}" in path "${fullPath}". Must be one of: ${VALID_L1_VALUES.join(', ')}`
-    );
-  }
 
   let parentPath: string | null = null;
   if (depth === 2) {

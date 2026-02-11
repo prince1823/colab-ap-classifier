@@ -396,10 +396,10 @@ async function getDistinctSupplierNames(transactionIds: string[]): Promise<strin
  * Get configured invoice grouping columns.
  */
 async function getInvoiceGroupingColumns(): Promise<string[]> {
-  const rows = await databaseService.all<{ column_name: string }>(
-    'SELECT column_name FROM invoice_grouping_columns ORDER BY ordinal_position'
+  const rows = await databaseService.all<{ canonical_name: string }>(
+    'SELECT canonical_name FROM invoice_grouping_columns ORDER BY position'
   );
-  return rows.map((r) => r.column_name);
+  return rows.map((r) => r.canonical_name);
 }
 
 interface TransactionGroup {

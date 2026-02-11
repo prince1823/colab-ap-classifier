@@ -429,14 +429,14 @@ describe('parseResponse', () => {
   it('should throw when classificationPath is missing', () => {
     const response = JSON.stringify({ reasoning: 'test' });
     expect(() => parseResponse(response)).toThrow(
-      'LLM response missing "classificationPath" string'
+      'LLM response missing classification path field'
     );
   });
 
   it('should throw when classificationPath is empty string', () => {
     const response = JSON.stringify({ classificationPath: '' });
     expect(() => parseResponse(response)).toThrow(
-      'LLM response missing "classificationPath" string'
+      'LLM response missing classification path field'
     );
   });
 });
@@ -609,8 +609,9 @@ describe('classifyInvoiceGroup', () => {
     await classifyInvoiceGroup(makeInput());
 
     const [, , options] = mockChat.mock.calls[0];
+    // Model comes from settings (defaults to Haiku in settings.ts)
     expect(options).toEqual({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-3-5-haiku-latest',
       temperature: 0,
       maxTokens: 4096,
     });

@@ -2,8 +2,7 @@ import type { ConfidenceLevel } from '../../shared/types/canonicalization';
 import type { CompanyContext } from '../../shared/types/project';
 import type { SupplierResearchResult } from '../../shared/types/suppliers';
 import * as llmClient from '../services/llm-client';
-
-const DEFAULT_MODEL = 'claude-3-5-haiku-latest';
+import * as settingsService from '../services/settings';
 
 /**
  * Build the system prompt for the supplier research agent.
@@ -225,8 +224,10 @@ export async function researchSupplier(
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(supplierName, companyContext, supplierAddress);
 
+  // Use model from settings (configured via .env or runtime)
+  const settings = settingsService.getSettings();
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
-    model: DEFAULT_MODEL,
+    model: settings.model,
     temperature: 0,
     maxTokens: 4096,
   });

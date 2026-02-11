@@ -9,8 +9,7 @@ import type {
   UncategorizedFeedbackAction,
 } from '../../shared/types/feedback';
 import * as llmClient from '../services/llm-client';
-
-const DEFAULT_MODEL = 'claude-3-5-haiku-latest';
+import * as settingsService from '../services/settings';
 
 /**
  * Input for the feedback analysis agent.
@@ -349,8 +348,10 @@ export async function analyzeFeedback(
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(input);
 
+  // Use model from settings (configured via .env or runtime)
+  const settings = settingsService.getSettings();
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
-    model: DEFAULT_MODEL,
+    model: settings.model,
     temperature: 0,
     maxTokens: 4096,
   });

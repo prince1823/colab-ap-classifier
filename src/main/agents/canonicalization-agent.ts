@@ -4,6 +4,7 @@ import type {
   ConfidenceLevel,
 } from '../../shared/types/canonicalization';
 import * as llmClient from '../services/llm-client';
+import * as settingsService from '../services/settings';
 
 /**
  * The 14 canonical columns used for AP classification.
@@ -109,7 +110,6 @@ export const CANONICAL_COLUMNS: CanonicalColumnDefinition[] = [
   },
 ];
 
-const DEFAULT_MODEL = 'claude-3-5-haiku-latest';
 const MAX_SAMPLE_ROWS = 5;
 
 /**
@@ -278,8 +278,10 @@ export async function suggestMappings(
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(columns, sampleData);
 
+  // Use model from settings (configured via .env or runtime)
+  const settings = settingsService.getSettings();
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
-    model: DEFAULT_MODEL,
+    model: settings.model,
     temperature: 0,
     maxTokens: 4096,
   });

@@ -2,6 +2,7 @@ import type { TaxonomyNode } from '../../shared/types/taxonomy';
 import type { CompanyContext } from '../../shared/types/project';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import * as llmClient from '../services/llm-client';
+import * as settingsService from '../services/settings';
 
 /**
  * Input data required to classify an invoice group.
@@ -24,7 +25,6 @@ export interface ClassificationResult {
   descriptionSupplierAligned: boolean;
 }
 
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
 const VALID_L1_VALUES = ['Direct', 'Indirect', 'Exempt'];
 
 /**
@@ -223,23 +223,50 @@ export function parseResponse(responseText: string): ClassificationResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
-  } catch {
+  } catch (error) {
     throw new Error(`Failed to parse LLM response as JSON: ${cleaned.substring(0, 200)}`);
   }
 
-  const data = parsed as Record<string, unknown>;
+  // Handle both array and object responses from LLM
+  let data: Record<string, unknown>;
+  if (Array.isArray(parsed)) {
+    // If LLM returned an array, take the first element
+    if (parsed.length === 0) {
+      throw new Error('LLM response is an empty array');
+    }
+    data = parsed[0] as Record<string, unknown>;
+  } else {
+    data = parsed as Record<string, unknown>;
+  }
 
-  if (typeof data.classificationPath !== 'string' || !data.classificationPath) {
-    throw new Error('LLM response missing "classificationPath" string');
+  // Try multiple field name variations for classification path
+  const classificationPath =
+    (typeof data.classificationPath === 'string' && data.classificationPath) ||
+    (typeof data.classification_path === 'string' && data.classification_path) ||
+    (typeof data.path === 'string' && data.path) ||
+    (typeof data.taxonomyPath === 'string' && data.taxonomyPath) ||
+    (typeof data.taxonomy_path === 'string' && data.taxonomy_path) ||
+    '';
+
+  if (!classificationPath) {
+    // Provide helpful error with available fields
+    const availableFields = Object.keys(data).join(', ');
+    throw new Error(
+      `LLM response missing classification path field. ` +
+      `Expected "classificationPath" but got fields: ${availableFields}. ` +
+      `Response preview: ${JSON.stringify(data).substring(0, 200)}`
+    );
   }
 
   return {
-    classificationPath: data.classificationPath,
+    classificationPath,
     reasoning: typeof data.reasoning === 'string' ? data.reasoning : '',
     descriptionSupplierAligned:
       typeof data.descriptionSupplierAligned === 'boolean'
         ? data.descriptionSupplierAligned
-        : false,
+        : (typeof data.description_supplier_aligned === 'boolean'
+          ? data.description_supplier_aligned
+          : false),
   };
 }
 
@@ -418,8 +445,10 @@ export async function classifyInvoiceGroup(
   const systemPrompt = buildSystemPrompt(isTailSpend);
   const userPrompt = buildUserPrompt(input);
 
+  // Use model from settings (configured via .env or runtime)
+  const settings = settingsService.getSettings();
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
-    model: DEFAULT_MODEL,
+    model: settings.model,
     temperature: 0,
     maxTokens: 4096,
   });

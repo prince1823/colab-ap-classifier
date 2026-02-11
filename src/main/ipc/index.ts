@@ -7,6 +7,7 @@ import { registerChangelogHandlers } from './changelog';
 import { registerTaxonomyHandlers } from './taxonomy';
 import { registerUploadHandlers } from './upload';
 import { registerSuppliersHandlers } from './suppliers';
+import { registerCanonicalizationHandlers } from './canonicalization';
 
 export function registerAllHandlers(): void {
   // Test channel — proves IPC is working end-to-end
@@ -21,4 +22,5 @@ export function registerAllHandlers(): void {
   registerTaxonomyHandlers();
   registerUploadHandlers();
   registerSuppliersHandlers();
+  registerCanonicalizationHandlers();
 }

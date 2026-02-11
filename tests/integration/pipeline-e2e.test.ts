@@ -1,23 +1,28 @@
 /**
  * End-to-end pipeline integration test.
  *
- * Runs through the full backend pipeline using real DuckDB + fixture data
- * with mocked LLM responses. Covers:
+ * Runs through the full backend pipeline using real DuckDB, real LLM calls,
+ * and real data. Dynamically discovers the taxonomy from ColabIP fixtures
+ * and reads transaction data from test_data/input.csv.
  *
+ * Nothing is hardcoded — this test works with any input.csv and any taxonomy
+ * in the ColabIP fixtures directory.
+ *
+ * Covers:
  *   1. Project creation
- *   2. Company context setup
+ *   2. Company context setup (derived from taxonomy name)
  *   3. Taxonomy import from ColabIP fixtures
  *   4. CSV upload preview + column mapping + import
- *   5. Supplier research (mocked LLM)
+ *   5. Supplier research (real LLM)
  *   6. Override rule creation
- *   7. Full classification pipeline (mocked LLM)
+ *   7. Full classification pipeline (real LLM)
  *   8. Transaction query + stats
  *   9. Reclassification with changelog
  *  10. CSV export
  *
  * Requirements:
  *   - DuckDB native module must be compiled
- *   - No real API keys needed (LLM is mocked)
+ *   - ANTHROPIC_API_KEY (or OPENROUTER_API_KEY) set in environment
  *
  * Run with: npx vitest run tests/integration/pipeline-e2e.test.ts
  */
@@ -25,8 +30,25 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { parse } from 'csv-parse/sync';
 
-// --- Mock electron before any service imports ---
+// --- Load .env from project root (only set vars not already in env) ---
+const envPath = path.resolve(__dirname, '..', '..', '.env');
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex === -1) continue;
+    const key = trimmed.slice(0, eqIndex).trim();
+    const value = trimmed.slice(eqIndex + 1).trim();
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+}
+
+// --- Mock electron only (not LLM) ---
 vi.mock('electron', () => ({
   dialog: {
     showSaveDialog: vi.fn().mockResolvedValue({ canceled: false, filePath: '/tmp/test.csv' }),
@@ -36,192 +58,69 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn(),
 }));
 
-// --- Mock LLM client ---
-vi.mock('../../src/main/services/llm-client', () => ({
-  chat: vi.fn(),
-  LLMClientError: class extends Error {
-    code: string;
-    constructor(msg: string, code: string) { super(msg); this.code = code; }
-  },
-}));
-
-// --- Imports (after mocks) ---
+// --- Imports ---
 import { databaseService } from '../../src/main/services/database';
-import * as projectService from '../../src/main/services/project';
 import * as taxonomyService from '../../src/main/services/taxonomy';
 import * as canonicalizationService from '../../src/main/services/canonicalization';
 import * as uploadService from '../../src/main/services/upload';
 import * as supplierService from '../../src/main/services/suppliers';
-import * as transactionsService from '../../src/main/services/transactions';
 import * as rulesService from '../../src/main/services/rules';
 import * as classificationPipeline from '../../src/main/services/classification-pipeline';
 import * as reclassificationService from '../../src/main/services/reclassification';
-import * as changelogService from '../../src/main/services/changelog';
 import * as exportService from '../../src/main/services/export';
 import * as colabipService from '../../src/main/services/colabip';
-import * as llmClient from '../../src/main/services/llm-client';
+import { resetSettings } from '../../src/main/services/settings';
 
 // --- Paths ---
 const FIXTURES_DIR = path.resolve(__dirname, '..', 'fixtures');
-const CSV_PATH = path.join(FIXTURES_DIR, 'csv', 'standard.csv');
+const CSV_PATH = path.resolve(__dirname, '..', '..', 'test_data', 'input.csv');
 const COLABIP_DIR = path.join(FIXTURES_DIR, 'colabip');
+
+// --- Dynamically parsed CSV metadata ---
+function parseInputCSV(): { columns: string[]; rows: Record<string, string>[]; totalRows: number } {
+  const buffer = fs.readFileSync(CSV_PATH);
+  const content = buffer.toString('utf-8').replace(/^\uFEFF/, '');
+  const rows = parse(content, {
+    columns: true,
+    skip_empty_lines: true,
+    relax_column_count: true,
+    trim: true,
+  }) as Record<string, string>[];
+  const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+  return { columns, rows, totalRows: rows.length };
+}
 
 function tempDbPath(): string {
   return path.join(os.tmpdir(), `pipeline-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}.c91`);
-}
-
-// --- Default LLM responses per supplier ---
-const SUPPLIER_RESEARCH_RESPONSES: Record<string, string> = {
-  'Acme Corp': JSON.stringify({
-    supplierType: 'company',
-    officialBusinessName: 'Acme Corporation',
-    description: 'Office and business supplies distributor',
-    industry: 'Office Supplies',
-    productsServices: 'Office supplies, stationery, paper products',
-    serviceType: 'Distribution',
-    confidence: 'high',
-    sources: ['Mock data'],
-  }),
-  'Globex Inc': JSON.stringify({
-    supplierType: 'company',
-    officialBusinessName: 'Globex Incorporated',
-    description: 'IT hardware and networking equipment provider',
-    industry: 'Information Technology',
-    productsServices: 'Servers, laptops, networking equipment',
-    serviceType: 'IT Hardware',
-    confidence: 'high',
-    sources: ['Mock data'],
-  }),
-  'Initech': JSON.stringify({
-    supplierType: 'company',
-    officialBusinessName: 'Initech Consulting LLC',
-    description: 'Management and technology consulting firm',
-    industry: 'Professional Services',
-    productsServices: 'Management consulting, strategy advisory',
-    serviceType: 'Consulting',
-    confidence: 'medium',
-    sources: ['Mock data'],
-  }),
-  'Wayne Enterprises': JSON.stringify({
-    supplierType: 'company',
-    officialBusinessName: 'Wayne Enterprises Inc',
-    description: 'Diversified industrial conglomerate with construction division',
-    industry: 'Construction',
-    productsServices: 'Construction materials, engineering services, infrastructure',
-    serviceType: 'Construction',
-    confidence: 'high',
-    sources: ['Mock data'],
-  }),
-  'Stark Industries': JSON.stringify({
-    supplierType: 'company',
-    officialBusinessName: 'Stark Industries',
-    description: 'Advanced technology and laboratory equipment manufacturer',
-    industry: 'Science & Technology',
-    productsServices: 'Laboratory equipment, analytical instruments, testing devices',
-    serviceType: 'Manufacturing',
-    confidence: 'high',
-    sources: ['Mock data'],
-  }),
-};
-
-// Classification responses keyed by supplier name
-const CLASSIFICATION_RESPONSES: Record<string, string> = {
-  'Acme Corp': JSON.stringify({
-    classificationPath: 'Indirect|Facilities|Office Supplies',
-    reasoning: 'Acme Corp supplies office supplies. This is an indirect cost for facility operations.',
-    descriptionSupplierAligned: true,
-  }),
-  'Globex Inc': JSON.stringify({
-    classificationPath: 'Indirect|IT|Hardware',
-    reasoning: 'Globex provides IT equipment. IT hardware is an indirect cost.',
-    descriptionSupplierAligned: true,
-  }),
-  'Initech': JSON.stringify({
-    classificationPath: 'Indirect|Professional Services|Consulting',
-    reasoning: 'Initech provides consulting services. Professional services are indirect costs.',
-    descriptionSupplierAligned: true,
-  }),
-  'Wayne Enterprises': JSON.stringify({
-    classificationPath: 'Direct|Construction|Building Materials',
-    reasoning: 'Wayne Enterprises provides construction materials. Direct cost for manufacturing plant construction.',
-    descriptionSupplierAligned: true,
-  }),
-  'Stark Industries': JSON.stringify({
-    classificationPath: 'Direct|Equipment|Lab Equipment',
-    reasoning: 'Stark Industries provides lab equipment used directly in R&D/production.',
-    descriptionSupplierAligned: true,
-  }),
-};
-
-/**
- * Setup the mock LLM to return appropriate responses based on the prompt content.
- */
-function setupLLMMock(): void {
-  const mockChat = vi.mocked(llmClient.chat);
-
-  mockChat.mockImplementation(async (_systemPrompt: string, userPrompt: string) => {
-    // Canonicalization call — LLM-first mapping suggestion
-    if (userPrompt.includes('## CSV Column Headers')) {
-      return JSON.stringify({
-        mappings: {
-          supplier_name: 'Supplier',
-          spend_amount: 'Amount',
-          invoice_date: 'Date',
-          line_description: 'Description',
-        },
-        confidence: 'high',
-        unmappedClientColumns: ['Invoice Number'],
-        importantUnmappedColumns: [],
-        unmappedCanonicalColumns: ['gl_description', 'gl_code', 'department', 'creation_date', 'company', 'cost_center', 'po_number', 'supplier_address', 'currency', 'memo'],
-        reasoning: 'Mapped Supplier to supplier_name, Amount to spend_amount, Date to invoice_date, Description to line_description.',
-      });
-    }
-
-    // Determine if this is a research call or classification call
-    const isResearch = userPrompt.includes('## Supplier Name');
-
-    if (isResearch) {
-      // Extract supplier name from research prompt
-      const match = userPrompt.match(/## Supplier Name\n\n(.+)/);
-      const supplierName = match?.[1]?.trim() ?? '';
-      const response = SUPPLIER_RESEARCH_RESPONSES[supplierName];
-      if (response) return response;
-
-      // Fallback for unknown suppliers
-      return JSON.stringify({
-        supplierType: 'company',
-        officialBusinessName: supplierName,
-        description: 'Unknown supplier',
-        industry: 'General',
-        confidence: 'low',
-        sources: ['Fallback mock'],
-      });
-    }
-
-    // Classification call — find supplier name in the transactions section
-    for (const [supplier, response] of Object.entries(CLASSIFICATION_RESPONSES)) {
-      if (userPrompt.includes(supplier)) {
-        return response;
-      }
-    }
-
-    // Fallback classification
-    return JSON.stringify({
-      classificationPath: 'Indirect|Facilities|Office Supplies',
-      reasoning: 'Default fallback classification',
-      descriptionSupplierAligned: false,
-    });
-  });
 }
 
 describe('Pipeline E2E Integration Test', () => {
   let dbPath: string;
   let exportPath: string;
 
-  beforeAll(() => {
+  // Dynamic data — populated in beforeAll from fixtures and CSV
+  let csvData: ReturnType<typeof parseInputCSV>;
+  let taxonomyName: string;
+  let taxonomyNodeCount: number;
+
+  beforeAll(async () => {
+    // Re-read env vars loaded from .env (settings module captures env at import time)
+    resetSettings();
+
     // Set ColabIP base path to fixtures
     colabipService.setColabipBasePath(COLABIP_DIR);
-    setupLLMMock();
+
+    // Discover the first available taxonomy from ColabIP fixtures
+    const taxonomies = await colabipService.listTaxonomies();
+    expect(taxonomies.length).toBeGreaterThan(0);
+    // Pick the taxonomy with the most nodes (most realistic for testing)
+    const sorted = [...taxonomies].sort((a, b) => b.nodeCount - a.nodeCount);
+    taxonomyName = sorted[0].name;
+    taxonomyNodeCount = sorted[0].nodeCount;
+
+    // Parse the input CSV to discover its structure
+    csvData = parseInputCSV();
+    expect(csvData.totalRows).toBeGreaterThan(0);
   });
 
   afterAll(async () => {
@@ -243,11 +142,10 @@ describe('Pipeline E2E Integration Test', () => {
     dbPath = tempDbPath();
     await databaseService.openDatabase(dbPath);
 
-    // Store project name in settings
     await databaseService.run(
       "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
       'project_name',
-      'E2E Test Project'
+      `${taxonomyName} E2E Test Project`
     );
 
     expect(databaseService.isOpen()).toBe(true);
@@ -255,6 +153,8 @@ describe('Pipeline E2E Integration Test', () => {
   });
 
   it('Phase 1b: Set company context', async () => {
+    // Derive company context from the taxonomy name — generic descriptions
+    const industry = taxonomyName.charAt(0).toUpperCase() + taxonomyName.slice(1);
     await databaseService.run(
       `UPDATE company_context
        SET industry = ?,
@@ -264,123 +164,145 @@ describe('Pipeline E2E Integration Test', () => {
            procurement_nuances = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = 1`,
-      'Manufacturing',
-      'Industrial Equipment',
-      'Mid-size industrial equipment manufacturer',
-      'Production of precision instruments and machinery',
-      'Heavy focus on raw materials and lab equipment; IT is secondary spend'
+      industry,
+      'General',
+      `Company operating in the ${industry} industry`,
+      `${industry} services and operations`,
+      `Standard procurement for ${industry.toLowerCase()} operations`
     );
 
     const cc = await databaseService.get<{ industry: string }>(
       'SELECT industry FROM company_context WHERE id = 1'
     );
-    expect(cc?.industry).toBe('Manufacturing');
-    console.log('  ✓ Company context set: Manufacturing / Industrial Equipment');
+    expect(cc?.industry).toBe(industry);
+    console.log(`  ✓ Company context set: ${industry}`);
   });
 
   // ────────────────────────────────────────────────────────────────
   // Phase 2: Taxonomy Setup
   // ────────────────────────────────────────────────────────────────
 
-  it('Phase 2: Import manufacturing taxonomy from ColabIP', async () => {
-    await taxonomyService.importFromColabip('manufacturing');
+  it('Phase 2: Import taxonomy from ColabIP', async () => {
+    await taxonomyService.importFromColabip(taxonomyName);
 
     const nodes = await taxonomyService.getNodes();
+    const l1Nodes = nodes.filter((n) => n.depth === 1);
     const l3Nodes = nodes.filter((n) => n.depth === 3);
 
-    expect(nodes.length).toBeGreaterThan(10);
-    expect(l3Nodes.length).toBeGreaterThan(5);
+    // The taxonomy should have nodes loaded
+    expect(nodes.length).toBeGreaterThan(0);
+    expect(l1Nodes.length).toBeGreaterThan(0);
 
-    console.log(`  ✓ Taxonomy imported: ${nodes.length} nodes (${l3Nodes.length} L3 leaf nodes)`);
-    console.log('    L3 paths:', l3Nodes.map((n) => n.fullPath).join(', '));
+    console.log(`  ✓ Taxonomy "${taxonomyName}" imported: ${nodes.length} nodes (${l1Nodes.length} L1, ${l3Nodes.length} L3)`);
   });
 
   // ────────────────────────────────────────────────────────────────
   // Phase 3: CSV Upload & Import
   // ────────────────────────────────────────────────────────────────
 
+  let mappingSuggestion: Record<string, string>;
+
   it('Phase 3a: Preview CSV file', async () => {
     const preview = await uploadService.parsePreview(CSV_PATH);
 
-    expect(preview.columns).toEqual(['Supplier', 'Invoice Number', 'Amount', 'Date', 'Description']);
-    expect(preview.totalRows).toBe(5);
-    expect(preview.sampleRows.length).toBe(5);
+    // Verify preview matches our independently parsed CSV data
+    expect(preview.totalRows).toBe(csvData.totalRows);
+    expect(preview.sampleRows.length).toBeGreaterThan(0);
+    expect(preview.sampleRows.length).toBeLessThanOrEqual(csvData.totalRows);
+
+    // Columns should match what we parsed independently
+    for (const col of csvData.columns) {
+      expect(preview.columns).toContain(col);
+    }
+
     // LLM-first flow: mappingSuggestion is included in the preview
     expect(preview.mappingSuggestion).toBeDefined();
 
-    console.log(`  ✓ CSV preview: ${preview.totalRows} rows, columns: ${preview.columns.join(', ')}`);
-  });
+    // Store the LLM-suggested mappings for next step
+    mappingSuggestion = preview.mappingSuggestion.mappings;
+
+    console.log(`  ✓ CSV preview: ${preview.totalRows} rows, ${preview.columns.length} columns`);
+    console.log(`  ✓ LLM suggested ${Object.keys(mappingSuggestion).length} column mappings`);
+  }, 60000);
 
   it('Phase 3b: Save column mappings', async () => {
-    // Map CSV columns to canonical names
-    const mapping = {
-      supplier_name: 'Supplier',
-      spend_amount: 'Amount',
-      invoice_date: 'Date',
-      line_description: 'Description',
-    };
+    // Use the LLM-suggested mappings from parsePreview
+    // Must have at least supplier_name mapped for the pipeline to work
+    expect(Object.keys(mappingSuggestion).length).toBeGreaterThan(0);
+    expect(mappingSuggestion).toHaveProperty('supplier_name');
 
-    await canonicalizationService.saveMappings(mapping, ['supplier_name']);
+    // Use supplier_name as the grouping column
+    await canonicalizationService.saveMappings(mappingSuggestion, ['supplier_name']);
 
     const saved = await canonicalizationService.getMappings();
-    expect(saved).toEqual(mapping);
+    expect(saved).toEqual(mappingSuggestion);
 
     const grouping = await canonicalizationService.getGroupingColumns();
     expect(grouping).toEqual(['supplier_name']);
 
-    console.log('  ✓ Column mappings saved:', JSON.stringify(mapping));
-    console.log('  ✓ Grouping columns:', grouping.join(', '));
+    console.log('  ✓ Column mappings saved:', Object.keys(mappingSuggestion).join(', '));
   });
 
   it('Phase 3c: Import CSV data', async () => {
     const result = await canonicalizationService.importCSV(CSV_PATH);
-    expect(result.rowsInserted).toBe(5);
+    expect(result.rowsInserted).toBe(csvData.totalRows);
 
     // Verify transactions exist
-    const txns = await databaseService.all<{ id: string; supplier_name: string; spend_amount: string }>(
-      'SELECT id, supplier_name, spend_amount FROM transactions ORDER BY row_index'
+    const txns = await databaseService.all<{ id: string }>(
+      'SELECT id FROM transactions ORDER BY row_index'
     );
-    expect(txns.length).toBe(5);
-    expect(txns[0].supplier_name).toBe('Acme Corp');
-    expect(txns[4].supplier_name).toBe('Stark Industries');
+    expect(txns.length).toBe(csvData.totalRows);
 
-    // Verify suppliers extracted
+    // Verify suppliers extracted — count distinct supplier names from our CSV data
+    const supplierCol = mappingSuggestion['supplier_name'];
+    const distinctSuppliers = new Set(
+      csvData.rows.map((r) => r[supplierCol]).filter(Boolean)
+    );
+
     const suppliers = await supplierService.listSuppliers();
-    expect(suppliers.length).toBe(5);
+    expect(suppliers.length).toBe(distinctSuppliers.size);
 
     console.log(`  ✓ Imported ${result.rowsInserted} transactions`);
-    console.log(`  ✓ Extracted ${suppliers.length} suppliers: ${suppliers.map((s) => s.supplierName).join(', ')}`);
-    console.log(`  ✓ Total spend: $${suppliers.reduce((sum, s) => sum + s.totalSpend, 0).toFixed(2)}`);
+    console.log(`  ✓ Extracted ${suppliers.length} distinct supplier(s)`);
   });
 
   // ────────────────────────────────────────────────────────────────
   // Phase 4: Override Rules
   // ────────────────────────────────────────────────────────────────
 
-  it('Phase 4: Create an override rule for Wayne Enterprises', async () => {
-    // Get the "Direct|Construction|Building Materials" taxonomy node
+  it('Phase 4: Create an override rule', async () => {
+    // Pick any L3 node from the taxonomy as the rule target
     const nodes = await taxonomyService.getNodes();
-    const buildingMaterialsNode = nodes.find((n) => n.fullPath === 'Direct|Construction|Building Materials');
-    expect(buildingMaterialsNode).toBeDefined();
+    const l3Nodes = nodes.filter((n) => n.depth === 3);
+    expect(l3Nodes.length).toBeGreaterThan(0);
+    const targetNode = l3Nodes[0];
 
-    // Create a rule: Wayne Enterprises → always Direct|Construction|Building Materials
+    // Get the first supplier from the data
+    const suppliers = await supplierService.listSuppliers();
+    expect(suppliers.length).toBeGreaterThan(0);
+    const firstSupplier = suppliers[0].supplierName;
+
+    // Extract a keyword from the supplier name (first word) for a "contains" rule
+    const supplierKeyword = firstSupplier.split(/\s+/)[0].toLowerCase();
+
     const { id } = await rulesService.createRule({
-      name: 'Wayne Enterprises → Building Materials',
+      name: `${firstSupplier} → ${targetNode.fullPath.split('|').pop()}`,
       source: 'project',
       conditions: [
-        { field: 'supplier_name', operator: 'equals', value: 'Wayne Enterprises' },
+        { field: 'supplier_name', operator: 'contains', value: supplierKeyword },
       ],
-      targetTaxonomyNodeId: buildingMaterialsNode!.id,
+      targetTaxonomyNodeId: targetNode.id,
     });
 
     expect(id).toBeTruthy();
     const rules = await rulesService.listRules();
     expect(rules.length).toBe(1);
-    expect(rules[0].name).toBe('Wayne Enterprises → Building Materials');
+    // Project rules should have priority score in 100-199 band
     expect(rules[0].priorityScore).toBeGreaterThanOrEqual(100);
     expect(rules[0].priorityScore).toBeLessThan(200);
 
     console.log(`  ✓ Created override rule: "${rules[0].name}" (priority: ${rules[0].priorityScore})`);
+    console.log(`  ✓ Rule matches supplier_name containing "${supplierKeyword}"`);
   });
 
   // ────────────────────────────────────────────────────────────────
@@ -404,9 +326,9 @@ describe('Pipeline E2E Integration Test', () => {
     });
     expect(runId).toBeTruthy();
 
-    // Wait for pipeline to complete (async)
+    // Wait for pipeline to complete (async) — longer timeout for real LLM calls
     let status = classificationPipeline.getStatus();
-    const maxWait = 30000; // 30s timeout
+    const maxWait = 120000; // 120s timeout for real LLM
     const startTime = Date.now();
 
     while (
@@ -414,7 +336,7 @@ describe('Pipeline E2E Integration Test', () => {
       !['completed', 'failed', 'cancelled'].includes(status.status) &&
       Date.now() - startTime < maxWait
     ) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       status = classificationPipeline.getStatus();
     }
 
@@ -426,12 +348,7 @@ describe('Pipeline E2E Integration Test', () => {
 
     console.log(`  ✓ Pipeline completed in ${Date.now() - startTime}ms`);
     console.log(`  ✓ ${progressEvents.length} progress events emitted`);
-
-    // Verify LLM was called
-    const mockChat = vi.mocked(llmClient.chat);
-    expect(mockChat).toHaveBeenCalled();
-    console.log(`  ✓ LLM called ${mockChat.mock.calls.length} times`);
-  }, 60000);
+  }, 180000);
 
   // ────────────────────────────────────────────────────────────────
   // Phase 6: Verify Classification Results
@@ -448,50 +365,49 @@ describe('Pipeline E2E Integration Test', () => {
       'SELECT id, supplier_name, taxonomy_node_id, review_score, classification_reasoning FROM transactions ORDER BY row_index'
     );
 
+    expect(txns.length).toBe(csvData.totalRows);
+
     const taxonomy = await taxonomyService.getNodes();
 
     let classified = 0;
     let ruleMatched = 0;
-    let llmClassified = 0;
 
     for (const txn of txns) {
       const node = taxonomy.find((n) => n.id === txn.taxonomy_node_id);
-      const path = node?.fullPath ?? '(unclassified)';
+      const nodePath = node?.fullPath ?? '(unclassified)';
       const source = txn.review_score === 0 ? 'rule/aligned' : 'LLM';
 
       if (txn.taxonomy_node_id) {
         classified++;
         if (txn.review_score === 0 && !txn.classification_reasoning) {
           ruleMatched++;
-        } else {
-          llmClassified++;
         }
       }
 
-      console.log(`    ${txn.supplier_name}: ${path} [score=${txn.review_score}, source=${source}]`);
+      console.log(`    ${txn.supplier_name}: ${nodePath} [score=${txn.review_score}, source=${source}]`);
     }
 
-    expect(classified).toBe(5); // All 5 should be classified
+    // All transactions should be classified (either by rule or LLM)
+    expect(classified).toBe(csvData.totalRows);
 
-    console.log(`  ✓ ${classified}/5 transactions classified (${ruleMatched} by rules, ${llmClassified} by LLM)`);
+    console.log(`  ✓ ${classified}/${csvData.totalRows} transactions classified (${ruleMatched} by rules, ${classified - ruleMatched} by LLM)`);
   });
 
   it('Phase 6b: Check transaction stats', async () => {
-    // Query stats manually since the transactions service may use different column discovery
     const stats = await databaseService.get<{
       total: number;
       classified: number;
       flagged: number;
     }>(`
       SELECT
-        COUNT(*) as total,
-        COUNT(taxonomy_node_id) as classified,
-        COUNT(CASE WHEN review_score > 0 THEN 1 END) as flagged
+        COUNT(*)::INTEGER as total,
+        COUNT(taxonomy_node_id)::INTEGER as classified,
+        COUNT(CASE WHEN review_score > 0 THEN 1 END)::INTEGER as flagged
       FROM transactions
     `);
 
-    expect(stats?.total).toBe(5);
-    expect(stats?.classified).toBe(5);
+    expect(stats?.total).toBe(csvData.totalRows);
+    expect(stats?.classified).toBe(csvData.totalRows);
 
     console.log(`  ✓ Stats: ${stats?.total} total, ${stats?.classified} classified, ${stats?.flagged} flagged for review`);
   });
@@ -507,7 +423,7 @@ describe('Pipeline E2E Integration Test', () => {
     expect(changes.length).toBeGreaterThanOrEqual(1);
     const pipelineEntry = changes.find((c) => c.source === 'pipeline');
     expect(pipelineEntry).toBeDefined();
-    expect(pipelineEntry!.affected_count).toBe(5);
+    expect(pipelineEntry!.affected_count).toBe(csvData.totalRows);
 
     console.log(`  ✓ Changelog has ${changes.length} entries`);
     console.log(`    Pipeline entry: "${pipelineEntry?.description}"`);
@@ -518,28 +434,29 @@ describe('Pipeline E2E Integration Test', () => {
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 7: Reclassify a transaction', async () => {
-    // Get Acme Corp's transaction
-    const acmeTxn = await databaseService.get<{ id: string; taxonomy_node_id: string }>(
-      "SELECT id, taxonomy_node_id FROM transactions WHERE supplier_name = 'Acme Corp'"
+    // Get the first transaction
+    const firstTxn = await databaseService.get<{ id: string; taxonomy_node_id: string }>(
+      'SELECT id, taxonomy_node_id FROM transactions ORDER BY row_index LIMIT 1'
     );
-    expect(acmeTxn).toBeDefined();
+    expect(firstTxn).toBeDefined();
 
-    // Reclassify to "Indirect|Facilities|Maintenance"
+    // Find a different taxonomy node (any L3 node that isn't the current one)
     const taxonomy = await taxonomyService.getNodes();
-    const maintenanceNode = taxonomy.find((n) => n.fullPath === 'Indirect|Facilities|Maintenance');
-    expect(maintenanceNode).toBeDefined();
+    const l3Nodes = taxonomy.filter((n) => n.depth === 3);
+    const differentNode = l3Nodes.find((n) => n.id !== firstTxn!.taxonomy_node_id);
+    expect(differentNode).toBeDefined();
 
     await reclassificationService.reclassifyTransactions(
-      [acmeTxn!.id],
-      maintenanceNode!.id,
+      [firstTxn!.id],
+      differentNode!.id,
     );
 
     // Verify reclassification
     const updated = await databaseService.get<{ taxonomy_node_id: string }>(
       'SELECT taxonomy_node_id FROM transactions WHERE id = ?',
-      acmeTxn!.id
+      firstTxn!.id
     );
-    expect(updated?.taxonomy_node_id).toBe(maintenanceNode!.id);
+    expect(updated?.taxonomy_node_id).toBe(differentNode!.id);
 
     // Verify changelog has a manual entry
     const changes = await databaseService.all<{ source: string; description: string }>(
@@ -547,7 +464,7 @@ describe('Pipeline E2E Integration Test', () => {
     );
     expect(changes.length).toBeGreaterThan(0);
 
-    console.log(`  ✓ Reclassified Acme Corp to: Indirect|Facilities|Maintenance`);
+    console.log(`  ✓ Reclassified transaction to: ${differentNode!.fullPath}`);
     console.log(`  ✓ Manual changelog entry: "${changes[0]?.description}"`);
   });
 
@@ -559,14 +476,14 @@ describe('Pipeline E2E Integration Test', () => {
     exportPath = path.join(os.tmpdir(), `pipeline-e2e-export-${Date.now()}.csv`);
 
     const result = await exportService.exportCSV(exportPath);
-    expect(result.rowsExported).toBe(5);
+    expect(result.rowsExported).toBe(csvData.totalRows);
     expect(fs.existsSync(exportPath)).toBe(true);
 
     const csvContent = fs.readFileSync(exportPath, 'utf-8');
     const lines = csvContent.trim().split('\n');
 
-    // Header + 5 data rows
-    expect(lines.length).toBe(6);
+    // Header + data rows
+    expect(lines.length).toBe(csvData.totalRows + 1);
 
     // Check header includes classification columns
     const header = lines[0];
@@ -579,7 +496,6 @@ describe('Pipeline E2E Integration Test', () => {
     console.log(`  ✓ Exported ${result.rowsExported} rows to CSV`);
     console.log(`  ✓ CSV header: ${header}`);
 
-    // Print each exported row
     for (let i = 1; i < lines.length; i++) {
       console.log(`    Row ${i}: ${lines[i].substring(0, 120)}...`);
     }

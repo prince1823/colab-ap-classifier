@@ -134,13 +134,6 @@ beforeEach(() => {
 // --- buildSystemPrompt ---
 
 describe('buildSystemPrompt', () => {
-  it('should include L1 classification rules', () => {
-    const prompt = buildSystemPrompt(false);
-    expect(prompt).toContain('Direct');
-    expect(prompt).toContain('Indirect');
-    expect(prompt).toContain('Exempt');
-  });
-
   it('should require depth 3 classification', () => {
     const prompt = buildSystemPrompt(false);
     expect(prompt).toContain('depth 3');
@@ -152,22 +145,11 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('supplier research');
   });
 
-  it('should mention intercompany check', () => {
-    const prompt = buildSystemPrompt(false);
-    expect(prompt).toContain('intercompany');
-  });
-
   it('should include JSON response format', () => {
     const prompt = buildSystemPrompt(false);
     expect(prompt).toContain('classificationPath');
     expect(prompt).toContain('reasoning');
     expect(prompt).toContain('descriptionSupplierAligned');
-  });
-
-  it('should include classification guidance for non-tail spend', () => {
-    const prompt = buildSystemPrompt(false);
-    expect(prompt).toContain('Classification Guidance');
-    expect(prompt).toContain('production');
   });
 
   it('should use simplified prompt for tail spend', () => {
@@ -178,17 +160,8 @@ describe('buildSystemPrompt', () => {
     expect(tailPrompt.length).toBeLessThan(fullPrompt.length);
 
     // Should still include core rules
-    expect(tailPrompt).toContain('Direct');
-    expect(tailPrompt).toContain('Indirect');
-    expect(tailPrompt).toContain('Exempt');
     expect(tailPrompt).toContain('depth 3');
     expect(tailPrompt).toContain('L1|L2|L3');
-    expect(tailPrompt).toContain('intercompany');
-  });
-
-  it('should not include detailed classification guidance for tail spend', () => {
-    const tailPrompt = buildSystemPrompt(true);
-    expect(tailPrompt).not.toContain('Classification Guidance');
   });
 });
 
@@ -444,25 +417,25 @@ describe('parseResponse', () => {
 // --- validateL1 ---
 
 describe('validateL1', () => {
-  it('should accept valid L1 values', () => {
-    expect(validateL1('Direct|Raw Materials|Steel')).toBe('Direct|Raw Materials|Steel');
-    expect(validateL1('Indirect|IT Services|Software')).toBe('Indirect|IT Services|Software');
-    expect(validateL1('Exempt|Taxes|Sales Tax')).toBe('Exempt|Taxes|Sales Tax');
+  it('should accept valid L1 values from taxonomy', () => {
+    expect(validateL1('Direct|Raw Materials|Steel', SAMPLE_TAXONOMY)).toBe('Direct|Raw Materials|Steel');
+    expect(validateL1('Indirect|IT Services|Software', SAMPLE_TAXONOMY)).toBe('Indirect|IT Services|Software');
+    expect(validateL1('Exempt|Taxes|Sales Tax', SAMPLE_TAXONOMY)).toBe('Exempt|Taxes|Sales Tax');
   });
 
   it('should fix case-insensitive L1 values', () => {
-    expect(validateL1('direct|Raw Materials|Steel')).toBe('Direct|Raw Materials|Steel');
-    expect(validateL1('INDIRECT|IT Services|Software')).toBe('Indirect|IT Services|Software');
-    expect(validateL1('exempt|Taxes|Sales Tax')).toBe('Exempt|Taxes|Sales Tax');
+    expect(validateL1('direct|Raw Materials|Steel', SAMPLE_TAXONOMY)).toBe('Direct|Raw Materials|Steel');
+    expect(validateL1('INDIRECT|IT Services|Software', SAMPLE_TAXONOMY)).toBe('Indirect|IT Services|Software');
+    expect(validateL1('exempt|Taxes|Sales Tax', SAMPLE_TAXONOMY)).toBe('Exempt|Taxes|Sales Tax');
   });
 
-  it('should return null for invalid L1 values', () => {
-    expect(validateL1('Unknown|Something|Else')).toBeNull();
-    expect(validateL1('Services|IT|Software')).toBeNull();
+  it('should return null for L1 values not in taxonomy', () => {
+    expect(validateL1('Unknown|Something|Else', SAMPLE_TAXONOMY)).toBeNull();
+    expect(validateL1('Services|IT|Software', SAMPLE_TAXONOMY)).toBeNull();
   });
 
   it('should return null for empty path', () => {
-    expect(validateL1('')).toBeNull();
+    expect(validateL1('', SAMPLE_TAXONOMY)).toBeNull();
   });
 });
 
@@ -534,14 +507,15 @@ describe('validateClassification', () => {
     expect(result.descriptionSupplierAligned).toBe(true);
   });
 
-  it('should fix invalid L1 by defaulting to Indirect', () => {
+  it('should fix invalid L1 by defaulting to first taxonomy L1', () => {
     const input: ClassificationResult = {
       classificationPath: 'Unknown|Services|Software',
       reasoning: 'test',
       descriptionSupplierAligned: false,
     };
     const result = validateClassification(input, SAMPLE_TAXONOMY);
-    expect(result.classificationPath.split('|')[0]).toBe('Indirect');
+    // When L1 is invalid, it defaults to the first L1 in the taxonomy
+    expect(result.classificationPath.split('|')[0]).toBe('Direct');
   });
 
   it('should fix case-insensitive L1', () => {
@@ -625,12 +599,8 @@ describe('classifyInvoiceGroup', () => {
     const [systemPrompt, userPrompt] = mockChat.mock.calls[0];
 
     // System prompt requirements
-    expect(systemPrompt).toContain('Direct');
-    expect(systemPrompt).toContain('Indirect');
-    expect(systemPrompt).toContain('Exempt');
     expect(systemPrompt).toContain('depth 3');
     expect(systemPrompt).toContain('supplier research');
-    expect(systemPrompt).toContain('intercompany');
 
     // User prompt requirements
     expect(userPrompt).toContain('## Taxonomy');

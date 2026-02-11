@@ -1,1 +1,2 @@
-
+Non-Sourceable
+Non-procurement items including payroll, taxes, intercompany transfers, and regulatory fees

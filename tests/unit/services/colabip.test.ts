@@ -30,9 +30,9 @@ describe('listTaxonomies', () => {
 
     expect(taxonomies).toEqual(
       expect.arrayContaining([
-        { name: 'healthcare', nodeCount: 3 },
+        { name: 'healthcare', nodeCount: 78 },
         { name: 'general', nodeCount: 2 },
-        { name: 'empty', nodeCount: 0 },
+        { name: 'manufacturing', nodeCount: 25 },
       ])
     );
     expect(taxonomies).toHaveLength(3);
@@ -52,15 +52,16 @@ describe('listRulePacks', () => {
 
     const healthcare = packs.find((p) => p.name === 'healthcare');
     const general = packs.find((p) => p.name === 'general');
+    const manufacturing = packs.find((p) => p.name === 'manufacturing');
 
     expect(healthcare).toEqual({ name: 'healthcare', ruleCount: 2 });
     expect(general).toEqual({ name: 'general', ruleCount: 0 });
+    expect(manufacturing).toEqual({ name: 'manufacturing', ruleCount: 0 });
   });
 
-  it('should skip directories without rules.csv', async () => {
+  it('should return all directories with rules.csv', async () => {
     const packs = await listRulePacks();
-    const empty = packs.find((p) => p.name === 'empty');
-    expect(empty).toBeUndefined();
+    expect(packs.length).toBe(3);
   });
 
   it('should return empty array when colabip directory does not exist', async () => {
@@ -75,30 +76,36 @@ describe('readTaxonomy', () => {
   it('should parse valid .txt files with correct paths and descriptions', async () => {
     const result = await readTaxonomy('healthcare');
 
-    // 3.txt is malformed (empty first line) — should be skipped
-    expect(result.nodes).toHaveLength(2);
+    // Healthcare taxonomy has 78 nodes (L1, L2, and L3)
+    expect(result.nodes).toHaveLength(78);
+
+    // Check first few nodes (sorted by numeric filename: 1.txt, 2.txt, 3.txt)
     expect(result.nodes[0]).toEqual({
-      path: 'clinical|clinical equipment|diagnostic imaging',
-      description: expect.stringContaining('Diagnostic imaging'),
+      path: 'Clinical',
+      description: expect.stringContaining('Clinical costs'),
     });
     expect(result.nodes[1]).toEqual({
-      path: 'clinical|pharmaceuticals',
-      description: expect.stringContaining('Prescription'),
+      path: 'Non Clinical',
+      description: expect.stringContaining('Non-clinical'),
+    });
+    expect(result.nodes[2]).toEqual({
+      path: 'Non-Sourceable',
+      description: expect.stringContaining('Non-procurement'),
     });
   });
 
-  it('should skip malformed .txt files with empty first line', async () => {
+  it('should not include nodes with empty paths', async () => {
     const result = await readTaxonomy('healthcare');
-    // 3.txt has empty first line — should be skipped
     const paths = result.nodes.map((n) => n.path);
     expect(paths).not.toContain('');
   });
 
   it('should return sorted nodes (numeric filename order)', async () => {
     const result = await readTaxonomy('healthcare');
-    // 1.txt should come before 2.txt
-    expect(result.nodes[0].path).toContain('diagnostic imaging');
-    expect(result.nodes[1].path).toContain('pharmaceuticals');
+    // 1.txt = Clinical, 2.txt = Non Clinical, 3.txt = Non-Sourceable
+    expect(result.nodes[0].path).toBe('Clinical');
+    expect(result.nodes[1].path).toBe('Non Clinical');
+    expect(result.nodes[2].path).toBe('Non-Sourceable');
   });
 
   it('should return empty nodes for non-existent industry', async () => {

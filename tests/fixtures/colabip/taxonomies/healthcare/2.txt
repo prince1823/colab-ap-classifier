@@ -1,2 +1,2 @@
-clinical|pharmaceuticals
-Prescription and over-the-counter drugs, medications, and related pharmaceutical supplies
+Non Clinical
+Non-clinical operational costs including facilities, IT, HR, and administrative functions

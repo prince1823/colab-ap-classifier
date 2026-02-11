@@ -169,34 +169,7 @@ describe('TaxonomyService', () => {
     });
   });
 
-  describe('L1 validation', () => {
-    it('should reject paths with invalid L1 values', async () => {
-      await expect(
-        setTaxonomy({
-          name: 'bad-taxonomy',
-          nodes: [{ path: 'InvalidCategory|SubCategory' }],
-        })
-      ).rejects.toThrow('Invalid L1 value "InvalidCategory"');
-    });
-
-    it('should reject paths starting with lowercase valid values', async () => {
-      await expect(
-        setTaxonomy({
-          name: 'bad-taxonomy',
-          nodes: [{ path: 'direct|IT' }],
-        })
-      ).rejects.toThrow('Invalid L1 value "direct"');
-    });
-
-    it('should reject paths with random L1 like "clinical"', async () => {
-      await expect(
-        setTaxonomy({
-          name: 'bad-taxonomy',
-          nodes: [{ path: 'clinical|equipment' }],
-        })
-      ).rejects.toThrow('Invalid L1 value "clinical"');
-    });
-
+  describe('depth validation', () => {
     it('should reject paths with depth greater than 3', async () => {
       await expect(
         setTaxonomy({
@@ -206,6 +179,21 @@ describe('TaxonomyService', () => {
       ).rejects.toThrow('depth must be 1, 2, or 3');
     });
 
+    it('should accept any L1 value (no L1 constraint)', async () => {
+      await setTaxonomy({
+        name: 'healthcare-taxonomy',
+        nodes: [
+          { path: 'Clinical', description: 'Clinical costs' },
+          { path: 'Non Clinical', description: 'Non-clinical costs' },
+          { path: 'Non-Sourceable', description: 'Non-procurement items' },
+        ],
+      });
+
+      const nodes = await getNodes();
+      expect(nodes).toHaveLength(3);
+      expect(nodes.map((n) => n.l1).sort()).toEqual(['Clinical', 'Non Clinical', 'Non-Sourceable']);
+    });
+
     it('should not modify database when validation fails', async () => {
       // First set a valid taxonomy
       await setTaxonomy({
@@ -213,13 +201,13 @@ describe('TaxonomyService', () => {
         nodes: [{ path: 'Direct', description: 'Valid' }],
       });
 
-      // Attempt to set an invalid taxonomy
+      // Attempt to set a taxonomy with depth > 3
       await expect(
         setTaxonomy({
           name: 'invalid-taxonomy',
-          nodes: [{ path: 'BadValue' }],
+          nodes: [{ path: 'A|B|C|D' }],
         })
-      ).rejects.toThrow();
+      ).rejects.toThrow('depth must be 1, 2, or 3');
 
       // The previous valid taxonomy should still be intact
       const nodes = await getNodes();

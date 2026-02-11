@@ -4,25 +4,9 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
-  root: 'src/renderer',
-  base: './',
-  build: {
-    outDir: '../../dist/renderer',
-    emptyOutDir: true,
-  },
   resolve: {
     alias: {
-      '@shared': path.resolve(__dirname, 'src/shared'),
-    },
-  },
-  define: {
-    'global': 'globalThis',
-  },
-  optimizeDeps: {
-    esbuildOptions: {
-      define: {
-        global: 'globalThis',
-      },
+      '@': path.resolve(__dirname, './frontend-v1'),
     },
   },
   server: {

@@ -1,0 +1,807 @@
+.classification-tree {
+  width: 100%;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.tree-success-toast {
+  margin: 8px 16px 0 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #ecfdf5;
+  border: 1px solid #10b981;
+  color: #065f46;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.tree-success-toast .toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.tree-success-toast .toast-title {
+  font-weight: 600;
+}
+
+.tree-success-toast .toast-path {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tree-success-toast .toast-path-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tree-success-toast .toast-path-separator {
+  opacity: 0.7;
+}
+
+.tree-success-toast .toast-view-details-btn {
+  padding: 6px 12px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tree-success-toast .toast-view-details-btn:hover {
+  background: #059669;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.tree-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+}
+
+.tree-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.add-node-btn {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  border: 1px solid #d0d7de;
+  background-color: #f6f8fa;
+  color: #24292f;
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.add-node-btn:hover {
+  background-color: #eaeef2;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.add-node-btn:active {
+  background-color: #dde3ea;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
+}
+
+.add-node-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.add-node-modal {
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 20px 25px -5px rgba(15,23,42,0.1), 0 10px 10px -5px rgba(15,23,42,0.04);
+  padding: 16px 20px 14px;
+  width: 360px;
+  max-width: 90vw;
+}
+
+.add-node-modal h4 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.add-node-form {
+  margin-top: 4px;
+}
+
+.add-node-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.add-node-row label {
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.add-node-row input {
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.add-node-row input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.4);
+}
+
+.add-node-error {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.add-node-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.add-node-cancel,
+.add-node-save {
+  border-radius: 4px;
+  border: 1px solid transparent;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.add-node-cancel {
+  border-color: #d1d5db;
+  background-color: #ffffff;
+  color: #374151;
+}
+
+.add-node-cancel:hover {
+  background-color: #f3f4f6;
+}
+
+.add-node-save {
+  background-color: #2563eb;
+  color: #ffffff;
+}
+
+.add-node-save:hover {
+  background-color: #1d4ed8;
+}
+
+.add-node-save:disabled,
+.add-node-cancel:disabled,
+.add-node-delete:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.add-node-delete {
+  background-color: #ef4444;
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.add-node-delete:hover:not(:disabled) {
+  background-color: #dc2626;
+}
+
+.tree-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.zoom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.zoom-btn:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.zoom-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.zoom-percentage {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 40px;
+  text-align: center;
+}
+
+.tree-content {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 12px;
+  min-height: 320px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.tree-columns {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  width: 100%;
+  min-height: 280px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.tree-column {
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  position: relative;
+}
+
+.tree-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+  z-index: 1;
+}
+
+.tree-column-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.tree-column-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.tree-column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 100%;
+}
+
+.node-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.node-wrapper:hover .node-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.column-node {
+  width: 100%;
+  justify-content: space-between;
+  text-align: left;
+  background: transparent;
+  position: relative;
+}
+
+.column-node:hover {
+  background: #f3f4f6;
+  border-color: #cbd5e1;
+}
+
+.node-actions {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  padding: 2px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+}
+
+.node-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.node-action-btn:hover {
+  background: var(--bg-secondary);
+}
+
+.node-rename-btn:hover {
+  color: #3b82f6;
+  background: #eff6ff;
+}
+
+.node-delete-btn:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+/* Level colors reused from original tree */
+:root {
+  --level-1-color: #3b82f6;
+  --level-2-color: #10b981;
+  --level-3-color: #f59e0b;
+  --level-4-color: #ef4444;
+}
+
+.tree-column.column-level-1::before,
+.column-node.column-level-1.selected::after {
+  background: var(--level-1-color);
+}
+
+.tree-column.column-level-2::before,
+.column-node.column-level-2.selected::after {
+  background: var(--level-2-color);
+}
+
+.tree-column.column-level-3::before,
+.column-node.column-level-3.selected::after {
+  background: var(--level-3-color);
+}
+
+.tree-column.column-level-4::before,
+.column-node.column-level-4.selected::after {
+  background: var(--level-4-color);
+}
+
+/* Column spine to show lineage per level */
+.tree-column::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--border-color);
+  opacity: 0.4;
+}
+
+/* Highlight active columns (there is a selection/hover at that level) */
+.tree-column.active-column::before {
+  opacity: 1;
+}
+
+/* Connector from selected node toward the next column */
+.column-node.selected::after,
+.column-node.active-path::after {
+  content: '';
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 2px;
+  background: var(--border-color);
+}
+
+.empty-tree {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--text-secondary);
+}
+
+.tree-node {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  position: relative;
+  margin: 0;
+  gap: 12px;
+}
+
+/* Connector lines for each level */
+.tree-node.level-1 {
+  position: relative;
+}
+
+.tree-node.level-1::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 12px;
+  height: 2px;
+  background: #3b82f6; /* Blue for L1 */
+  z-index: 0;
+}
+
+.tree-node.level-2 {
+  position: relative;
+}
+
+.tree-node.level-2::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 12px;
+  height: 2px;
+  background: #10b981; /* Green for L2 */
+  z-index: 0;
+}
+
+.tree-node.level-3 {
+  position: relative;
+}
+
+.tree-node.level-3::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 12px;
+  height: 2px;
+  background: #f59e0b; /* Orange for L3 */
+  z-index: 0;
+}
+
+.tree-node.level-4 {
+  position: relative;
+}
+
+.tree-node.level-4::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 12px;
+  height: 2px;
+  background: #ef4444; /* Red for L4 */
+  z-index: 0;
+}
+
+.node-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  position: relative;
+  gap: 12px;
+}
+
+.node-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: var(--transition);
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  white-space: nowrap;
+  min-width: fit-content;
+  position: relative;
+  z-index: 2;
+  font-size: 11px;
+}
+
+/* L4 nodes are droppable - highlight them */
+.tree-node.level-4 .node-content {
+  cursor: grab;
+  border: 1px solid #ef4444;
+  background: #fef2f2;
+}
+
+.tree-node.level-4 .node-content:hover {
+  background: #fee2e2;
+  border-color: #dc2626;
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);
+}
+
+/* L1, L2, L3 nodes are not droppable - keep normal appearance */
+.tree-node.level-1 .node-content,
+.tree-node.level-2 .node-content,
+.tree-node.level-3 .node-content {
+  cursor: default;
+}
+
+.node-content:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.node-content.selected {
+  background: #eff6ff;
+  border-color: #3b82f6;
+}
+
+.node-content.keyboard-selected {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.node-content.keyboard-selected.selected {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+.node-content.drag-over {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  border-style: dashed;
+}
+
+.node-expander {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.expand-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  transition: var(--transition);
+}
+
+.expand-btn:hover {
+  color: var(--text-primary);
+}
+
+.expand-spacer {
+  width: 16px;
+}
+
+.node-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.node-level-badge {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 4px;
+  margin-right: 4px;
+  background: #6b7280;
+  color: white;
+  font-size: 9px;
+  font-weight: 600;
+  border-radius: 3px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.node-label {
+  flex: 1;
+  font-size: 11px;
+  color: #374151;
+  font-weight: 400;
+  margin-right: 4px;
+}
+
+.node-count {
+  font-size: 10px;
+  color: #6b7280;
+  padding: 1px 4px;
+  background: #f3f4f6;
+  border-radius: 8px;
+}
+
+.node-amount {
+  font-size: 10px;
+  font-weight: 500;
+  color: #6b7280;
+  min-width: 60px;
+  text-align: right;
+}
+
+.node-children {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  align-items: flex-start;
+  padding-left: 0;
+  margin-left: 0;
+}
+
+/* Vertical connector line from parent to children - color coded by parent level */
+.node-children::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #d1d5db;
+  z-index: 0;
+}
+
+/* Color-coded vertical lines based on parent level */
+.tree-node.level-1 .node-children::before {
+  background: #3b82f6; /* Blue for L1 children */
+}
+
+.tree-node.level-2 .node-children::before {
+  background: #10b981; /* Green for L2 children */
+}
+
+.tree-node.level-3 .node-children::before {
+  background: #f59e0b; /* Orange for L3 children */
+}
+
+.tree-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: fit-content;
+}
+
+/* Simple text-only style */
+.tree-node .node-content {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.tree-node .node-label {
+  font-size: 11px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-node .node-count,
+.tree-node .node-amount {
+  font-size: 10px;
+}
+
+.tree-node.level-1 .node-content {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  color: #111827;
+  border: 1px solid #9ca3af;
+  border-left: 3px solid #3b82f6; /* Blue for L1 */
+}
+
+.tree-node.level-1 .node-label {
+  font-size: 12px;
+  max-width: 140px;
+  color: #111827;
+}
+
+.tree-node.level-1 .node-level-badge,
+.tree-node.level-1 .node-count,
+.tree-node.level-1 .node-amount {
+  color: #6b7280;
+}
+
+/* Color-coded level badges to match connector lines */
+.tree-node.level-1 .node-level-badge {
+  background: #3b82f6; /* Blue for L1 */
+}
+
+.tree-node.level-2 .node-level-badge {
+  background: #10b981; /* Green for L2 */
+}
+
+.tree-node.level-3 .node-level-badge {
+  background: #f59e0b; /* Orange for L3 */
+}
+
+.tree-node.level-4 .node-level-badge {
+  background: #ef4444; /* Red for L4 */
+}
+
+/* Color-coded borders to match connector lines */
+.tree-node.level-2 .node-content {
+  border-left: 3px solid #10b981; /* Green for L2 */
+}
+
+.tree-node.level-3 .node-content {
+  border-left: 3px solid #f59e0b; /* Orange for L3 */
+}
+
+.tree-node.level-4 .node-content {
+  border-left: 3px solid #ef4444; /* Red for L4 */
+}
+

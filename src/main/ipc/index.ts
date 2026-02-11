@@ -11,6 +11,10 @@ import { registerCanonicalizationHandlers } from './canonicalization';
 import { registerSupplierResearchHandlers } from './supplier-research';
 import { registerRulesHandlers } from './rules';
 import { registerTransactionsHandlers } from './transactions';
+import { registerClassificationHandlers } from './classification';
+import { registerReclassificationHandlers } from './reclassification';
+import { registerFeedbackHandlers } from './feedback';
+import { registerExportHandlers } from './export';
 
 export function registerAllHandlers(): void {
   // Test channel — proves IPC is working end-to-end
@@ -29,4 +33,8 @@ export function registerAllHandlers(): void {
   registerSupplierResearchHandlers();
   registerRulesHandlers();
   registerTransactionsHandlers();
+  registerClassificationHandlers();
+  registerReclassificationHandlers();
+  registerFeedbackHandlers();
+  registerExportHandlers();
 }

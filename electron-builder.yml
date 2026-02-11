@@ -1,0 +1,23 @@
+appId: com.colab91.classifier
+productName: Colab91 Classifier
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+extraMetadata:
+  main: dist/main/main/index.js
+mac:
+  category: public.app-category.business
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+    - portable
+linux:
+  target:
+    - AppImage
+    - deb

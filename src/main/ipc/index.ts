@@ -1,6 +1,8 @@
-// IPC handler registrations
-// Handlers will be added in subsequent issues (S1-03+)
+import { registerHandler } from './register';
 
 export function registerAllHandlers(): void {
-  // Register IPC handlers here as they are implemented
+  // Test channel — proves IPC is working end-to-end
+  registerHandler('test:ping', async () => 'pong');
+
+  // Namespace handlers will be registered here as services are built
 }

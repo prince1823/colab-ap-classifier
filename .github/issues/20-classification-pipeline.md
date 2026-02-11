@@ -98,3 +98,27 @@ Run state is tracked in-memory only (no database table). State resets on app res
 - `internal_docs/ipc_contract.md` — Classification section (channels 17-20)
 - `internal_docs/features.md` — Classification Pipeline section
 - `internal_docs/backend_spec.md` — pipeline architecture
+
+## Implementation Notes
+
+**Status:** Implemented with deviations
+
+**Files:**
+- `src/main/services/classification-pipeline.ts`
+- `src/main/ipc/classification.ts`
+- `tests/unit/services/classification-pipeline.test.ts`
+
+**Deviations:**
+- **Review score simplified:** Uses binary `descriptionSupplierAligned ? 0 : 50` instead of the spec's multi-factor 0-100 scoring with historical L1/L2 mismatch, supplier lookup issues, description misalignment, and low spend factors. Full review scoring should be implemented in a follow-up.
+- **Pipeline steps consolidated:** Steps 6 (invoice grouping) and 7 (description cleaning) are implemented inline within the LLM classification loop rather than as distinct pipeline phases. The `cleanDescription()` function exists and correctly applies the 70% numeric threshold.
+- **Historical classification scoring:** The pipeline does not query historical L1/L2/L3 classifications per supplier to factor into review scores. This is a TODO for the review score enhancement.
+
+**Implemented correctly:**
+- Run state tracked in-memory only (no database table) as specified
+- All 3 IPC handlers + 1 event work
+- Override rules applied before LLM classification
+- Cancel stops pipeline between steps
+- One-job-at-a-time enforcement
+- Partial failure handling (processed rows kept)
+- Changelog entry created on completion
+- Progress events emitted

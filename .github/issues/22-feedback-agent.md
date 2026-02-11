@@ -75,3 +75,13 @@ async function analyzeFeedback(input: {
 - `internal_docs/backend_spec.md` — FeedbackAgent description
 - `internal_docs/features.md` — System Feedback section
 - `internal_docs/ipc_contract.md` — FeedbackActionDetails types
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/agents/feedback-agent.ts`
+- `tests/unit/agents/feedback-agent.test.ts`
+
+**No deviations.** Agent produces all 4 feedback types, prompt includes full context, output parsed into correct FeedbackSuggestion type, error handling for LLM failures included.

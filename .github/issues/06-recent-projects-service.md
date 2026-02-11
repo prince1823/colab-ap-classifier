@@ -59,3 +59,14 @@ interface RecentProject {
 ## Spec References
 - `internal_docs/ipc_contract.md` — Recent Projects section (channels 9-11)
 - `CLAUDE.md` — recent projects tracked in `~/.config/Colab91 Classifier/recent-projects.json`
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/recent-projects.ts`
+- `src/main/ipc/recent-projects.ts`
+- `tests/unit/services/recent-projects.test.ts`
+
+**No deviations.** All 3 IPC handlers registered, JSON file stored in correct config directory, list sorted by most recent, corrupt file handling works, max 20 entries enforced.

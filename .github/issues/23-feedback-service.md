@@ -63,3 +63,18 @@ Implement the Feedback service — CRUD operations for system feedback suggestio
 - `internal_docs/ipc_contract.md` — Feedback section (channels 39-41)
 - `internal_docs/schema.md` — system_feedback table
 - `internal_docs/features.md` — System Feedback section
+
+## Implementation Notes
+
+**Status:** Implemented with minor deviations
+
+**Files:**
+- `src/main/services/feedback.ts`
+- `src/main/ipc/feedback.ts`
+- `tests/unit/services/feedback.test.ts`
+
+**Deviations:**
+- **Supplier rule approval:** When approving `supplier_rule` feedback, the implementation uses only the first `classificationPath` from `action_details` to create the override rule. If the feedback contains multiple paths, only the first is used. Could be enhanced to create multiple rules.
+- **Company context update:** The `company_context` approval action uses UPDATE (not UPSERT). If no row exists in `company_context`, it will silently update 0 rows. Should add an UPSERT pattern for robustness.
+
+**All other acceptance criteria met.** All 3 IPC handlers work, approval executes the correct action per feedback type, modifications applied before execution, changes logged to changelog, rejection just updates status.

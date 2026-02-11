@@ -78,3 +78,16 @@ interface ClassificationResult {
 - `internal_docs/backend_spec.md` — ClassificationAgent description
 - `internal_docs/features.md` — Classification Pipeline section
 - `CLAUDE.md` — Taxonomy conventions, L1 constraint
+
+## Implementation Notes
+
+**Status:** Implemented with minor deviation
+
+**Files:**
+- `src/main/agents/classification-agent.ts`
+- `tests/unit/agents/classification-agent.test.ts`
+
+**Deviations:**
+- **Government utilities exception not implemented.** The spec says electricity/water/gas suppliers should NOT auto-classify as Exempt even if government type. The current prompt does not include this special-case instruction. Should be added to the system prompt in a follow-up.
+
+**All other acceptance criteria met.** Agent constructs comprehensive classification prompt, L1 constraint enforced in post-processing, minimum depth of 3 enforced, taxonomy path validated, tail spend optimization implemented, intercompany detection included in prompt.

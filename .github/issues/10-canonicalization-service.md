@@ -64,3 +64,14 @@ Implement the canonicalization service (suggest & save mappings) and the full CS
 - `internal_docs/ipc_contract.md` — Canonicalization section (channels 15-16), Upload channel 14
 - `internal_docs/schema.md` — column_mappings, invoice_grouping_columns, transactions, project_suppliers
 - `internal_docs/features.md` — Data Import section
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/canonicalization.ts`
+- `src/main/ipc/canonicalization.ts`
+- `tests/unit/services/canonicalization.test.ts`
+
+**No deviations.** Suggest delegates to agent, save persists mappings and grouping columns, full CSV import creates transactions with dynamic columns, suppliers extracted and deduplicated.

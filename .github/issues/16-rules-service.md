@@ -86,3 +86,17 @@ Each condition: `{ field, operator, value }` → translates to SQL WHERE clause
 - `internal_docs/schema.md` — override_rules table
 - `internal_docs/features.md` — Override Rules section
 - `CLAUDE.md` — Override Rules conventions
+
+## Implementation Notes
+
+**Status:** Implemented with deviation
+
+**Files:**
+- `src/main/services/rules.ts`
+- `src/main/ipc/rules.ts`
+- `tests/unit/services/rules.test.ts`
+
+**Deviations:**
+- **Conflict detection is NOT implemented.** The spec calls for checking if a new/updated rule would overlap with existing rules targeting different classifications and returning a warning. `createRule` and `updateRule` do not check for or return warnings about conflicts. This should be added in a follow-up.
+
+**All other acceptance criteria met.** All 5 IPC handlers work, rule evaluation engine matches correctly with all operators, priority bands enforced by source, first-match-wins logic correct, rule sync clears and rebuilds non-project rules, ColabIP import works.

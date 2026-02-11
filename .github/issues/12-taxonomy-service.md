@@ -60,3 +60,14 @@ Implement the Taxonomy service for importing, querying, and managing the 3-level
 - `internal_docs/ipc_contract.md` — Taxonomy section (channels 25-28)
 - `internal_docs/schema.md` — taxonomy table
 - `CLAUDE.md` — Taxonomy conventions
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/taxonomy.ts`
+- `src/main/ipc/taxonomy.ts`
+- `tests/unit/services/taxonomy.test.ts`
+
+**No deviations.** All 4 IPC handlers registered, L1 constraint enforced, taxonomy hierarchy validated, import from ColabIP works end-to-end.

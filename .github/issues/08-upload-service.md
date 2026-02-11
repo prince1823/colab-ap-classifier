@@ -49,3 +49,14 @@ Note: `upload:csv` (full import) is implemented in S1-10 after canonicalization 
 ## Spec References
 - `internal_docs/ipc_contract.md` — Upload section (channels 12-13)
 - `internal_docs/features.md` — CSV upload with preview
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/upload.ts`
+- `src/main/ipc/upload.ts`
+- `tests/unit/services/upload.test.ts`
+
+**No deviations.** File dialog filters for .csv, preview returns correct columns/sample rows/total count, various delimiters handled.

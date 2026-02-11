@@ -49,3 +49,14 @@ Implement the Export service — CSV export of classified transactions with all 
 ## Spec References
 - `internal_docs/ipc_contract.md` — Export section (channels 44-45)
 - `internal_docs/features.md` — Export & Sync section
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/export.ts`
+- `src/main/ipc/export.ts`
+- `tests/unit/services/export.test.ts`
+
+**No deviations.** Both IPC handlers work, CSV includes all canonical + classification columns, classification path split into L1/L2/L3 separate columns, handles unclassified rows gracefully.

@@ -80,3 +80,14 @@ interface CanonicalizationResult {
 ## Spec References
 - `internal_docs/ipc_contract.md` — CanonicalizationResult type, canonical columns table
 - `internal_docs/backend_spec.md` — CanonicalizationAgent description
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/agents/canonicalization-agent.ts`
+- `src/main/services/llm-client.ts`
+- `tests/unit/agents/canonicalization-agent.test.ts`
+
+**No deviations.** Agent constructs appropriate prompt, parses JSON response into CanonicalizationResult, LLM client supports Anthropic/OpenAI/OpenRouter. Error handling for LLM failures included.

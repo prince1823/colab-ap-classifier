@@ -50,3 +50,17 @@ Implement the Supplier Research service that wraps the ResearchAgent for individ
 ## Spec References
 - `internal_docs/ipc_contract.md` — suppliers:research (channel 33)
 - `internal_docs/features.md` — Supplier Research section
+
+## Implementation Notes
+
+**Status:** Implemented with minor deviation
+
+**Files:**
+- `src/main/services/supplier-research.ts`
+- `src/main/ipc/supplier-research.ts`
+- `tests/unit/services/supplier-research.test.ts`
+
+**Deviations:**
+- Batch concurrency is hardcoded at 5 (not configurable via parameter as spec suggests with "configurable (default 5 concurrent)"). Can be made configurable in a follow-up if needed.
+
+**All other acceptance criteria met.** IPC handler works, results persisted to project_suppliers, existing research data checked before re-researching.

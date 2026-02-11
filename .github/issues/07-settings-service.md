@@ -64,3 +64,14 @@ openrouter:
 ## Spec References
 - `internal_docs/ipc_contract.md` — Settings section (channels 46-49)
 - `internal_docs/backend_spec.md` — LLM configuration
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/settings.ts`
+- `src/main/ipc/settings.ts`
+- `tests/unit/services/settings.test.ts`
+
+**No deviations.** All 4 IPC handlers registered, env var defaults work, provider/model switching works, API key masking via `hasApiKey` boolean.

@@ -22,7 +22,7 @@
 ## 2. Data Import
 
 - Users upload CSV transaction files into a project. Each upload can create a new dataset or add rows to an existing dataset.
-- **Column canonicalization:** CSV columns are mapped to a standard schema (supplier_name, spend_amount, gl_description, line_description, etc.). The CanonicalizationAgent suggests mappings using column names and sample values; the user confirms or edits.
+- **Column canonicalization (LLM-first):** When a CSV is previewed, the CanonicalizationAgent automatically maps CSV columns to the standard schema (supplier_name, spend_amount, gl_description, line_description, etc.) using column names and sample values. The user's role is to **review, edit, and approve** the LLM's suggested mappings — not to configure them from scratch.
 - **Invoice grouping columns:** The user selects which canonical columns define an "invoice" for grouping during classification.
 - Only canonicalized columns are stored in duckdb.
 - After canonicalization is confirmed, distinct suppliers are extracted from transactions and inserted into the project's supplier list.
@@ -32,10 +32,7 @@
 ## 3. Taxonomy
 
 - Classifications follow a 3-level hierarchy: L1 → L2 → L3.
-- **L1 is constrained** to one of three values:
-  - **Direct** — core services directly related to the company's primary business
-  - **Indirect** — support services (facilities, IT, HR, etc.)
-  - **Exempt** — government fees, third-party regulatory costs, inter-company transfers
+- L1 categories are user-defined and can be customized per taxonomy (e.g., "Direct", "Indirect", "Exempt" for procurement, or "Revenue", "Cost of Sales", "Operating Expenses" for finance).
 - Each project contains its own complete copy of the taxonomy, imported from ColabIP during project setup. This makes projects self-contained and portable. Taxonomy metadata (name) is stored in project settings.
 - Taxonomy nodes have descriptions that help the LLM understand what belongs in each category. Descriptions are authoritative — the LLM should follow them.
 - Users can add, rename, and delete taxonomy nodes. Deleting a node requires reassigning affected rows to another node.

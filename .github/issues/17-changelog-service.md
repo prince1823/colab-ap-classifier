@@ -63,3 +63,14 @@ interface ChangeLog {
 - `internal_docs/ipc_contract.md` — Changelog section (channels 42-43)
 - `internal_docs/schema.md` — change_log table
 - `internal_docs/features.md` — Version History section
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/changelog.ts`
+- `src/main/ipc/changelog.ts`
+- `tests/unit/services/changelog.test.ts`
+
+**No deviations.** Both IPC handlers work, changes logged with old/new values, revert restores original values, revert creates new changelog entry (never deletes).

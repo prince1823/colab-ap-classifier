@@ -5,7 +5,7 @@ export interface IPCResponse<T> {
   error?: string;
 }
 
-// All 53 IPC channel names
+// All 52 IPC channel names (canonicalization:suggest removed — folded into upload:parsePreview)
 export type IPCChannel =
   // Project (8 channels)
   | 'project:isOpen'
@@ -24,8 +24,7 @@ export type IPCChannel =
   | 'upload:selectFile'
   | 'upload:parsePreview'
   | 'upload:csv'
-  // Canonicalization (2 channels)
-  | 'canonicalization:suggest'
+  // Canonicalization (1 channel — suggest was folded into upload:parsePreview)
   | 'canonicalization:save'
   // Classification (3 channels + 1 event)
   | 'classification:start'

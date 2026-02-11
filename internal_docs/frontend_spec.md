@@ -67,7 +67,6 @@ Sections are disabled until prerequisites are met (tooltip explains why on hover
 - Company context form: industry, sector, description, business focus, procurement nuances
 - Taxonomy selector (dropdown of available taxonomies from ColabIP, with auto-suggestion based on industry)
 - Preview of selected taxonomy (structure + descriptions)
-- Info note near taxonomy selector: L1 is constrained to Direct / Indirect / Exempt (see [features.md §3](./features.md) for definitions)
 - Override Rules section (rules applied with highest priority)
 - Tail Spend Threshold setting with input field (default: $10,000)
 
@@ -104,21 +103,25 @@ Sections are disabled until prerequisites are met (tooltip explains why on hover
 - If project has an existing canonicalization mapping, uploaded columns must match
 - On upload: rows are inserted into Transactions with classification fields null
 
-### 2.2 Column Canonicalization
+### 2.2 Column Canonicalization (LLM-first Review)
 
-**Description:** View + edit canonicalized columns, ensuring that the correct data is used for deciding classifications. Also choose columns for invoice-level grouping.
+**Description:** Review and approve LLM-suggested column mappings. The LLM automatically maps CSV columns to canonical names during preview — the user reviews, edits, and confirms. Also choose columns for invoice-level grouping.
 
 **What the user sees:**
-- Original column name → mapped to canonicalized column name
+- **Pre-populated** mappings: original column name → mapped canonical column name (filled by LLM)
+- Confidence indicator for the overall mapping (high/medium/low)
 - Canonicalized names are selected from a predefined list
 - Current columns chosen for invoice-level grouping
+- Any unmapped CSV columns highlighted for attention
+- Any missing critical canonical columns (supplier_name, line_description, spend_amount) flagged with warnings
 
 **Interactions:**
 - Expanded view to see sample values for the column
-- Add a new canonicalized column (choose original column name and map to possible canonicalized column names)
-- Delete canonicalized column
-- Edit original column name for an existing canonicalized column
+- Edit a mapping (change which canonical column a CSV column maps to)
+- Remove a mapping (unmap a canonical column)
+- Add a new mapping the LLM missed (choose original column name and map to possible canonicalized column names)
 - Add/remove from invoice-level grouping columns
+- Approve all mappings (save)
 
 ### 2.3 Review Shape of Data
 
@@ -279,7 +282,7 @@ Sections are disabled until prerequisites are met (tooltip explains why on hover
 
 ### 5.1 Taxonomy
 
-> See [features.md §3](./features.md) for taxonomy structure and L1 constraints.
+> See [features.md §3](./features.md) for taxonomy structure.
 
 **Description:** Browse and edit the taxonomy for this project's industry. Edits here apply to this project only.
 

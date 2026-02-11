@@ -63,3 +63,21 @@ Create end-to-end integration tests that verify the full backend workflow: proje
 
 ## Spec References
 - All spec documents — this validates the complete backend
+
+## Implementation Notes
+
+**Status:** Partially implemented
+
+**Files:**
+- `tests/integration/backend-workflow.test.ts`
+
+**Implemented test suites:** Settings lifecycle, taxonomy + rules, reclassification + changelog, feedback approval workflow, transaction queries, supplier CRUD, error handling.
+
+**Missing test suites from spec:**
+- "Full Project Lifecycle" (create → import → classify → close → reopen) — not implemented due to complexity of mocking full DuckDB + file system lifecycle
+- "Classification Flow" (override rules → LLM → review scores → progress events) — not implemented due to deep pipeline mocking requirements
+- "Export" (CSV output validation) — not implemented
+
+**Notes:**
+- All tests use mocked database layer (no DuckDB dependency in CI)
+- Tests run deterministically with no real API calls

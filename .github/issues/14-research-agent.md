@@ -80,3 +80,13 @@ async function researchSupplier(
 - `internal_docs/features.md` — Supplier Research section
 - `internal_docs/backend_spec.md` — ResearchAgent description
 - `internal_docs/ipc_contract.md` — SupplierResearchResult type
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/agents/research-agent.ts`
+- `tests/unit/agents/research-agent.test.ts`
+
+**No deviations.** Agent constructs appropriate research prompts, fallback chain implemented, structured output parsed into SupplierResearchResult, supplier type classification logic correct.

@@ -232,22 +232,23 @@ Open a native file dialog for CSV selection.
 
 #### `upload:parsePreview`
 
-Parse a CSV file and return a preview for the canonicalization step.
+Parse a CSV file, return a preview, and **automatically suggest column mappings** via the CanonicalizationAgent (LLM-first).
 
 | | |
 |---|---|
 | **Args** | `filePath: string` |
-| **Response** | `CSVPreview` |
+| **Response** | `CSVPreviewWithMappings` |
 
 ```typescript
-interface CSVPreview {
+interface CSVPreviewWithMappings {
   columns: string[];                          // All CSV column headers
   sampleRows: Record<string, string>[];       // First 10 rows as key-value pairs
   totalRows: number;                          // Total row count in file
+  mappingSuggestion: CanonicalizationResult;  // LLM-suggested column mappings
 }
 ```
 
-| **Notes** | Does not insert data. Used for preview and canonicalization suggestions. |
+| **Notes** | Does not insert data. Automatically calls CanonicalizationAgent with headers + sample rows to produce mapping suggestions. If the LLM call fails, `mappingSuggestion` is returned with empty mappings and confidence 'low'. The frontend displays the pre-populated mappings for review. |
 
 ---
 
@@ -263,31 +264,9 @@ Import a full CSV file into the currently open project's transactions table.
 
 ---
 
-### canonicalization (2 channels)
+### canonicalization (1 channel)
 
----
-
-#### `canonicalization:suggest`
-
-Use the CanonicalizationAgent (LLM) to suggest column mappings.
-
-| | |
-|---|---|
-| **Args** | `columns: string[], sampleData: Record<string, string>[]` |
-| **Response** | `CanonicalizationResult` |
-
-```typescript
-interface CanonicalizationResult {
-  mappings: CanonicalColumnMapping;           // canonical_name → csv_column_name
-  confidence: ConfidenceLevel;
-  unmappedClientColumns: string[];
-  importantUnmappedColumns: string[];
-  unmappedCanonicalColumns: string[];
-  reasoning: string;
-}
-```
-
-| **Notes** | `columns` = CSV headers. `sampleData` = first ~5 rows for context. Does not save — user reviews first. |
+> **Note:** The `canonicalization:suggest` channel has been **removed**. LLM mapping suggestions are now returned automatically as part of `upload:parsePreview` (LLM-first flow). See the `upload:parsePreview` channel above.
 
 ---
 
@@ -323,7 +302,7 @@ interface ClassificationStartOptions {
 }
 ```
 
-| **Notes** | Creates a `project_runs` row. Pipeline runs async: supplier research → rule sync → override rules → LLM classification → review scores. Progress emitted via `classification:progress` event. Only one job at a time. |
+| **Notes** | Creates an in-memory run tracker (no database table). Pipeline runs async: supplier research → rule sync → override rules → LLM classification → review scores. Progress emitted via `classification:progress` event. Only one job at a time. |
 
 ---
 
@@ -336,7 +315,7 @@ Get the status of the most recent classification run.
 | **Args** | none |
 | **Response** | `ProjectRun \| null` |
 
-| **Notes** | Returns null if no runs exist. Returns the latest run by `created_at`. |
+| **Notes** | Returns null if no classification has been started. Returns the current in-memory run state. |
 
 ---
 
@@ -516,7 +495,7 @@ Get all taxonomy nodes for the current project.
 ```typescript
 interface TaxonomyNode {
   id: string;
-  fullPath: string;                           // Pipe-delimited: "Direct|IT|Software"
+  fullPath: string;                           // Pipe-delimited: "Corporate Services|IT|Software"
   l1: string;
   l2: string | null;
   l3: string | null;
@@ -527,7 +506,7 @@ interface TaxonomyNode {
 }
 ```
 
-| **Notes** | Returns all nodes (L1, L2, L3). Frontend builds tree structure from `parentPath`. L1 is constrained to: Direct, Indirect, Exempt. |
+| **Notes** | Returns all nodes (L1, L2, L3). Frontend builds tree structure from `parentPath`. |
 
 ---
 
@@ -544,7 +523,7 @@ Set/replace the taxonomy in the current project. Used when manually defining a t
 interface TaxonomySetInput {
   name: string;
   nodes: Array<{
-    path: string;                             // Pipe-delimited: "Direct|IT|Software"
+    path: string;                             // Pipe-delimited: "Corporate Services|IT|Software"
     description?: string;
   }>;
 }
@@ -1050,6 +1029,7 @@ interface RuleCondition {
 ```typescript
 type ClassificationScope = "all" | "new" | "filtered";
 
+// In-memory only — no database table. State resets when app restarts.
 type ProjectRunStatus =
   | "pending"
   | "researching"                             // Supplier research phase
@@ -1058,6 +1038,7 @@ type ProjectRunStatus =
   | "failed"
   | "cancelled";
 
+// In-memory run state — not persisted to database.
 interface ProjectRun {
   id: string;
   scope: ClassificationScope;

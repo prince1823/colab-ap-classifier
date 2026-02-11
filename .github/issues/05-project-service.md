@@ -59,3 +59,17 @@ Register 8 handlers:
 ## Spec References
 - `internal_docs/ipc_contract.md` — Project section (channels 1-8)
 - `internal_docs/schema.md` — settings, company_context tables
+
+## Implementation Notes
+
+**Status:** Implemented with minor deviation
+
+**Files:**
+- `src/main/services/project.ts`
+- `src/main/ipc/project.ts`
+- `tests/unit/services/project.test.ts`
+
+**Deviations:**
+- Recent projects integration (`addRecent()` on open/create) is stubbed with a TODO — wiring deferred until S1-06 is integrated at the IPC layer.
+
+**All other acceptance criteria met.** All 8 IPC handlers registered, schema initialization works, metadata get/update works, projects directory auto-created.

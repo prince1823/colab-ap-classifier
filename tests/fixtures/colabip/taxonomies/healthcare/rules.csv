@@ -1,0 +1,3 @@
+name,conditions,target_taxonomy_path,priority_score
+GE Healthcare Rule,"[{""field"":""supplier_name"",""operator"":""contains"",""value"":""GE Healthcare""}]",clinical|clinical equipment|diagnostic imaging,250
+Pharma Rule,"[{""field"":""supplier_name"",""operator"":""contains"",""value"":""Pfizer""}]",clinical|pharmaceuticals,251

@@ -43,7 +43,7 @@ flowchart TB
     subgraph Project["DuckDB Project (.c91)"]
         db1["settings"] ~~~ db2["company_context"] ~~~ db3["column_mappings"] ~~~ db4["invoice_grouping_columns"]
         db5["taxonomy"] ~~~ db6["transactions"] ~~~ db7["project_suppliers"] ~~~ db8["override_rules"]
-        db9["project_runs"] ~~~ db10["change_log"] ~~~ db11["system_feedback"]
+        db9["change_log"] ~~~ db10["system_feedback"]
     end
 
     ColabIP <--> Local <--> Project
@@ -89,7 +89,6 @@ flowchart TB
 - **transactions** — dynamic schema: fixed columns (id, raw_data, classification results with `review_score` 0-100 integer) + canonical columns added from column_mappings
 - **project_suppliers** — suppliers with parent_name, `supplier_type` (company/individual/government/null), supplier_info (JSON), Category A designation (`category_a`, `category_a_taxonomy_node_id`), transaction_count, total_spend
 - **override_rules** — rules with name, source (`project`/`taxonomy`/`supplier`), conditions (JSON), target_classification, priority_score. `supplier` and `taxonomy` rules synced at classification time; `project` rules created directly.
-- **project_runs** — classification job tracking: scope, status, started_at, completed_at, error_message
 - **change_log** — audit trail: change_type, source, affected_table, old/new values
 - **system_feedback** — AI-generated suggestions: feedback_type, action_details (JSON), status
 
@@ -175,15 +174,18 @@ flowchart TB
 - On insert → apply column_mappings to map columns to canonical fields
 - Store original row as `raw_data` JSON for reference
 
-#### 2.2 Canonicalization
+#### 2.2 Canonicalization (LLM-first)
 
-**IPC Handlers:** `canonicalization:suggest`, `canonicalization:save`
+**IPC Handlers:** `upload:parsePreview` (extended), `canonicalization:save`
 
-- User requests suggestions → `canonicalization:suggest` → CanonicalizationAgent LLM call with column names + sample values → returns:
+- `upload:parsePreview` now **automatically** calls the CanonicalizationAgent after parsing the CSV. The response includes both the CSV preview and the LLM's suggested mappings (`CSVPreviewWithMappings`):
+  - CSV columns, sample rows, total row count
   - Suggested mappings (canonical column → client column)
   - Confidence level and reasoning
   - Unmapped columns list
-- User confirms/edits mapping → `canonicalization:save` → update `column_mappings` table
+  - If the LLM call fails, the preview is still returned with an empty `CanonicalizationResult` (confidence: 'low', empty mappings) so the user can map manually
+- The separate `canonicalization:suggest` IPC channel has been **removed** — suggestions are bundled into the preview response
+- User reviews and edits the pre-populated mappings → `canonicalization:save` → update `column_mappings` table
 - User sets invoice grouping columns → update `invoice_grouping_columns` table
 - On confirmation:
   - Extract distinct suppliers from transactions using supplier_name column → insert into project_suppliers
@@ -207,18 +209,18 @@ flowchart TB
 
 **IPC Handlers:** `classification:start`, `classification:status`, `classification:cancel`
 
-1. Start classification → `classification:start` → creates new row in project_runs (taxonomy_id snapshot, company_context snapshot, `tail_spend_threshold`, `scope`, `status`="pending")
+1. Start classification → `classification:start` → creates in-memory run tracker (scope, status="pending")
    - `status` follows: `pending` → `researching` → `classifying` → `completed` / `failed` / `cancelled`
+   - Run state is tracked in-memory only (no database table). Only one job at a time.
 2. ClassificationPipeline orchestrates the job (operates on currently open project). See §3.3 for pipeline steps.
 3. Progress updates → emit `classification:progress` IPC event with progress_percentage
 4. Update transactions with classification results (classification_path, review_score, classification_reasoning)
-5. Update project_runs row (progress_processed, progress_percentage, status, completed_at)
 
 #### 3.2 Job Progress
 
 **IPC Handlers:** `classification:getStatus`, `classification:cancel`, `classification:progress` (event)
 
-- Poll status → `classification:getStatus` → returns current project_run with status, progress_total, progress_processed, progress_percentage
+- Poll status → `classification:getStatus` → returns current in-memory run state with status, progress_total, progress_processed, progress_percentage
 - Real-time updates → renderer listens to `classification:progress` IPC event
 - Cancel → `classification:cancel` → sets status="cancelled", stops pipeline processing
 
@@ -226,7 +228,7 @@ flowchart TB
 
 > See [features.md §5](./features.md) for priority hierarchy and classification rules. See [features.md §6](./features.md) for review score definition.
 
-**Input:** Project Run record (`taxonomy_id`, `company_context`, `tail_spend_threshold`, `scope`)
+**Input:** Classification options (`scope`, `filterCriteria`). Pipeline reads taxonomy, company_context, and tail_spend_threshold from the open project.
 
 **Step 1: Supplier research**
 
@@ -269,7 +271,7 @@ For each rule (sorted by priority_score ascending), query all matching rows and 
 
 **Step 7: LLM classification**
 
-> See [features.md §5](./features.md) for description prioritization and L1 constraints.
+> See [features.md §5](./features.md) for description prioritization.
 
 For each group:
 1. Check if total spend < `tail_spend_threshold` → may use simplified prompt
@@ -279,15 +281,15 @@ For each group:
    - Supplier research info (type, offerings, website, industry) — prioritized over line/GL descriptions per [features.md §5](./features.md)
    - Supplier historical L1/L2/L3 classifications (provided to LLM for review score computation)
    - Transaction details (supplier_name, gl_description, line_description, spend_amount)
-   - L1 constrained to Direct/Indirect/Exempt per [features.md §3](./features.md)
 3. ClassificationAgent calls LLM provider (Anthropic Claude or OpenAI GPT based on config)
 4. LLM returns: classification_path (L1|L2|L3), review_score (0-100), reasoning, description_supplier_aligned (boolean — whether line/GL desc aligns with supplier info)
 5. Write classification results to transactions (`classification_path`, `review_score`, `classification_reasoning`)
 
 **Step 8: Finalize**
 
-- Update Project Runs row (`status`="completed", `completed_at`=CURRENT_TIMESTAMP)
-- If error mid-process → `status`="failed", store error message, rows processed so far remain classified
+- Update in-memory run state (`status`="completed", `completedAt`=now)
+- Log completion to change_log
+- If error mid-process → `status`="failed", store error message in-memory, rows processed so far remain classified
 
 ---
 

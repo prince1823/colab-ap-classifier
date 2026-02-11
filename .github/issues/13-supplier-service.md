@@ -53,3 +53,14 @@ Note: `suppliers:research` is implemented in S1-15.
 ## Spec References
 - `internal_docs/ipc_contract.md` — Suppliers section (channels 31-32)
 - `internal_docs/schema.md` — project_suppliers table
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/suppliers.ts`
+- `src/main/ipc/suppliers.ts`
+- `tests/unit/services/suppliers.test.ts`
+
+**No deviations.** Both IPC handlers registered, supplier CRUD works, Category A flag + taxonomy node stored correctly, JSON supplier_info stored and retrieved correctly.

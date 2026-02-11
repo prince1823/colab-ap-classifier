@@ -96,3 +96,14 @@ Note: `transactions:reclassify` is in S1-21.
 ## Spec References
 - `internal_docs/ipc_contract.md` — Transactions section (channels 21-23)
 - `internal_docs/schema.md` — transactions table
+
+## Implementation Notes
+
+**Status:** Implemented as specified
+
+**Files:**
+- `src/main/services/transactions.ts`
+- `src/main/ipc/transactions.ts`
+- `tests/unit/services/transactions.test.ts`
+
+**No deviations.** All 3 IPC handlers work, dynamic SQL query building with parameterized queries, pagination works, stats aggregation accurate, column discovery works for dynamic schema.

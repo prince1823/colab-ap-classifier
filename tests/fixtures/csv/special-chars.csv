@@ -1,0 +1,7 @@
+Supplier,Invoice Number,Amount,Description
+"O'Brien & Associates",INV-010,2500.00,"Legal fees, consulting"
+"Müller GmbH",INV-011,3100.50,"Büromaterial — office supplies"
+"Café Déjà Vu",INV-012,450.00,"Catering for ""Annual Gala"""
+"Smith, Jones & Co.",INV-013,7800.25,"Advisory services
+spanning multiple lines"
+"Tëst Ëntérprïsé",INV-014,1200.00,"Special chars: é à ü ö ñ"

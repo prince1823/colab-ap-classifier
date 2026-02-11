@@ -24,6 +24,8 @@
     "script:test-llm": "tsx scripts/test-llm-config.ts"
   },
   "dependencies": {
+    "@tanstack/react-table": "^8.20.5",
+    "@tanstack/react-virtual": "^3.10.8",
     "csv-parse": "^5.6.0",
     "duckdb-async": "^1.1.0",
     "exa-js": "^2.3.0",

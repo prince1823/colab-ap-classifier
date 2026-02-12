@@ -19,8 +19,8 @@
     }
   },
   "include": [
-    "src/renderer/**/*.ts",
-    "src/renderer/**/*.tsx",
+    "frontend-v1/**/*.ts",
+    "frontend-v1/**/*.tsx",
     "src/shared/**/*.ts"
   ]
 }

@@ -9,6 +9,8 @@ export default defineConfig({
       '@': path.resolve(__dirname, './frontend-v1'),
     },
   },
+  root: './',
+  publicDir: 'public',
   server: {
     port: 5173,
   },

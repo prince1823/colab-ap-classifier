@@ -31,7 +31,7 @@ describe('listTaxonomies', () => {
     expect(taxonomies).toEqual(
       expect.arrayContaining([
         { name: 'healthcare', nodeCount: 78 },
-        { name: 'general', nodeCount: 2 },
+        { name: 'general', nodeCount: 6 },
         { name: 'manufacturing', nodeCount: 25 },
       ])
     );

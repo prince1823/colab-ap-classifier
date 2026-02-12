@@ -269,6 +269,29 @@ describe('parseResponse', () => {
     expect(result.mappings).not.toHaveProperty('not_a_real_column');
   });
 
+  it('should handle inverted mappings (CSV→canonical instead of canonical→CSV)', () => {
+    const response = JSON.stringify({
+      mappings: {
+        'Vendor Name': 'supplier_name',
+        'Invoice Amount': 'spend_amount',
+        'Invoice Date': 'invoice_date',
+      },
+      confidence: 'high',
+      unmappedClientColumns: [],
+      importantUnmappedColumns: [],
+      unmappedCanonicalColumns: [],
+      reasoning: 'test inverted mappings',
+    });
+
+    const result = parseResponse(response);
+    // Should detect inversion and normalize to canonical→CSV
+    expect(result.mappings).toEqual({
+      supplier_name: 'Vendor Name',
+      spend_amount: 'Invoice Amount',
+      invoice_date: 'Invoice Date',
+    });
+  });
+
   it('should filter out mappings with empty string values', () => {
     const response = JSON.stringify({
       mappings: {

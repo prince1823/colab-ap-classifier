@@ -1,51 +1,171 @@
 /**
- * End-to-end pipeline integration test.
+ * Pipeline Full Run — real LLM integration test driven by test_data folders.
  *
- * Runs through the full backend pipeline using real DuckDB, real LLM calls,
- * and real data. Dynamically discovers the taxonomy from ColabIP fixtures
- * and reads transaction data from test_data/input.csv.
+ * Runs the full backend pipeline using real DuckDB, real LLM calls, and real
+ * data from a test folder. All human-in-the-loop input (company context,
+ * taxonomy choice, grouping columns) is read from config.json in the test
+ * folder — nothing is hardcoded.
  *
- * Nothing is hardcoded — this test works with any input.csv and any taxonomy
- * in the ColabIP fixtures directory.
+ * Test folder structure (in test_data/<TEST_NAME>/):
+ *   input.csv          — transaction data (required)
+ *   config.json         — HITL configuration (required)
+ *     {
+ *       "projectName": "...",
+ *       "taxonomy": "healthcare",          // ColabIP taxonomy name
+ *       "groupingColumns": ["supplier_name"],
+ *       "companyContext": {
+ *         "industry": "...",
+ *         "sector": "...",
+ *         "description": "...",
+ *         "businessFocus": "...",
+ *         "procurementNuances": "..."
+ *       }
+ *     }
  *
- * Covers:
- *   1. Project creation
- *   2. Company context setup (derived from taxonomy name)
- *   3. Taxonomy import from ColabIP fixtures
- *   4. CSV upload preview + column mapping + import
- *   5. Supplier research (real LLM)
- *   6. Override rule creation
- *   7. Full classification pipeline (real LLM)
- *   8. Transaction query + stats
- *   9. Reclassification with changelog
- *  10. CSV export
+ * Outputs (saved to test_data/<TEST_NAME>/):
+ *   <TEST_NAME>.c91           — DuckDB project file
+ *   <TEST_NAME>-export.csv    — Exported classification results
+ *   run-summary.md            — Markdown summary of every pipeline step
+ *
+ * Switch tests by setting TEST_NAME env var:
+ *   TEST_NAME=innova_test npx vitest run tests/integration/pipeline-run.test.ts
+ *
+ * Default: innova_test
  *
  * Requirements:
  *   - DuckDB native module must be compiled
  *   - ANTHROPIC_API_KEY (or OPENROUTER_API_KEY) set in environment
- *
- * Run with: npx vitest run tests/integration/pipeline-e2e.test.ts
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import { parse } from 'csv-parse/sync';
 
-// --- Load .env from project root (only set vars not already in env) ---
-const envPath = path.resolve(__dirname, '..', '..', '.env');
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) continue;
-    const key = trimmed.slice(0, eqIndex).trim();
-    const value = trimmed.slice(eqIndex + 1).trim();
-    if (!process.env[key]) {
-      process.env[key] = value;
-    }
+// --- Load .env before any service imports ---
+import { loadEnv } from '../../src/main/load-env';
+loadEnv(path.resolve(__dirname, '..', '..'));
+
+// --- Resolve test folder from TEST_NAME env var ---
+const TEST_NAME = process.env.TEST_NAME ?? 'innova_test';
+const TEST_DATA_DIR = path.resolve(__dirname, '..', '..', 'test_data', TEST_NAME);
+const CSV_PATH = path.join(TEST_DATA_DIR, 'input.csv');
+const CONFIG_PATH = path.join(TEST_DATA_DIR, 'config.json');
+
+// --- Output paths in test_data folder ---
+const DB_PATH = path.join(TEST_DATA_DIR, `${TEST_NAME}.c91`);
+const EXPORT_PATH = path.join(TEST_DATA_DIR, `${TEST_NAME}-export.csv`);
+const SUMMARY_PATH = path.join(TEST_DATA_DIR, 'run-summary.md');
+
+// --- Validate test folder exists with required files ---
+function validateTestFolder(): void {
+  const missing: string[] = [];
+
+  if (!fs.existsSync(TEST_DATA_DIR)) {
+    throw new Error(
+      `Test folder not found: ${TEST_DATA_DIR}\n` +
+      `Set TEST_NAME to a valid folder under test_data/. Available folders:\n` +
+      `  ${listAvailableTests().join('\n  ')}`
+    );
   }
+
+  if (!fs.existsSync(CSV_PATH)) {
+    missing.push('input.csv — transaction CSV data');
+  }
+
+  if (!fs.existsSync(CONFIG_PATH)) {
+    missing.push(
+      'config.json — HITL configuration. Expected format:\n' +
+      '  {\n' +
+      '    "projectName": "My Test Project",\n' +
+      '    "taxonomy": "healthcare",\n' +
+      '    "groupingColumns": ["supplier_name"],\n' +
+      '    "companyContext": {\n' +
+      '      "industry": "...",\n' +
+      '      "sector": "...",\n' +
+      '      "description": "...",\n' +
+      '      "businessFocus": "...",\n' +
+      '      "procurementNuances": "..."\n' +
+      '    }\n' +
+      '  }'
+    );
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Test folder "${TEST_NAME}" is missing required files:\n\n` +
+      missing.map((m) => `  - ${m}`).join('\n\n') +
+      `\n\nTest folder path: ${TEST_DATA_DIR}`
+    );
+  }
+}
+
+function listAvailableTests(): string[] {
+  const testDataRoot = path.resolve(__dirname, '..', '..', 'test_data');
+  if (!fs.existsSync(testDataRoot)) return [];
+  return fs.readdirSync(testDataRoot, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+}
+
+// --- Test config type ---
+interface TestConfig {
+  projectName: string;
+  taxonomy: string;
+  groupingColumns: string[];
+  companyContext: {
+    industry: string;
+    sector: string;
+    description: string;
+    businessFocus: string;
+    procurementNuances: string;
+  };
+}
+
+function loadTestConfig(): TestConfig {
+  const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+
+  // Validate required fields
+  const requiredFields = ['projectName', 'taxonomy', 'groupingColumns', 'companyContext'];
+  const missingFields = requiredFields.filter((f) => !(f in raw));
+  if (missingFields.length > 0) {
+    throw new Error(
+      `config.json is missing required fields: ${missingFields.join(', ')}\n` +
+      `Path: ${CONFIG_PATH}`
+    );
+  }
+
+  const ccFields = ['industry', 'sector', 'description', 'businessFocus', 'procurementNuances'];
+  const missingCC = ccFields.filter((f) => !(f in raw.companyContext));
+  if (missingCC.length > 0) {
+    throw new Error(
+      `config.json companyContext is missing required fields: ${missingCC.join(', ')}\n` +
+      `Path: ${CONFIG_PATH}`
+    );
+  }
+
+  return raw as TestConfig;
+}
+
+// --- Run summary collector ---
+const summary: string[] = [];
+const runStartTime = Date.now();
+
+function logSummary(line: string): void {
+  summary.push(line);
+}
+
+function writeSummary(): void {
+  const elapsed = ((Date.now() - runStartTime) / 1000).toFixed(1);
+  const header = [
+    `# Pipeline Run Summary: ${TEST_NAME}`,
+    '',
+    `**Date:** ${new Date().toISOString()}`,
+    `**Total duration:** ${elapsed}s`,
+    '',
+    '---',
+    '',
+  ];
+  fs.writeFileSync(SUMMARY_PATH, header.join('\n') + summary.join('\n') + '\n', 'utf-8');
 }
 
 // --- Mock electron only (not LLM) ---
@@ -69,11 +189,10 @@ import * as classificationPipeline from '../../src/main/services/classification-
 import * as reclassificationService from '../../src/main/services/reclassification';
 import * as exportService from '../../src/main/services/export';
 import * as colabipService from '../../src/main/services/colabip';
-import { resetSettings } from '../../src/main/services/settings';
+import { resetSettings, getSettings } from '../../src/main/services/settings';
 
 // --- Paths ---
 const FIXTURES_DIR = path.resolve(__dirname, '..', 'fixtures');
-const CSV_PATH = path.resolve(__dirname, '..', '..', 'test_data', 'input.csv');
 const COLABIP_DIR = path.join(FIXTURES_DIR, 'colabip');
 
 // --- Dynamically parsed CSV metadata ---
@@ -90,33 +209,53 @@ function parseInputCSV(): { columns: string[]; rows: Record<string, string>[]; t
   return { columns, rows, totalRows: rows.length };
 }
 
-function tempDbPath(): string {
-  return path.join(os.tmpdir(), `pipeline-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}.c91`);
-}
-
-describe('Pipeline E2E Integration Test', () => {
+describe(`Pipeline Full Run [${TEST_NAME}]`, () => {
   let dbPath: string;
   let exportPath: string;
+  let testConfig: TestConfig;
 
   // Dynamic data — populated in beforeAll from fixtures and CSV
   let csvData: ReturnType<typeof parseInputCSV>;
-  let taxonomyName: string;
-  let taxonomyNodeCount: number;
 
   beforeAll(async () => {
+    // Validate test folder before anything else
+    validateTestFolder();
+    testConfig = loadTestConfig();
+
+    console.log(`\n  Test: ${TEST_NAME}`);
+    console.log(`  Project: ${testConfig.projectName}`);
+    console.log(`  Taxonomy: ${testConfig.taxonomy}`);
+    console.log(`  Folder: ${TEST_DATA_DIR}\n`);
+
     // Re-read env vars loaded from .env (settings module captures env at import time)
     resetSettings();
+
+    const settings = getSettings();
+    logSummary(`## Configuration\n`);
+    logSummary(`| Setting | Value |`);
+    logSummary(`|---------|-------|`);
+    logSummary(`| Project | ${testConfig.projectName} |`);
+    logSummary(`| Taxonomy | ${testConfig.taxonomy} |`);
+    logSummary(`| LLM Provider | ${settings.provider} |`);
+    logSummary(`| LLM Model | ${settings.model} |`);
+    logSummary(`| Industry | ${testConfig.companyContext.industry} |`);
+    logSummary(`| Sector | ${testConfig.companyContext.sector} |`);
+    logSummary(`| Grouping Columns | ${testConfig.groupingColumns.join(', ')} |`);
+    logSummary('');
 
     // Set ColabIP base path to fixtures
     colabipService.setColabipBasePath(COLABIP_DIR);
 
-    // Discover the first available taxonomy from ColabIP fixtures
+    // Verify the requested taxonomy exists in fixtures
     const taxonomies = await colabipService.listTaxonomies();
-    expect(taxonomies.length).toBeGreaterThan(0);
-    // Pick the taxonomy with the most nodes (most realistic for testing)
-    const sorted = [...taxonomies].sort((a, b) => b.nodeCount - a.nodeCount);
-    taxonomyName = sorted[0].name;
-    taxonomyNodeCount = sorted[0].nodeCount;
+    const match = taxonomies.find((t) => t.name === testConfig.taxonomy);
+    if (!match) {
+      throw new Error(
+        `Taxonomy "${testConfig.taxonomy}" not found in fixtures.\n` +
+        `Available taxonomies: ${taxonomies.map((t) => t.name).join(', ')}\n` +
+        `Check config.json in ${TEST_DATA_DIR}`
+      );
+    }
 
     // Parse the input CSV to discover its structure
     csvData = parseInputCSV();
@@ -125,13 +264,13 @@ describe('Pipeline E2E Integration Test', () => {
 
   afterAll(async () => {
     if (databaseService.isOpen()) {
+      // Flush WAL into main .c91 file so it's portable and inspectable
+      await databaseService.run('CHECKPOINT');
       await databaseService.closeDatabase();
     }
-    // Clean up temp files
-    if (dbPath && fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-    if (exportPath && fs.existsSync(exportPath)) {
-      try { fs.unlinkSync(exportPath); } catch { /* ignore */ }
-    }
+    // Write run summary to test_data folder
+    writeSummary();
+    console.log(`\n  Summary written to: ${SUMMARY_PATH}`);
   });
 
   // ────────────────────────────────────────────────────────────────
@@ -139,22 +278,27 @@ describe('Pipeline E2E Integration Test', () => {
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 1a: Create a new project', async () => {
-    dbPath = tempDbPath();
+    dbPath = DB_PATH;
+    // Remove stale file from previous run so we start fresh
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
     await databaseService.openDatabase(dbPath);
 
     await databaseService.run(
       "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
       'project_name',
-      `${taxonomyName} E2E Test Project`
+      testConfig.projectName
     );
 
     expect(databaseService.isOpen()).toBe(true);
+
+    logSummary(`## Phase 1: Project Setup\n`);
+    logSummary(`- Project file: \`${path.basename(dbPath)}\``);
     console.log('  ✓ Project created at', dbPath);
   });
 
-  it('Phase 1b: Set company context', async () => {
-    // Derive company context from the taxonomy name — generic descriptions
-    const industry = taxonomyName.charAt(0).toUpperCase() + taxonomyName.slice(1);
+  it('Phase 1b: Set company context from config', async () => {
+    const cc = testConfig.companyContext;
+
     await databaseService.run(
       `UPDATE company_context
        SET industry = ?,
@@ -164,18 +308,21 @@ describe('Pipeline E2E Integration Test', () => {
            procurement_nuances = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = 1`,
-      industry,
-      'General',
-      `Company operating in the ${industry} industry`,
-      `${industry} services and operations`,
-      `Standard procurement for ${industry.toLowerCase()} operations`
+      cc.industry,
+      cc.sector,
+      cc.description,
+      cc.businessFocus,
+      cc.procurementNuances
     );
 
-    const cc = await databaseService.get<{ industry: string }>(
+    const row = await databaseService.get<{ industry: string }>(
       'SELECT industry FROM company_context WHERE id = 1'
     );
-    expect(cc?.industry).toBe(industry);
-    console.log(`  ✓ Company context set: ${industry}`);
+    expect(row?.industry).toBe(cc.industry);
+
+    logSummary(`- Company: ${cc.industry} / ${cc.sector}`);
+    logSummary('');
+    console.log(`  ✓ Company context set: ${cc.industry} / ${cc.sector}`);
   });
 
   // ────────────────────────────────────────────────────────────────
@@ -183,17 +330,23 @@ describe('Pipeline E2E Integration Test', () => {
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 2: Import taxonomy from ColabIP', async () => {
-    await taxonomyService.importFromColabip(taxonomyName);
+    await taxonomyService.importFromColabip(testConfig.taxonomy);
 
     const nodes = await taxonomyService.getNodes();
     const l1Nodes = nodes.filter((n) => n.depth === 1);
+    const l2Nodes = nodes.filter((n) => n.depth === 2);
     const l3Nodes = nodes.filter((n) => n.depth === 3);
 
-    // The taxonomy should have nodes loaded
     expect(nodes.length).toBeGreaterThan(0);
     expect(l1Nodes.length).toBeGreaterThan(0);
 
-    console.log(`  ✓ Taxonomy "${taxonomyName}" imported: ${nodes.length} nodes (${l1Nodes.length} L1, ${l3Nodes.length} L3)`);
+    logSummary(`## Phase 2: Taxonomy Import\n`);
+    logSummary(`- Source: \`${testConfig.taxonomy}\``);
+    logSummary(`- Total nodes: ${nodes.length} (${l1Nodes.length} L1, ${l2Nodes.length} L2, ${l3Nodes.length} L3)`);
+    logSummary(`- L1 categories: ${l1Nodes.map((n) => n.l1).join(', ')}`);
+    logSummary('');
+
+    console.log(`  ✓ Taxonomy "${testConfig.taxonomy}" imported: ${nodes.length} nodes (${l1Nodes.length} L1, ${l3Nodes.length} L3)`);
   });
 
   // ────────────────────────────────────────────────────────────────
@@ -205,12 +358,10 @@ describe('Pipeline E2E Integration Test', () => {
   it('Phase 3a: Preview CSV file', async () => {
     const preview = await uploadService.parsePreview(CSV_PATH);
 
-    // Verify preview matches our independently parsed CSV data
     expect(preview.totalRows).toBe(csvData.totalRows);
     expect(preview.sampleRows.length).toBeGreaterThan(0);
     expect(preview.sampleRows.length).toBeLessThanOrEqual(csvData.totalRows);
 
-    // Columns should match what we parsed independently
     for (const col of csvData.columns) {
       expect(preview.columns).toContain(col);
     }
@@ -218,42 +369,50 @@ describe('Pipeline E2E Integration Test', () => {
     // LLM-first flow: mappingSuggestion is included in the preview
     expect(preview.mappingSuggestion).toBeDefined();
 
-    // Store the LLM-suggested mappings for next step
     mappingSuggestion = preview.mappingSuggestion.mappings;
+
+    logSummary(`## Phase 3: CSV Upload & Canonicalization\n`);
+    logSummary(`- Input file: \`input.csv\``);
+    logSummary(`- Rows: ${preview.totalRows}`);
+    logSummary(`- CSV columns: ${preview.columns.length}`);
+    logSummary(`- LLM mapping confidence: ${preview.mappingSuggestion.confidence}`);
+    logSummary(`- Mapped columns (${Object.keys(mappingSuggestion).length}):`);
+    for (const [canonical, csv] of Object.entries(mappingSuggestion)) {
+      logSummary(`  - \`${canonical}\` <- \`${csv}\``);
+    }
 
     console.log(`  ✓ CSV preview: ${preview.totalRows} rows, ${preview.columns.length} columns`);
     console.log(`  ✓ LLM suggested ${Object.keys(mappingSuggestion).length} column mappings`);
   }, 60000);
 
   it('Phase 3b: Save column mappings', async () => {
-    // Use the LLM-suggested mappings from parsePreview
-    // Must have at least supplier_name mapped for the pipeline to work
     expect(Object.keys(mappingSuggestion).length).toBeGreaterThan(0);
     expect(mappingSuggestion).toHaveProperty('supplier_name');
 
-    // Use supplier_name as the grouping column
-    await canonicalizationService.saveMappings(mappingSuggestion, ['supplier_name']);
+    await canonicalizationService.saveMappings(mappingSuggestion, testConfig.groupingColumns);
 
     const saved = await canonicalizationService.getMappings();
     expect(saved).toEqual(mappingSuggestion);
 
     const grouping = await canonicalizationService.getGroupingColumns();
-    expect(grouping).toEqual(['supplier_name']);
+    expect(grouping).toEqual(testConfig.groupingColumns);
+
+    logSummary(`- Grouping columns: ${testConfig.groupingColumns.join(', ')}`);
+    logSummary('');
 
     console.log('  ✓ Column mappings saved:', Object.keys(mappingSuggestion).join(', '));
+    console.log('  ✓ Grouping columns:', testConfig.groupingColumns.join(', '));
   });
 
   it('Phase 3c: Import CSV data', async () => {
     const result = await canonicalizationService.importCSV(CSV_PATH);
     expect(result.rowsInserted).toBe(csvData.totalRows);
 
-    // Verify transactions exist
     const txns = await databaseService.all<{ id: string }>(
       'SELECT id FROM transactions ORDER BY row_index'
     );
     expect(txns.length).toBe(csvData.totalRows);
 
-    // Verify suppliers extracted — count distinct supplier names from our CSV data
     const supplierCol = mappingSuggestion['supplier_name'];
     const distinctSuppliers = new Set(
       csvData.rows.map((r) => r[supplierCol]).filter(Boolean)
@@ -261,6 +420,12 @@ describe('Pipeline E2E Integration Test', () => {
 
     const suppliers = await supplierService.listSuppliers();
     expect(suppliers.length).toBe(distinctSuppliers.size);
+
+    logSummary(`## Phase 3c: Data Import\n`);
+    logSummary(`- Transactions imported: ${result.rowsInserted}`);
+    logSummary(`- Distinct suppliers: ${suppliers.length}`);
+    logSummary(`- Suppliers: ${suppliers.map((s) => s.supplierName).join(', ')}`);
+    logSummary('');
 
     console.log(`  ✓ Imported ${result.rowsInserted} transactions`);
     console.log(`  ✓ Extracted ${suppliers.length} distinct supplier(s)`);
@@ -271,18 +436,15 @@ describe('Pipeline E2E Integration Test', () => {
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 4: Create an override rule', async () => {
-    // Pick any L3 node from the taxonomy as the rule target
     const nodes = await taxonomyService.getNodes();
     const l3Nodes = nodes.filter((n) => n.depth === 3);
     expect(l3Nodes.length).toBeGreaterThan(0);
     const targetNode = l3Nodes[0];
 
-    // Get the first supplier from the data
     const suppliers = await supplierService.listSuppliers();
     expect(suppliers.length).toBeGreaterThan(0);
     const firstSupplier = suppliers[0].supplierName;
 
-    // Extract a keyword from the supplier name (first word) for a "contains" rule
     const supplierKeyword = firstSupplier.split(/\s+/)[0].toLowerCase();
 
     const { id } = await rulesService.createRule({
@@ -297,9 +459,15 @@ describe('Pipeline E2E Integration Test', () => {
     expect(id).toBeTruthy();
     const rules = await rulesService.listRules();
     expect(rules.length).toBe(1);
-    // Project rules should have priority score in 100-199 band
     expect(rules[0].priorityScore).toBeGreaterThanOrEqual(100);
     expect(rules[0].priorityScore).toBeLessThan(200);
+
+    logSummary(`## Phase 4: Override Rules\n`);
+    logSummary(`- Rule: "${rules[0].name}"`);
+    logSummary(`- Condition: supplier_name contains "${supplierKeyword}"`);
+    logSummary(`- Target: ${targetNode.fullPath}`);
+    logSummary(`- Priority: ${rules[0].priorityScore}`);
+    logSummary('');
 
     console.log(`  ✓ Created override rule: "${rules[0].name}" (priority: ${rules[0].priorityScore})`);
     console.log(`  ✓ Rule matches supplier_name containing "${supplierKeyword}"`);
@@ -310,7 +478,6 @@ describe('Pipeline E2E Integration Test', () => {
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 5: Run classification pipeline', async () => {
-    // Set up mock main window for progress events
     const progressEvents: unknown[] = [];
     classificationPipeline.setMainWindow({
       webContents: {
@@ -320,15 +487,14 @@ describe('Pipeline E2E Integration Test', () => {
       },
     });
 
-    // Start classification (all transactions)
+    const pipelineStart = Date.now();
     const { runId } = await classificationPipeline.startClassification({
       scope: 'all',
     });
     expect(runId).toBeTruthy();
 
-    // Wait for pipeline to complete (async) — longer timeout for real LLM calls
     let status = classificationPipeline.getStatus();
-    const maxWait = 120000; // 120s timeout for real LLM
+    const maxWait = 120000;
     const startTime = Date.now();
 
     while (
@@ -342,9 +508,15 @@ describe('Pipeline E2E Integration Test', () => {
 
     expect(status).toBeDefined();
     expect(status!.status).toBe('completed');
-
-    // Verify progress events were emitted
     expect(progressEvents.length).toBeGreaterThan(0);
+
+    const pipelineDuration = ((Date.now() - pipelineStart) / 1000).toFixed(1);
+
+    logSummary(`## Phase 5: Classification Pipeline\n`);
+    logSummary(`- Status: ${status!.status}`);
+    logSummary(`- Duration: ${pipelineDuration}s`);
+    logSummary(`- Progress events: ${progressEvents.length}`);
+    logSummary('');
 
     console.log(`  ✓ Pipeline completed in ${Date.now() - startTime}ms`);
     console.log(`  ✓ ${progressEvents.length} progress events emitted`);
@@ -372,7 +544,12 @@ describe('Pipeline E2E Integration Test', () => {
     let classified = 0;
     let ruleMatched = 0;
 
-    for (const txn of txns) {
+    logSummary(`## Phase 6: Classification Results\n`);
+    logSummary(`| # | Supplier | Classification | Score | Source |`);
+    logSummary(`|---|----------|----------------|-------|--------|`);
+
+    for (let i = 0; i < txns.length; i++) {
+      const txn = txns[i];
       const node = taxonomy.find((n) => n.id === txn.taxonomy_node_id);
       const nodePath = node?.fullPath ?? '(unclassified)';
       const source = txn.review_score === 0 ? 'rule/aligned' : 'LLM';
@@ -384,10 +561,14 @@ describe('Pipeline E2E Integration Test', () => {
         }
       }
 
+      logSummary(`| ${i + 1} | ${txn.supplier_name} | ${nodePath} | ${txn.review_score} | ${source} |`);
       console.log(`    ${txn.supplier_name}: ${nodePath} [score=${txn.review_score}, source=${source}]`);
     }
 
-    // All transactions should be classified (either by rule or LLM)
+    logSummary('');
+    logSummary(`**Summary:** ${classified}/${csvData.totalRows} classified (${ruleMatched} by rules, ${classified - ruleMatched} by LLM)`);
+    logSummary('');
+
     expect(classified).toBe(csvData.totalRows);
 
     console.log(`  ✓ ${classified}/${csvData.totalRows} transactions classified (${ruleMatched} by rules, ${classified - ruleMatched} by LLM)`);
@@ -434,15 +615,14 @@ describe('Pipeline E2E Integration Test', () => {
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 7: Reclassify a transaction', async () => {
-    // Get the first transaction
     const firstTxn = await databaseService.get<{ id: string; taxonomy_node_id: string }>(
       'SELECT id, taxonomy_node_id FROM transactions ORDER BY row_index LIMIT 1'
     );
     expect(firstTxn).toBeDefined();
 
-    // Find a different taxonomy node (any L3 node that isn't the current one)
     const taxonomy = await taxonomyService.getNodes();
     const l3Nodes = taxonomy.filter((n) => n.depth === 3);
+    const originalNode = taxonomy.find((n) => n.id === firstTxn!.taxonomy_node_id);
     const differentNode = l3Nodes.find((n) => n.id !== firstTxn!.taxonomy_node_id);
     expect(differentNode).toBeDefined();
 
@@ -451,18 +631,22 @@ describe('Pipeline E2E Integration Test', () => {
       differentNode!.id,
     );
 
-    // Verify reclassification
     const updated = await databaseService.get<{ taxonomy_node_id: string }>(
       'SELECT taxonomy_node_id FROM transactions WHERE id = ?',
       firstTxn!.id
     );
     expect(updated?.taxonomy_node_id).toBe(differentNode!.id);
 
-    // Verify changelog has a manual entry
     const changes = await databaseService.all<{ source: string; description: string }>(
       "SELECT source, description FROM change_log WHERE source = 'manual' ORDER BY created_at DESC"
     );
     expect(changes.length).toBeGreaterThan(0);
+
+    logSummary(`## Phase 7: Reclassification\n`);
+    logSummary(`- Transaction ID: \`${firstTxn!.id}\``);
+    logSummary(`- From: ${originalNode?.fullPath ?? '(unknown)'}`);
+    logSummary(`- To: ${differentNode!.fullPath}`);
+    logSummary('');
 
     console.log(`  ✓ Reclassified transaction to: ${differentNode!.fullPath}`);
     console.log(`  ✓ Manual changelog entry: "${changes[0]?.description}"`);
@@ -473,7 +657,7 @@ describe('Pipeline E2E Integration Test', () => {
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 8: Export to CSV', async () => {
-    exportPath = path.join(os.tmpdir(), `pipeline-e2e-export-${Date.now()}.csv`);
+    exportPath = EXPORT_PATH;
 
     const result = await exportService.exportCSV(exportPath);
     expect(result.rowsExported).toBe(csvData.totalRows);
@@ -482,16 +666,20 @@ describe('Pipeline E2E Integration Test', () => {
     const csvContent = fs.readFileSync(exportPath, 'utf-8');
     const lines = csvContent.trim().split('\n');
 
-    // Header + data rows
     expect(lines.length).toBe(csvData.totalRows + 1);
 
-    // Check header includes classification columns
     const header = lines[0];
     expect(header).toContain('classification_path');
     expect(header).toContain('classification_l1');
     expect(header).toContain('classification_l2');
     expect(header).toContain('classification_l3');
     expect(header).toContain('review_score');
+
+    logSummary(`## Phase 8: Export\n`);
+    logSummary(`- Output: \`${path.basename(exportPath)}\``);
+    logSummary(`- Rows exported: ${result.rowsExported}`);
+    logSummary(`- Columns: ${header.split(',').length}`);
+    logSummary('');
 
     console.log(`  ✓ Exported ${result.rowsExported} rows to CSV`);
     console.log(`  ✓ CSV header: ${header}`);
@@ -509,15 +697,215 @@ describe('Pipeline E2E Integration Test', () => {
     const suppliers = await supplierService.listSuppliers();
 
     let researched = 0;
+
+    logSummary(`## Phase 9: Supplier Research\n`);
+    logSummary(`| Supplier | Type | Industry |`);
+    logSummary(`|----------|------|----------|`);
+
     for (const supplier of suppliers) {
       if (supplier.supplierInfo) {
         researched++;
+        logSummary(`| ${supplier.supplierName} | ${supplier.supplierType} | ${supplier.supplierInfo.industry} |`);
         console.log(`    ${supplier.supplierName}: type=${supplier.supplierType}, industry=${supplier.supplierInfo.industry}`);
       } else {
+        logSummary(`| ${supplier.supplierName} | ${supplier.supplierType} | (no research) |`);
         console.log(`    ${supplier.supplierName}: (no research data)`);
       }
     }
 
+    logSummary('');
+    logSummary(`**Summary:** ${researched}/${suppliers.length} suppliers have research data`);
+    logSummary('');
+
+    logSummary('');
+
     console.log(`  ✓ ${researched}/${suppliers.length} suppliers have research data`);
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // Phase 10: Database Snapshot
+  // ────────────────────────────────────────────────────────────────
+
+  it('Phase 10: Write database snapshot to summary', async () => {
+    logSummary(`## Database Snapshot\n`);
+    logSummary(`Contents of \`${path.basename(DB_PATH)}\` at end of run.\n`);
+
+    // --- settings ---
+    const settings = await databaseService.all<{ key: string; value: string; updated_at: string }>(
+      'SELECT key, value, updated_at FROM settings ORDER BY key'
+    );
+    logSummary(`### settings (${settings.length} rows)\n`);
+    logSummary('Key-value project configuration. Created on project init (Phase 1) and taxonomy import (Phase 2).\n');
+    logSummary(`| Key | Value | Updated |`);
+    logSummary(`|-----|-------|---------|`);
+    for (const s of settings) {
+      const val = (s.value?.length ?? 0) > 80 ? s.value.substring(0, 80) + '...' : s.value;
+      logSummary(`| ${s.key} | ${val} | ${s.updated_at} |`);
+    }
+    logSummary('');
+
+    // --- company_context ---
+    const cc = await databaseService.get<Record<string, unknown>>(
+      'SELECT * FROM company_context WHERE id = 1'
+    );
+    logSummary(`### company_context (1 row)\n`);
+    logSummary('Company metadata injected into classification LLM prompts. Set in Phase 1b.\n');
+    if (cc) {
+      logSummary(`| Field | Value |`);
+      logSummary(`|-------|-------|`);
+      for (const [k, v] of Object.entries(cc)) {
+        if (k === 'id') continue;
+        const val = String(v ?? 'NULL');
+        logSummary(`| ${k} | ${val.length > 100 ? val.substring(0, 100) + '...' : val} |`);
+      }
+    }
+    logSummary('');
+
+    // --- taxonomy ---
+    const taxL1 = await databaseService.all<{ l1: string; cnt: number }>(
+      "SELECT l1, COUNT(*)::INTEGER as cnt FROM taxonomy GROUP BY l1 ORDER BY l1"
+    );
+    const taxDepth = await databaseService.all<{ depth: number; cnt: number }>(
+      "SELECT depth, COUNT(*)::INTEGER as cnt FROM taxonomy GROUP BY depth ORDER BY depth"
+    );
+    const taxTotal = taxDepth.reduce((sum, d) => sum + d.cnt, 0);
+    logSummary(`### taxonomy (${taxTotal} rows)\n`);
+    logSummary('3-level classification hierarchy imported from ColabIP in Phase 2.\n');
+    logSummary(`**By depth:** ${taxDepth.map(d => `L${d.depth}: ${d.cnt}`).join(', ')}\n`);
+    logSummary(`**L1 categories:** ${taxL1.map(t => `${t.l1} (${t.cnt} nodes)`).join(', ')}\n`);
+
+    const taxL3 = await databaseService.all<{ full_path: string; description: string }>(
+      "SELECT full_path, description FROM taxonomy WHERE depth = 3 ORDER BY full_path"
+    );
+    logSummary(`<details>\n<summary>All L3 leaf nodes (${taxL3.length})</summary>\n`);
+    logSummary(`| Path | Description |`);
+    logSummary(`|------|-------------|`);
+    for (const t of taxL3) {
+      const desc = (t.description?.length ?? 0) > 80 ? t.description.substring(0, 80) + '...' : (t.description ?? '');
+      logSummary(`| ${t.full_path} | ${desc} |`);
+    }
+    logSummary(`\n</details>\n`);
+
+    // --- column_mappings ---
+    const mappings = await databaseService.all<{ canonical_name: string; csv_column_name: string }>(
+      'SELECT canonical_name, csv_column_name FROM column_mappings ORDER BY canonical_name'
+    );
+    logSummary(`### column_mappings (${mappings.length} rows)\n`);
+    logSummary('Maps canonical column names to CSV headers. Created in Phase 3b when user confirms LLM-suggested mappings.\n');
+    logSummary(`| Canonical Name | CSV Column |`);
+    logSummary(`|----------------|------------|`);
+    for (const m of mappings) {
+      logSummary(`| ${m.canonical_name} | ${m.csv_column_name} |`);
+    }
+    logSummary('');
+
+    // --- invoice_grouping_columns ---
+    const grouping = await databaseService.all<{ canonical_name: string; position: number }>(
+      'SELECT canonical_name, position FROM invoice_grouping_columns ORDER BY position'
+    );
+    logSummary(`### invoice_grouping_columns (${grouping.length} rows)\n`);
+    logSummary('Defines how transactions are grouped for classification (one LLM call per group). Set in Phase 3b.\n');
+    logSummary(`| Position | Column |`);
+    logSummary(`|----------|--------|`);
+    for (const g of grouping) {
+      logSummary(`| ${g.position} | ${g.canonical_name} |`);
+    }
+    logSummary('');
+
+    // --- transactions ---
+    const txns = await databaseService.all<Record<string, unknown>>(
+      'SELECT * FROM transactions ORDER BY row_index'
+    );
+    const taxonomy = await taxonomyService.getNodes();
+    logSummary(`### transactions (${txns.length} rows)\n`);
+    logSummary('Core data table. Rows created in Phase 3c (CSV import), classification fields updated in Phase 5.\n');
+    logSummary('Dynamic schema: base columns + canonical columns added via ALTER TABLE based on column_mappings.\n');
+    logSummary(`| # | Supplier | Description | GL | Amount | Classification | Score | Source | Reasoning |`);
+    logSummary(`|---|----------|-------------|----|---------:|----------------|------:|--------|-----------|`);
+    for (const txn of txns) {
+      const node = taxonomy.find(n => n.id === txn.taxonomy_node_id);
+      const nodePath = node?.fullPath ?? '(unclassified)';
+      const source = (txn.review_score === 0 && !txn.classification_reasoning) ? 'rule' :
+                     (txn.review_score === 0) ? 'LLM (aligned)' : 'LLM';
+      const reasoning = typeof txn.classification_reasoning === 'string'
+        ? (txn.classification_reasoning.length > 60 ? txn.classification_reasoning.substring(0, 60) + '...' : txn.classification_reasoning)
+        : '—';
+      logSummary(`| ${txn.row_index} | ${txn.supplier_name} | ${String(txn.line_description ?? '').substring(0, 40)} | ${String(txn.gl_description ?? '').substring(0, 30)} | ${txn.spend_amount} | ${nodePath} | ${txn.review_score} | ${source} | ${reasoning} |`);
+    }
+    logSummary('');
+
+    // --- project_suppliers ---
+    const suppliersDb = await databaseService.all<Record<string, unknown>>(
+      'SELECT * FROM project_suppliers ORDER BY supplier_name'
+    );
+    logSummary(`### project_suppliers (${suppliersDb.length} rows)\n`);
+    logSummary('One row per distinct supplier. Created in Phase 3c (import), research data added in Phase 5.\n');
+    logSummary(`| Supplier | Type | Txn Count | Total Spend | Category A | Research Confidence | Industry |`);
+    logSummary(`|----------|------|----------:|------------:|:----------:|--------------------:|----------|`);
+    for (const s of suppliersDb) {
+      let confidence = '—';
+      let industry = '—';
+      if (s.supplier_info && typeof s.supplier_info === 'string') {
+        try {
+          const info = JSON.parse(s.supplier_info);
+          confidence = info.confidence ?? '—';
+          industry = info.industry ?? '—';
+        } catch { /* ignore */ }
+      }
+      logSummary(`| ${s.supplier_name} | ${s.supplier_type ?? '—'} | ${s.transaction_count} | ${s.total_spend} | ${s.category_a ? 'Yes' : 'No'} | ${confidence} | ${industry} |`);
+    }
+    logSummary('');
+
+    // --- override_rules ---
+    const rules = await databaseService.all<Record<string, unknown>>(
+      'SELECT * FROM override_rules ORDER BY priority_score'
+    );
+    logSummary(`### override_rules (${rules.length} rows)\n`);
+    logSummary('Deterministic rules that override LLM classification. Created in Phase 4.\n');
+    if (rules.length > 0) {
+      logSummary(`| Name | Source | Conditions | Target | Priority | Active |`);
+      logSummary(`|------|--------|------------|--------|----------|--------|`);
+      for (const r of rules) {
+        const targetNode = taxonomy.find(n => n.id === r.target_taxonomy_node_id);
+        logSummary(`| ${r.name} | ${r.source} | ${r.conditions} | ${targetNode?.fullPath ?? String(r.target_taxonomy_node_id)} | ${r.priority_score} | ${r.is_active ? 'Yes' : 'No'} |`);
+      }
+    } else {
+      logSummary('(no rules)');
+    }
+    logSummary('');
+
+    // --- change_log ---
+    const changes = await databaseService.all<Record<string, unknown>>(
+      'SELECT * FROM change_log ORDER BY created_at'
+    );
+    logSummary(`### change_log (${changes.length} rows)\n`);
+    logSummary('Audit trail for all classification changes. Created in Phase 5 (pipeline) and Phase 7 (reclassification).\n');
+    logSummary(`| Source | Description | Affected Count | Old Values | New Values |`);
+    logSummary(`|--------|-------------|---------------:|------------|------------|`);
+    for (const c of changes) {
+      const oldVal = c.old_values ? (String(c.old_values).length > 60 ? String(c.old_values).substring(0, 60) + '...' : String(c.old_values)) : '—';
+      const newVal = c.new_values ? (String(c.new_values).length > 60 ? String(c.new_values).substring(0, 60) + '...' : String(c.new_values)) : '—';
+      logSummary(`| ${c.source} | ${c.description} | ${c.affected_count} | ${oldVal} | ${newVal} |`);
+    }
+    logSummary('');
+
+    // --- system_feedback ---
+    const feedback = await databaseService.all<Record<string, unknown>>(
+      'SELECT * FROM system_feedback'
+    );
+    logSummary(`### system_feedback (${feedback.length} rows)\n`);
+    logSummary('AI-generated suggestions for improving classifications. Populated by the feedback agent (not triggered in this test).\n');
+    if (feedback.length === 0) {
+      logSummary('(empty)\n');
+    }
+
+    // --- Output files ---
+    logSummary(`## Output Files\n`);
+    logSummary(`- \`${path.basename(DB_PATH)}\` — DuckDB project file`);
+    logSummary(`- \`${path.basename(EXPORT_PATH)}\` — Exported CSV`);
+    logSummary(`- \`run-summary.md\` — This file`);
+    logSummary('');
+
+    console.log(`  ✓ Database snapshot written to summary`);
   });
 });

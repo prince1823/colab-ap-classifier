@@ -412,6 +412,27 @@ describe('parseResponse', () => {
       'LLM response missing classification path field'
     );
   });
+
+  it('should unwrap { transactions: [...] } envelope from LLM', () => {
+    const response = JSON.stringify({
+      transactions: [
+        {
+          classificationPath: 'Non Clinical|Professional Services|Consulting',
+          reasoning: 'Unwrapped from transactions array',
+          descriptionSupplierAligned: true,
+        },
+        {
+          classificationPath: 'Non Clinical|IT|Software',
+          reasoning: 'Second item ignored',
+          descriptionSupplierAligned: false,
+        },
+      ],
+    });
+    const result = parseResponse(response);
+    expect(result.classificationPath).toBe('Non Clinical|Professional Services|Consulting');
+    expect(result.reasoning).toBe('Unwrapped from transactions array');
+    expect(result.descriptionSupplierAligned).toBe(true);
+  });
 });
 
 // --- validateL1 ---

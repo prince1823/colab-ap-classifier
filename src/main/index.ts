@@ -1,3 +1,7 @@
+// Load .env before any service imports (settings.ts reads process.env at import time)
+import { loadEnv } from './load-env';
+loadEnv();
+
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import fs from 'fs';

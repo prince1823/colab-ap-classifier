@@ -226,13 +226,33 @@ export function parseResponse(responseText: string): CanonicalizationResult {
     : 'low';
 
   const canonicalNames = new Set(CANONICAL_COLUMNS.map((c) => c.name));
+  const rawMappings = data.mappings as Record<string, unknown>;
   const mappings: Record<string, string> = {};
 
-  for (const [key, value] of Object.entries(
-    data.mappings as Record<string, unknown>
-  )) {
-    if (canonicalNames.has(key) && typeof value === 'string' && value.length > 0) {
-      mappings[key] = value;
+  // Count how many keys are canonical names vs how many values are canonical names
+  // to detect whether the LLM returned canonical→CSV or CSV→canonical orientation.
+  let keysAreCanonical = 0;
+  let valuesAreCanonical = 0;
+  for (const [key, value] of Object.entries(rawMappings)) {
+    if (canonicalNames.has(key)) keysAreCanonical++;
+    if (typeof value === 'string' && canonicalNames.has(value)) valuesAreCanonical++;
+  }
+
+  const inverted = valuesAreCanonical > keysAreCanonical;
+
+  for (const [key, value] of Object.entries(rawMappings)) {
+    if (typeof value !== 'string' || value.length === 0) continue;
+
+    if (inverted) {
+      // LLM returned { csvColumn: canonicalName } — flip to canonical→CSV
+      if (canonicalNames.has(value)) {
+        mappings[value] = key;
+      }
+    } else {
+      // Expected orientation: { canonicalName: csvColumn }
+      if (canonicalNames.has(key)) {
+        mappings[key] = value;
+      }
     }
   }
 

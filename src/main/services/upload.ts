@@ -214,7 +214,8 @@ export async function parsePreview(filePath: string): Promise<CSVPreviewWithMapp
   let mappingSuggestion: CanonicalizationResult;
   try {
     mappingSuggestion = await suggestMappings(preview.columns, preview.sampleRows);
-  } catch {
+  } catch (err) {
+    console.error('[parsePreview] LLM mapping suggestion failed:', err instanceof Error ? err.message : err);
     mappingSuggestion = emptyMappingSuggestion(preview.columns);
   }
 

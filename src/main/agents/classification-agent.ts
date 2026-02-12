@@ -218,7 +218,7 @@ export function parseResponse(responseText: string): ClassificationResult {
     throw new Error(`Failed to parse LLM response as JSON: ${cleaned.substring(0, 200)}`);
   }
 
-  // Handle both array and object responses from LLM
+  // Handle array, object, and { transactions: [...] } wrapper responses from LLM
   let data: Record<string, unknown>;
   if (Array.isArray(parsed)) {
     // If LLM returned an array, take the first element
@@ -228,6 +228,17 @@ export function parseResponse(responseText: string): ClassificationResult {
     data = parsed[0] as Record<string, unknown>;
   } else {
     data = parsed as Record<string, unknown>;
+  }
+
+  // Unwrap { "transactions": [...] } envelope — some LLMs wrap per-transaction
+  // results in an array even when we ask for a single classification.
+  if (
+    Array.isArray(data.transactions) &&
+    data.transactions.length > 0 &&
+    !data.classificationPath &&
+    !data.classification_path
+  ) {
+    data = data.transactions[0] as Record<string, unknown>;
   }
 
   // Try multiple field name variations for classification path

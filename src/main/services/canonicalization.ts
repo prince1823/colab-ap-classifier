@@ -169,7 +169,7 @@ function detectDelimiter(content: string): string {
  *
  * 1. Read and parse the CSV file
  * 2. Get saved column_mappings from the database
- * 3. Map CSV columns to canonical names, generate UUIDs, store raw_data
+ * 3. Map CSV columns to canonical names, generate UUIDs
  * 4. ALTER TABLE transactions to add any canonical columns that don't exist
  * 5. Bulk INSERT rows into the transactions table
  * 6. Extract distinct supplier_name values and INSERT INTO project_suppliers
@@ -243,15 +243,8 @@ export async function importCSV(
     }
   }
 
-  // Also ensure raw_data column exists
-  if (!existingColumnNames.has('raw_data')) {
-    await databaseService.run(
-      'ALTER TABLE transactions ADD COLUMN raw_data JSON'
-    );
-  }
-
   // 5. Bulk INSERT rows into transactions table
-  const allColumns = ['id', 'row_index', 'raw_data', ...canonicalColumns];
+  const allColumns = ['id', 'row_index', ...canonicalColumns];
   const placeholders = allColumns.map(() => '?').join(', ');
   const columnList = allColumns.map((c) => `"${c}"`).join(', ');
   const insertSQL = `INSERT INTO transactions (${columnList}) VALUES (${placeholders})`;
@@ -260,9 +253,8 @@ export async function importCSV(
     const record = allRecords[i];
     const id = uuidv4();
     const rowIndex = i + 1;
-    const rawData = JSON.stringify(record);
 
-    const values: unknown[] = [id, rowIndex, rawData];
+    const values: unknown[] = [id, rowIndex];
     for (const canonicalCol of canonicalColumns) {
       const csvCol = mappings[canonicalCol];
       values.push(record[csvCol] ?? null);

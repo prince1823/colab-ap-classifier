@@ -86,7 +86,7 @@ flowchart TB
 - **taxonomy** — hierarchy nodes (L1→L2→L3), descriptions, parent relationships. Taxonomy metadata (name) stored in `settings`.
 
 *Data Tables:*
-- **transactions** — dynamic schema: fixed columns (id, raw_data, classification results with `review_score` 0-100 integer) + canonical columns added from column_mappings
+- **transactions** — dynamic schema: fixed columns (id, row_index, classification results with `review_score` 0-100 integer) + canonical columns added from column_mappings
 - **project_suppliers** — suppliers with parent_name, `supplier_type` (company/individual/government/null), supplier_info (JSON), Category A designation (`category_a`, `category_a_taxonomy_node_id`), transaction_count, total_spend
 - **override_rules** — rules with name, source (`project`/`taxonomy`/`supplier`), conditions (JSON), target_classification, priority_score. `supplier` and `taxonomy` rules synced at classification time; `project` rules created directly.
 - **change_log** — audit trail: change_type, source, affected_table, old/new values
@@ -173,7 +173,6 @@ flowchart TB
 - Preview file → `upload:parsePreview` → parse headers + sample rows (10 rows)
 - Upload CSV → `upload:csv` → parse full file → insert rows into transactions (in current project's `.c91` file)
 - On insert → apply column_mappings to map columns to canonical fields
-- Store original row as `raw_data` JSON for reference
 
 #### 2.2 Canonicalization (LLM-first)
 
@@ -191,7 +190,7 @@ flowchart TB
 - On confirmation:
   - Extract distinct suppliers from transactions using supplier_name column → insert into project_suppliers
 
-**Constraint:** Mapping is applied at upload time. If mapping is changed after data exists, existing rows are NOT re-mapped. The `raw_data` column always contains the original CSV row.
+**Constraint:** Mapping is applied at upload time. If mapping is changed after data exists, existing rows are NOT re-mapped.
 
 #### 2.3 Data Review
 

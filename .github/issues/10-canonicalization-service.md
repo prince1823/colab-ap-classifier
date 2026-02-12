@@ -21,7 +21,6 @@ Implement the canonicalization service (suggest & save mappings) and the full CS
    - Map CSV columns to canonical names using saved mappings
    - Generate UUID for row `id`
    - Set `row_index` as sequential number
-   - Store original row as `raw_data` JSON (NOTE: raw_data column should be added to transactions table)
 4. ALTER TABLE transactions to add any canonical columns that don't exist yet
 5. Bulk INSERT rows into transactions table
 6. Extract distinct supplier_name values → INSERT INTO project_suppliers (deduplicate against existing)
@@ -37,7 +36,7 @@ Implement the canonicalization service (suggest & save mappings) and the full CS
 
 ### Constraints
 - Once column mappings are saved for a project, all future uploads must use the same mapping
-- Only mapped canonical columns are stored as typed columns; unmapped CSV data goes into `raw_data` JSON
+- Only mapped canonical columns are stored as typed columns; unmapped CSV data is discarded
 - Supplier extraction must deduplicate — don't create duplicate project_suppliers rows
 
 ### Tests

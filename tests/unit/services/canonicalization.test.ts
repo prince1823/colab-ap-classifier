@@ -302,8 +302,8 @@ describe('CanonicalizationService', () => {
           typeof call[0] === 'string' && call[0].includes('ALTER TABLE')
       );
 
-      // 4 canonical columns + 1 raw_data column = 5 ALTER statements
-      expect(alterCalls.length).toBe(5);
+      // 4 canonical columns = 4 ALTER statements
+      expect(alterCalls.length).toBe(4);
 
       // Verify canonical columns are added
       const alterSqls = alterCalls.map((c) => c[0] as string);
@@ -318,9 +318,6 @@ describe('CanonicalizationService', () => {
       );
       expect(alterSqls).toContainEqual(
         expect.stringContaining('"line_description"')
-      );
-      expect(alterSqls).toContainEqual(
-        expect.stringContaining('raw_data')
       );
     });
 
@@ -345,43 +342,19 @@ describe('CanonicalizationService', () => {
       expect(firstSql).toContain('"spend_amount"');
       expect(firstSql).toContain('"invoice_date"');
       expect(firstSql).toContain('"line_description"');
-      expect(firstSql).toContain('"raw_data"');
-
-      // Params: id, row_index, raw_data, supplier_name, spend_amount, invoice_date, line_description
+      // Params: id, row_index, supplier_name, spend_amount, invoice_date, line_description
       expect(firstRow[1]).toBe('test-uuid-1'); // id
       expect(firstRow[2]).toBe(1); // row_index
-      // firstRow[3] is raw_data JSON
-      expect(firstRow[4]).toBe('Acme Corp'); // supplier_name
-      expect(firstRow[5]).toBe('1500.00'); // spend_amount
-      expect(firstRow[6]).toBe('2024-01-15'); // invoice_date
-      expect(firstRow[7]).toBe('Office Supplies'); // line_description
+      expect(firstRow[3]).toBe('Acme Corp'); // supplier_name
+      expect(firstRow[4]).toBe('1500.00'); // spend_amount
+      expect(firstRow[5]).toBe('2024-01-15'); // invoice_date
+      expect(firstRow[6]).toBe('Office Supplies'); // line_description
 
       // Second row
       const secondRow = insertCalls[1];
       expect(secondRow[1]).toBe('test-uuid-2'); // id
       expect(secondRow[2]).toBe(2); // row_index
-      expect(secondRow[4]).toBe('Globex Inc'); // supplier_name
-    });
-
-    it('should store the original row as raw_data JSON', async () => {
-      setupImportMocks();
-
-      await importCSV('/path/to/data.csv');
-
-      const insertCalls = mockedDb.run.mock.calls.filter(
-        (call) =>
-          typeof call[0] === 'string' &&
-          call[0].includes('INSERT INTO transactions')
-      );
-
-      // raw_data is the 3rd parameter (index [3])
-      const rawData = JSON.parse(insertCalls[0][3] as string);
-      expect(rawData).toEqual({
-        Vendor: 'Acme Corp',
-        Amount: '1500.00',
-        Date: '2024-01-15',
-        Description: 'Office Supplies',
-      });
+      expect(secondRow[3]).toBe('Globex Inc'); // supplier_name
     });
 
     it('should INSERT distinct suppliers into project_suppliers', async () => {

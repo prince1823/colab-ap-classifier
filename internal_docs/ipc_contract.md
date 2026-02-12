@@ -260,7 +260,7 @@ Import a full CSV file into the currently open project's transactions table.
 |---|---|
 | **Args** | `filePath: string` |
 | **Response** | `{ rowsInserted: number }` |
-| **Notes** | Requires open project with saved column mappings. Applies canonicalization during insert. Extracts distinct suppliers into `project_suppliers`. Stores original row as `raw_data` JSON. |
+| **Notes** | Requires open project with saved column mappings. Applies canonicalization during insert. Extracts distinct suppliers into `project_suppliers`. |
 
 ---
 

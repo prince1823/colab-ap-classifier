@@ -2,7 +2,7 @@
 export default {
   content: [
     "./index.html",
-    "./frontend-v1/**/*.{js,ts,jsx,tsx}",
+    "./src/renderer/**/*.{js,ts,jsx,tsx}",
   ],
   darkMode: false,
   theme: {

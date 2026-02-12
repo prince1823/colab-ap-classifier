@@ -40,11 +40,15 @@
 
 ```
 ap-classfier/
-├── frontend-v1/          # React frontend (light theme UI)
-│   ├── components/       # UI components
-│   ├── pages/           # Page components (Review, etc.)
-│   ├── styles/          # CSS files
-│   └── main.tsx         # Entry point
+├── src/
+│   ├── renderer/        # React frontend (light theme UI)
+│   │   ├── components/  # UI components
+│   │   ├── pages/       # Page components (Review, etc.)
+│   │   ├── styles/      # CSS files
+│   │   └── main.tsx     # Entry point
+│   ├── main/            # Electron main process
+│   ├── preload/         # Electron preload scripts
+│   └── shared/          # Shared types and utilities
 ├── public/              # Static assets
 │   └── classified.csv   # Sample transaction data
 ├── index.html           # HTML entry point
@@ -58,3 +62,4 @@ ap-classfier/
 - The Electron main process requires `duckdb-async` which is not installed, but the web UI works fine without it
 - The app defaults to the **Review** tab which shows the classification dashboard
 - Sample data is included in `public/classified.csv`
+- Frontend code is in `src/renderer/` following standard Electron conventions

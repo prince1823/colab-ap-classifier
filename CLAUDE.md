@@ -96,7 +96,8 @@ Authoritative specs live in `internal_docs/` (dev branch only). Read before impl
 
 ### LLM Configuration
 - Default model: `claude-3-5-haiku-latest`
-- Env vars: `CLASSIFIER_LLM_PROVIDER`, `CLASSIFIER_MODEL`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+- Env vars (loaded from `.env` at startup via `src/main/load-env.ts`): `CLASSIFIER_LLM_PROVIDER`, `CLASSIFIER_MODEL`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+- LLM response parsing is hardened: canonicalization agent auto-corrects inverted mappings, classification agent unwraps `{"transactions": [...]}` envelopes
 
 ## Development
 

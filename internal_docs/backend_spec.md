@@ -106,6 +106,7 @@ flowchart TB
 
 ### Thread 0: Start App
 
+- Load `.env` file via `loadEnv()` (`src/main/load-env.ts`) **before** any service imports — this ensures `CLASSIFIER_LLM_PROVIDER`, `CLASSIFIER_MODEL`, and API keys are available when `settings.ts` reads `process.env` at import time
 - Load runtime settings from environment/config
 - Load recent projects index from `~/.config/Colab91 Classifier/recent-projects.json`
 - Ensure `./projects/` folder exists
@@ -180,7 +181,7 @@ flowchart TB
 
 - `upload:parsePreview` now **automatically** calls the CanonicalizationAgent after parsing the CSV. The response includes both the CSV preview and the LLM's suggested mappings (`CSVPreviewWithMappings`):
   - CSV columns, sample rows, total row count
-  - Suggested mappings (canonical column → client column)
+  - Suggested mappings (canonical column → client column). The agent auto-detects and corrects inverted mappings — if the LLM returns `{csv_column: canonical_name}` instead of `{canonical_name: csv_column}`, the orientation is detected by counting canonical names in keys vs values and flipped accordingly
   - Confidence level and reasoning
   - Unmapped columns list
   - If the LLM call fails, the preview is still returned with an empty `CanonicalizationResult` (confidence: 'low', empty mappings) so the user can map manually
@@ -282,7 +283,7 @@ For each group:
    - Supplier historical L1/L2/L3 classifications (provided to LLM for review score computation)
    - Transaction details (supplier_name, gl_description, line_description, spend_amount)
 3. ClassificationAgent calls LLM provider (Anthropic Claude or OpenAI GPT based on config)
-4. LLM returns: classification_path (L1|L2|L3), review_score (0-100), reasoning, description_supplier_aligned (boolean — whether line/GL desc aligns with supplier info)
+4. LLM returns: classification_path (L1|L2|L3), review_score (0-100), reasoning, description_supplier_aligned (boolean — whether line/GL desc aligns with supplier info). The agent handles multiple response shapes: if the LLM wraps results in a `{"transactions": [...]}` envelope, it auto-unwraps to the first element; if the response is a bare array, the first element is used
 5. Write classification results to transactions (`classification_path`, `review_score`, `classification_reasoning`)
 
 **Step 8: Finalize**

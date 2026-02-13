@@ -12,46 +12,44 @@ interface Tab {
 
 export default function WorkflowTabs() {
   const navigate = useNavigate()
-  const workflowState = useWorkflowState()
+  const ws = useWorkflowState()
 
-  // Upload, Canonicalization, Data Review, Classification, Output: always clickable → show "Coming soon".
-  // Review: only enabled when data is classified (actual review UI).
   const tabs: Tab[] = [
     {
       path: '/workflow/upload',
       label: 'Upload',
-      disabled: false,
-      tooltip: 'Coming soon',
+      disabled: !ws.hasProject,
+      tooltip: ws.hasProject ? '' : 'Open or create a project first',
     },
     {
       path: '/workflow/canonicalization',
       label: 'Canonicalization',
-      disabled: false,
-      tooltip: 'Coming soon',
+      disabled: !ws.hasProject,
+      tooltip: ws.hasProject ? '' : 'Open or create a project first',
     },
     {
       path: '/workflow/data-review',
       label: 'Data Review',
-      disabled: false,
-      tooltip: 'Coming soon',
+      disabled: !ws.hasCanonicalizedData,
+      tooltip: ws.hasCanonicalizedData ? '' : 'Upload and canonicalize data first',
     },
     {
       path: '/workflow/classification',
       label: 'Classification',
-      disabled: false,
-      tooltip: 'Coming soon',
+      disabled: !(ws.hasCanonicalizedData && ws.hasTaxonomy),
+      tooltip: ws.hasCanonicalizedData && ws.hasTaxonomy ? '' : 'Requires canonicalized data and taxonomy',
     },
     {
       path: '/workflow/review',
       label: 'Review',
-      disabled: !workflowState.hasClassifiedData,
-      tooltip: workflowState.hasClassifiedData ? '' : 'Requires: Data classified',
+      disabled: !ws.hasClassifiedData,
+      tooltip: ws.hasClassifiedData ? '' : 'Classify data first',
     },
     {
       path: '/workflow/output',
       label: 'Output',
-      disabled: false,
-      tooltip: 'Coming soon',
+      disabled: !ws.hasClassifiedData,
+      tooltip: ws.hasClassifiedData ? '' : 'Classify data first',
     },
   ]
 

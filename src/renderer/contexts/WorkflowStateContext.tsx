@@ -15,10 +15,19 @@ interface WorkflowStateContextType {
 const WorkflowStateContext = createContext<WorkflowStateContextType | undefined>(undefined)
 
 export function WorkflowStateProvider({ children }: { children: ReactNode }) {
-  const workflowState = useWorkflowStore()
+  const state = useWorkflowStore((s) => ({
+    hasProject: s.hasProject,
+    hasCompanyContext: s.hasCompanyContext,
+    hasTaxonomy: s.hasTaxonomy,
+    hasUploadedData: s.hasUploadedData,
+    hasCanonicalizedData: s.hasCanonicalizedData,
+    hasReviewedData: s.hasReviewedData,
+    isClassifying: s.isClassifying,
+    hasClassifiedData: s.hasClassifiedData,
+  }))
 
   return (
-    <WorkflowStateContext.Provider value={workflowState}>
+    <WorkflowStateContext.Provider value={state}>
       {children}
     </WorkflowStateContext.Provider>
   )

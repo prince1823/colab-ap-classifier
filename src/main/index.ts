@@ -6,6 +6,7 @@ import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { registerAllHandlers } from './ipc';
+import { setMainWindow } from './services/classification-pipeline';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -49,6 +50,9 @@ function createWindow(): void {
 app.whenReady().then(() => {
   registerAllHandlers();
   createWindow();
+  if (mainWindow) {
+    setMainWindow(mainWindow);
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -60,5 +64,8 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
+    if (mainWindow) {
+      setMainWindow(mainWindow);
+    }
   }
 });

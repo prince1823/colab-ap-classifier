@@ -47,8 +47,8 @@ export async function searchSupplier(
   if (!client) return [];
 
   const query = supplierAddress
-    ? `${supplierName} ${supplierAddress} company information`
-    : `${supplierName} company information business`;
+    ? `${supplierName} ${supplierAddress} company information linkedin`
+    : `${supplierName} company information business linkedin`;
 
   const response = await client.search(query, {
     numResults,

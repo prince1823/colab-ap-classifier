@@ -13,7 +13,6 @@ export interface ClassificationInput {
   companyContext: CompanyContext;
   supplierResearch: SupplierInfo | null;
   historicalClassifications: { l1: string; l2: string; l3: string; count: number }[];
-  isTailSpend: boolean;
 }
 
 /**
@@ -28,40 +27,112 @@ export interface ClassificationResult {
 /**
  * Build the system prompt for the classification agent.
  */
-export function buildSystemPrompt(isTailSpend: boolean): string {
-  if (isTailSpend) {
-    return `You are an AP transaction classifier specializing in tail spend categorization.
+export function buildSystemPrompt(): string {
+  return `You are an AP transaction classifier. Classify business transactions into taxonomy categories using contextual reasoning.
 
-## Rules
-- Always classify to exactly depth 3 in the format L1|L2|L3
-- Use the provided taxonomy to determine the correct classification
-- Prioritize supplier research when available to determine the correct classification
-- For tail spend, focus on the supplier name and any available description to make a quick determination
+## Critical Classification Rules (Check These First)
+
+1. MINIMUM DEPTH RULE:
+   - NEVER return just L1 or L1|L2 — must return L1|L2|L3 (exactly 3 levels)
+
+2. SUPPLIER TYPE AS SIGNAL:
+   - Government supplier_type is a STRONG signal for Exempt classification, but NOT a hard rule
+   - EXCEPTION: Government utility payments (electricity, water, gas) should be classified
+     under the appropriate Utilities category, NOT Exempt
+   - Use supplier_type as one signal among many — evaluate contextually
+
+3. INTERCOMPANY SPEND:
+   - Check if the supplier appears to be a subsidiary of the client company (from domain_context)
+   - If the supplier is a subsidiary/affiliate of the client → classify under Exempt
+
+## Use Taxonomy Descriptions and Company Context
+
+The taxonomy includes paths WITH descriptions (when available).
+The domain_context provides company-specific context.
+
+YOU MUST:
+1. READ taxonomy descriptions carefully — they define what each category includes/excludes
+2. USE company_context to understand the business domain and inform your decisions
+3. MATCH transactions to category definitions in descriptions, not just keywords
+4. REFERENCE descriptions when distinguishing between similar categories
+
+Taxonomy descriptions are AUTHORITATIVE — they define category boundaries.
+
+## Signal Prioritization
+
+- Supplier research info (type, offerings, website, industry) takes PRECEDENCE over
+  line/GL descriptions. When they conflict, supplier info wins.
+- Taxonomy descriptions (when available) > Generic keyword matching
+- Specific, detailed information > Generic, vague information (regardless of field type)
+- Company context helps interpret signals in domain-specific ways
+
+## Contextual Pattern Recognition
+
+- Supplier Profile: PRIMARY signal. Understand what the supplier typically provides.
+- Supplier Historical Classifications: If provided, strong signal for consistency.
+  Deviations should be flagged via review score.
+- Department/Business Unit: Organizational context — often aligns with spend categories.
+- GL Code: VERY LOW priority — accounting constructs rarely indicate spend category.
+  Only use if there's nothing else.
+- Descriptions: Can be highly specific and useful OR generic/accounting jargon — evaluate each case.
+  Accounting references ("accounts payable", "accrued invoices") are usually less useful.
+
+## Process
+
+1. CHECK CRITICAL RULES FIRST:
+   a. Is supplier a subsidiary of the client company? → Exempt (STOP)
+   b. Is supplier_type "government"? → Strong signal for Exempt, UNLESS it's a utility payment
+
+2. REVIEW COMPANY CONTEXT:
+   a. Read the company_context provided — it describes the business domain
+   b. Use industry/sector/business_focus/procurement_nuances to understand operational priorities
+   c. Use it to understand domain-specific terminology
+
+3. EXAMINE TAXONOMY PATHS WITH DESCRIPTIONS:
+   a. Start from deepest taxonomy levels (L3)
+   b. READ the Description field for each candidate path (if provided)
+   c. Match transaction context to what the description says the category includes
+   d. Use similarity scores as one signal, but descriptions are authoritative
+
+4. MATCH TRANSACTION TO TAXONOMY:
+   a. Supplier research info is the PRIMARY signal — match supplier offerings to categories
+   b. Line/GL descriptions are SECONDARY — use only when they align with supplier info
+   c. If multiple categories seem similar, choose the one whose description best matches
+
+5. USE TRANSACTION AMOUNT FOR PATTERNS:
+   - Large one-time amounts (>$50k) → Capital equipment, major services, infrastructure
+   - Small recurring amounts → Subscriptions, utilities, recurring services
+   - Variable amounts → Usage-based services, one-time purchases
+
+6. USE PO NUMBER:
+   - Same PO across multiple transactions → Related purchases, same project/category
+
+7. USE COST CENTER:
+   - Organizational alignment with departments → Spend category context
+
+## Edge Cases
+- Zero or very small amounts: Evaluate if this is an adjustment, refund, or actual purchase
+- Missing/blank descriptions: Rely on supplier profile and department first; GL code only as last resort
+- Supplier profile mismatch: If supplier typically provides X but transaction suggests Y,
+  prioritize supplier info (supplier info wins per spec)
+
+## Invoice-Level Classification
+- For invoices with multiple line items, you will be shown all line items together
+- Return ONE classification per line item in the order provided
+- Response format options:
+  * If ALL rows get the SAME classification → Return single path: "Technology|Software|Cloud Services"
+  * If rows need DIFFERENT classifications → Return JSON list: ["path1", "path2", "path3"]
+
+## General Rules
+- NEVER return just L1 or L1|L2 — must return L1|L2|L3 (exactly 3 levels)
+- Prefer specific categories over "Other" when confident
+- Distinguish consumption expenses (meals, services consumed) from operational purchases
 
 ## Response Format
 You MUST respond with valid JSON only (no markdown fencing, no explanation text outside JSON):
 {
   "classificationPath": "L1|L2|L3",
-  "reasoning": "<brief explanation>",
-  "descriptionSupplierAligned": true/false
-}`;
-  }
-
-  return `You are an AP transaction classifier. Your task is to classify accounts payable transactions into a standardized taxonomy.
-
-## Rules
-- Always classify to exactly depth 3 in the format L1|L2|L3
-- Use the provided taxonomy to determine the correct classification
-- Prioritize supplier research when available to determine the correct classification
-- Consider the company context and industry when making classification decisions
-- Use historical classifications as guidance for consistency, but do not blindly follow them if the data suggests otherwise
-- When the transaction description and supplier research conflict, weigh supplier research more heavily
-
-## Response Format
-You MUST respond with valid JSON only (no markdown fencing, no explanation text outside JSON):
-{
-  "classificationPath": "L1|L2|L3",
-  "reasoning": "<detailed explanation of classification decision>",
+  "reasoning": "<concise explanation (2-3 sentences): key signals and why this category was chosen>",
   "descriptionSupplierAligned": true/false
 }
 
@@ -158,20 +229,7 @@ export function formatTransactions(transactions: Array<Record<string, unknown>>)
  * Build the user prompt with all classification context.
  */
 export function buildUserPrompt(input: ClassificationInput): string {
-  const { taxonomy, companyContext, supplierResearch, historicalClassifications, transactions, isTailSpend } = input;
-
-  if (isTailSpend) {
-    return `## Taxonomy
-${formatTaxonomyTree(taxonomy)}
-
-## Supplier Research
-${formatSupplierResearch(supplierResearch)}
-
-## Transactions
-${formatTransactions(transactions)}
-
-Classify the above transactions into the taxonomy. Respond with JSON only.`;
-  }
+  const { taxonomy, companyContext, supplierResearch, historicalClassifications, transactions } = input;
 
   const contextParts: string[] = [];
   contextParts.push(`Industry: ${companyContext.industry}`);
@@ -448,7 +506,7 @@ export function validateClassification(
 export async function classifyInvoiceGroup(
   input: ClassificationInput
 ): Promise<ClassificationResult> {
-  const { taxonomy, isTailSpend } = input;
+  const { taxonomy } = input;
 
   if (input.transactions.length === 0) {
     return {
@@ -458,7 +516,7 @@ export async function classifyInvoiceGroup(
     };
   }
 
-  const systemPrompt = buildSystemPrompt(isTailSpend);
+  const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(input);
 
   // Use model from settings (configured via .env or runtime)

@@ -97,7 +97,7 @@ describe('exa-search', () => {
 
       expect(MockExa).toHaveBeenCalledWith('test-key');
       expect(mockSearch).toHaveBeenCalledWith(
-        'Acme Corporation company information business',
+        'Acme Corporation company information business linkedin',
         {
           numResults: 5,
           type: 'auto',
@@ -113,7 +113,7 @@ describe('exa-search', () => {
       await searchSupplier('Acme Corporation', '123 Main St, Springfield, IL');
 
       expect(mockSearch).toHaveBeenCalledWith(
-        'Acme Corporation 123 Main St, Springfield, IL company information',
+        'Acme Corporation 123 Main St, Springfield, IL company information linkedin',
         expect.any(Object)
       );
     });

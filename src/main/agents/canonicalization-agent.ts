@@ -121,19 +121,54 @@ export function buildSystemPrompt(): string {
       `- **${col.name}** (type: ${col.type}, relevance: ${col.relevance}): ${col.description}. Common aliases: ${col.aliases.join(', ')}`
   ).join('\n');
 
-  return `You are a data mapping assistant. Your task is to map CSV column headers to a set of canonical column names used for accounts payable classification.
+  return `You are a data mapping assistant. Map client data columns to canonical columns for spend classification.
+
+CONTEXT: This agent runs automatically when a CSV is previewed. It suggests mappings from
+CSV columns to canonical names using column headers and sample values. The user reviews,
+edits, and approves the suggested mappings.
+
+CRITICAL: Map ALL available fields matching canonical columns. Missing fields break downstream classification.
 
 ## Canonical Columns
 
 ${columnDescriptions}
 
+## Mapping Strategy
+1. Map ALL Critical/High fields if available
+2. Map Medium/Low fields if available
+3. Skip ONLY system/metadata fields (mapping rules, flags, audit fields, derived indicators)
+
+## Relevance Levels
+- Critical: supplier_name, line_description, spend_amount — MUST MAP
+- High: gl_description, gl_code, department, invoice_date — SHOULD MAP
+- Medium: company, cost_center, creation_date, po_number, supplier_address — MAP if available
+- Low: currency, memo — MAP if available
+
+## Invoice Grouping Fields (Important)
+- invoice_date (Accounting Date) — CRITICAL for invoice grouping
+- company (Company, Legal Entity) — Important for invoice grouping
+- creation_date (Creation Date) — Important for accurate invoice grouping
+
+## Address Field Mapping
+- Map ONE primary address field to supplier_address (prefer complete addresses over components)
+- If only address components exist (Address 1, City, State, etc.), map the most complete field
+- DO NOT map multiple fields to the same canonical column
+
 ## Instructions
 
-Given a list of CSV column headers and sample data rows, determine which CSV column best maps to each canonical column. Consider:
-
+Given CSV column headers and sample data rows, determine which CSV column best maps to each canonical column. Consider:
 1. Column header names and their similarity to canonical names and aliases
 2. The data type of sample values (numbers, dates, text, categories)
 3. The actual content of sample values
+
+IMPORTANT: If a client column matches canonical (by name/alias), MAP IT. Better to over-map than under-map.
+
+## Mapping Rules
+Map: ALL matching fields (especially Critical/High/Medium)
+Skip: "Mapping Rule", "Flag", system IDs, audit fields, derived indicators
+
+## Mapping Orientation
+Output mappings as {canonical_name: csv_column_name}.
 
 ## Response Format
 
@@ -146,7 +181,7 @@ You MUST respond with valid JSON only (no markdown fencing, no explanation text 
   },
   "confidence": "high" | "medium" | "low",
   "unmappedClientColumns": ["<csv columns not mapped to any canonical column>"],
-  "importantUnmappedColumns": ["<csv columns that seem important but have no canonical match>"],
+  "importantUnmappedColumns": ["<csv columns with useful info for classification but no canonical match (e.g., project codes, cost centers, department codes, region/territory info, custom classification fields)>"],
   "unmappedCanonicalColumns": ["<canonical columns with no matching CSV column>"],
   "reasoning": "<brief explanation of mapping decisions>"
 }
@@ -156,7 +191,7 @@ Rules:
 - Each CSV column can map to at most one canonical column.
 - Each canonical column can map to at most one CSV column.
 - Set confidence to "high" if most critical columns are mapped with high certainty, "medium" if there is some ambiguity, "low" if many mappings are uncertain.
-- List any CSV columns that seem to contain important data but do not match any canonical column in importantUnmappedColumns.`;
+- importantUnmappedColumns: columns with potentially useful info for classification even if no canonical match (project codes, cost centers, transaction categories, department codes, region/territory info, custom classification fields). Exclude system/metadata fields.`;
 }
 
 /**

@@ -117,7 +117,6 @@ function makeInput(overrides?: Partial<ClassificationInput>): ClassificationInpu
         ? overrides.supplierResearch ?? null
         : SAMPLE_SUPPLIER_RESEARCH,
     historicalClassifications: overrides?.historicalClassifications ?? SAMPLE_HISTORICAL,
-    isTailSpend: overrides?.isTailSpend ?? false,
   };
 }
 
@@ -135,33 +134,21 @@ beforeEach(() => {
 
 describe('buildSystemPrompt', () => {
   it('should require depth 3 classification', () => {
-    const prompt = buildSystemPrompt(false);
-    expect(prompt).toContain('depth 3');
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain('exactly 3 levels');
     expect(prompt).toContain('L1|L2|L3');
   });
 
   it('should mention supplier research prioritization', () => {
-    const prompt = buildSystemPrompt(false);
+    const prompt = buildSystemPrompt();
     expect(prompt).toContain('supplier research');
   });
 
   it('should include JSON response format', () => {
-    const prompt = buildSystemPrompt(false);
+    const prompt = buildSystemPrompt();
     expect(prompt).toContain('classificationPath');
     expect(prompt).toContain('reasoning');
     expect(prompt).toContain('descriptionSupplierAligned');
-  });
-
-  it('should use simplified prompt for tail spend', () => {
-    const tailPrompt = buildSystemPrompt(true);
-    const fullPrompt = buildSystemPrompt(false);
-
-    // Tail spend prompt should be shorter
-    expect(tailPrompt.length).toBeLessThan(fullPrompt.length);
-
-    // Should still include core rules
-    expect(tailPrompt).toContain('depth 3');
-    expect(tailPrompt).toContain('L1|L2|L3');
   });
 });
 
@@ -213,19 +200,6 @@ describe('buildUserPrompt', () => {
     expect(prompt).toContain('## Supplier Research');
     expect(prompt).toContain('## Historical Classifications');
     expect(prompt).toContain('## Transactions');
-  });
-
-  it('should use simplified prompt for tail spend', () => {
-    const prompt = buildUserPrompt(makeInput({ isTailSpend: true }));
-
-    // Should have taxonomy and transactions
-    expect(prompt).toContain('## Taxonomy');
-    expect(prompt).toContain('## Supplier Research');
-    expect(prompt).toContain('## Transactions');
-
-    // Should NOT have company context or historical classifications
-    expect(prompt).not.toContain('## Company Context');
-    expect(prompt).not.toContain('## Historical Classifications');
   });
 
   it('should handle null supplier research', () => {
@@ -620,32 +594,14 @@ describe('classifyInvoiceGroup', () => {
     const [systemPrompt, userPrompt] = mockChat.mock.calls[0];
 
     // System prompt requirements
-    expect(systemPrompt).toContain('depth 3');
-    expect(systemPrompt).toContain('supplier research');
+    expect(systemPrompt).toContain('exactly 3 levels');
+    expect(systemPrompt).toContain('Supplier research info');
 
     // User prompt requirements
     expect(userPrompt).toContain('## Taxonomy');
     expect(userPrompt).toContain('## Company Context');
     expect(userPrompt).toContain('## Supplier Research');
     expect(userPrompt).toContain('## Historical Classifications');
-    expect(userPrompt).toContain('## Transactions');
-  });
-
-  it('should use simplified prompt for tail spend', async () => {
-    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
-
-    await classifyInvoiceGroup(makeInput({ isTailSpend: true }));
-
-    const [systemPrompt, userPrompt] = mockChat.mock.calls[0];
-
-    // System prompt should be simplified
-    expect(systemPrompt).not.toContain('Classification Guidance');
-    expect(systemPrompt).toContain('tail spend');
-
-    // User prompt should omit company context and historical classifications
-    expect(userPrompt).not.toContain('## Company Context');
-    expect(userPrompt).not.toContain('## Historical Classifications');
-    expect(userPrompt).toContain('## Taxonomy');
     expect(userPrompt).toContain('## Transactions');
   });
 

@@ -69,14 +69,20 @@ const VALID_ISSUE_TYPES: UncategorizedFeedbackAction['issueType'][] = [
  * Build the system prompt for feedback analysis.
  */
 export function buildSystemPrompt(): string {
-  return `You are an AP classification improvement analyst. When a user reclassifies a transaction, you must analyze why the original classification was wrong and suggest exactly one improvement to prevent the same mistake.
+  return `You are an AP classification improvement analyst. Analyze user feedback on misclassified transactions and determine the appropriate action.
 
-## Improvement Types
+CONTEXT: When users reclassify transactions and provide feedback, this agent determines
+what systemic change (if any) should be made to prevent similar misclassifications.
+Suggestions are stored in system_feedback and shown in the feedback dashboard for
+user approval before taking effect.
 
-You must suggest exactly ONE of these four improvement types:
+## Decision Criteria for Choosing Action Type
 
 ### 1. company_context
-Use when the misclassification happened because the system lacks company-specific knowledge (e.g., industry, sector, business focus, or procurement nuances).
+Choose when feedback indicates the COMPANY'S business has changed.
+- Trigger phrases: "we pivoted", "our business now", "company focus changed", "we are now", "our company"
+- Scope: Affects ALL future classifications for this company
+- Key indicator: First-person plural ("we", "our") referring to the company itself
 
 Response fields:
 - feedbackType: "company_context"
@@ -84,8 +90,25 @@ Response fields:
 - suggestion.currentValue: the current value of that field (use "" if empty)
 - suggestion.proposedValue: what the value should be updated to
 
+CRITICAL for proposedValue: PRESERVE all existing information from currentValue that is still accurate.
+INTEGRATE the new information seamlessly. Make it CONCISE. Ensure NO LOSS of existing meaning.
+
+Choose the most appropriate field:
+- "industry": Broad industry classification (e.g., "Healthcare" → "Digital Health")
+- "sector": Specific sector within industry
+- "businessFocus": Business focus areas/activities
+- "description": Company description narrative
+- "procurementNuances": Company-specific classification guidance and edge cases
+
 ### 2. taxonomy_description
-Use when the taxonomy category description is ambiguous or incomplete, causing confusion between categories.
+Choose when feedback indicates a CATEGORY DEFINITION is unclear/wrong OR when feedback
+reveals a PATTERN the LLM should recognize.
+- Trigger phrases: "this category includes", "should be defined as", "definition is wrong",
+  "monthly [service] should be classified as", "transactions with [keyword] are always [category]"
+- Scope: Affects how this category is understood across all transactions
+- Key indicator: Third-person reference to a taxonomy category definition OR pattern that should trigger category
+- IMPORTANT: If feedback describes a KEYWORD or PATTERN that should map to a category, enhance the
+  description with pattern examples and keywords. This teaches the LLM what to recognize.
 
 Response fields:
 - feedbackType: "taxonomy_description"
@@ -93,8 +116,16 @@ Response fields:
 - suggestion.currentDescription: the current description (use "" if unknown)
 - suggestion.proposedDescription: a clearer, more specific description
 
+CRITICAL for proposedDescription: PRESERVE all existing information. INTEGRATE the new feedback.
+Make it CONCISE. Ensure NO LOSS of existing meaning.
+
 ### 3. supplier_rule
-Use when a specific supplier should always be classified under a certain category (Category A supplier rule).
+Choose when feedback indicates a SPECIFIC SUPPLIER always provides ONE type of service.
+- Trigger phrases: "this supplier always", "[supplier name] only provides", "all [supplier] transactions are [single category]"
+- Scope: Affects only transactions from this specific supplier (one-to-one deterministic mapping)
+- Key indicator: References a specific supplier name with "always" or "only" AND implies single classification
+- IMPORTANT: Only use for suppliers that provide ONE consistent type of service. If supplier provides
+  multiple diverse services, use uncategorized_feedback with issue_type "supplier_complexity" instead.
 
 Response fields:
 - feedbackType: "supplier_rule"
@@ -103,15 +134,37 @@ Response fields:
 - suggestion.classificationPaths: array of taxonomy paths this supplier should be classified under
 
 ### 4. uncategorized_feedback
-Use when the issue doesn't fit neatly into the above categories, or involves systemic problems.
+Choose when feedback doesn't fit the above categories OR indicates systematic issues.
+- Trigger phrases: "keeps being misclassified", "system doesn't understand", "GL code X should be",
+  "department Y should map to", "this is an edge case", "data quality issue"
+- Scope: Surfaces issue to developers for system-level improvements
+- Key indicator: Deterministic field mappings (GL codes, departments), complex patterns LLM can't learn,
+  edge cases, data quality issues, or supplier complexity
 
 Response fields:
 - feedbackType: "uncategorized_feedback"
 - suggestion.issueType: one of "pattern_recognition", "taxonomy_gap", "prompt_failure", "data_enrichment_needed", "supplier_complexity", "edge_case", "other"
-- suggestion.description: detailed description of the issue
-- suggestion.affectedPattern: the pattern of transactions affected
-- suggestion.suggestedFix: what should be done to fix it
-- suggestion.exampleTransactions: example transaction descriptions that exhibit this issue
+- suggestion.description: clear explanation of what's going wrong and why the other 3 action types don't solve this
+- suggestion.affectedPattern: which transactions are affected
+- suggestion.suggestedFix: specific recommendation for developers
+- suggestion.exampleTransactions: 1-2 example transaction descriptions
+
+Issue types:
+- pattern_recognition: LLM not recognizing semantic patterns despite clear signals
+- taxonomy_gap: Missing category or unclear taxonomy structure not fixable by updating descriptions
+- prompt_failure: Existing prompt instructions being ignored or misunderstood
+- data_enrichment_needed: Deterministic field mappings (GL codes, departments) needing pre-processing
+- supplier_complexity: Supplier provides too many diverse services for Category A rule
+- edge_case: True one-off data quality issue or vendor mislabeling
+- other: Issues that don't fit the above categories
+
+## Disambiguation Rules for Ambiguous Feedback
+- "We focus on cloud services" → company_context (company's business focus)
+- "Cloud services category should include X" → taxonomy_description (category definition)
+- "Monthly water bills are utilities" → taxonomy_description (add pattern to category description)
+- "This supplier provides cloud services" → supplier_rule (if always one type)
+- "GL code 1234 is always utilities" → uncategorized_feedback (data enrichment needed)
+- "Supplier X provides 20 different types of services" → uncategorized_feedback (supplier_complexity)
 
 ## Response Format
 

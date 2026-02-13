@@ -33,13 +33,11 @@ export async function researchSingle(supplierName: string): Promise<SupplierRese
     return result;
   }
 
-  // Get company context and project name for research and retry disambiguation
+  // Get company context for research
   let companyContext;
-  let projectName: string | undefined;
   try {
     const metadata = await projectService.getMetadata();
     companyContext = metadata.companyContext ?? undefined;
-    projectName = metadata.name || undefined;
   } catch {
     // Project might not be open or metadata unavailable
   }
@@ -57,30 +55,11 @@ export async function researchSingle(supplierName: string): Promise<SupplierRese
   }
 
   // Research via LLM, enriched with web search results
-  let result = await researchSupplier(supplierName, companyContext, address, searchResults);
+  const result = await researchSupplier(supplierName, companyContext, address, searchResults);
 
   // Track that Exa was used as a source
   if (searchResults.length > 0 && !result.sources.includes('Exa Web Search')) {
     result.sources.push('Exa Web Search');
-  }
-
-  // Retry with project name if confidence is low — helps disambiguate common names
-  // TODO: Replace projectName with companyContext.companyName once that field exists (see GitHub issue)
-  if (result.confidence === 'low' && projectName) {
-    try {
-      const retryResults = await exaSearch.searchSupplier(
-        `${supplierName} ${projectName}`,
-        address
-      );
-      if (retryResults.length > 0) {
-        result = await researchSupplier(supplierName, companyContext, address, retryResults);
-        if (!result.sources.includes('Exa Web Search')) {
-          result.sources.push('Exa Web Search');
-        }
-      }
-    } catch (error) {
-      console.error(`[SupplierResearch] Exa retry with project name failed for ${supplierName}:`, error);
-    }
   }
 
   // Store results

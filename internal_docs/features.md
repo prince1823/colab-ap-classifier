@@ -54,11 +54,12 @@
 
 ### Lookup Fallback Chain
 
-Research uses a fallback chain — try each step in order:
+Research uses a fallback chain — try each method in order, stop when a clear match is found:
 
-1. **Existing data** — check the Supplier Universe (ColabIP global master list) and any existing `supplier_info` / `supplier_type` from prior research. If data already exists, use it directly (no external calls needed). Done.
-2. **Exa web search → LLM synthesis** — search Exa for `"supplierName [address] company information linkedin"`. Includes a LinkedIn bias to surface concise company profiles alongside official websites. Exa results are passed to the LLM as context; the LLM extracts structured fields. If Exa is unavailable (no API key) or fails, falls back to LLM-only (training data).
-3. **Exa retry with project name** — if step 2 returns `low` confidence and the project has a name, retry Exa with `"supplierName projectName"` to disambiguate. If the retry returns results, re-run the LLM with the new context. **TODO:** Replace `projectName` with a dedicated `companyName` field on CompanyContext once available — project name is a proxy for now.
+1. **Existing data** — check the Supplier Universe (ColabIP global master list) and any existing `supplier_info` / `supplier_type` from prior research. If data already exists, use it directly (no external calls needed).
+2. **Supplier name → website + LinkedIn lookup** (external)
+3. **Supplier name + address** (external, if address is available in transaction data) - ? find website? 
+4. **Supplier name + client company name** (external)
 
 ### Research Output
 

@@ -179,9 +179,6 @@ describe('ClassificationPipeline', () => {
         if (sql.includes('override_rules')) {
           return { target_taxonomy_node_id: 'tid1' };
         }
-        if (sql.includes('tail_spend_threshold')) {
-          return { value: '10000' };
-        }
         return undefined;
       });
       mockRun.mockResolvedValue(undefined);

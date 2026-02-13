@@ -8,6 +8,7 @@
 - UI to upload a new taxonomy to ColabIP from within the app
 
 ### Classification Improvements
+- Tail spend handling — simplified/optimized classification prompt for transactions below the tail spend threshold to reduce LLM cost
 - QC Agent — automated classification quality review with specifications for tail spend and high spend suppliers
 - Classification source tracking — filter transactions by how each row was classified (rule / llm / manual)
 

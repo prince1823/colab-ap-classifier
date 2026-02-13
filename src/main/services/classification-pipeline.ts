@@ -227,11 +227,6 @@ async function runPipeline(
             supplierResearch = supplier?.supplierInfo ?? null;
           }
 
-          // Check tail spend
-          const spendAmount = group.transactions[0]?.spend_amount;
-          const tailThreshold = await getTailSpendThreshold();
-          const isTailSpend = typeof spendAmount === 'number' && spendAmount < tailThreshold;
-
           // Clean descriptions (strip if ≥70% numeric)
           const cleanedTxns = group.transactions.map((txn) => {
             const cleaned = { ...txn };
@@ -248,7 +243,6 @@ async function runPipeline(
             companyContext,
             supplierResearch,
             historicalClassifications: [],
-            isTailSpend,
           });
 
           // Find taxonomy node by path
@@ -464,12 +458,3 @@ export function cleanDescription(desc: string): string {
   return desc;
 }
 
-/**
- * Get the tail spend threshold from settings.
- */
-async function getTailSpendThreshold(): Promise<number> {
-  const result = await databaseService.get<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
-  );
-  return result ? parseFloat(result.value) : 10000;
-}

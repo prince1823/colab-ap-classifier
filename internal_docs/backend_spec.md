@@ -228,7 +228,7 @@ flowchart TB
 
 > See [features.md §5](./features.md) for priority hierarchy and classification rules. See [features.md §6](./features.md) for review score definition.
 
-**Input:** Classification options (`scope`, `filterCriteria`). Pipeline reads taxonomy, company_context, and tail_spend_threshold from the open project.
+**Input:** Classification options (`scope`, `filterCriteria`). Pipeline reads taxonomy and company_context from the open project.
 
 **Step 1: Supplier research**
 
@@ -274,16 +274,15 @@ For each rule (sorted by priority_score ascending), query all matching rows and 
 > See [features.md §5](./features.md) for description prioritization.
 
 For each group:
-1. Check if total spend < `tail_spend_threshold` → may use simplified prompt
-2. Build prompt:
+1. Build prompt:
    - Taxonomy tree (paths + descriptions)
    - Company context (industry, sector, business focus, procurement nuances)
    - Supplier research info (type, offerings, website, industry) — prioritized over line/GL descriptions per [features.md §5](./features.md)
    - Supplier historical L1/L2/L3 classifications (provided to LLM for review score computation)
    - Transaction details (supplier_name, gl_description, line_description, spend_amount)
-3. ClassificationAgent calls LLM provider (Anthropic Claude or OpenAI GPT based on config)
-4. LLM returns: classification_path (L1|L2|L3), review_score (0-100), reasoning, description_supplier_aligned (boolean — whether line/GL desc aligns with supplier info). The agent handles multiple response shapes: if the LLM wraps results in a `{"transactions": [...]}` envelope, it auto-unwraps to the first element; if the response is a bare array, the first element is used
-5. Write classification results to transactions (`classification_path`, `review_score`, `classification_reasoning`)
+2. ClassificationAgent calls LLM provider (Anthropic Claude or OpenAI GPT based on config)
+3. LLM returns: classification_path (L1|L2|L3), review_score (0-100), reasoning, description_supplier_aligned (boolean — whether line/GL desc aligns with supplier info). The agent handles multiple response shapes: if the LLM wraps results in a `{"transactions": [...]}` envelope, it auto-unwraps to the first element; if the response is a bare array, the first element is used
+4. Write classification results to transactions (`classification_path`, `review_score`, `classification_reasoning`)
 
 **Step 8: Finalize**
 

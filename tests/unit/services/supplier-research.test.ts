@@ -8,6 +8,10 @@ vi.mock('../../../src/main/services/colabip', () => ({
   readSupplierUniverse: vi.fn(),
 }));
 
+vi.mock('../../../src/main/services/exa-search', () => ({
+  searchSupplier: vi.fn(),
+}));
+
 vi.mock('../../../src/main/services/suppliers', () => ({
   getSupplierByName: vi.fn(),
   updateSupplier: vi.fn(),
@@ -21,6 +25,7 @@ vi.mock('../../../src/main/services/project', () => ({
 import { researchSingle, researchBatch } from '../../../src/main/services/supplier-research';
 import { researchSupplier } from '../../../src/main/agents/research-agent';
 import { readSupplierUniverse } from '../../../src/main/services/colabip';
+import * as exaSearch from '../../../src/main/services/exa-search';
 import * as supplierService from '../../../src/main/services/suppliers';
 import * as projectService from '../../../src/main/services/project';
 
@@ -28,6 +33,7 @@ describe('SupplierResearchService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(readSupplierUniverse).mockResolvedValue([]);
+    vi.mocked(exaSearch.searchSupplier).mockResolvedValue([]);
     vi.mocked(projectService.getMetadata).mockResolvedValue({
       name: 'Test', filePath: '/test.c91', companyContext: null,
       columnMappings: null, invoiceGroupingColumns: null,
@@ -63,8 +69,73 @@ describe('SupplierResearchService', () => {
 
       const result = await researchSingle('Test Co');
 
-      expect(researchSupplier).toHaveBeenCalledWith('Test Co', undefined, undefined);
+      expect(researchSupplier).toHaveBeenCalledWith('Test Co', undefined, undefined, []);
       expect(result.officialBusinessName).toBe('Test Co');
+    });
+
+    it('should pass Exa search results to LLM research agent', async () => {
+      const mockSearchResults = [
+        { title: 'Test Co', url: 'https://testco.com', text: 'Test Co is a tech company.' },
+      ];
+      vi.mocked(exaSearch.searchSupplier).mockResolvedValue(mockSearchResults);
+      vi.mocked(researchSupplier).mockResolvedValue({
+        officialBusinessName: 'Test Co',
+        confidence: 'high' as const,
+        sources: ['Company website'],
+      });
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+
+      const result = await researchSingle('Test Co');
+
+      expect(exaSearch.searchSupplier).toHaveBeenCalledWith('Test Co', undefined);
+      expect(researchSupplier).toHaveBeenCalledWith('Test Co', undefined, undefined, mockSearchResults);
+      expect(result.sources).toContain('Exa Web Search');
+    });
+
+    it('should gracefully handle Exa search failure and fall back to LLM-only', async () => {
+      vi.mocked(exaSearch.searchSupplier).mockRejectedValue(new Error('Exa API error'));
+      vi.mocked(researchSupplier).mockResolvedValue({
+        officialBusinessName: 'Test Co',
+        confidence: 'medium' as const,
+        sources: ['LLM training data'],
+      });
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+
+      const result = await researchSingle('Test Co');
+
+      // Should still succeed despite Exa failure
+      expect(result.officialBusinessName).toBe('Test Co');
+      expect(researchSupplier).toHaveBeenCalledWith('Test Co', undefined, undefined, []);
+      expect(result.sources).not.toContain('Exa Web Search');
+    });
+
+    it('should not add Exa source when search returns empty results', async () => {
+      vi.mocked(exaSearch.searchSupplier).mockResolvedValue([]);
+      vi.mocked(researchSupplier).mockResolvedValue({
+        officialBusinessName: 'Test Co',
+        confidence: 'medium' as const,
+        sources: ['LLM'],
+      });
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+
+      const result = await researchSingle('Test Co');
+      expect(result.sources).not.toContain('Exa Web Search');
+    });
+
+    it('should not skip Exa search for ColabIP-matched suppliers', async () => {
+      vi.mocked(readSupplierUniverse).mockResolvedValue([
+        { supplierName: 'Known Corp', parentCompany: '', supplierType: 'company', website: 'known.com', industry: 'Tech' },
+      ]);
+      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+
+      await researchSingle('Known Corp');
+
+      // When found in ColabIP, should not call Exa at all
+      expect(exaSearch.searchSupplier).not.toHaveBeenCalled();
+      expect(researchSupplier).not.toHaveBeenCalled();
     });
 
     it('should store results in supplier service', async () => {

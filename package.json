@@ -26,6 +26,7 @@
   "dependencies": {
     "csv-parse": "^5.6.0",
     "duckdb-async": "^1.1.0",
+    "exa-js": "^2.3.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

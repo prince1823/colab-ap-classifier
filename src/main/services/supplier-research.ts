@@ -1,5 +1,6 @@
 import { researchSupplier } from '../agents/research-agent';
 import { readSupplierUniverse } from './colabip';
+import * as exaSearch from './exa-search';
 import * as supplierService from './suppliers';
 import * as projectService from './project';
 import type { SupplierResearchResult, SupplierInfo } from '../../shared/types';
@@ -45,8 +46,21 @@ export async function researchSingle(supplierName: string): Promise<SupplierRese
   const existing = await supplierService.getSupplierByName(supplierName);
   const address = existing?.supplierInfo?.supplierAddress;
 
-  // Research via LLM
-  const result = await researchSupplier(supplierName, companyContext, address);
+  // Search Exa for web data (gracefully returns [] if unavailable)
+  let searchResults: exaSearch.ExaSearchResult[] = [];
+  try {
+    searchResults = await exaSearch.searchSupplier(supplierName, address);
+  } catch (error) {
+    console.error(`[SupplierResearch] Exa search failed for ${supplierName}, falling back to LLM-only:`, error);
+  }
+
+  // Research via LLM, enriched with web search results
+  const result = await researchSupplier(supplierName, companyContext, address, searchResults);
+
+  // Track that Exa was used as a source
+  if (searchResults.length > 0 && !result.sources.includes('Exa Web Search')) {
+    result.sources.push('Exa Web Search');
+  }
 
   // Store results
   await supplierService.updateSupplier(supplierName, {

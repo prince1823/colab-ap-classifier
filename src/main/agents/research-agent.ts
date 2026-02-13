@@ -1,6 +1,7 @@
 import type { ConfidenceLevel } from '../../shared/types/canonicalization';
 import type { CompanyContext } from '../../shared/types/project';
 import type { SupplierResearchResult } from '../../shared/types/suppliers';
+import type { ExaSearchResult } from '../services/exa-search';
 import * as llmClient from '../services/llm-client';
 import * as settingsService from '../services/settings';
 
@@ -76,7 +77,8 @@ You MUST respond with valid JSON only (no markdown fencing, no explanation text 
 export function buildUserPrompt(
   supplierName: string,
   companyContext?: CompanyContext,
-  supplierAddress?: string
+  supplierAddress?: string,
+  searchResults?: ExaSearchResult[]
 ): string {
   const sections: string[] = [];
 
@@ -95,6 +97,16 @@ export function buildUserPrompt(
     if (companyContext.procurementNuances) contextParts.push(`Procurement Nuances: ${companyContext.procurementNuances}`);
 
     sections.push(`## Purchasing Company Context\n\n${contextParts.join('\n')}`);
+  }
+
+  if (searchResults && searchResults.length > 0) {
+    const resultTexts = searchResults.map((r, i) => {
+      const parts = [`### Result ${i + 1}: ${r.title}`, `URL: ${r.url}`];
+      if (r.publishedDate) parts.push(`Published: ${r.publishedDate}`);
+      parts.push('', r.text);
+      return parts.join('\n');
+    });
+    sections.push(`## Web Search Results\n\nThe following web search results were found for this supplier. Use these to extract accurate, verified information. Prioritize data from these results over your training data.\n\n${resultTexts.join('\n\n')}`);
   }
 
   sections.push(
@@ -207,12 +219,14 @@ export function parseResponse(responseText: string): SupplierResearchResult {
  * @param supplierName - The name of the supplier to research
  * @param companyContext - Optional context about the purchasing company
  * @param supplierAddress - Optional known address of the supplier
+ * @param searchResults - Optional Exa web search results to include as context
  * @returns A SupplierResearchResult with supplier metadata and confidence
  */
 export async function researchSupplier(
   supplierName: string,
   companyContext?: CompanyContext,
-  supplierAddress?: string
+  supplierAddress?: string,
+  searchResults?: ExaSearchResult[]
 ): Promise<SupplierResearchResult> {
   if (!supplierName.trim()) {
     return {
@@ -222,7 +236,7 @@ export async function researchSupplier(
   }
 
   const systemPrompt = buildSystemPrompt();
-  const userPrompt = buildUserPrompt(supplierName, companyContext, supplierAddress);
+  const userPrompt = buildUserPrompt(supplierName, companyContext, supplierAddress, searchResults);
 
   // Use model from settings (configured via .env or runtime)
   const settings = settingsService.getSettings();

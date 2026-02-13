@@ -6,6 +6,7 @@ import {
   parseResponse,
 } from '../../../src/main/agents/research-agent';
 import type { CompanyContext } from '../../../src/shared/types/project';
+import type { ExaSearchResult } from '../../../src/main/services/exa-search';
 import * as llmClient from '../../../src/main/services/llm-client';
 
 // Mock the llm-client module
@@ -221,6 +222,54 @@ describe('buildUserPrompt', () => {
   it('should end with JSON instruction', () => {
     const prompt = buildUserPrompt('Acme Corporation');
     expect(prompt).toContain('respond with JSON only');
+  });
+
+  it('should include web search results when provided', () => {
+    const searchResults: ExaSearchResult[] = [
+      {
+        title: 'Acme Corp Website',
+        url: 'https://acme.example.com',
+        text: 'Acme Corporation is a global industrial supplier.',
+        publishedDate: '2024-06-15',
+      },
+      {
+        title: 'Acme Corp LinkedIn',
+        url: 'https://linkedin.com/company/acme',
+        text: 'B2B distributor headquartered in Springfield.',
+      },
+    ];
+    const prompt = buildUserPrompt('Acme Corporation', undefined, undefined, searchResults);
+
+    expect(prompt).toContain('## Web Search Results');
+    expect(prompt).toContain('### Result 1: Acme Corp Website');
+    expect(prompt).toContain('URL: https://acme.example.com');
+    expect(prompt).toContain('Published: 2024-06-15');
+    expect(prompt).toContain('Acme Corporation is a global industrial supplier.');
+    expect(prompt).toContain('### Result 2: Acme Corp LinkedIn');
+    expect(prompt).toContain('B2B distributor headquartered in Springfield.');
+    expect(prompt).toContain('Prioritize data from these results');
+  });
+
+  it('should not include web search results section when array is empty', () => {
+    const prompt = buildUserPrompt('Acme Corporation', undefined, undefined, []);
+    expect(prompt).not.toContain('## Web Search Results');
+  });
+
+  it('should not include web search results section when undefined', () => {
+    const prompt = buildUserPrompt('Acme Corporation', undefined, undefined, undefined);
+    expect(prompt).not.toContain('## Web Search Results');
+  });
+
+  it('should not include Published line when publishedDate is missing', () => {
+    const searchResults: ExaSearchResult[] = [
+      {
+        title: 'Test',
+        url: 'https://example.com',
+        text: 'Some text.',
+      },
+    ];
+    const prompt = buildUserPrompt('Test', undefined, undefined, searchResults);
+    expect(prompt).not.toContain('Published:');
   });
 });
 
@@ -531,5 +580,32 @@ describe('researchSupplier', () => {
     expect(result.officialBusinessName).toBe('John Smith Consulting');
     expect(result.serviceType).toBe('Consulting');
     expect(result.confidence).toBe('medium');
+  });
+
+  it('should include search results in user prompt when provided', async () => {
+    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+
+    const searchResults: ExaSearchResult[] = [
+      {
+        title: 'Acme Website',
+        url: 'https://acme.example.com',
+        text: 'Acme is an industrial supplier.',
+      },
+    ];
+
+    await researchSupplier('Acme Corporation', undefined, undefined, searchResults);
+
+    const [, userPrompt] = mockChat.mock.calls[0];
+    expect(userPrompt).toContain('## Web Search Results');
+    expect(userPrompt).toContain('Acme is an industrial supplier.');
+  });
+
+  it('should not include search results section when no results provided', async () => {
+    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+
+    await researchSupplier('Acme Corporation', undefined, undefined, []);
+
+    const [, userPrompt] = mockChat.mock.calls[0];
+    expect(userPrompt).not.toContain('## Web Search Results');
   });
 });

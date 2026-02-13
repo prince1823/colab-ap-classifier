@@ -138,6 +138,81 @@ describe('SupplierResearchService', () => {
       expect(researchSupplier).not.toHaveBeenCalled();
     });
 
+    it('should retry Exa with company name when confidence is low', async () => {
+      vi.mocked(projectService.getMetadata).mockResolvedValue({
+        name: 'Acme Manufacturing', filePath: '/test.c91', companyContext: null,
+        columnMappings: null, invoiceGroupingColumns: null,
+        tailSpendThreshold: 10000, taxonomyName: null, createdAt: null,
+      });
+      const retryResults = [
+        { title: 'Disambiguated', url: 'https://example.com', text: 'Found the right supplier.' },
+      ];
+      vi.mocked(exaSearch.searchSupplier)
+        .mockResolvedValueOnce([])   // first search returns nothing
+        .mockResolvedValueOnce(retryResults);  // retry with company name
+      vi.mocked(researchSupplier)
+        .mockResolvedValueOnce({ confidence: 'low' as const, sources: [] })  // first LLM call
+        .mockResolvedValueOnce({ officialBusinessName: 'Ambiguous Inc', confidence: 'high' as const, sources: [] });  // retry LLM call
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+
+      const result = await researchSingle('Ambiguous Inc');
+
+      // Should have called Exa twice: once normally, once with company name
+      expect(exaSearch.searchSupplier).toHaveBeenCalledTimes(2);
+      expect(exaSearch.searchSupplier).toHaveBeenLastCalledWith('Ambiguous Inc Acme Manufacturing', undefined);
+      // Should have called LLM twice
+      expect(researchSupplier).toHaveBeenCalledTimes(2);
+      expect(result.confidence).toBe('high');
+      expect(result.sources).toContain('Exa Web Search');
+    });
+
+    it('should not retry when confidence is medium or high', async () => {
+      vi.mocked(researchSupplier).mockResolvedValue({
+        officialBusinessName: 'Test', confidence: 'medium' as const, sources: [],
+      });
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+
+      await researchSingle('Test');
+
+      // Exa called once (initial), not retried
+      expect(exaSearch.searchSupplier).toHaveBeenCalledTimes(1);
+      expect(researchSupplier).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not retry when retry Exa returns empty results', async () => {
+      vi.mocked(exaSearch.searchSupplier).mockResolvedValue([]);  // both calls return empty
+      vi.mocked(researchSupplier).mockResolvedValue({
+        confidence: 'low' as const, sources: [],
+      });
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+
+      await researchSingle('Unknown');
+
+      // Exa called twice but LLM only once (retry Exa returned nothing)
+      expect(exaSearch.searchSupplier).toHaveBeenCalledTimes(2);
+      expect(researchSupplier).toHaveBeenCalledTimes(1);
+    });
+
+    it('should gracefully handle retry Exa failure', async () => {
+      vi.mocked(exaSearch.searchSupplier)
+        .mockResolvedValueOnce([])  // first search
+        .mockRejectedValueOnce(new Error('Retry failed'));  // retry fails
+      vi.mocked(researchSupplier).mockResolvedValue({
+        confidence: 'low' as const, sources: [],
+      });
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+
+      const result = await researchSingle('Failing');
+
+      // Should still complete with the original low-confidence result
+      expect(result.confidence).toBe('low');
+      expect(researchSupplier).toHaveBeenCalledTimes(1);
+    });
+
     it('should store results in supplier service', async () => {
       vi.mocked(researchSupplier).mockResolvedValue({
         officialBusinessName: 'Test', confidence: 'high' as const, sources: ['LLM'],

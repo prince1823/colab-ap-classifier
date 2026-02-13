@@ -13,7 +13,7 @@
 - Project name is derived from the filename (e.g., `Acme Corp.c91` → "Acme Corp").
 - Recent projects are tracked in a local index for quick access. The project picker shows recently opened projects from any location (both ./projects/ and external).
 - Each project stores:
-  - **Company context:** industry, sector, description, business focus, procurement nuances
+  - **Company context:** company name, industry, sector, description, business focus, procurement nuances
   - **Settings:** tail spend threshold (default: $10,000)
 - LLM access is through **OpenRouter**, which routes to any supported model (Claude, GPT, etc.) with a single API key. The model is configured via environment variable, with a default.
 

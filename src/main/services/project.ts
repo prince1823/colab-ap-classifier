@@ -147,16 +147,18 @@ export async function getMetadata(): Promise<ProjectMetadata> {
 
   // ---- company_context -------------------------------------------------
   const ccRow = await databaseService.get<{
+    company_name: string | null;
     industry: string | null;
     sector: string | null;
     description: string | null;
     business_focus: string | null;
     procurement_nuances: string | null;
-  }>('SELECT industry, sector, description, business_focus, procurement_nuances FROM company_context WHERE id = 1');
+  }>('SELECT company_name, industry, sector, description, business_focus, procurement_nuances FROM company_context WHERE id = 1');
 
   let companyContext: CompanyContext | null = null;
   if (ccRow && ccRow.industry) {
     companyContext = {
+      companyName: ccRow.company_name ?? undefined,
       industry: ccRow.industry,
       sector: ccRow.sector ?? undefined,
       description: ccRow.description ?? undefined,
@@ -229,13 +231,15 @@ export async function updateMetadata(
     const cc = updates.companyContext;
     await databaseService.run(
       `UPDATE company_context
-       SET industry = ?,
+       SET company_name = ?,
+           industry = ?,
            sector = ?,
            description = ?,
            business_focus = ?,
            procurement_nuances = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = 1`,
+      cc.companyName ?? null,
       cc.industry,
       cc.sector ?? null,
       cc.description ?? null,

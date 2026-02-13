@@ -45,6 +45,7 @@ Company information. Single row per project.
 ```sql
 CREATE TABLE company_context (
   id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  company_name VARCHAR,
   industry VARCHAR,
   sector VARCHAR,
   description TEXT,

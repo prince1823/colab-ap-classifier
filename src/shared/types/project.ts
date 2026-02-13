@@ -1,6 +1,7 @@
 import type { CanonicalColumnMapping } from './canonicalization';
 
 export interface CompanyContext {
+  companyName?: string;
   industry: string;
   sector?: string;
   description?: string;

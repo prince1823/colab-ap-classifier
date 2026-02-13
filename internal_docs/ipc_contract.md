@@ -954,6 +954,7 @@ These types are used across multiple channels. Full definitions provided here fo
 
 ```typescript
 interface CompanyContext {
+  companyName?: string;
   industry: string;
   sector?: string;
   description?: string;

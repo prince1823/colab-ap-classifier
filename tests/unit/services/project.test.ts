@@ -266,6 +266,32 @@ describe('ProjectService', () => {
       expect(metadata.companyContext).toEqual(companyContext);
     });
 
+    it('should update and retrieve company context with companyName', async () => {
+      const companyContext = {
+        companyName: 'Acme Corp',
+        industry: 'Manufacturing',
+        sector: 'Industrial Equipment',
+      };
+
+      await updateMetadata({ companyContext });
+      const metadata = await getMetadata();
+
+      expect(metadata.companyContext).toEqual(companyContext);
+      expect(metadata.companyContext!.companyName).toBe('Acme Corp');
+    });
+
+    it('should return undefined companyName when not set', async () => {
+      const companyContext = {
+        industry: 'Tech',
+      };
+
+      await updateMetadata({ companyContext });
+      const metadata = await getMetadata();
+
+      expect(metadata.companyContext!.industry).toBe('Tech');
+      expect(metadata.companyContext!.companyName).toBeUndefined();
+    });
+
     it('should update and retrieve tail spend threshold', async () => {
       await updateMetadata({ tailSpendThreshold: 25000 });
       const metadata = await getMetadata();

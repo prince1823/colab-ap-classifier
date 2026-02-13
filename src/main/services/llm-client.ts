@@ -46,7 +46,7 @@ const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
   openai: {
     url: 'https://api.openai.com/v1/chat/completions',
     format: 'openai',
-    defaultModel: 'gpt-4o',
+    defaultModel: 'gpt-4o-mini',
   },
   openrouter: {
     url: 'https://openrouter.ai/api/v1/chat/completions',

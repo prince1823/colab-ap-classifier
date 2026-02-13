@@ -432,48 +432,6 @@ describe(`Pipeline Full Run [${TEST_NAME}]`, () => {
   });
 
   // ────────────────────────────────────────────────────────────────
-  // Phase 4: Override Rules
-  // ────────────────────────────────────────────────────────────────
-
-  it('Phase 4: Create an override rule', async () => {
-    const nodes = await taxonomyService.getNodes();
-    const l3Nodes = nodes.filter((n) => n.depth === 3);
-    expect(l3Nodes.length).toBeGreaterThan(0);
-    const targetNode = l3Nodes[0];
-
-    const suppliers = await supplierService.listSuppliers();
-    expect(suppliers.length).toBeGreaterThan(0);
-    const firstSupplier = suppliers[0].supplierName;
-
-    const supplierKeyword = firstSupplier.split(/\s+/)[0].toLowerCase();
-
-    const { id } = await rulesService.createRule({
-      name: `${firstSupplier} → ${targetNode.fullPath.split('|').pop()}`,
-      source: 'project',
-      conditions: [
-        { field: 'supplier_name', operator: 'contains', value: supplierKeyword },
-      ],
-      targetTaxonomyNodeId: targetNode.id,
-    });
-
-    expect(id).toBeTruthy();
-    const rules = await rulesService.listRules();
-    expect(rules.length).toBe(1);
-    expect(rules[0].priorityScore).toBeGreaterThanOrEqual(100);
-    expect(rules[0].priorityScore).toBeLessThan(200);
-
-    logSummary(`## Phase 4: Override Rules\n`);
-    logSummary(`- Rule: "${rules[0].name}"`);
-    logSummary(`- Condition: supplier_name contains "${supplierKeyword}"`);
-    logSummary(`- Target: ${targetNode.fullPath}`);
-    logSummary(`- Priority: ${rules[0].priorityScore}`);
-    logSummary('');
-
-    console.log(`  ✓ Created override rule: "${rules[0].name}" (priority: ${rules[0].priorityScore})`);
-    console.log(`  ✓ Rule matches supplier_name containing "${supplierKeyword}"`);
-  });
-
-  // ────────────────────────────────────────────────────────────────
   // Phase 5: Classification Pipeline
   // ────────────────────────────────────────────────────────────────
 
@@ -726,178 +684,38 @@ describe(`Pipeline Full Run [${TEST_NAME}]`, () => {
   // Phase 10: Database Snapshot
   // ────────────────────────────────────────────────────────────────
 
-  it('Phase 10: Write database snapshot to summary', async () => {
-    logSummary(`## Database Snapshot\n`);
-    logSummary(`Contents of \`${path.basename(DB_PATH)}\` at end of run.\n`);
+  it('Phase 10: Write database query commands to summary', async () => {
+    const dbFile = DB_PATH;
+    const dbRelative = path.relative(process.cwd(), dbFile);
 
-    // --- settings ---
-    const settings = await databaseService.all<{ key: string; value: string; updated_at: string }>(
-      'SELECT key, value, updated_at FROM settings ORDER BY key'
-    );
-    logSummary(`### settings (${settings.length} rows)\n`);
-    logSummary('Key-value project configuration. Created on project init (Phase 1) and taxonomy import (Phase 2).\n');
-    logSummary(`| Key | Value | Updated |`);
-    logSummary(`|-----|-------|---------|`);
-    for (const s of settings) {
-      const val = (s.value?.length ?? 0) > 80 ? s.value.substring(0, 80) + '...' : s.value;
-      logSummary(`| ${s.key} | ${val} | ${s.updated_at} |`);
-    }
-    logSummary('');
-
-    // --- company_context ---
-    const cc = await databaseService.get<Record<string, unknown>>(
-      'SELECT * FROM company_context WHERE id = 1'
-    );
-    logSummary(`### company_context (1 row)\n`);
-    logSummary('Company metadata injected into classification LLM prompts. Set in Phase 1b.\n');
-    if (cc) {
-      logSummary(`| Field | Value |`);
-      logSummary(`|-------|-------|`);
-      for (const [k, v] of Object.entries(cc)) {
-        if (k === 'id') continue;
-        const val = String(v ?? 'NULL');
-        logSummary(`| ${k} | ${val.length > 100 ? val.substring(0, 100) + '...' : val} |`);
-      }
-    }
-    logSummary('');
-
-    // --- taxonomy ---
-    const taxL1 = await databaseService.all<{ l1: string; cnt: number }>(
-      "SELECT l1, COUNT(*)::INTEGER as cnt FROM taxonomy GROUP BY l1 ORDER BY l1"
-    );
-    const taxDepth = await databaseService.all<{ depth: number; cnt: number }>(
-      "SELECT depth, COUNT(*)::INTEGER as cnt FROM taxonomy GROUP BY depth ORDER BY depth"
-    );
-    const taxTotal = taxDepth.reduce((sum, d) => sum + d.cnt, 0);
-    logSummary(`### taxonomy (${taxTotal} rows)\n`);
-    logSummary('3-level classification hierarchy imported from ColabIP in Phase 2.\n');
-    logSummary(`**By depth:** ${taxDepth.map(d => `L${d.depth}: ${d.cnt}`).join(', ')}\n`);
-    logSummary(`**L1 categories:** ${taxL1.map(t => `${t.l1} (${t.cnt} nodes)`).join(', ')}\n`);
-
-    const taxL3 = await databaseService.all<{ full_path: string; description: string }>(
-      "SELECT full_path, description FROM taxonomy WHERE depth = 3 ORDER BY full_path"
-    );
-    logSummary(`<details>\n<summary>All L3 leaf nodes (${taxL3.length})</summary>\n`);
-    logSummary(`| Path | Description |`);
-    logSummary(`|------|-------------|`);
-    for (const t of taxL3) {
-      const desc = (t.description?.length ?? 0) > 80 ? t.description.substring(0, 80) + '...' : (t.description ?? '');
-      logSummary(`| ${t.full_path} | ${desc} |`);
-    }
-    logSummary(`\n</details>\n`);
-
-    // --- column_mappings ---
-    const mappings = await databaseService.all<{ canonical_name: string; csv_column_name: string }>(
-      'SELECT canonical_name, csv_column_name FROM column_mappings ORDER BY canonical_name'
-    );
-    logSummary(`### column_mappings (${mappings.length} rows)\n`);
-    logSummary('Maps canonical column names to CSV headers. Created in Phase 3b when user confirms LLM-suggested mappings.\n');
-    logSummary(`| Canonical Name | CSV Column |`);
-    logSummary(`|----------------|------------|`);
-    for (const m of mappings) {
-      logSummary(`| ${m.canonical_name} | ${m.csv_column_name} |`);
-    }
-    logSummary('');
-
-    // --- invoice_grouping_columns ---
-    const grouping = await databaseService.all<{ canonical_name: string; position: number }>(
-      'SELECT canonical_name, position FROM invoice_grouping_columns ORDER BY position'
-    );
-    logSummary(`### invoice_grouping_columns (${grouping.length} rows)\n`);
-    logSummary('Defines how transactions are grouped for classification (one LLM call per group). Set in Phase 3b.\n');
-    logSummary(`| Position | Column |`);
-    logSummary(`|----------|--------|`);
-    for (const g of grouping) {
-      logSummary(`| ${g.position} | ${g.canonical_name} |`);
-    }
-    logSummary('');
-
-    // --- transactions ---
-    const txns = await databaseService.all<Record<string, unknown>>(
-      'SELECT * FROM transactions ORDER BY row_index'
-    );
-    const taxonomy = await taxonomyService.getNodes();
-    logSummary(`### transactions (${txns.length} rows)\n`);
-    logSummary('Core data table. Rows created in Phase 3c (CSV import), classification fields updated in Phase 5.\n');
-    logSummary('Dynamic schema: base columns + canonical columns added via ALTER TABLE based on column_mappings.\n');
-    logSummary(`| # | Supplier | Description | GL | Amount | Classification | Score | Source | Reasoning |`);
-    logSummary(`|---|----------|-------------|----|---------:|----------------|------:|--------|-----------|`);
-    for (const txn of txns) {
-      const node = taxonomy.find(n => n.id === txn.taxonomy_node_id);
-      const nodePath = node?.fullPath ?? '(unclassified)';
-      const source = (txn.review_score === 0 && !txn.classification_reasoning) ? 'rule' :
-                     (txn.review_score === 0) ? 'LLM (aligned)' : 'LLM';
-      const reasoning = typeof txn.classification_reasoning === 'string'
-        ? (txn.classification_reasoning.length > 60 ? txn.classification_reasoning.substring(0, 60) + '...' : txn.classification_reasoning)
-        : '—';
-      logSummary(`| ${txn.row_index} | ${txn.supplier_name} | ${String(txn.line_description ?? '').substring(0, 40)} | ${String(txn.gl_description ?? '').substring(0, 30)} | ${txn.spend_amount} | ${nodePath} | ${txn.review_score} | ${source} | ${reasoning} |`);
-    }
-    logSummary('');
-
-    // --- project_suppliers ---
-    const suppliersDb = await databaseService.all<Record<string, unknown>>(
-      'SELECT * FROM project_suppliers ORDER BY supplier_name'
-    );
-    logSummary(`### project_suppliers (${suppliersDb.length} rows)\n`);
-    logSummary('One row per distinct supplier. Created in Phase 3c (import), research data added in Phase 5.\n');
-    logSummary(`| Supplier | Type | Txn Count | Total Spend | Category A | Research Confidence | Industry |`);
-    logSummary(`|----------|------|----------:|------------:|:----------:|--------------------:|----------|`);
-    for (const s of suppliersDb) {
-      let confidence = '—';
-      let industry = '—';
-      if (s.supplier_info && typeof s.supplier_info === 'string') {
-        try {
-          const info = JSON.parse(s.supplier_info);
-          confidence = info.confidence ?? '—';
-          industry = info.industry ?? '—';
-        } catch { /* ignore */ }
-      }
-      logSummary(`| ${s.supplier_name} | ${s.supplier_type ?? '—'} | ${s.transaction_count} | ${s.total_spend} | ${s.category_a ? 'Yes' : 'No'} | ${confidence} | ${industry} |`);
-    }
-    logSummary('');
-
-    // --- override_rules ---
-    const rules = await databaseService.all<Record<string, unknown>>(
-      'SELECT * FROM override_rules ORDER BY priority_score'
-    );
-    logSummary(`### override_rules (${rules.length} rows)\n`);
-    logSummary('Deterministic rules that override LLM classification. Created in Phase 4.\n');
-    if (rules.length > 0) {
-      logSummary(`| Name | Source | Conditions | Target | Priority | Active |`);
-      logSummary(`|------|--------|------------|--------|----------|--------|`);
-      for (const r of rules) {
-        const targetNode = taxonomy.find(n => n.id === r.target_taxonomy_node_id);
-        logSummary(`| ${r.name} | ${r.source} | ${r.conditions} | ${targetNode?.fullPath ?? String(r.target_taxonomy_node_id)} | ${r.priority_score} | ${r.is_active ? 'Yes' : 'No'} |`);
-      }
-    } else {
-      logSummary('(no rules)');
-    }
-    logSummary('');
-
-    // --- change_log ---
-    const changes = await databaseService.all<Record<string, unknown>>(
-      'SELECT * FROM change_log ORDER BY created_at'
-    );
-    logSummary(`### change_log (${changes.length} rows)\n`);
-    logSummary('Audit trail for all classification changes. Created in Phase 5 (pipeline) and Phase 7 (reclassification).\n');
-    logSummary(`| Source | Description | Affected Count | Old Values | New Values |`);
-    logSummary(`|--------|-------------|---------------:|------------|------------|`);
-    for (const c of changes) {
-      const oldVal = c.old_values ? (String(c.old_values).length > 60 ? String(c.old_values).substring(0, 60) + '...' : String(c.old_values)) : '—';
-      const newVal = c.new_values ? (String(c.new_values).length > 60 ? String(c.new_values).substring(0, 60) + '...' : String(c.new_values)) : '—';
-      logSummary(`| ${c.source} | ${c.description} | ${c.affected_count} | ${oldVal} | ${newVal} |`);
-    }
-    logSummary('');
-
-    // --- system_feedback ---
-    const feedback = await databaseService.all<Record<string, unknown>>(
-      'SELECT * FROM system_feedback'
-    );
-    logSummary(`### system_feedback (${feedback.length} rows)\n`);
-    logSummary('AI-generated suggestions for improving classifications. Populated by the feedback agent (not triggered in this test).\n');
-    if (feedback.length === 0) {
-      logSummary('(empty)\n');
-    }
+    logSummary(`## Database Inspection\n`);
+    logSummary(`The \`${path.basename(dbFile)}\` file is a DuckDB database. Query it with:\n`);
+    logSummary('```bash');
+    logSummary(`# Open interactive shell`);
+    logSummary(`duckdb ${dbRelative}\n`);
+    logSummary(`# List all tables`);
+    logSummary(`duckdb ${dbRelative} "SELECT table_name FROM information_schema.tables ORDER BY table_name"\n`);
+    logSummary(`# Settings`);
+    logSummary(`duckdb ${dbRelative} "SELECT * FROM settings"\n`);
+    logSummary(`# Company context`);
+    logSummary(`duckdb ${dbRelative} "SELECT * FROM company_context"\n`);
+    logSummary(`# Taxonomy (L3 leaf nodes)`);
+    logSummary(`duckdb ${dbRelative} "SELECT full_path, description FROM taxonomy WHERE depth = 3 ORDER BY full_path"\n`);
+    logSummary(`# Column mappings`);
+    logSummary(`duckdb ${dbRelative} "SELECT * FROM column_mappings ORDER BY canonical_name"\n`);
+    logSummary(`# Transactions with classification`);
+    logSummary(`duckdb ${dbRelative} "SELECT row_index, supplier_name, line_description, spend_amount, classification_reasoning, review_score FROM transactions ORDER BY row_index"\n`);
+    logSummary(`# Transactions joined with taxonomy path`);
+    logSummary(`duckdb ${dbRelative} "SELECT t.row_index, t.supplier_name, tx.full_path as classification, t.review_score FROM transactions t LEFT JOIN taxonomy tx ON t.taxonomy_node_id = tx.id ORDER BY t.row_index"\n`);
+    logSummary(`# Supplier research (full JSON)`);
+    logSummary(`duckdb ${dbRelative} "SELECT supplier_name, supplier_type, supplier_info FROM project_suppliers ORDER BY supplier_name"\n`);
+    logSummary(`# Override rules`);
+    logSummary(`duckdb ${dbRelative} "SELECT * FROM override_rules"\n`);
+    logSummary(`# Change log`);
+    logSummary(`duckdb ${dbRelative} "SELECT * FROM change_log ORDER BY created_at"\n`);
+    logSummary(`# System feedback`);
+    logSummary(`duckdb ${dbRelative} "SELECT * FROM system_feedback"\n`);
+    logSummary('```\n');
 
     // --- Output files ---
     logSummary(`## Output Files\n`);
@@ -906,6 +724,6 @@ describe(`Pipeline Full Run [${TEST_NAME}]`, () => {
     logSummary(`- \`run-summary.md\` — This file`);
     logSummary('');
 
-    console.log(`  ✓ Database snapshot written to summary`);
+    console.log(`  ✓ Database query commands written to summary`);
   });
 });

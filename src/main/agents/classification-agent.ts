@@ -299,6 +299,15 @@ export function parseResponse(responseText: string): ClassificationResult {
     data = data.transactions[0] as Record<string, unknown>;
   }
 
+  // Unwrap single-element arrays — some LLMs return classificationPath as
+  // ["Non Clinical|Telecom|Telecom"] instead of a plain string.
+  for (const key of ['classificationPath', 'classification_path', 'path', 'taxonomyPath', 'taxonomy_path']) {
+    const val = data[key];
+    if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'string') {
+      data[key] = val[0];
+    }
+  }
+
   // Try multiple field name variations for classification path
   const classificationPath =
     (typeof data.classificationPath === 'string' && data.classificationPath) ||

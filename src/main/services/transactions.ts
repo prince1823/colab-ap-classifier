@@ -113,7 +113,7 @@ export async function getStats(): Promise<TransactionStats> {
   let totalSpend = 0;
   if (hasSpend) {
     const spendResult = await databaseService.get<{ total: number }>(
-      'SELECT COALESCE(SUM(TRY_CAST(spend_amount AS DOUBLE)), 0) as total FROM transactions'
+      'SELECT COALESCE(SUM(CAST(spend_amount AS DOUBLE)), 0) as total FROM transactions'
     );
     totalSpend = spendResult?.total || 0;
   }

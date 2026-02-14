@@ -17,8 +17,7 @@ let loaded = false;
 export function loadEnv(rootDir?: string): void {
   if (loaded) return;
 
-  // __dirname is dist/main/main/ after compilation, so go up 3 levels to project root
-  const root = rootDir ?? path.resolve(__dirname, '..', '..', '..');
+  const root = rootDir ?? path.resolve(__dirname, '..', '..');
   const envPath = path.join(root, '.env');
 
   if (!fs.existsSync(envPath)) return;

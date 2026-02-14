@@ -9,14 +9,14 @@ export function registerHandler<T>(
   channel: string,
   handler: (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<T> | T
 ): void {
-  try { console.log(`[IPC] Registering handler: ${channel}`); } catch { /* EPIPE safe */ }
+  console.log(`[IPC] Registering handler: ${channel}`);
   ipcMain.handle(channel, async (event, ...args): Promise<IPCResponse<T>> => {
     try {
       const data = await handler(event, ...args);
       return { success: true, data };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      try { console.error(`[IPC] Error in ${channel}:`, message); } catch { /* EPIPE safe */ }
+      console.error(`[IPC] Error in ${channel}:`, message);
       return { success: false, error: message };
     }
   });

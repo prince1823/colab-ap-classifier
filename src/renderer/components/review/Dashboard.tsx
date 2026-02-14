@@ -6,6 +6,7 @@ import ActiveFilters from './ActiveFilters'
 import ReclassificationLoader from './ReclassificationLoader'
 import SystemFeedbackModal from './SystemFeedbackModal'
 import { Table, X, ChevronDown, Sparkles, Plus } from 'lucide-react'
+import { ipc } from '../../lib/ipc'
 import '../../styles/Dashboard.css'
 import '../../styles/Tabs.css'
 
@@ -99,11 +100,11 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     costCenter: [],
     supplierCategory: [],
     country: [],
-    clientSpendCategory: []
+    lineDescription: []
   })
   const [tables, setTables] = useState(() => [
     { id: 'vendor', title: 'supplier_name', column: 'supplier_name', isHierarchical: false, collapsed: false },
-    { id: 'commodity', title: 'Client Spend Category Name', column: 'Client Spend Category Name', isHierarchical: false, collapsed: false },
+    { id: 'commodity', title: 'line_description', column: 'line_description', isHierarchical: false, collapsed: false },
     { id: 'gl', title: 'gl_description', column: 'gl_description', isHierarchical: false, collapsed: false },
     // 4th table: hierarchical taxonomy based on classification_path.
     // Clicking L1 / L2 / L3 here will update the global classification filters
@@ -157,7 +158,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     const costCenters = new Set()
     const supplierCategories = new Set()
     const countries = new Set()
-    const clientSpendCategories = new Set()
+    const lineDescriptions = new Set()
 
     transactions.forEach(row => {
       if (row.supplier_name) suppliers.add(row.supplier_name)
@@ -176,7 +177,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       if (row['Cost Center Name']) costCenters.add(row['Cost Center Name'])
       if (row['Supplier Category']) supplierCategories.add(row['Supplier Category'])
       if (row.Country) countries.add(row.Country)
-      if (row['Client Spend Category Name']) clientSpendCategories.add(row['Client Spend Category Name'])
+      if (row.line_description) lineDescriptions.add(row.line_description)
     })
 
     return {
@@ -193,7 +194,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       costCenters: Array.from(costCenters).sort().slice(0, 50),
       supplierCategories: Array.from(supplierCategories).sort(),
       countries: Array.from(countries).sort(),
-      clientSpendCategories: Array.from(clientSpendCategories).sort().slice(0, 50)
+      lineDescriptions: Array.from(lineDescriptions).sort().slice(0, 50)
     }
   }, [transactions])
 
@@ -237,8 +238,8 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       newFilters.country = filterState.country
     }
 
-    if (Array.isArray(filterState.clientSpendCategory) && filterState.clientSpendCategory.length > 0) {
-      newFilters.clientSpendCategory = filterState.clientSpendCategory
+    if (Array.isArray(filterState.lineDescription) && filterState.lineDescription.length > 0) {
+      newFilters.lineDescription = filterState.lineDescription
     }
 
     // Update filters - this will trigger re-filtering in MultiTableSystem
@@ -257,7 +258,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     filterState.costCenter,
     filterState.supplierCategory,
     filterState.country,
-    filterState.clientSpendCategory
+    filterState.lineDescription
   ])
 
   const clearFilters = useCallback(() => {
@@ -275,7 +276,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       costCenter: [],
       supplierCategory: [],
       country: [],
-      clientSpendCategory: []
+      lineDescription: []
     })
     setActiveFilters({})
     setTableLocalFilters({})
@@ -304,7 +305,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       supplier: 'supplier_name',
       glDescription: 'gl_description',
       supplierCategory: 'Supplier Category',
-      clientSpendCategory: 'Client Spend Category Name',
+      lineDescription: 'line_description',
       country: 'Country',
       company: 'company',
       costCenter: 'Cost Center Name',
@@ -333,7 +334,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       'costCenter',
       'supplierCategory',
       'country',
-      'clientSpendCategory',
+      'lineDescription',
     ])
 
     if (uiKeys.has(filterKey)) {
@@ -487,7 +488,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                 {renderDropdownFilter('costCenter', 'Cost Center', filterOptions.costCenters)}
                 {renderDropdownFilter('supplierCategory', 'Supplier Category', filterOptions.supplierCategories)}
                 {renderDropdownFilter('country', 'Country', filterOptions.countries)}
-                {renderDropdownFilter('clientSpendCategory', 'Client Spend Category', filterOptions.clientSpendCategories)}
+                {renderDropdownFilter('lineDescription', 'Line Description', filterOptions.lineDescriptions)}
               </>
             )
           })()}
@@ -584,8 +585,8 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
         if (!filterState.country.includes(row.Country)) return false
       }
 
-      if (Array.isArray(filterState.clientSpendCategory) && filterState.clientSpendCategory.length > 0) {
-        if (!filterState.clientSpendCategory.includes(row['Client Spend Category Name'])) return false
+      if (Array.isArray(filterState.lineDescription) && filterState.lineDescription.length > 0) {
+        if (!filterState.lineDescription.includes(row.line_description)) return false
       }
 
       return true
@@ -849,6 +850,8 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                       {focusedClassificationPath.split('|').filter(Boolean).join(' → ')}
                     </span>
                   </>
+                ) : selectedRows.length > 0 ? (
+                  <span className="current-classification-placeholder" style={{ color: '#9ca3af', fontStyle: 'italic' }}>Unclassified (no classification assigned yet)</span>
                 ) : (
                   <span className="current-classification-placeholder">Please select a supplier to see its current classification</span>
                 )}
@@ -1131,6 +1134,40 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                           return updated
                         })
                       }
+
+                    // Persist reclassification to backend via IPC
+                    try {
+                      // Resolve taxonomy node ID from the target path
+                      const taxonomyNodes = await ipc.taxonomy.getNodes()
+                      // The ClassificationTree prepends 'root|' — strip it for matching
+                      const cleanPath = targetPath.replace(/^root\|/, '')
+                      const targetNode = taxonomyNodes.find((n) => n.fullPath === cleanPath)
+
+                      if (targetNode) {
+                        // Extract transaction IDs from the rows being reclassified
+                        const transactionIds = rows
+                          .map((row) => row.id)
+                          .filter((id) => id != null)
+
+                        if (transactionIds.length > 0) {
+                          await ipc.transactions.reclassify(transactionIds, targetNode.id)
+                          console.log(`[Reclassify] Persisted ${transactionIds.length} rows to backend (node: ${targetNode.id})`)
+                        }
+                      } else {
+                        console.warn(`[Reclassify] No taxonomy node found for path: ${cleanPath}`)
+                      }
+                    } catch (persistErr) {
+                      console.error('[Reclassify] Failed to persist to backend:', persistErr)
+                    }
+
+                    // Refresh transactions from backend to get updated classification paths
+                    if (refreshTransactions) {
+                      try {
+                        await refreshTransactions()
+                      } catch (refreshErr) {
+                        console.error('[Reclassify] Failed to refresh transactions:', refreshErr)
+                      }
+                    }
 
                     // Generate feedback suggestions if enabled
                     if (systemFeedbackEnabled) {

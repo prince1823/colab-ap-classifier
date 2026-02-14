@@ -2,6 +2,10 @@
 import { loadEnv } from './load-env';
 loadEnv();
 
+// Prevent EPIPE errors from crashing the app when stdout/stderr pipe breaks
+process.stdout?.on?.('error', () => {});
+process.stderr?.on?.('error', () => {});
+
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import fs from 'fs';

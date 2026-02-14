@@ -61,6 +61,15 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   ...deriveState(null, 0, null),
 
   createProject: async (name: string) => {
+    // Always close backend project (may be open even if frontend metadata was never set)
+    try { await ipc.project.close() } catch { /* already closed */ }
+    set({
+      projectMetadata: null,
+      classifiedRows: 0,
+      classificationProgress: null,
+      ...deriveState(null, 0, null),
+    })
+
     await ipc.project.new(name)
     const metadata = await ipc.project.getMetadata()
     set({
@@ -72,8 +81,36 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   loadProject: async (filePath: string) => {
+    // Always close backend project (may be open even if frontend metadata was never set)
+    try { await ipc.project.close() } catch { /* already closed */ }
+    set({
+      projectMetadata: null,
+      classifiedRows: 0,
+      classificationProgress: null,
+      ...deriveState(null, 0, null),
+    })
+
     await ipc.project.open(filePath)
-    const metadata = await ipc.project.getMetadata()
+
+    // Fetch metadata — may fail on older DBs with schema mismatches
+    let metadata: ProjectMetadata | null = null
+    try {
+      metadata = await ipc.project.getMetadata()
+    } catch (e) {
+      console.warn('[loadProject] getMetadata failed, using fallback:', e)
+      // Build a minimal metadata object so the project still opens
+      const name = filePath.split('/').pop()?.replace(/\.c91$/, '') ?? 'Unknown'
+      metadata = {
+        name,
+        filePath,
+        companyContext: null,
+        columnMappings: null,
+        invoiceGroupingColumns: null,
+        tailSpendThreshold: 10000,
+        taxonomyName: null,
+        createdAt: null,
+      }
+    }
 
     let classifiedRows = 0
     try {
@@ -101,11 +138,16 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       // No classification running
     }
 
+    const derived = deriveState(metadata, classifiedRows, progress)
+    console.log('[loadProject] metadata:', JSON.stringify(metadata, null, 2))
+    console.log('[loadProject] classifiedRows:', classifiedRows)
+    console.log('[loadProject] derived:', JSON.stringify(derived))
+
     set({
       projectMetadata: metadata,
       classifiedRows,
       classificationProgress: progress,
-      ...deriveState(metadata, classifiedRows, progress),
+      ...derived,
     })
   },
 
@@ -125,14 +167,29 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
   refreshMetadata: async () => {
     try {
+      // Guard: only refresh if a project is actually open
+      const isOpen = await ipc.project.isOpen()
+      if (!isOpen) return
+
       const metadata = await ipc.project.getMetadata()
-      const { classifiedRows, classificationProgress } = get()
+      if (!metadata) return // Keep existing state if metadata comes back null
+
+      // Refresh stats — keep previous classifiedRows if stats call fails
+      let classifiedRows = get().classifiedRows
+      try {
+        const stats = await ipc.transactions.stats()
+        classifiedRows = stats.classifiedRows
+      } catch {
+        // No transactions yet — keep previous value
+      }
+      const { classificationProgress } = get()
       set({
         projectMetadata: metadata,
+        classifiedRows,
         ...deriveState(metadata, classifiedRows, classificationProgress),
       })
     } catch {
-      // Project might not be open
+      // IPC failed — keep existing state intact, don't reset anything
     }
   },
 

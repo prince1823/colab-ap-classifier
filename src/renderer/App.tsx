@@ -53,7 +53,14 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="workflow/review" element={<ReviewPage />} />
+          <Route
+            path="workflow/review"
+            element={
+              <ProtectedRoute>
+                <ReviewPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="workflow/output"
             element={

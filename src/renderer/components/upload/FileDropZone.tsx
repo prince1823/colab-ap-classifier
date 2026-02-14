@@ -10,14 +10,16 @@ export default function FileDropZone({ onFileSelected }: Props) {
   const [selecting, setSelecting] = useState(false)
 
   const handleClick = async () => {
+    console.log('[FileDropZone] Click — calling ipc.upload.selectFile()...')
     setSelecting(true)
     try {
       const filePath = await ipc.upload.selectFile()
+      console.log('[FileDropZone] selectFile returned:', filePath)
       if (filePath) {
         onFileSelected(filePath)
       }
     } catch (e) {
-      console.error('Failed to select file:', e)
+      console.error('[FileDropZone] Failed to select file:', e)
     } finally {
       setSelecting(false)
     }

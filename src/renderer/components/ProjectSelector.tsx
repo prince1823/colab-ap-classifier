@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ChevronDownIcon, FolderOpenIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
@@ -6,13 +7,28 @@ import { useWorkflowStore } from '../stores/workflowStore'
 import { ipc } from '../lib/ipc'
 import type { RecentProject } from '../../shared/types/project'
 
+/**
+ * Determine the best page to navigate to based on the current project state.
+ * Navigates to the furthest completed workflow step.
+ */
+function getBestRoute(): string {
+  const s = useWorkflowStore.getState()
+  if (s.hasClassifiedData) return '/workflow/review'
+  if (s.hasCanonicalizedData && s.hasTaxonomy) return '/workflow/classification'
+  if (s.hasCanonicalizedData) return '/workflow/data-review'
+  if (s.hasUploadedData) return '/workflow/canonicalization'
+  return '/workflow/upload'
+}
+
 export default function ProjectSelector() {
   const { projectMetadata, loadProject, createProject, closeProject } = useWorkflowStore()
+  const navigate = useNavigate()
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [openError, setOpenError] = useState<string | null>(null)
 
   useEffect(() => {
     ipc.recentProjects.list().then(setRecentProjects).catch(() => {})
@@ -38,17 +54,19 @@ export default function ProjectSelector() {
       const filePath = await ipc.project.selectOpenPath()
       if (filePath) {
         await loadProject(filePath)
+        navigate(getBestRoute())
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to open project')
+      setOpenError(e instanceof Error ? e.message : 'Failed to open project')
     }
   }
 
   const handleOpenRecent = async (path: string) => {
     try {
       await loadProject(path)
+      navigate(getBestRoute())
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to open project')
+      setOpenError(e instanceof Error ? e.message : 'Failed to open project')
     }
   }
 
@@ -125,6 +143,7 @@ export default function ProjectSelector() {
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
+      {/* New Project Dialog */}
       <Dialog.Root open={showNewDialog} onOpenChange={setShowNewDialog}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
@@ -164,6 +183,39 @@ export default function ProjectSelector() {
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Open Project Error Dialog */}
+      <Dialog.Root open={!!openError} onOpenChange={(open) => { if (!open) setOpenError(null) }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-xl">
+            <Dialog.Title className="text-lg font-semibold text-red-700">
+              Failed to Open Project
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm text-gray-600">
+              {openError}
+            </Dialog.Description>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setOpenError(null)}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+              >
+                OK
+              </button>
+              <button
+                onClick={() => {
+                  setOpenError(null)
+                  handleOpenProject()
+                }}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Try Another
               </button>
             </div>
           </Dialog.Content>

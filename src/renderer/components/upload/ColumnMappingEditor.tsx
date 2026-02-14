@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { CanonicalColumnMapping, CanonicalizationResult } from '../../../shared/types/canonicalization'
+import { CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
 
 interface Props {
   suggestion: CanonicalizationResult
@@ -11,23 +12,22 @@ interface Props {
 
 const UNMAPPED = '__unmapped__'
 
-// Common aliases: canonical name → possible CSV column names (lowercase)
-const ALIASES: Record<string, string[]> = {
-  spend_amount: ['amount', 'invoice_amount', 'total_amount', 'net_amount', 'gross_amount', 'value', 'spend', 'total'],
-  supplier_name: ['supplier', 'vendor', 'vendor_name', 'payee', 'supplier name'],
-  line_description: ['line_item_description', 'line item description', 'description', 'item_description', 'line_desc'],
-  gl_description: ['gl_account_name', 'gl account name', 'gl_account', 'account_name', 'account name', 'gl account'],
-  gl_code: ['gl_account_code', 'gl account code', 'account_code', 'gl_number', 'account_number', 'gl code'],
-  invoice_date: ['invoice date', 'inv_date', 'date', 'doc_date', 'document_date'],
-  creation_date: ['creation date', 'created_date', 'created_at', 'entry_date'],
-  department: ['dept', 'department_name', 'dept_name', 'business_unit'],
-  company: ['company_name', 'entity', 'legal_entity', 'company code'],
-  cost_center: ['cost_center_name', 'cost center', 'cost center name', 'cc'],
-  po_number: ['purchase_order', 'po', 'po_num', 'po number', 'purchase order'],
-  supplier_address: ['vendor_address', 'supplier address', 'address'],
-  currency: ['currency_code', 'curr', 'ccy'],
-  memo: ['notes', 'comment', 'remarks', 'line_memo'],
-}
+// Build aliases map from shared canonical column definitions
+const ALIASES: Record<string, string[]> = Object.fromEntries(
+  CANONICAL_COLUMNS.map((col) => [
+    col.name,
+    col.aliases.map((a) => a.toLowerCase()),
+  ])
+)
+
+// Build a lookup for relevance badges
+const RELEVANCE_MAP: Record<string, string> = Object.fromEntries(
+  CANONICAL_COLUMNS.map((col) => [col.name, col.relevance])
+)
+
+const DESCRIPTION_MAP: Record<string, string> = Object.fromEntries(
+  CANONICAL_COLUMNS.map((col) => [col.name, col.description])
+)
 
 function autoMap(llmMappings: CanonicalColumnMapping, unmappedCanonical: string[], csvColumns: string[]): CanonicalColumnMapping {
   const result = { ...llmMappings }
@@ -53,6 +53,13 @@ function autoMap(llmMappings: CanonicalColumnMapping, unmappedCanonical: string[
   return result
 }
 
+const RELEVANCE_STYLES: Record<string, string> = {
+  critical: 'bg-red-100 text-red-700',
+  high: 'bg-orange-100 text-orange-700',
+  medium: 'bg-blue-100 text-blue-700',
+  low: 'bg-gray-100 text-gray-500',
+}
+
 export default function ColumnMappingEditor({
   suggestion,
   csvColumns,
@@ -64,10 +71,17 @@ export default function ColumnMappingEditor({
     autoMap(suggestion.mappings, suggestion.unmappedCanonicalColumns, csvColumns)
   )
 
+  // Track the suggestion identity to avoid re-render loops.
+  // Only re-run autoMap when the suggestion's underlying data actually changes.
+  const prevSuggestionKey = useRef<string>('')
   useEffect(() => {
+    const key = JSON.stringify(suggestion.mappings) + '|' + JSON.stringify(suggestion.unmappedCanonicalColumns)
+    if (key === prevSuggestionKey.current) return // No actual change — skip
+    prevSuggestionKey.current = key
     const enhanced = autoMap(suggestion.mappings, suggestion.unmappedCanonicalColumns, csvColumns)
     setMapping(enhanced)
     onMappingChange(enhanced)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestion])
 
   const handleChange = (canonicalName: string, csvColumn: string) => {
@@ -89,11 +103,8 @@ export default function ColumnMappingEditor({
     }
   }
 
-  const canonicalNames = Object.keys(suggestion.mappings)
-  const allCanonical = [
-    ...canonicalNames,
-    ...suggestion.unmappedCanonicalColumns.filter((c) => !canonicalNames.includes(c)),
-  ]
+  // Use all 14 canonical columns from shared definition, ordered by relevance
+  const allCanonical = CANONICAL_COLUMNS.map((col) => col.name)
 
   return (
     <div className="space-y-6">
@@ -116,24 +127,38 @@ export default function ColumnMappingEditor({
           <p className="mb-3 text-xs text-gray-500">{suggestion.reasoning}</p>
         )}
         <div className="space-y-2">
-          {allCanonical.map((canonicalName) => (
-            <div key={canonicalName} className="flex items-center gap-3">
-              <span className="w-48 text-sm font-medium text-gray-700">{canonicalName}</span>
-              <span className="text-gray-400">&rarr;</span>
-              <select
-                value={mapping[canonicalName] ?? UNMAPPED}
-                onChange={(e) => handleChange(canonicalName, e.target.value)}
-                className="flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value={UNMAPPED}>-- Not mapped --</option>
-                {csvColumns.map((col) => (
-                  <option key={col} value={col}>
-                    {col}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ))}
+          {allCanonical.map((canonicalName) => {
+            const relevance = RELEVANCE_MAP[canonicalName]
+            const description = DESCRIPTION_MAP[canonicalName]
+            return (
+              <div key={canonicalName} className="flex items-center gap-3">
+                <div className="w-52 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-700">{canonicalName}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${RELEVANCE_STYLES[relevance] || ''}`}>
+                      {relevance}
+                    </span>
+                  </div>
+                  {description && (
+                    <p className="text-[11px] text-gray-400">{description}</p>
+                  )}
+                </div>
+                <span className="text-gray-400">&rarr;</span>
+                <select
+                  value={mapping[canonicalName] ?? UNMAPPED}
+                  onChange={(e) => handleChange(canonicalName, e.target.value)}
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value={UNMAPPED}>-- Not mapped --</option>
+                  {csvColumns.map((col) => (
+                    <option key={col} value={col}>
+                      {col}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )
+          })}
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import ColumnMappingEditor from '../components/upload/ColumnMappingEditor'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
@@ -19,13 +19,44 @@ export default function CanonicalizationPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        // Always get fresh metadata from backend
         const metadata = await ipc.project.getMetadata()
-        const cols = await ipc.transactions.getColumns()
-        setColumns(cols)
+
         if (metadata?.columnMappings) {
           setMapping(metadata.columnMappings)
+
+          // The mapping values ARE the original CSV column names
+          // e.g. { supplier_name: "Vendor Name", spend_amount: "Total Cost" }
+          // Extract CSV column names from the mapping values
+          const csvColumnNames = Object.values(metadata.columnMappings)
+
+          // Also get all columns from transactions table to find any that aren't
+          // in the mapping (e.g. columns that weren't mapped to canonical fields)
+          try {
+            const dbCols = await ipc.transactions.getColumns()
+            // DB columns include both fixed columns (id, row_index, etc.)
+            // and canonical columns. The CSV column names are what we want
+            // to show. Any DB column NOT in the base set and NOT in the
+            // canonical mapping could be an extra column.
+            const BASE_COLS = ['id', 'row_index', 'invoice_group_key', 'taxonomy_node_id',
+              'review_score', 'classification_reasoning', 'created_at', 'updated_at']
+            const canonicalNames = Object.keys(metadata.columnMappings)
+            const extraCols = dbCols.filter(c => !BASE_COLS.includes(c) && !canonicalNames.includes(c))
+            // Combine CSV names + any extra columns
+            const allCsvColumns = [...new Set([...csvColumnNames, ...extraCols])]
+            setColumns(allCsvColumns)
+          } catch {
+            setColumns(csvColumnNames)
+          }
+        } else {
+          // No mappings saved yet — try to get columns from transactions table
+          try {
+            const cols = await ipc.transactions.getColumns()
+            setColumns(cols)
+          } catch {
+            setColumns([])
+          }
         }
+
         if (metadata?.invoiceGroupingColumns) {
           setGroupingColumns(metadata.invoiceGroupingColumns)
         }
@@ -36,17 +67,20 @@ export default function CanonicalizationPage() {
       }
     }
     load()
-  }, []) // Only run on mount — no stale metadata dependency
+  }, []) // Only run on mount
 
   // Build a pseudo CanonicalizationResult from existing mappings
-  const suggestion: CanonicalizationResult = {
+  // Memoize to prevent infinite re-render loops with ColumnMappingEditor's useEffect
+  const mappingKey = JSON.stringify(mapping)
+  const columnsKey = JSON.stringify(columns)
+  const suggestion: CanonicalizationResult = useMemo(() => ({
     mappings: mapping,
-    confidence: 'high',
+    confidence: 'high' as const,
     unmappedClientColumns: columns.filter((c) => !Object.values(mapping).includes(c)),
     importantUnmappedColumns: [],
     unmappedCanonicalColumns: [],
     reasoning: 'Loaded from current project settings.',
-  }
+  }), [mappingKey, columnsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async () => {
     setSaving(true)
@@ -74,7 +108,7 @@ export default function CanonicalizationPage() {
     )
   }
 
-  if (columns.length === 0 && !error) {
+  if (columns.length === 0 && Object.keys(mapping).length === 0 && !error) {
     return (
       <div className="p-6">
         <h2 className="text-lg font-semibold text-gray-900">Column Mappings</h2>

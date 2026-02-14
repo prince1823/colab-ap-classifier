@@ -27,6 +27,13 @@ export default function UploadPage() {
     refreshMetadata()
   }, [refreshMetadata])
 
+  // Sync showUploader when project changes (e.g. opening an existing project with data)
+  useEffect(() => {
+    if (hasUploadedData) {
+      setShowUploader(false)
+    }
+  }, [hasUploadedData])
+
   const handleFileSelected = async (path: string) => {
     setFilePath(path)
     setLoading(true)

@@ -4,6 +4,7 @@ import { useWorkflowStore } from '../stores/workflowStore'
 import type { CompanyContext } from '../../shared/types/project'
 
 const FIELDS: { key: keyof CompanyContext; label: string; placeholder: string; multiline?: boolean }[] = [
+  { key: 'companyName', label: 'Company Name', placeholder: 'e.g. Acme Corp, Global Industries' },
   { key: 'industry', label: 'Industry', placeholder: 'e.g. Manufacturing, Technology, Healthcare' },
   { key: 'sector', label: 'Sector', placeholder: 'e.g. Automotive, SaaS, Pharmaceuticals' },
   { key: 'description', label: 'Company Description', placeholder: 'Brief description of the company', multiline: true },
@@ -16,6 +17,7 @@ export default function CompanyContextPage() {
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
 
   const [form, setForm] = useState<CompanyContext>({
+    companyName: '',
     industry: '',
     sector: '',
     description: '',
@@ -29,6 +31,7 @@ export default function CompanyContextPage() {
   useEffect(() => {
     if (metadata?.companyContext) {
       setForm({
+        companyName: metadata.companyContext.companyName || '',
         industry: metadata.companyContext.industry || '',
         sector: metadata.companyContext.sector || '',
         description: metadata.companyContext.description || '',

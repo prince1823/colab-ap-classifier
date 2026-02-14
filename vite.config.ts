@@ -11,6 +11,10 @@ export default defineConfig({
   },
   root: './',
   publicDir: 'public',
+  build: {
+    // Don't wipe dist/ — tsc outputs main process + preload into dist/main/
+    emptyOutDir: false,
+  },
   server: {
     port: 5173,
   },

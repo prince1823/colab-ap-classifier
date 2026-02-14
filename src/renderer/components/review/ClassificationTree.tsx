@@ -4,10 +4,8 @@ import { ChevronRight, ChevronDown, Plus, Minus, Edit2, Trash2 } from 'lucide-re
 import { TABLE_ROW_TYPE, ITEM_TYPE } from './MultiTableSystem'
 import { buildTaxonomyTree, populateTreeWithTransactions } from '../../utils/taxonomyLoader'
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
+import { ipc } from '../../lib/ipc'
 import '../../styles/ClassificationTree.css'
-
-// Base URL for backend API (matched with UploadTab)
-const API_BASE_URL = 'http://localhost:8000/api/v1'
 
 const ColumnNode = ({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete }) => {
   const levelLabel = level > 0 ? `L${level}` : ''
@@ -192,57 +190,39 @@ const ClassificationTree = ({
   }, [getLocalStorageKey])
 
   // Load taxonomy paths:
-  // 1. Try to load taxonomy.yaml from backend API (when running)
-  // 2. Fall back to building paths from transaction data
-  // 3. In both cases, merge with any custom paths stored locally in this browser
+  // 1. Try IPC backend (Electron) to get taxonomy nodes
+  // 2. Fall back to extracting paths from transaction data
+  // 3. Merge with any custom paths stored locally in this browser
   useEffect(() => {
     const loadTaxonomy = async () => {
       setLoadingTaxonomy(true)
       try {
-        let basePaths = []
+        let basePaths: string[] = []
 
-        if (typeof window !== 'undefined') {
-          try {
-            const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 1500)
-
-            const resp = await fetch(
-              `${API_BASE_URL}/datasets/${datasetId}/taxonomy?foldername=${encodeURIComponent(foldername || 'default')}`,
-              { method: 'GET', signal: controller.signal }
-            )
-
-            clearTimeout(timeoutId)
-
-            if (resp.ok) {
-              const data = await resp.json()
-              const taxonomy = data.taxonomy || {}
-              const taxonomyList = Array.isArray(taxonomy.taxonomy) ? taxonomy.taxonomy : []
-              basePaths = taxonomyList.filter((p) => typeof p === 'string' && p.trim())
-              setTaxonomyData(taxonomy)
-              setBackendAvailable(true)
-            } else {
-              setBackendAvailable(false)
-            }
-          } catch (e) {
-            setBackendAvailable(false)
+        // Try loading taxonomy nodes from IPC backend
+        try {
+          const nodes = await ipc.taxonomy.getNodes()
+          if (nodes && nodes.length > 0) {
+            basePaths = nodes.map((n) => n.fullPath).filter((p) => p && p.trim())
+            setBackendAvailable(true)
           }
+        } catch (e) {
+          setBackendAvailable(false)
         }
 
+        // Fallback: extract classification paths from transaction data
         if (basePaths.length === 0) {
-          // Extract all unique classification paths from transactions
-          const pathsFromData = new Set()
+          const pathsFromData = new Set<string>()
           transactions.forEach(row => {
             const path = row.classification_path || row.taxonomy_path || ''
             if (path && path.trim()) {
               pathsFromData.add(path.trim())
             } else {
-              // Build from L1-L4 columns if path doesn't exist
-              const parts = []
+              const parts: string[] = []
               if (row.L1) parts.push(row.L1)
               if (row.L2) parts.push(row.L2)
               if (row.L3) parts.push(row.L3)
               if (row.L4) parts.push(row.L4)
-              if (row.L5) parts.push(row.L5)
 
               if (parts.length > 0) {
                 pathsFromData.add(parts.join('|'))
@@ -257,8 +237,7 @@ const ClassificationTree = ({
         setLoadingTaxonomy(false)
       } catch (err) {
         console.error('Could not load taxonomy:', err)
-        // Fallback: build from transaction classifications
-        const paths = new Set()
+        const paths = new Set<string>()
         transactions.forEach(row => {
           const path = row.classification_path || row.taxonomy_path || ''
           if (path && path.trim()) {
@@ -271,11 +250,7 @@ const ClassificationTree = ({
       }
     }
 
-    if (transactions.length > 0) {
-      loadTaxonomy()
-    } else {
-      setLoadingTaxonomy(false)
-    }
+    loadTaxonomy()
   }, [datasetId, foldername, transactions.length])
 
   // Build taxonomy tree from YAML structure + populate with transaction data
@@ -483,40 +458,34 @@ const ClassificationTree = ({
         console.warn('Failed to persist taxonomy path to localStorage', e)
       }
 
-      // If backend is available and we have loaded taxonomyData, write to taxonomy.yaml via API
-      if (backendAvailable && taxonomyData) {
+      // Persist to backend via IPC
+      if (backendAvailable) {
         try {
           setIsSavingNode(true)
           setAddNodeError(null)
 
-          const currentList = Array.isArray(taxonomyData.taxonomy) ? taxonomyData.taxonomy : []
-          const updatedList = Array.from(new Set([...currentList, trimmedPath]))
-          const updatedTaxonomy = { ...taxonomyData, taxonomy: updatedList }
-
-          const resp = await fetch(
-            `${API_BASE_URL}/datasets/${datasetId}/taxonomy?foldername=${encodeURIComponent(foldername || 'default')}`,
-            {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taxonomy: updatedTaxonomy })
-            }
-          )
-
-          if (!resp.ok) {
-            const text = await resp.text()
-            throw new Error(text || `Failed to update dataset taxonomy (status ${resp.status})`)
+          // Get current nodes, add the new path, and save all
+          const currentNodes = await ipc.taxonomy.getNodes()
+          const existingPaths = currentNodes.map((n) => n.fullPath)
+          if (!existingPaths.includes(trimmedPath)) {
+            const meta = await ipc.taxonomy.get()
+            await ipc.taxonomy.set({
+              name: meta.name || 'custom',
+              nodes: [
+                ...currentNodes.map((n) => ({ path: n.fullPath, description: n.description || undefined })),
+                { path: trimmedPath },
+              ],
+            })
           }
-
-          setTaxonomyData(updatedTaxonomy)
         } catch (e) {
           console.error('Failed to persist taxonomy path to backend', e)
-          setAddNodeError('Saved locally, but failed to persist to backend. Check the API server.')
+          setAddNodeError('Saved locally, but failed to persist to backend.')
         } finally {
           setIsSavingNode(false)
         }
       }
     },
-    [backendAvailable, taxonomyData, datasetId, foldername, getLocalStorageKey]
+    [backendAvailable, datasetId, foldername, getLocalStorageKey]
   )
 
   const handleOpenAddNodeModal = () => {
@@ -578,34 +547,22 @@ const ClassificationTree = ({
         console.warn('Failed to update localStorage after delete', e)
       }
 
-      // Update backend if available
-      if (backendAvailable && taxonomyData) {
+      // Update backend via IPC if available
+      if (backendAvailable) {
         try {
           setIsDeleting(true)
           setDeleteError(null)
 
-          const currentList = Array.isArray(taxonomyData.taxonomy) ? taxonomyData.taxonomy : []
-          const updatedList = currentList.filter(p => !pathsToRemove.includes(p))
-          const updatedTaxonomy = { ...taxonomyData, taxonomy: updatedList }
-
-          const resp = await fetch(
-            `${API_BASE_URL}/datasets/${datasetId}/taxonomy?foldername=${encodeURIComponent(foldername || 'default')}`,
-            {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taxonomy: updatedTaxonomy })
-            }
-          )
-
-          if (!resp.ok) {
-            const text = await resp.text()
-            throw new Error(text || `Failed to update dataset taxonomy (status ${resp.status})`)
-          }
-
-          setTaxonomyData(updatedTaxonomy)
+          const currentNodes = await ipc.taxonomy.getNodes()
+          const remainingNodes = currentNodes.filter((n) => !pathsToRemove.includes(n.fullPath))
+          const meta = await ipc.taxonomy.get()
+          await ipc.taxonomy.set({
+            name: meta.name || 'custom',
+            nodes: remainingNodes.map((n) => ({ path: n.fullPath, description: n.description || undefined })),
+          })
         } catch (e) {
           console.error('Failed to delete taxonomy node from backend', e)
-          setDeleteError('Deleted locally, but failed to update backend. Check the API server.')
+          setDeleteError('Deleted locally, but failed to update backend.')
           // Revert optimistic update on error
           setTaxonomyPaths(prev => [...prev, ...pathsToRemove])
         } finally {
@@ -666,32 +623,20 @@ const ClassificationTree = ({
         console.warn('Failed to update localStorage after rename', e)
       }
 
-      // Update backend if available
-      if (backendAvailable && taxonomyData) {
+      // Update backend via IPC if available
+      if (backendAvailable) {
         try {
           setIsRenaming(true)
           setRenameError(null)
 
-          const updatedTaxonomy = { ...taxonomyData, taxonomy: updatedPaths }
-
-          const resp = await fetch(
-            `${API_BASE_URL}/datasets/${datasetId}/taxonomy?foldername=${encodeURIComponent(foldername || 'default')}`,
-            {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taxonomy: updatedTaxonomy })
-            }
-          )
-
-          if (!resp.ok) {
-            const text = await resp.text()
-            throw new Error(text || `Failed to update dataset taxonomy (status ${resp.status})`)
-          }
-
-          setTaxonomyData(updatedTaxonomy)
+          const meta = await ipc.taxonomy.get()
+          await ipc.taxonomy.set({
+            name: meta.name || 'custom',
+            nodes: updatedPaths.map((p) => ({ path: p })),
+          })
         } catch (e) {
           console.error('Failed to rename taxonomy node in backend', e)
-          setRenameError('Renamed locally, but failed to update backend. Check the API server.')
+          setRenameError('Renamed locally, but failed to update backend.')
           // Revert optimistic update on error
           setTaxonomyPaths(originalPaths)
         } finally {

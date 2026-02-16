@@ -619,86 +619,53 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     })
   }, [])
 
-  // Generate AI feedback suggestions (mock implementation - replace with actual AI call)
-  const generateFeedbackSuggestions = useCallback(async (rows, targetPath, previousClassifications) => {
-    // This is a mock implementation - in production, this would call your AI service
-    const suggestions = []
-
-    // Check for taxonomy description changes
-    if (rows.length > 0) {
-      const pathParts = targetPath.split('|').filter(p => p.trim())
-      if (pathParts.length > 0) {
-        suggestions.push({
-          id: `taxonomy-${Date.now()}-${Math.random()}`,
-          type: 'taxonomy_description',
-          affectedRows: rows,
-          proposedChange: `Update taxonomy description for "${pathParts[pathParts.length - 1]}" to better reflect the classification patterns observed in these ${rows.length} transactions.`,
-          currentValue: 'Current taxonomy description...',
-          createdAt: new Date().toISOString()
-        })
+  // Fetch feedback suggestions from backend
+  const refreshFeedbackSuggestions = useCallback(async () => {
+    try {
+      const feedbackList = await ipc.feedback.list()
+      const pending = feedbackList.filter(f => f.status === 'pending')
+      const mapped = pending.map(f => ({
+        id: f.id,
+        type: f.feedbackType,
+        affectedRows: f.affectedTransactionIds || [],
+        proposedChange: f.suggestion?.proposedDescription || f.suggestion?.proposedValue || JSON.stringify(f.suggestion),
+        createdAt: f.createdAt,
+      }))
+      setFeedbackSuggestions(mapped)
+      if (mapped.length > 0) {
+        setNewFeedbackCount(mapped.length)
+        setShowFeedbackNotification(true)
+        setTimeout(() => setShowFeedbackNotification(false), 5000)
       }
+    } catch (err) {
+      console.error('Failed to fetch feedback suggestions:', err)
     }
-
-    // Check for company context changes
-    const uniqueCompanies = new Set(rows.map(r => r.company || '').filter(c => c))
-    if (uniqueCompanies.size > 0 && rows.length >= 2) {
-      const company = Array.from(uniqueCompanies)[0]
-      suggestions.push({
-        id: `context-${Date.now()}-${Math.random()}`,
-        type: 'company_context',
-        affectedRows: rows,
-        proposedChange: `Update company context for "${company}" based on ${rows.length} reclassified transactions to "${targetPath}".`,
-        currentValue: 'Current company context...',
-        createdAt: new Date().toISOString()
-      })
-    }
-
-    // Check for new rule suggestions
-    const uniqueSuppliers = new Set(rows.map(r => r.supplier_name || r.vendor_name || '').filter(s => s))
-    if (uniqueSuppliers.size > 0 && rows.length >= 3) {
-      const supplier = Array.from(uniqueSuppliers)[0]
-      suggestions.push({
-        id: `rule-${Date.now()}-${Math.random()}`,
-        type: 'new_rule',
-        affectedRows: rows,
-        proposedChange: `Create Category A rule for supplier "${supplier}" mapping to "${targetPath}" based on ${rows.length} reclassified transactions.`,
-        createdAt: new Date().toISOString()
-      })
-    }
-
-    // Check for Category A supplier suggestions (if supplier appears frequently)
-    if (uniqueSuppliers.size === 1 && rows.length >= 5) {
-      const supplier = Array.from(uniqueSuppliers)[0]
-      suggestions.push({
-        id: `category-a-${Date.now()}-${Math.random()}`,
-        type: 'category_a_supplier',
-        affectedRows: rows,
-        proposedChange: `Consider creating a Category A supplier rule for "${supplier}" with classification "${targetPath}" based on ${rows.length} consistent reclassifications.`,
-        createdAt: new Date().toISOString()
-      })
-    }
-
-    return suggestions
   }, [])
 
-  // Handle feedback approval
-  const handleApproveFeedback = useCallback((suggestion) => {
-    // In production, this would apply the feedback change via API
-    console.log('Approving feedback:', suggestion)
-    setFeedbackSuggestions(prev => {
-      const remaining = prev.filter(s => s.id !== suggestion.id)
-      // If no more suggestions, close the modal
-      if (remaining.length === 0) {
-        setShowFeedbackModal(false)
-      }
-      return remaining
-    })
+  // Handle feedback approval via IPC
+  const handleApproveFeedback = useCallback(async (suggestion) => {
+    try {
+      await ipc.feedback.approve(suggestion.id)
+      setFeedbackSuggestions(prev => {
+        const remaining = prev.filter(s => s.id !== suggestion.id)
+        if (remaining.length === 0) {
+          setShowFeedbackModal(false)
+        }
+        return remaining
+      })
+    } catch (err) {
+      console.error('Failed to approve feedback:', err)
+    }
   }, [])
 
-  // Handle feedback rejection
-  const handleRejectFeedback = useCallback((suggestion) => {
-    console.log('Rejecting feedback:', suggestion)
-    setFeedbackSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
+  // Handle feedback rejection via IPC
+  const handleRejectFeedback = useCallback(async (suggestion) => {
+    try {
+      await ipc.feedback.reject(suggestion.id)
+      setFeedbackSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
+    } catch (err) {
+      console.error('Failed to reject feedback:', err)
+    }
   }, [])
 
   // Handle feedback edit
@@ -814,7 +781,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
         <h2>Error Loading Data</h2>
         <p>{error}</p>
         <p style={{ fontSize: '12px', color: '#666', marginTop: '10px' }}>
-          Make sure the backend API is running on http://localhost:8000
+          Please try reopening the project or restarting the application.
         </p>
       </div>
     )
@@ -1157,28 +1124,10 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                       }
                     }
 
-                    // Generate feedback suggestions if enabled
+                    // Refresh feedback suggestions from backend if enabled
                     if (systemFeedbackEnabled) {
-                      try {
-                        const suggestions = await generateFeedbackSuggestions(rows, targetPath, previousClassifications)
-                        if (suggestions.length > 0) {
-                          setFeedbackSuggestions(prev => {
-                            const newSuggestions = [...prev, ...suggestions]
-                            // Show notification for new suggestions
-                            const newCount = suggestions.length
-                            setNewFeedbackCount(newCount)
-                            setShowFeedbackNotification(true)
-                            // Auto-hide notification after 5 seconds
-                            setTimeout(() => {
-                              setShowFeedbackNotification(false)
-                            }, 5000)
-                            return newSuggestions
-                          })
-                          // Feedback will automatically show in sidebar subtab
-                        }
-                      } catch (err) {
-                        console.error('Failed to generate feedback suggestions:', err)
-                      }
+                      // Small delay to allow backend to process feedback agent
+                      setTimeout(() => refreshFeedbackSuggestions(), 2000)
                     }
 
                       console.log(`✓ Successfully reclassified ${rowCount} rows`)

@@ -107,6 +107,6 @@ export async function revertChange(changeId: string): Promise<void> {
     affectedCount: change.affectedCount,
     oldValues: change.newValues,
     newValues: change.oldValues,
-    description: `Reverted: ${change.description ?? change.id}`,
+    description: `Reverted: ${(change.description ?? change.id).replace(/^(Reverted:\s*)+/, '')}`,
   });
 }

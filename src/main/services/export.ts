@@ -1,4 +1,4 @@
-import { dialog } from 'electron';
+import { dialog, BrowserWindow } from 'electron';
 import fs from 'fs';
 import { databaseService } from './database';
 
@@ -6,7 +6,8 @@ import { databaseService } from './database';
  * Show a save dialog for CSV export.
  */
 export async function selectExportPath(): Promise<string | null> {
-  const result = await dialog.showSaveDialog({
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const result = await dialog.showSaveDialog(win!, {
     title: 'Export Classified Transactions',
     defaultPath: 'classified-transactions.csv',
     filters: [{ name: 'CSV Files', extensions: ['csv'] }],

@@ -8,6 +8,7 @@ import {
   TruckIcon,
   DocumentDuplicateIcon,
   ClockIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline'
 
 interface SidebarProps {
@@ -21,6 +22,7 @@ const projectViews = [
   { path: '/project/suppliers', label: 'Suppliers', icon: TruckIcon },
   { path: '/project/override-rules', label: 'Override Rules', icon: DocumentDuplicateIcon },
   { path: '/project/version-history', label: 'Version History', icon: ClockIcon },
+  { path: '/project/feedback', label: 'Feedback', icon: SparklesIcon },
 ]
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {

@@ -512,3 +512,63 @@ html.dragging-active {
     flex-direction: column;
   }
 }
+
+/* ── Reclassification Success Toast ── */
+.reclass-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  color: #1f2937;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  font-size: 13px;
+  font-family: system-ui, -apple-system, sans-serif;
+  max-width: 520px;
+  animation: toastSlideUp 0.25s ease-out;
+}
+
+.reclass-toast svg:first-child {
+  color: #10b981;
+  flex-shrink: 0;
+}
+
+.reclass-toast strong {
+  font-weight: 600;
+}
+
+.reclass-toast-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 2px;
+  margin-left: 4px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.reclass-toast-close:hover {
+  color: #6b7280;
+  background: #f3f4f6;
+}
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

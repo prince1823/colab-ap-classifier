@@ -11,6 +11,7 @@ import CompanyContextPage from './pages/CompanyContextPage'
 import SuppliersPage from './pages/SuppliersPage'
 import OverrideRulesPage from './pages/OverrideRulesPage'
 import VersionHistoryPage from './pages/VersionHistoryPage'
+import FeedbackDashboardPage from './pages/FeedbackDashboardPage'
 import { WorkflowStateProvider } from './contexts/WorkflowStateContext'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -108,6 +109,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <VersionHistoryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="project/feedback"
+            element={
+              <ProtectedRoute>
+                <FeedbackDashboardPage />
               </ProtectedRoute>
             }
           />

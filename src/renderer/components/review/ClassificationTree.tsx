@@ -7,9 +7,9 @@ import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
 import { ipc } from '../../lib/ipc'
 import '../../styles/ClassificationTree.css'
 
-const ColumnNode = ({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete }) => {
+const ColumnNode = ({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete, isLeaf }) => {
   const levelLabel = level > 0 ? `L${level}` : ''
-  const isDroppableLevel = level === 4
+  const isDroppableLevel = isLeaf || level >= 3
 
   const [{ isOverShallow, itemType, canDrop }, drop] = useDrop({
     accept: [TABLE_ROW_TYPE, ITEM_TYPE],
@@ -368,25 +368,9 @@ const ClassificationTree = ({
       if (onReclassify) {
         const success = await onReclassify(rows, classificationPath)
         
-        // Only show success message and update UI if reclassification was actually successful
         if (success === true) {
-          // Show local success toast inside the taxonomy panel
-          const pathParts = classificationPath.split('|').filter(p => p.trim())
-          setLocalSuccess({
-            count: rows.length,
-            pathParts,
-          })
-
           // Auto-navigate to the target branch
           autoNavigateToPath(targetPath)
-
-          // Auto-hide after 3.5 seconds
-          setTimeout(() => {
-            setLocalSuccess(null)
-          }, 3500)
-        } else {
-          // Reclassification was blocked - do not show success message
-          console.log('Reclassification was blocked - no success message shown')
         }
       }
     }
@@ -830,19 +814,20 @@ const ClassificationTree = ({
   // Handle Enter key to reclassify
   const handleReclassifyWithKeyboard = useCallback(() => {
     const { columnIndex, nodeIndex } = keyboardNav
-    
-    // Only allow reclassification on L4 nodes (columnIndex 3, 0-based)
-    if (columnIndex !== 3) {
-      console.log('Please navigate to an L4 node (Level 4) to reclassify')
-      return
-    }
-    
+
     if (!columns || columns.length === 0) return
     const currentColumn = columns[columnIndex]
     if (!currentColumn || !currentColumn[nodeIndex]) return
-    
+
     const targetNode = currentColumn[nodeIndex]
     if (!targetNode || targetNode.path === 'root') return
+
+    // Allow reclassification on leaf nodes or nodes at L3+
+    const isLeaf = !targetNode.children || targetNode.children.length === 0
+    if (!isLeaf && columnIndex < 2) {
+      console.log('Please navigate to a leaf node (deepest level) to reclassify')
+      return
+    }
     
     // Get transaction rows from selectedRows
     const transactionRows = getTransactionRowsFromSelection()
@@ -1075,6 +1060,7 @@ const ClassificationTree = ({
                         key={node.path}
                         node={node}
                         level={idx + 1}
+                        isLeaf={!node.children || node.children.length === 0}
                         onSelect={(path) => setPathAtLevel(path, idx + 1)}
                         onHoverExpand={setPathAtLevel}
                         isSelected={selectedPath === node.path}

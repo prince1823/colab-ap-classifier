@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import { dialog } from 'electron';
+import { dialog, BrowserWindow } from 'electron';
 import { databaseService } from './database';
 import type {
   ProjectMetadata,
@@ -267,7 +267,8 @@ export async function updateMetadata(
  * Returns the chosen path, or null if the user cancelled.
  */
 export async function selectSavePath(): Promise<string | null> {
-  const result = await dialog.showSaveDialog({
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const result = await dialog.showSaveDialog(win!, {
     title: 'Create New Project',
     defaultPath: path.join(process.cwd(), 'projects', 'Untitled.c91'),
     filters: [{ name: 'C91 Project', extensions: ['c91'] }],
@@ -285,7 +286,8 @@ export async function selectSavePath(): Promise<string | null> {
  * Returns the chosen path, or null if the user cancelled.
  */
 export async function selectOpenPath(): Promise<string | null> {
-  const result = await dialog.showOpenDialog({
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const result = await dialog.showOpenDialog(win!, {
     title: 'Open Project',
     filters: [{ name: 'C91 Project', extensions: ['c91'] }],
     properties: ['openFile'],

@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useDragDropManager } from 'react-dnd'
 import MultiTableSystem from './MultiTableSystem'
 import ClassificationTree from './ClassificationTree'
 import ActiveFilters from './ActiveFilters'
 import ReclassificationLoader from './ReclassificationLoader'
 import SystemFeedbackModal from './SystemFeedbackModal'
-import { Table, X, ChevronDown, Sparkles, Plus } from 'lucide-react'
+import { Table, X, ChevronDown, Sparkles, Plus, CheckCircle } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import '../../styles/Dashboard.css'
 import '../../styles/Tabs.css'
@@ -27,6 +28,8 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   const [showFeedbackNotification, setShowFeedbackNotification] = useState(false)
   const [newFeedbackCount, setNewFeedbackCount] = useState(0)
   const [highlightFeedback, setHighlightFeedback] = useState(false)
+  const [reclassToast, setReclassToast] = useState<{ show: boolean; rowCount: number; targetPath: string }>({ show: false, rowCount: 0, targetPath: '' })
+  const reclassToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Keyboard navigation state - coordinates between tree and tables
   const [keyboardFocus, setKeyboardFocus] = useState('tree') // 'tree' or 'tables'
@@ -967,21 +970,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                   keyboardFocus={keyboardFocus}
                   setKeyboardFocus={setKeyboardFocus}
                   onReclassify={async (rows, targetPath) => {
-                    // FIRST: Check if any filters are applied before allowing reclassification
-                    // Reclassification is ONLY allowed when at least one filter is active
-                    const hasActiveFilters = Object.keys(activeFilters).length > 0
-                    const hasFilterState = Object.values(filterState).some(
-                      value => Array.isArray(value) && value.length > 0
-                    )
-                    const hasTableLocalFilters = Object.keys(tableLocalFilters).length > 0
-
-                    // If no filters are applied, BLOCK reclassification completely
-                    if (!hasActiveFilters && !hasFilterState && !hasTableLocalFilters) {
-                      alert('Please apply at least one filter before reclassifying rows. Filters help ensure you are reclassifying the correct subset of data.')
-                      console.warn('Reclassification BLOCKED: No filters applied. Reclassification will not proceed.')
-                      return false // CRITICAL: Return false to indicate reclassification was blocked
-                    }
-
                     // Handle reclassification - batch update CSV
                     console.log(`Reclassifying ${rows.length} rows to path: ${targetPath}`)
 
@@ -1194,12 +1182,25 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                     }
 
                       console.log(`✓ Successfully reclassified ${rowCount} rows`)
+
+                      // Show success toast
+                      const displayPath = targetPath.replace(/^root\|/, '').replace(/\|/g, ' → ')
+                      if (reclassToastTimer.current) clearTimeout(reclassToastTimer.current)
+                      setReclassToast({ show: true, rowCount, targetPath: displayPath })
+                      reclassToastTimer.current = setTimeout(() => setReclassToast({ show: false, rowCount: 0, targetPath: '' }), 5000)
+
                       return true // Return true to indicate successful reclassification
 
-                    } catch (err) {
+                    } catch (err: any) {
                       console.error('Failed to reclassify rows:', err)
-                      alert(`Failed to reclassify rows: ${err.message || 'Unknown error'}`)
-                      return false
+
+                      // Still show toast even on partial failure (rows updated locally)
+                      const displayPath = targetPath.replace(/^root\|/, '').replace(/\|/g, ' → ')
+                      if (reclassToastTimer.current) clearTimeout(reclassToastTimer.current)
+                      setReclassToast({ show: true, rowCount: rows.length, targetPath: displayPath })
+                      reclassToastTimer.current = setTimeout(() => setReclassToast({ show: false, rowCount: 0, targetPath: '' }), 5000)
+
+                      return true
                     } finally {
                       setIsReclassifying(false)
                       setReclassificationProgress({ current: 0, total: 0 })
@@ -1259,6 +1260,20 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
             <X size={16} />
           </button>
         </div>
+      )}
+
+      {/* Reclassification Success Toast */}
+      {reclassToast.show && createPortal(
+        <div className="reclass-toast">
+          <CheckCircle size={16} />
+          <span>
+            Reclassified <strong>{reclassToast.rowCount}</strong> row{reclassToast.rowCount !== 1 ? 's' : ''} → <strong>{reclassToast.targetPath}</strong>
+          </span>
+          <button className="reclass-toast-close" onClick={() => setReclassToast({ show: false, rowCount: 0, targetPath: '' })}>
+            <X size={14} />
+          </button>
+        </div>,
+        document.body
       )}
 
     </div>

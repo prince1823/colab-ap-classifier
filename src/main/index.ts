@@ -8,6 +8,14 @@ import fs from 'fs';
 import { registerAllHandlers } from './ipc';
 import { setMainWindow } from './services/classification-pipeline';
 
+// Prevent unhandled errors from crashing the entire Electron app
+process.on('uncaughtException', (error) => {
+  console.error('[Main] Uncaught exception:', error);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Main] Unhandled rejection:', reason);
+});
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {

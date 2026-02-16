@@ -14,15 +14,25 @@ interface ChangeLogRow {
   created_at: string;
 }
 
+function safeParse(json: string | null): unknown {
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    console.error('[Changelog] Failed to parse JSON:', json.substring(0, 100));
+    return null;
+  }
+}
+
 function rowToChangeLog(row: ChangeLogRow): ChangeLog {
   return {
     id: row.id,
     source: row.source as ChangeSource,
     affectedTable: row.affected_table,
-    affectedIds: JSON.parse(row.affected_ids),
+    affectedIds: (safeParse(row.affected_ids) as string[]) || [],
     affectedCount: row.affected_count,
-    oldValues: row.old_values ? JSON.parse(row.old_values) : null,
-    newValues: row.new_values ? JSON.parse(row.new_values) : null,
+    oldValues: safeParse(row.old_values) as Record<string, unknown> | null,
+    newValues: safeParse(row.new_values) as Record<string, unknown> | null,
     description: row.description,
     createdAt: String(row.created_at),
   };

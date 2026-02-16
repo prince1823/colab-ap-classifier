@@ -1604,9 +1604,9 @@ const MultiTableSystem = ({
           if (fullPath) setFocusedPath(fullPath)
         }
       }
-    } else if (column && column !== 'classification_path') {
-      setFocusedPath(null)
     }
+    // For non-supplier, non-taxonomy columns: don't clear focusedPath
+    // so the last selected supplier's classification stays visible
     // If column is provided, create a unique key with column prefix
     const key = column ? `${column}:${rowValue}` : rowValue
     

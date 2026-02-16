@@ -284,6 +284,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     setActiveFilters({})
     setTableLocalFilters({})
     setSelectedRows([])
+    setFocusedClassificationPath(null)
     setShowFilterPanel(false)
   }, [setActiveFilters])
 
@@ -813,17 +814,17 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
             {/* Minimal inline: active filters + actions (no full-width bar) */}
             <div className="review-toolbar-inline">
               <div className="current-classification-bar">
-                {focusedClassificationPath ? (
+                {currentSelection ? (
                   <>
-                    <span className="current-classification-label">Current classification</span>
-                    <span className="current-classification-path" title={focusedClassificationPath.replace(/\|/g, ' → ')}>
-                      {focusedClassificationPath.split('|').filter(Boolean).join(' → ')}
+                    <span className="current-classification-label">{currentSelection.supplier}</span>
+                    <span className="current-classification-path" title={currentSelection.levels.join(' → ')}>
+                      {currentSelection.levels.join(' → ')}
                     </span>
                   </>
                 ) : selectedRows.length > 0 ? (
                   <span className="current-classification-placeholder" style={{ color: '#9ca3af', fontStyle: 'italic' }}>Unclassified (no classification assigned yet)</span>
                 ) : (
-                  <span className="current-classification-placeholder">Please select a supplier to see its current classification</span>
+                  <span className="current-classification-placeholder">Select a supplier to see its current classification</span>
                 )}
               </div>
               <div className="review-toolbar-actions">

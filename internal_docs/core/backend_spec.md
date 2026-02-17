@@ -60,8 +60,8 @@ flowchart TB
 **Location:** GitHub Repo
 
 **File Specifications:**
-- Taxonomy [.txt] — per-taxonomy node files
-- Taxonomy Rules [.csv] — per-taxonomy rules (stored alongside taxonomy files)
+- Taxonomy [taxonomy.txt] — single flat file per taxonomy (depth-3 leaves only, parents auto-generated)
+- Taxonomy Rules [.csv] — per-taxonomy rules (stored alongside taxonomy file)
 - Supplier Universe [.csv] — global master list of known suppliers + parents
 
 ### Project Files (.c91)
@@ -96,8 +96,8 @@ flowchart TB
 
 **Details:** Pulled from GitHub. Not intended for manual user changes.
 
-- Taxonomy [.txt]
-- Taxonomy Rules [.csv] — per-taxonomy, stored alongside taxonomy files
+- Taxonomy [taxonomy.txt] — single flat file per taxonomy
+- Taxonomy Rules [.csv] — per-taxonomy, stored alongside taxonomy file
 - Supplier Universe [.csv]
 
 ---

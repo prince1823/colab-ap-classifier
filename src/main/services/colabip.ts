@@ -21,19 +21,9 @@ function stripBOM(content: string): string {
   return content;
 }
 
-/** Sort filenames numerically when possible (1.txt before 10.txt) */
-function numericSort(a: string, b: string): number {
-  const numA = parseInt(a, 10);
-  const numB = parseInt(b, 10);
-  if (!isNaN(numA) && !isNaN(numB)) {
-    return numA - numB;
-  }
-  return a.localeCompare(b);
-}
-
 /**
  * List available taxonomies from colabip/taxonomies/.
- * Returns industry folder names with .txt file counts.
+ * Returns industry folder names with leaf node counts (lines in taxonomy.txt).
  */
 export async function listTaxonomies(): Promise<TaxonomyInfo[]> {
   const taxonomiesDir = path.join(basePath, 'taxonomies');
@@ -42,10 +32,15 @@ export async function listTaxonomies(): Promise<TaxonomyInfo[]> {
     const results: TaxonomyInfo[] = [];
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        const dirPath = path.join(taxonomiesDir, entry.name);
-        const files = await fs.readdir(dirPath);
-        const txtCount = files.filter((f) => f.endsWith('.txt')).length;
-        results.push({ name: entry.name, nodeCount: txtCount });
+        const filePath = path.join(taxonomiesDir, entry.name, 'taxonomy.txt');
+        try {
+          const content = await fs.readFile(filePath, 'utf-8');
+          const cleaned = stripBOM(content);
+          const pathLines = cleaned.split('\n').filter((l) => l.trim() && !l.startsWith('\t'));
+          results.push({ name: entry.name, nodeCount: pathLines.length });
+        } catch {
+          // No taxonomy.txt in this directory — skip
+        }
       }
     }
     return results;
@@ -92,51 +87,69 @@ export async function listRulePacks(): Promise<RulePackInfo[]> {
 }
 
 /**
- * Read all taxonomy nodes from colabip/taxonomies/{industryName}/.
- * Each .txt file has 2 lines: line 1 = pipe-delimited path, line 2 = description.
+ * Read all taxonomy nodes from colabip/taxonomies/{industryName}/taxonomy.txt.
+ * Format: path line followed by tab-indented description line, e.g.:
+ *   L1|L2|L3
+ *   \tdescription text
+ * Parent nodes (L1 and L1|L2) are auto-generated from leaf paths.
  */
 export async function readTaxonomy(
   industryName: string
 ): Promise<{ nodes: Array<{ path: string; description: string }> }> {
-  const dirPath = path.join(basePath, 'taxonomies', industryName);
-  const nodes: Array<{ path: string; description: string }> = [];
+  const filePath = path.join(basePath, 'taxonomies', industryName, 'taxonomy.txt');
 
   try {
-    const files = await fs.readdir(dirPath);
-    const txtFiles = files.filter((f) => f.endsWith('.txt')).sort(numericSort);
+    const content = await fs.readFile(filePath, 'utf-8');
+    const cleaned = stripBOM(content);
+    const lines = cleaned.split('\n');
 
-    for (const file of txtFiles) {
-      try {
-        const content = await fs.readFile(path.join(dirPath, file), 'utf-8');
-        const cleaned = stripBOM(content);
-        const lines = cleaned.split('\n').map((l) => l.trim());
+    const parentPaths = new Map<string, true>();
+    const nodes: Array<{ path: string; description: string }> = [];
 
-        if (!lines[0]) {
-          console.warn(
-            `[ColabIP] Skipping malformed taxonomy file: ${industryName}/${file}`
-          );
-          continue;
-        }
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
 
-        nodes.push({
-          path: lines[0],
-          description: lines[1] || '',
-        });
-      } catch (err) {
+      // Skip empty lines and tab-indented description lines (handled with their path)
+      if (!line.trim() || line.startsWith('\t')) continue;
+
+      const leafPath = line.trim();
+      const parts = leafPath.split('|');
+      if (parts.length !== 3) {
         console.warn(
-          `[ColabIP] Error reading taxonomy file ${industryName}/${file}:`,
-          err
+          `[ColabIP] Skipping non-depth-3 line in ${industryName}/taxonomy.txt: "${leafPath}"`
         );
+        continue;
       }
+
+      // Next line is the tab-indented description (if present)
+      let description = '';
+      if (i + 1 < lines.length && lines[i + 1].startsWith('\t')) {
+        description = lines[i + 1].trim();
+        i++; // skip the description line
+      }
+
+      // Collect parent paths for auto-generation
+      const l1 = parts[0];
+      const l1l2 = `${parts[0]}|${parts[1]}`;
+      parentPaths.set(l1, true);
+      parentPaths.set(l1l2, true);
+
+      nodes.push({ path: leafPath, description });
     }
+
+    // Auto-generate parent nodes (L1 and L2) with no descriptions
+    const parentNodes: Array<{ path: string; description: string }> = [];
+    for (const parentPath of parentPaths.keys()) {
+      parentNodes.push({ path: parentPath, description: '' });
+    }
+
+    return { nodes: [...parentNodes, ...nodes] };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return { nodes: [] };
     }
     throw error;
   }
-
-  return { nodes };
 }
 
 /**

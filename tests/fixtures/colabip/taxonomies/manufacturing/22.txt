@@ -1,2 +1,0 @@
-Exempt|Intercompany|Transfers
-Intercompany transfers and internal charges

@@ -1,0 +1,116 @@
+Clinical|Clinical Equipment|Clinical Equipment Other
+	Any other type of equipment apart from diagnostic imaging equipment used at the physician clinic for providing healthcare to patients. Examples include examination chairs, treatment tables, diagnostic tools, autoclave equipment, medication dispensers, vital sign monitors, and other non-imaging clinical equipment. (Medical equipment manufacturers, medical supply distributors, clinical equipment vendors.)
+Clinical|Clinical Equipment|Diagnostic Imaging Equipment
+	Diagnostic imaging equipment suppliers including X-ray machines, ultrasound equipment, CT scanners, MRI machines, digital radiography systems, mammography equipment, and related imaging technology. (Medical imaging equipment manufacturers (GE Healthcare, Siemens, Philips), imaging equipment vendors, specialized medical device companies.)
+Clinical|Clinical Services|Clinical Services Other
+	Clinical services such as specialized clinical assessments, clinical audits, quality improvement support, clinical protocol development, or other ad-hoc clinical work performed by external clinical consultants or agencies. (Clinical consulting firms, healthcare service organizations, specialized clinical service providers.)
+Clinical|Clinical Services|Clinical Staffing
+	Staffing agencies or independent contractors for temporary labor associated with clinical work like registered nurses, LPNs, medical assistants, phlebotomists, respiratory therapists, and other non-physician clinical personnel. (Healthcare staffing agencies (Aya Healthcare, Trustaff), clinical temporary labor providers, nursing agencies, medical staffing companies.)
+Clinical|Clinical Services|Doctor/Physician/Director Fee
+	Doctors or physicians (that are not on payroll) for their services provided to InnovaCare, including contracted primary care physicians, specialty consultants, medical directors, peer review services, or advisory services. (Independent physician practitioners, physician networks, specialist groups, medical director service providers, locum tenens agencies.)
+Clinical|Clinical Services|Laboratory Services
+	Laboratory testing services including chemistry, hematology, microbiology, pathology, genetic testing, and specialized lab analysis services for patient samples. (Laboratory service providers (LabCorp, Quest Diagnostics, Sonic Healthcare), hospital labs, specialized reference labs, diagnostic testing companies.)
+Clinical|Clinical Services|Patient Care
+	Direct patient care services including member support services, care navigation, transportation for medical appointments, wellness programs, community health initiatives, and other direct patient-facing care delivery not categorized elsewhere. (Patient transportation services (medical transport companies), patient advocacy organizations, care navigation service providers, member services vendors, community health organizations.)
+Clinical|Clinical Supplies|Clinical Supplies Other
+	Clinical supplies including bandages, wound care products, syringes, needles, diagnostic test kits, gloves, protective equipment, IV supplies, and other consumable clinical supplies used in patient care. (Medical supply manufacturers, healthcare distributors (Cardinal Health, McKesson, Henry Schein), clinical consumables vendors, pharmaceutical distributors.)
+Clinical|Clinical Supplies|Medical-Surgical Supplies
+	Medical and surgical supplies including sterile instruments, surgical trays, sutures, gauze, dressings, catheters, stents, orthopedic implants, and other surgical/procedural consumables. (Surgical supply manufacturers, medical device companies (Medtronic, Stryker, Zimmer), hospital supply distributors, specialty surgical suppliers.)
+Clinical|IT - Clinical|Clinical Decision Support Tools
+	Clinical decision support software and AI tools that help physicians with diagnosis, treatment recommendations, drug interactions, evidence-based protocols, and clinical guideline adherence. (EHR vendors with embedded CDS (Epic, Cerner), specialized CDS vendors (IBM Watson Health, Tempus AI), healthcare IT companies.)
+Clinical|IT - Clinical|EHR/EMR
+	Electronic Health Record (EHR) or Electronic Medical Record (EMR) systems and related services including software licenses, maintenance, updates, hosting, integration, and support. (Major EHR vendors (Epic Systems, Cerner, Athena Health, NextGen, Practice Fusion), cloud-based EHR providers, healthcare IT integrators.)
+Clinical|IT - Clinical|Practice Management Software
+	Practice management software systems used for scheduling, billing, patient registration, claims submission, and administrative workflow management across physician clinics. (Practice management vendors (Athena Health, NextGen Healthcare, eClinicalWorks), integrated EHR/PM vendors, healthcare IT service providers.)
+Clinical|IT - Clinical|Telehealth
+	Telehealth and virtual care platforms enabling remote consultations, virtual visits, remote patient monitoring, digital therapeutics, and virtual care delivery capabilities. (Telehealth platform vendors (Teladoc, Amwell, MDLive), video conferencing companies adapted for healthcare, healthcare IT vendors offering telehealth modules.)
+Clinical|Pharmacy|Pharmacy
+	Pharmacy services including medication management programs, formulary services, drug therapy consulting, medication synchronization programs, or specialized pharmacy services. (Pharmacy benefit managers (CVS Caremark, Express Scripts), specialty pharmacy providers, independent pharmacy networks, pharmaceutical consulting firms.)
+Non Clinical|Construction Services|Architectural & Engineering Services
+	Architectural and engineering firms for design, planning, feasibility studies, and engineering support for clinic renovations, facility expansions, and construction projects. (Architectural firms, engineering consulting companies, healthcare facility design specialists, construction planning consultants.)
+Non Clinical|Construction Services|Contractors
+	General contractors and construction companies for building and renovation work, including labor, materials coordination, and project management for clinic facilities, offices, and infrastructure projects. (General contractors, construction companies, specialized medical construction contractors, project managers.)
+Non Clinical|Facilities Maintenance Services|Electrical Services
+	Electrical system installation, repair, maintenance, and troubleshooting services including wiring, outlets, lighting systems, generators, and electrical code compliance. (Licensed electricians, electrical contractors, facility maintenance service providers, industrial electrical companies.)
+Non Clinical|General & Administrative|Corporate Insurance
+	Corporate Insurance services and products
+Non Clinical|General & Administrative|Document Management - Storage & Shredding
+	Document Management - Storage & Shredding services and products
+Non Clinical|General & Administrative|Flowers & Gifts
+	Flowers & Gifts services and products
+Non Clinical|General & Administrative|Office Supplies & Equipment
+	Office Supplies & Equipment services and products
+Non Clinical|General & Administrative|Subscriptions & Dues
+	Subscriptions & Dues services and products
+Non Clinical|Human Resources|Medical, Dental And Life Insurance
+	Medical, Dental And Life Insurance services and products
+Non Clinical|Human Resources|Retirement and Pension Plans
+	Retirement and Pension Plans services and products
+Non Clinical|IT Product & Services|Cybersecurity & Risk
+	Cybersecurity & Risk services and products
+Non Clinical|IT Product & Services|IT Products & Services Other
+	IT Products & Services Other services and products
+Non Clinical|IT Product & Services|IT Resellers (VAR)
+	IT Resellers (VAR) services and products
+Non Clinical|Logistics|Logistics Other
+	Logistics Other services and products
+Non Clinical|MRO Supplies|Janitorial & Cleaning Supplies
+	Janitorial & Cleaning Supplies services and products
+Non Clinical|MRO Supplies|MRO Supplies Other
+	MRO Supplies Other services and products
+Non Clinical|Marketing & Print|Agency Fees
+	Agency Fees services and products
+Non Clinical|Marketing & Print|Direct Mail & Fulfillment
+	Direct Mail & Fulfillment services and products
+Non Clinical|Marketing & Print|Marketing & Print Other
+	Marketing & Print Other services and products
+Non Clinical|Marketing & Print|Other Media
+	Other Media services and products
+Non Clinical|Marketing & Print|Print Other
+	Print Other services and products
+Non Clinical|Non Clinical|Facilities Maintenance Services
+	Facilities Maintenance Services services and products
+Non Clinical|Non Clinical|Facilities Management
+	Facilities Management services and products
+Non Clinical|Non Clinical|General & Administrative
+	General & Administrative services and products
+Non Clinical|Non Clinical|Human Resources
+	Human Resources services and products
+Non Clinical|Non Clinical|IT Product & Services
+	IT Product & Services services and products
+Non Clinical|Non Clinical|Logistics
+	Logistics services and products
+Non Clinical|Non Clinical|MRO Supplies
+	MRO Supplies services and products
+Non Clinical|Non Clinical|Marketing & Print
+	Marketing & Print services and products
+Non Clinical|Non Clinical|Professional Services
+	Professional Services services and products
+Non Clinical|Non Clinical|Telecom
+	Telecom services and products
+Non Clinical|Non Clinical|Travel & Entertainment
+	Travel & Entertainment services and products
+Non Clinical|Professional Services|Audit & Tax Services
+	Audit & Tax Services services and products
+Non Clinical|Professional Services|Financial Services
+	Financial Services services and products
+Non Clinical|Professional Services|Healthcare Consulting
+	'Healthcare consulting firms for services such as: clinical workflow optimization, quality improvement initiatives, clinical integration strategies, population health program design, and care model development. (Healthcare consulting firms (McKinsey Healthcare, Deloitte, Huron Consulting), clinical advisory firms, healthcare strategy boutiques.)'
+Non Clinical|Professional Services|Management Consulting
+	Management Consulting services and products
+Non Clinical|Professional Services|Revenue Cycle Management (RCM) Services
+	RCM services including claims processing, billing, coding, denial management, accounts receivable management, and revenue optimization support. (Dedicated RCM service providers (Change Healthcare, Optum, Athena Health), outsourced billing companies, healthcare business process outsourcing firms.)
+Non Clinical|Travel & Entertainment|Parking & Tolls
+	Parking & Tolls services and products
+Non Clinical|Travel & Entertainment|Travel & Entertainment Other
+	Travel & Entertainment Other services and products
+Non-Sourceable|Non-Sourceable|Business Related
+	Business Related services and products
+Non-Sourceable|Non-Sourceable|Employee Related
+	Employee Related services and products
+Non-Sourceable|Non-Sourceable|Intercompany
+	Intercompany services and products
+Non-Sourceable|Non-Sourceable|Non-Sourceable
+	Non-Sourceable services and products
+Non-Sourceable|Non-Sourceable|Taxes And Regulatory Fees
+	Taxes And Regulatory Fees services and products

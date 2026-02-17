@@ -1,5 +1,6 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
-import { ChevronDownIcon, XMarkIcon, FunnelIcon, XCircleIcon } from '@heroicons/react/24/outline'
+import { useState, useMemo } from 'react'
+import { ChevronDownIcon, XMarkIcon, PlusIcon } from '@heroicons/react/24/outline'
+import * as Popover from '@radix-ui/react-popover'
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -77,6 +78,24 @@ const FILTER_DEFS: FilterDef[] = [
   { key: 'country', label: 'Country', extract: (r) => r.Country as string | undefined },
 ]
 
+const PRIMARY_KEYS: (keyof PivotFilterState)[] = [
+  'supplier',
+  'classificationL1',
+  'glDescription',
+  'company',
+  'year',
+]
+
+const SECONDARY_KEYS: (keyof PivotFilterState)[] = [
+  'classificationL2',
+  'classificationL3',
+  'quarter',
+  'month',
+  'costCenter',
+  'supplierCategory',
+  'country',
+]
+
 /* ------------------------------------------------------------------ */
 /* Props                                                               */
 /* ------------------------------------------------------------------ */
@@ -86,12 +105,227 @@ interface PivotFilterBarProps {
   filterState: PivotFilterState
   onFilterStateChange: (state: PivotFilterState) => void
   onClearAll: () => void
-  isOpen: boolean
-  onToggle: () => void
 }
 
 /* ------------------------------------------------------------------ */
-/* Component                                                           */
+/* FilterChipPopover — one per primary filter dimension                */
+/* ------------------------------------------------------------------ */
+
+function FilterChipPopover({
+  def,
+  options,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  def: FilterDef
+  options: string[]
+  selected: string[]
+  onToggle: (value: string) => void
+  onClear: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const hasSelection = selected.length > 0
+
+  const filtered = search
+    ? options.filter((o) => o.toLowerCase().includes(search.toLowerCase()))
+    : options
+
+  return (
+    <Popover.Root onOpenChange={(open) => { if (!open) setSearch('') }}>
+      <Popover.Trigger asChild>
+        <button
+          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+            hasSelection
+              ? 'border-blue-300 bg-blue-50 text-blue-700'
+              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          {def.label}
+          {hasSelection && (
+            <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] h-4 min-w-[16px] px-1">
+              {selected.length}
+            </span>
+          )}
+          <ChevronDownIcon className="h-3 w-3 opacity-50" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          sideOffset={4}
+          align="start"
+          collisionPadding={8}
+          className="z-50 w-64 rounded-lg border border-gray-200 bg-white shadow-lg"
+        >
+          <div className="p-2">
+            {options.length > 6 && (
+              <input
+                type="text"
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-[11px] mb-2 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 outline-none"
+                autoFocus
+              />
+            )}
+            <div className="max-h-[250px] overflow-y-auto space-y-0.5">
+              {filtered.map((option) => {
+                const isSelected = selected.includes(option)
+                return (
+                  <label
+                    key={option}
+                    className={`flex items-center gap-2 rounded px-2 py-1 text-[11px] cursor-pointer transition-colors ${
+                      isSelected ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => onToggle(option)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3 w-3"
+                    />
+                    <span className="truncate">{option}</span>
+                  </label>
+                )
+              })}
+              {filtered.length === 0 && (
+                <p className="text-[11px] text-gray-400 py-2 text-center">No matches</p>
+              )}
+            </div>
+            {hasSelection && (
+              <button
+                onClick={onClear}
+                className="mt-1.5 text-[10px] text-red-500 hover:text-red-600 font-medium"
+              >
+                Clear {def.label}
+              </button>
+            )}
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* MoreFiltersPopover — single popover for secondary dimensions        */
+/* ------------------------------------------------------------------ */
+
+function MoreFiltersPopover({
+  defs,
+  filterOptions,
+  filterState,
+  onToggle,
+  onClearKey,
+}: {
+  defs: FilterDef[]
+  filterOptions: Record<string, string[]>
+  filterState: PivotFilterState
+  onToggle: (key: keyof PivotFilterState, value: string) => void
+  onClearKey: (key: keyof PivotFilterState) => void
+}) {
+  const [searches, setSearches] = useState<Record<string, string>>({})
+
+  const secondaryActiveCount = defs.reduce(
+    (sum, def) => sum + filterState[def.key].length,
+    0
+  )
+
+  return (
+    <Popover.Root onOpenChange={(open) => { if (!open) setSearches({}) }}>
+      <Popover.Trigger asChild>
+        <button
+          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+            secondaryActiveCount > 0
+              ? 'border-blue-300 bg-blue-50 text-blue-700'
+              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          <PlusIcon className="h-3 w-3" />
+          More
+          {secondaryActiveCount > 0 && (
+            <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] h-4 min-w-[16px] px-1">
+              {secondaryActiveCount}
+            </span>
+          )}
+          <ChevronDownIcon className="h-3 w-3 opacity-50" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          sideOffset={4}
+          align="start"
+          collisionPadding={8}
+          className="z-50 w-72 max-h-[400px] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg"
+        >
+          {defs.map((def) => {
+            const options = filterOptions[def.key] || []
+            if (options.length === 0) return null
+            const selected = filterState[def.key]
+            const searchTerm = (searches[def.key] || '').toLowerCase()
+            const filtered = searchTerm
+              ? options.filter((o) => o.toLowerCase().includes(searchTerm))
+              : options
+
+            return (
+              <div key={def.key} className="border-b border-gray-100 last:border-b-0">
+                <div className="px-3 pt-2.5 pb-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-gray-700">{def.label}</span>
+                    {selected.length > 0 && (
+                      <button
+                        onClick={() => onClearKey(def.key)}
+                        className="text-[10px] text-red-500 hover:text-red-600 font-medium"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {options.length > 6 && (
+                    <input
+                      type="text"
+                      placeholder="Search…"
+                      value={searches[def.key] || ''}
+                      onChange={(e) => setSearches({ ...searches, [def.key]: e.target.value })}
+                      className="w-full rounded border border-gray-200 px-2 py-1 text-[11px] mt-1 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 outline-none"
+                    />
+                  )}
+                </div>
+                <div className="px-3 pb-2.5 max-h-32 overflow-y-auto space-y-0.5">
+                  {filtered.map((option) => {
+                    const isSelected = selected.includes(option)
+                    return (
+                      <label
+                        key={option}
+                        className={`flex items-center gap-2 rounded px-2 py-0.5 text-[11px] cursor-pointer transition-colors ${
+                          isSelected ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => onToggle(def.key, option)}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3 w-3"
+                        />
+                        <span className="truncate">{option}</span>
+                      </label>
+                    )
+                  })}
+                  {filtered.length === 0 && (
+                    <p className="text-[10px] text-gray-400 py-1 text-center">No matches</p>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Main Component                                                      */
 /* ------------------------------------------------------------------ */
 
 export default function PivotFilterBar({
@@ -99,13 +333,7 @@ export default function PivotFilterBar({
   filterState,
   onFilterStateChange,
   onClearAll,
-  isOpen,
-  onToggle,
 }: PivotFilterBarProps) {
-  const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
-  const [searchTerms, setSearchTerms] = useState<Record<string, string>>({})
-  const panelRef = useRef<HTMLDivElement>(null)
-
   // Compute options for each filter dimension
   const filterOptions = useMemo(() => {
     const opts: Record<string, string[]> = {}
@@ -121,17 +349,16 @@ export default function PivotFilterBar({
     return opts
   }, [rows])
 
-  // Only show filters that have options
-  const visibleFilters = useMemo(() => {
-    return FILTER_DEFS.filter((def) => filterOptions[def.key]?.length > 0)
-  }, [filterOptions])
-
   const activeCount = Object.values(filterState).reduce((sum, arr) => sum + arr.length, 0)
 
   const toggleOption = (key: keyof PivotFilterState, value: string) => {
     const current = filterState[key]
     const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value]
     onFilterStateChange({ ...filterState, [key]: next })
+  }
+
+  const clearKey = (key: keyof PivotFilterState) => {
+    onFilterStateChange({ ...filterState, [key]: [] })
   }
 
   const removeFilter = (key: keyof PivotFilterState, value: string) => {
@@ -141,173 +368,72 @@ export default function PivotFilterBar({
     })
   }
 
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onToggle()
-    }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [isOpen, onToggle])
-
-  if (!isOpen) return null
+  // Visible primary/secondary filters (only those with options)
+  const visiblePrimary = FILTER_DEFS.filter(
+    (def) => PRIMARY_KEYS.includes(def.key) && (filterOptions[def.key]?.length ?? 0) > 0
+  )
+  const visibleSecondary = FILTER_DEFS.filter(
+    (def) => SECONDARY_KEYS.includes(def.key) && (filterOptions[def.key]?.length ?? 0) > 0
+  )
 
   return (
-    <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-30" onClick={onToggle} />
+    <div className="flex flex-col gap-2">
+      {/* Chip row */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {visiblePrimary.map((def) => (
+          <FilterChipPopover
+            key={def.key}
+            def={def}
+            options={filterOptions[def.key] || []}
+            selected={filterState[def.key]}
+            onToggle={(val) => toggleOption(def.key, val)}
+            onClear={() => clearKey(def.key)}
+          />
+        ))}
 
-      {/* Slide-over panel from right */}
-      <div
-        ref={panelRef}
-        className="fixed right-0 top-0 bottom-0 z-40 w-80 bg-white border-l border-gray-200 shadow-2xl flex flex-col overflow-hidden"
-        style={{ animation: 'slideInRight 0.2s ease-out' }}
-      >
-        {/* Panel header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
-          <div className="flex items-center gap-2">
-            <FunnelIcon className="h-4 w-4 text-gray-600" />
-            <h3 className="text-sm font-semibold text-gray-900">Filters</h3>
-            {activeCount > 0 && (
-              <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[10px] h-5 min-w-[20px] px-1.5 font-medium">
-                {activeCount}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {activeCount > 0 && (
-              <button
-                onClick={onClearAll}
-                className="text-[11px] text-red-600 hover:text-red-700 font-medium"
-              >
-                Clear all
-              </button>
-            )}
-            <button
-              onClick={onToggle}
-              className="rounded-md p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-            >
-              <XMarkIcon className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Active filter pills */}
-        {activeCount > 0 && (
-          <div className="px-4 py-2.5 border-b border-gray-100 bg-blue-50/40">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {FILTER_DEFS.map((def) =>
-                filterState[def.key].map((value) => (
-                  <span
-                    key={`${def.key}-${value}`}
-                    className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 text-blue-700 pl-2 pr-1 py-0.5 text-[10px] font-medium max-w-[180px]"
-                  >
-                    <span className="truncate">{value}</span>
-                    <button
-                      onClick={() => removeFilter(def.key, value)}
-                      className="rounded-full hover:bg-blue-200 p-0.5 flex-shrink-0"
-                    >
-                      <XMarkIcon className="h-2.5 w-2.5" />
-                    </button>
-                  </span>
-                ))
-              )}
-            </div>
-          </div>
+        {visibleSecondary.length > 0 && (
+          <MoreFiltersPopover
+            defs={visibleSecondary}
+            filterOptions={filterOptions}
+            filterState={filterState}
+            onToggle={toggleOption}
+            onClearKey={clearKey}
+          />
         )}
 
-        {/* Filter groups */}
-        <div className="flex-1 overflow-y-auto">
-          {visibleFilters.map((def) => {
-            const selected = filterState[def.key]
-            const isExpanded = expandedGroup === def.key
-            const options = filterOptions[def.key] || []
-            const searchTerm = (searchTerms[def.key] || '').toLowerCase()
-            const filteredOptions = searchTerm
-              ? options.filter((o) => o.toLowerCase().includes(searchTerm))
-              : options
-
-            return (
-              <div key={def.key} className="border-b border-gray-100">
-                {/* Group header */}
-                <button
-                  onClick={() => setExpandedGroup(isExpanded ? null : def.key)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-gray-50 transition-colors"
-                >
-                  <span className="text-xs font-medium text-gray-700">{def.label}</span>
-                  <div className="flex items-center gap-1.5">
-                    {selected.length > 0 && (
-                      <span className="inline-flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-[10px] h-4 min-w-[16px] px-1 font-semibold">
-                        {selected.length}
-                      </span>
-                    )}
-                    <ChevronDownIcon
-                      className={`h-3.5 w-3.5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                    />
-                  </div>
-                </button>
-
-                {/* Expanded: search + checkbox list */}
-                {isExpanded && (
-                  <div className="px-4 pb-3">
-                    {options.length > 6 && (
-                      <input
-                        type="text"
-                        placeholder={`Search…`}
-                        value={searchTerms[def.key] || ''}
-                        onChange={(e) => setSearchTerms({ ...searchTerms, [def.key]: e.target.value })}
-                        className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-[11px] mb-2 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 outline-none"
-                        autoFocus
-                      />
-                    )}
-                    <div className="max-h-44 overflow-y-auto space-y-0.5">
-                      {filteredOptions.map((option) => {
-                        const isSelected = selected.includes(option)
-                        return (
-                          <label
-                            key={option}
-                            className={`flex items-center gap-2 rounded px-2 py-1 text-[11px] cursor-pointer transition-colors ${
-                              isSelected ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => toggleOption(def.key, option)}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3 w-3"
-                            />
-                            <span className="truncate">{option}</span>
-                          </label>
-                        )
-                      })}
-                      {filteredOptions.length === 0 && (
-                        <p className="text-[11px] text-gray-400 py-2 text-center">No matches</p>
-                      )}
-                    </div>
-                    {selected.length > 0 && (
-                      <button
-                        onClick={() => onFilterStateChange({ ...filterState, [def.key]: [] })}
-                        className="mt-1.5 text-[10px] text-red-500 hover:text-red-600 font-medium"
-                      >
-                        Clear {def.label}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
+        {activeCount > 0 && (
+          <button
+            onClick={onClearAll}
+            className="inline-flex items-center gap-1 text-[11px] text-red-500 hover:text-red-600 font-medium ml-1"
+          >
+            <XMarkIcon className="h-3 w-3" />
+            Clear all
+          </button>
+        )}
       </div>
 
-      {/* Keyframe animation */}
-      <style>{`
-        @keyframes slideInRight {
-          from { transform: translateX(100%); }
-          to { transform: translateX(0); }
-        }
-      `}</style>
-    </>
+      {/* Active filter pills */}
+      {activeCount > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {FILTER_DEFS.map((def) =>
+            filterState[def.key].map((value) => (
+              <span
+                key={`${def.key}-${value}`}
+                className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 text-blue-700 pl-2 pr-1 py-0.5 text-[10px] font-medium max-w-[180px]"
+              >
+                <span className="truncate">{value}</span>
+                <button
+                  onClick={() => removeFilter(def.key, value)}
+                  className="rounded-full hover:bg-blue-200 p-0.5 flex-shrink-0"
+                >
+                  <XMarkIcon className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react'
 import {
-  FunnelIcon,
   ArrowDownTrayIcon,
   DocumentArrowDownIcon,
 } from '@heroicons/react/24/outline'
@@ -41,7 +40,6 @@ export default function PivotPage() {
 
   // --- Filters ---
   const [filterState, setFilterState] = useState<PivotFilterState>(INITIAL_PIVOT_FILTER_STATE)
-  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
 
   const filteredRows = useMemo(() => applyPivotFilters(rows, filterState), [rows, filterState])
 
@@ -100,9 +98,8 @@ export default function PivotPage() {
 
   return (
     <div className="flex flex-col h-full p-5">
-      {/* Single compact toolbar row */}
+      {/* Header row: Title + count + export buttons */}
       <div className="flex items-center justify-between gap-3 mb-3 flex-shrink-0">
-        {/* Left: Title + filter count */}
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold text-gray-900">Pivot Analysis</h1>
           {activeFilterCount > 0 && (
@@ -112,31 +109,7 @@ export default function PivotPage() {
           )}
         </div>
 
-        {/* Right: Filter toggle + Export icons */}
         <div className="flex items-center gap-1.5">
-          {/* Filter button */}
-          <button
-            onClick={() => setFilterPanelOpen(true)}
-            className={`relative inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-              activeFilterCount > 0
-                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
-            }`}
-            title="Open filters"
-          >
-            <FunnelIcon className="h-3.5 w-3.5" />
-            Filters
-            {activeFilterCount > 0 && (
-              <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] h-4 min-w-[16px] px-1">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-
-          {/* Divider */}
-          <div className="w-px h-5 bg-gray-200 mx-0.5" />
-
-          {/* Export Excel */}
           <button
             onClick={handleExportExcel}
             disabled={!pivotData}
@@ -146,8 +119,6 @@ export default function PivotPage() {
             <ArrowDownTrayIcon className="h-3.5 w-3.5" />
             <span>.xlsx</span>
           </button>
-
-          {/* Export Template */}
           <button
             onClick={handleExportTemplate}
             disabled={!pivotData}
@@ -158,6 +129,16 @@ export default function PivotPage() {
             <span>Report</span>
           </button>
         </div>
+      </div>
+
+      {/* Inline filter chips */}
+      <div className="flex-shrink-0 mb-3">
+        <PivotFilterBar
+          rows={rows}
+          filterState={filterState}
+          onFilterStateChange={setFilterState}
+          onClearAll={() => setFilterState(INITIAL_PIVOT_FILTER_STATE)}
+        />
       </div>
 
       {/* Pivot table (takes remaining space) */}
@@ -171,16 +152,6 @@ export default function PivotPage() {
           onColDimensionChange={setColDimension}
         />
       </div>
-
-      {/* Filter slide-over panel */}
-      <PivotFilterBar
-        rows={rows}
-        filterState={filterState}
-        onFilterStateChange={setFilterState}
-        onClearAll={() => setFilterState(INITIAL_PIVOT_FILTER_STATE)}
-        isOpen={filterPanelOpen}
-        onToggle={() => setFilterPanelOpen(false)}
-      />
     </div>
   )
 }

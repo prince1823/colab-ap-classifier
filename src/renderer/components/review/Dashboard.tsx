@@ -6,8 +6,9 @@ import ClassificationTree from './ClassificationTree'
 import ActiveFilters from './ActiveFilters'
 import ReclassificationLoader from './ReclassificationLoader'
 import SystemFeedbackModal from './SystemFeedbackModal'
-import { Table, X, ChevronDown, Sparkles, Plus, CheckCircle } from 'lucide-react'
+import { Table, X, ChevronDown, Sparkles, Plus, CheckCircle, BarChart3 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
+import MetricsTab from './MetricsTab'
 import '../../styles/Dashboard.css'
 import '../../styles/Tabs.css'
 
@@ -30,6 +31,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   const [highlightFeedback, setHighlightFeedback] = useState(false)
   const [reclassToast, setReclassToast] = useState<{ show: boolean; rowCount: number; targetPath: string }>({ show: false, rowCount: 0, targetPath: '' })
   const reclassToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [showDashboardModal, setShowDashboardModal] = useState(false)
 
   // Keyboard navigation state - coordinates between tree and tables
   const [keyboardFocus, setKeyboardFocus] = useState('tree') // 'tree' or 'tables'
@@ -851,6 +853,15 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                 />
                 <button
                   type="button"
+                  className="compact-control dashboard-btn"
+                  onClick={() => setShowDashboardModal(true)}
+                  title="Open Dashboard"
+                >
+                  <BarChart3 size={14} />
+                  <span>Dashboard</span>
+                </button>
+                <button
+                  type="button"
                   className={`compact-control system-feedback-compact ${systemFeedbackEnabled ? 'active' : ''}`}
                   onClick={() => setSystemFeedbackEnabled(!systemFeedbackEnabled)}
                   title="System feedback on reclassification"
@@ -1183,6 +1194,41 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
           onReject={handleRejectFeedback}
           onEdit={handleEditFeedback}
         />
+      )}
+
+      {/* Dashboard Modal */}
+      {showDashboardModal && (
+        <>
+          <div className="dashboard-modal-backdrop" onClick={() => setShowDashboardModal(false)} />
+          <div className="dashboard-modal">
+            <div className="dashboard-modal-header">
+              <h2>Dashboard</h2>
+              <button className="dashboard-modal-close" onClick={() => setShowDashboardModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="dashboard-modal-content">
+              <MetricsTab
+                transactions={transactions}
+                filteredTransactions={filteredTransactions}
+                onDrillToFilters={(filters) => {
+                  setFilterState(prev => {
+                    const next = { ...prev }
+                    if (filters.supplier) next.supplier = filters.supplier
+                    if (filters.classificationL1) next.classificationL1 = filters.classificationL1
+                    if (filters.glDescription) next.glDescription = filters.glDescription
+                    if (filters.company) next.company = filters.company
+                    if (filters.costCenter) next.costCenter = filters.costCenter
+                    if (filters.country) next.country = filters.country
+                    if (filters.supplierCategory) next.supplierCategory = filters.supplierCategory
+                    return next
+                  })
+                  setShowDashboardModal(false)
+                }}
+              />
+            </div>
+          </div>
+        </>
       )}
 
       {/* System Feedback Notification */}

@@ -433,6 +433,18 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
           <span className="header-metric-label">Suppliers:</span>
           <span className="header-metric-value">{formatNumber(totals.totalSuppliers)}</span>
         </div>
+        <div className="header-metric-divider" />
+        <div className="header-metric-item">
+          <span className="header-metric-label">Data Quality:</span>
+          <span className="header-metric-value">{totals.dataQualityScore}%</span>
+        </div>
+        <div className="header-metric-divider" />
+        <div className="header-metric-item">
+          <span className="header-metric-label">Low Confidence:</span>
+          <span className="header-metric-value" style={{ color: totals.lowConf > 0 ? '#f59e0b' : '#10b981' }}>
+            {formatNumber(totals.lowConf)} rows
+          </span>
+        </div>
       </div>
 
       <div className="metrics-grid">

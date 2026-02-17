@@ -2,7 +2,8 @@ import fs from 'fs';
 import { dialog, BrowserWindow } from 'electron';
 import { parse } from 'csv-parse/sync';
 import type { CSVPreview, CSVPreviewWithMappings, CanonicalizationResult } from '../../shared/types/canonicalization';
-import { CANONICAL_COLUMNS, suggestMappings } from '../agents/canonicalization-agent';
+import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
+import { suggestMappings } from '../agents/canonicalization-agent';
 
 const SAMPLE_ROW_LIMIT = 10;
 

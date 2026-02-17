@@ -1,8 +1,5 @@
 import { useState, useMemo } from 'react'
-import {
-  ArrowDownTrayIcon,
-  DocumentArrowDownIcon,
-} from '@heroicons/react/24/outline'
+import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { useTransactions } from '../hooks/useTransactions'
 import { transactionToDashboardRow } from '../utils/transactionTransform'
 import { usePivotData } from '../hooks/usePivotData'
@@ -10,10 +7,9 @@ import PivotView from '../components/review/PivotView'
 import PivotFilterBar, {
   INITIAL_PIVOT_FILTER_STATE,
   applyPivotFilters,
-  summarizeFilters,
   type PivotFilterState,
 } from '../components/review/PivotFilterBar'
-import { exportPivotExcel, exportPivotTemplate } from '../utils/exportPivotToExcel'
+import { exportPivotExcel } from '../utils/exportPivotToExcel'
 
 export default function PivotPage() {
   const { data: transactions, loading, error } = useTransactions()
@@ -52,25 +48,10 @@ export default function PivotPage() {
   // --- Pivot data (shared with export) ---
   const pivotData = usePivotData(filteredRows, rowDimension, colDimension)
 
-  // --- Filter summary for export ---
-  const filterSummary = useMemo(() => summarizeFilters(filterState), [filterState])
-
-  // --- Export handlers ---
+  // --- Export handler ---
   const handleExportExcel = () => {
     if (!pivotData) return
     exportPivotExcel({ pivotData, rowDimension, colDimension })
-  }
-
-  const handleExportTemplate = () => {
-    if (!pivotData) return
-    exportPivotTemplate({
-      pivotData,
-      rowDimension,
-      colDimension,
-      filterSummary,
-      totalTransactions: rows.length,
-      filteredTransactions: filteredRows.length,
-    })
   }
 
   // --- Loading / Error states ---
@@ -98,47 +79,30 @@ export default function PivotPage() {
 
   return (
     <div className="flex flex-col h-full p-5">
-      {/* Header row: Title + count + export buttons */}
-      <div className="flex items-center justify-between gap-3 mb-3 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-gray-900">Pivot Analysis</h1>
-          {activeFilterCount > 0 && (
-            <span className="text-xs text-blue-600 bg-blue-50 rounded-full px-2.5 py-0.5 font-medium">
-              {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()}
-            </span>
-          )}
+      {/* Filter chips + export button in one row */}
+      <div className="flex items-center gap-2 mb-3 flex-shrink-0">
+        <div className="flex-1 min-w-0">
+          <PivotFilterBar
+            rows={rows}
+            filterState={filterState}
+            onFilterStateChange={setFilterState}
+            onClearAll={() => setFilterState(INITIAL_PIVOT_FILTER_STATE)}
+          />
         </div>
-
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleExportExcel}
-            disabled={!pivotData}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            title="Export as Excel"
-          >
-            <ArrowDownTrayIcon className="h-3.5 w-3.5" />
-            <span>.xlsx</span>
-          </button>
-          <button
-            onClick={handleExportTemplate}
-            disabled={!pivotData}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            title="Export as formatted report"
-          >
-            <DocumentArrowDownIcon className="h-3.5 w-3.5" />
-            <span>Report</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Inline filter chips */}
-      <div className="flex-shrink-0 mb-3">
-        <PivotFilterBar
-          rows={rows}
-          filterState={filterState}
-          onFilterStateChange={setFilterState}
-          onClearAll={() => setFilterState(INITIAL_PIVOT_FILTER_STATE)}
-        />
+        {activeFilterCount > 0 && (
+          <span className="text-[10px] text-blue-600 bg-blue-50 rounded-full px-2 py-0.5 font-medium whitespace-nowrap flex-shrink-0">
+            {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()}
+          </span>
+        )}
+        <button
+          onClick={handleExportExcel}
+          disabled={!pivotData}
+          className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+          title="Export as Excel"
+        >
+          <ArrowDownTrayIcon className="h-3 w-3" />
+          <span>.xlsx</span>
+        </button>
       </div>
 
       {/* Pivot table (takes remaining space) */}

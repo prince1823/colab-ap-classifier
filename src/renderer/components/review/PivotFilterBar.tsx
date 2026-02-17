@@ -11,14 +11,9 @@ export interface PivotFilterState {
   classificationL1: string[]
   classificationL2: string[]
   classificationL3: string[]
+  classificationL4: string[]
   glDescription: string[]
   company: string[]
-  year: string[]
-  quarter: string[]
-  month: string[]
-  costCenter: string[]
-  supplierCategory: string[]
-  country: string[]
 }
 
 export const INITIAL_PIVOT_FILTER_STATE: PivotFilterState = {
@@ -26,14 +21,9 @@ export const INITIAL_PIVOT_FILTER_STATE: PivotFilterState = {
   classificationL1: [],
   classificationL2: [],
   classificationL3: [],
+  classificationL4: [],
   glDescription: [],
   company: [],
-  year: [],
-  quarter: [],
-  month: [],
-  costCenter: [],
-  supplierCategory: [],
-  country: [],
 }
 
 interface FilterDef {
@@ -44,9 +34,11 @@ interface FilterDef {
 
 const FILTER_DEFS: FilterDef[] = [
   { key: 'supplier', label: 'Supplier', extract: (r) => r.supplier_name as string | undefined },
+  { key: 'glDescription', label: 'GL Description', extract: (r) => r.gl_description as string | undefined },
+  { key: 'company', label: 'Company', extract: (r) => r.company as string | undefined },
   {
     key: 'classificationL1',
-    label: 'Classification L1',
+    label: 'L1',
     extract: (r) => {
       const p = String(r.classification_path || '')
       return p.split('|')[0]?.trim() || undefined
@@ -54,7 +46,7 @@ const FILTER_DEFS: FilterDef[] = [
   },
   {
     key: 'classificationL2',
-    label: 'Classification L2',
+    label: 'L2',
     extract: (r) => {
       const p = String(r.classification_path || '')
       return p.split('|')[1]?.trim() || undefined
@@ -62,38 +54,33 @@ const FILTER_DEFS: FilterDef[] = [
   },
   {
     key: 'classificationL3',
-    label: 'Classification L3',
+    label: 'L3',
     extract: (r) => {
       const p = String(r.classification_path || '')
       return p.split('|')[2]?.trim() || undefined
     },
   },
-  { key: 'glDescription', label: 'GL Description', extract: (r) => r.gl_description as string | undefined },
-  { key: 'company', label: 'Company', extract: (r) => r.company as string | undefined },
-  { key: 'year', label: 'Year', extract: (r) => r['Accounting Date-Year'] as string | undefined },
-  { key: 'quarter', label: 'Quarter', extract: (r) => r['Accounting Date-Quarter'] as string | undefined },
-  { key: 'month', label: 'Month', extract: (r) => r['Accounting Date-Month'] as string | undefined },
-  { key: 'costCenter', label: 'Cost Center', extract: (r) => r['Cost Center Name'] as string | undefined },
-  { key: 'supplierCategory', label: 'Supplier Category', extract: (r) => r['Supplier Category'] as string | undefined },
-  { key: 'country', label: 'Country', extract: (r) => r.Country as string | undefined },
+  {
+    key: 'classificationL4',
+    label: 'L4',
+    extract: (r) => {
+      const p = String(r.classification_path || '')
+      return p.split('|')[3]?.trim() || undefined
+    },
+  },
 ]
 
 const PRIMARY_KEYS: (keyof PivotFilterState)[] = [
   'supplier',
-  'classificationL1',
   'glDescription',
-  'company',
-  'year',
 ]
 
 const SECONDARY_KEYS: (keyof PivotFilterState)[] = [
+  'company',
+  'classificationL1',
   'classificationL2',
   'classificationL3',
-  'quarter',
-  'month',
-  'costCenter',
-  'supplierCategory',
-  'country',
+  'classificationL4',
 ]
 
 /* ------------------------------------------------------------------ */
@@ -135,7 +122,7 @@ function FilterChipPopover({
     <Popover.Root onOpenChange={(open) => { if (!open) setSearch('') }}>
       <Popover.Trigger asChild>
         <button
-          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+          className={`inline-flex items-center gap-0.5 rounded border px-2 py-0.5 text-[11px] font-medium transition-colors ${
             hasSelection
               ? 'border-blue-300 bg-blue-50 text-blue-700'
               : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
@@ -143,11 +130,11 @@ function FilterChipPopover({
         >
           {def.label}
           {hasSelection && (
-            <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] h-4 min-w-[16px] px-1">
+            <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[8px] h-3.5 min-w-[14px] px-0.5">
               {selected.length}
             </span>
           )}
-          <ChevronDownIcon className="h-3 w-3 opacity-50" />
+          <ChevronDownIcon className="h-2.5 w-2.5 opacity-50" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -235,20 +222,20 @@ function MoreFiltersPopover({
     <Popover.Root onOpenChange={(open) => { if (!open) setSearches({}) }}>
       <Popover.Trigger asChild>
         <button
-          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+          className={`inline-flex items-center gap-0.5 rounded border px-2 py-0.5 text-[11px] font-medium transition-colors ${
             secondaryActiveCount > 0
               ? 'border-blue-300 bg-blue-50 text-blue-700'
               : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
           }`}
         >
-          <PlusIcon className="h-3 w-3" />
+          <PlusIcon className="h-2.5 w-2.5" />
           More
           {secondaryActiveCount > 0 && (
-            <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] h-4 min-w-[16px] px-1">
+            <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[8px] h-3.5 min-w-[14px] px-0.5">
               {secondaryActiveCount}
             </span>
           )}
-          <ChevronDownIcon className="h-3 w-3 opacity-50" />
+          <ChevronDownIcon className="h-2.5 w-2.5 opacity-50" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -325,6 +312,75 @@ function MoreFiltersPopover({
 }
 
 /* ------------------------------------------------------------------ */
+/* ActivePillRow — shows first 2 pills, rest behind +N more popover    */
+/* ------------------------------------------------------------------ */
+
+function ActivePillRow({
+  filterState,
+  onRemove,
+  onClearAll,
+}: {
+  filterState: PivotFilterState
+  onRemove: (key: keyof PivotFilterState, value: string) => void
+  onClearAll: () => void
+}) {
+  // Flatten all active filters into a single ordered list
+  const allPills: { key: keyof PivotFilterState; label: string; value: string }[] = []
+  for (const def of FILTER_DEFS) {
+    for (const value of filterState[def.key]) {
+      allPills.push({ key: def.key, label: def.label, value })
+    }
+  }
+
+  const VISIBLE_COUNT = 2
+  const visible = allPills.slice(0, VISIBLE_COUNT)
+  const overflow = allPills.slice(VISIBLE_COUNT)
+
+  const pill = (item: { key: keyof PivotFilterState; value: string }) => (
+    <span
+      key={`${item.key}-${item.value}`}
+      className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 text-blue-700 pl-1.5 pr-0.5 py-px text-[9px] font-medium max-w-[160px]"
+    >
+      <span className="truncate">{item.value}</span>
+      <button
+        onClick={() => onRemove(item.key, item.value)}
+        className="rounded-full hover:bg-blue-200 p-px flex-shrink-0"
+      >
+        <XMarkIcon className="h-2 w-2" />
+      </button>
+    </span>
+  )
+
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      {visible.map(pill)}
+
+      {overflow.length > 0 && (
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <button className="inline-flex items-center gap-0.5 rounded-full bg-gray-100 text-gray-600 px-1.5 py-px text-[9px] font-medium hover:bg-gray-200 transition-colors">
+              +{overflow.length} more
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              sideOffset={4}
+              align="start"
+              collisionPadding={8}
+              className="z-50 w-64 max-h-[250px] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg p-2"
+            >
+              <div className="flex flex-wrap gap-1.5">
+                {overflow.map(pill)}
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* Main Component                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -377,9 +433,9 @@ export default function PivotFilterBar({
   )
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1">
       {/* Chip row */}
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="flex items-center gap-1 flex-wrap">
         {visiblePrimary.map((def) => (
           <FilterChipPopover
             key={def.key}
@@ -404,34 +460,17 @@ export default function PivotFilterBar({
         {activeCount > 0 && (
           <button
             onClick={onClearAll}
-            className="inline-flex items-center gap-1 text-[11px] text-red-500 hover:text-red-600 font-medium ml-1"
+            className="inline-flex items-center gap-0.5 text-[10px] text-red-500 hover:text-red-600 font-medium ml-0.5"
           >
-            <XMarkIcon className="h-3 w-3" />
+            <XMarkIcon className="h-2.5 w-2.5" />
             Clear all
           </button>
         )}
       </div>
 
-      {/* Active filter pills */}
+      {/* Active filter pills — show first 2, then +N more */}
       {activeCount > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {FILTER_DEFS.map((def) =>
-            filterState[def.key].map((value) => (
-              <span
-                key={`${def.key}-${value}`}
-                className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 text-blue-700 pl-2 pr-1 py-0.5 text-[10px] font-medium max-w-[180px]"
-              >
-                <span className="truncate">{value}</span>
-                <button
-                  onClick={() => removeFilter(def.key, value)}
-                  className="rounded-full hover:bg-blue-200 p-0.5 flex-shrink-0"
-                >
-                  <XMarkIcon className="h-2.5 w-2.5" />
-                </button>
-              </span>
-            ))
-          )}
-        </div>
+        <ActivePillRow filterState={filterState} onRemove={removeFilter} onClearAll={onClearAll} />
       )}
     </div>
   )
@@ -453,47 +492,29 @@ export function applyPivotFilters(
     if (filterState.supplier.length > 0) {
       if (!filterState.supplier.includes(String(row.supplier_name || ''))) return false
     }
-    if (filterState.classificationL1.length > 0) {
-      const path = String(row.classification_path || row.taxonomy_path || '')
-      const parts = path.split('|').map((p) => p.trim())
-      if (!parts[0] || !filterState.classificationL1.some((v) => parts[0].toLowerCase() === v.toLowerCase()))
-        return false
-    }
-    if (filterState.classificationL2.length > 0) {
-      const path = String(row.classification_path || row.taxonomy_path || '')
-      const parts = path.split('|').map((p) => p.trim())
-      if (!parts[1] || !filterState.classificationL2.some((v) => parts[1].toLowerCase() === v.toLowerCase()))
-        return false
-    }
-    if (filterState.classificationL3.length > 0) {
-      const path = String(row.classification_path || row.taxonomy_path || '')
-      const parts = path.split('|').map((p) => p.trim())
-      if (!parts[2] || !filterState.classificationL3.some((v) => parts[2].toLowerCase() === v.toLowerCase()))
-        return false
-    }
     if (filterState.glDescription.length > 0) {
       if (!filterState.glDescription.includes(String(row.gl_description || ''))) return false
     }
     if (filterState.company.length > 0) {
       if (!filterState.company.includes(String(row.company || ''))) return false
     }
-    if (filterState.year.length > 0) {
-      if (!filterState.year.includes(String(row['Accounting Date-Year'] || ''))) return false
+    const path = String(row.classification_path || row.taxonomy_path || '')
+    const parts = path.split('|').map((p) => p.trim())
+    if (filterState.classificationL1.length > 0) {
+      if (!parts[0] || !filterState.classificationL1.some((v) => parts[0].toLowerCase() === v.toLowerCase()))
+        return false
     }
-    if (filterState.quarter.length > 0) {
-      if (!filterState.quarter.includes(String(row['Accounting Date-Quarter'] || ''))) return false
+    if (filterState.classificationL2.length > 0) {
+      if (!parts[1] || !filterState.classificationL2.some((v) => parts[1].toLowerCase() === v.toLowerCase()))
+        return false
     }
-    if (filterState.month.length > 0) {
-      if (!filterState.month.includes(String(row['Accounting Date-Month'] || ''))) return false
+    if (filterState.classificationL3.length > 0) {
+      if (!parts[2] || !filterState.classificationL3.some((v) => parts[2].toLowerCase() === v.toLowerCase()))
+        return false
     }
-    if (filterState.costCenter.length > 0) {
-      if (!filterState.costCenter.includes(String(row['Cost Center Name'] || ''))) return false
-    }
-    if (filterState.supplierCategory.length > 0) {
-      if (!filterState.supplierCategory.includes(String(row['Supplier Category'] || ''))) return false
-    }
-    if (filterState.country.length > 0) {
-      if (!filterState.country.includes(String(row.Country || ''))) return false
+    if (filterState.classificationL4.length > 0) {
+      if (!parts[3] || !filterState.classificationL4.some((v) => parts[3].toLowerCase() === v.toLowerCase()))
+        return false
     }
     return true
   })

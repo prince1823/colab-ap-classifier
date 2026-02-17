@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react'
 import { usePivotData } from '../../hooks/usePivotData'
 
 interface PivotViewProps {
@@ -21,7 +22,7 @@ export default function PivotView({
 
   const fmt = (n: number) =>
     n === 0
-      ? '–'
+      ? ''
       : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 
   if (!transactions.length) {
@@ -36,16 +37,24 @@ export default function PivotView({
 
   const { matrix, sortedCols, sortedRows, colTotals, rowTotals, grandTotal } = pivotData
 
+  const [search, setSearch] = useState('')
+
+  const visibleRows = useMemo(() => {
+    if (!search.trim()) return sortedRows
+    const q = search.trim().toLowerCase()
+    return sortedRows.filter((r) => r.toLowerCase().includes(q))
+  }, [sortedRows, search])
+
   return (
-    <div className="flex flex-col gap-4 h-full">
+    <div className="flex flex-col gap-2 h-full">
       {/* Dimension selectors */}
-      <div className="flex items-center gap-4 flex-shrink-0">
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+      <div className="flex items-center gap-2.5 flex-shrink-0">
+        <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600">
           Rows:
           <select
             value={rowDimension}
             onChange={(e) => onRowDimensionChange(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="rounded border border-gray-300 px-2 py-1 text-xs bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           >
             {availableColumns.map((col) => (
               <option key={col} value={col}>
@@ -54,12 +63,12 @@ export default function PivotView({
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+        <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600">
           Columns:
           <select
             value={colDimension}
             onChange={(e) => onColDimensionChange(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="rounded border border-gray-300 px-2 py-1 text-xs bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           >
             {availableColumns.map((col) => (
               <option key={col} value={col}>
@@ -68,9 +77,23 @@ export default function PivotView({
             ))}
           </select>
         </label>
-        <span className="text-xs text-gray-500 ml-auto">
-          {sortedRows.length} rows × {sortedCols.length} columns
-        </span>
+        <div className="relative ml-auto">
+          <input
+            type="text"
+            placeholder="Search rows…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none w-36"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Pivot table */}
@@ -96,7 +119,7 @@ export default function PivotView({
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((rowKey, i) => {
+            {visibleRows.map((rowKey, i) => {
               const row = matrix.get(rowKey)!
               return (
                 <tr

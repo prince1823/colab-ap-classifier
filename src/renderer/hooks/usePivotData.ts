@@ -23,9 +23,19 @@ export function usePivotData(
     let grandTotal = 0
 
     for (const t of transactions) {
-      const rowKey = String(t[rowDimension] || '(blank)')
-      const colKey = String(t[colDimension] || '(blank)')
+      const rawRow = t[rowDimension]
+      const rawCol = t[colDimension]
       const amount = Number(t.spend_amount || t.amount || t.invoice_amount || 0)
+
+      // Skip rows with no amount or blank/null/undefined dimension values
+      if (amount === 0 || isNaN(amount)) continue
+      const rowStr = rawRow == null ? '' : String(rawRow).trim()
+      const colStr = rawCol == null ? '' : String(rawCol).trim()
+      if (!rowStr || rowStr === 'null' || rowStr === 'undefined' || rowStr === 'N/A') continue
+      if (!colStr || colStr === 'null' || colStr === 'undefined' || colStr === 'N/A') continue
+
+      const rowKey = rowStr
+      const colKey = colStr
 
       if (!matrix.has(rowKey)) matrix.set(rowKey, new Map())
       const row = matrix.get(rowKey)!
@@ -36,14 +46,16 @@ export function usePivotData(
       grandTotal += amount
     }
 
-    // Sort columns by total spend, take top 15
+    // Sort columns by total spend, take top 15 (only non-zero)
     const sortedCols = [...colTotals.entries()]
+      .filter(([, v]) => v !== 0)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15)
       .map(([k]) => k)
 
-    // Sort rows by total spend
+    // Sort rows by total spend (only non-zero)
     const sortedRows = [...rowTotals.entries()]
+      .filter(([, v]) => v !== 0)
       .sort((a, b) => b[1] - a[1])
       .map(([k]) => k)
 

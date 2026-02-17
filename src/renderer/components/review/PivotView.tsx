@@ -90,7 +90,7 @@ export default function PivotView({
                   {col}
                 </th>
               ))}
-              <th className="px-3 py-2 text-right font-bold text-gray-900 border-b border-l border-gray-300 bg-gray-100 min-w-[120px]">
+              <th className="sticky right-0 z-20 px-3 py-2 text-right font-bold text-gray-900 border-b border-l border-gray-300 bg-gray-100 min-w-[120px]">
                 Row Total
               </th>
             </tr>
@@ -120,7 +120,8 @@ export default function PivotView({
                       </td>
                     )
                   })}
-                  <td className="px-3 py-1.5 text-right font-semibold text-gray-900 border-l border-gray-300 bg-blue-50/30 tabular-nums">
+                  <td className="sticky right-0 z-[5] px-3 py-1.5 text-right font-semibold text-gray-900 border-l border-gray-300 tabular-nums"
+                      style={{ background: i % 2 === 0 ? '#eff6ff' : '#eef2ff' }}>
                     {fmt(rowTotals.get(rowKey) || 0)}
                   </td>
                 </tr>
@@ -140,7 +141,7 @@ export default function PivotView({
                   {fmt(colTotals.get(colKey) || 0)}
                 </td>
               ))}
-              <td className="px-3 py-2 text-right font-bold text-blue-700 border-l border-gray-300 tabular-nums">
+              <td className="sticky right-0 z-20 px-3 py-2 text-right font-bold text-blue-700 border-l border-gray-300 bg-gray-100 tabular-nums">
                 {fmt(grandTotal)}
               </td>
             </tr>

@@ -1,0 +1,28 @@
+Direct|Raw Materials|Chemicals
+	Industrial chemicals and chemical compounds
+Direct|Raw Materials|Metals
+	Steel, aluminum, and other metal products
+Direct|Equipment|Lab Equipment
+	Laboratory and testing equipment
+Direct|Equipment|Production Machinery
+	Manufacturing and production line machinery
+Direct|Construction|Building Materials
+	Concrete, lumber, steel, and construction supplies
+Direct|Construction|Contracting
+	General contracting and construction services
+Indirect|IT|Hardware
+	Computers, servers, networking, and IT hardware
+Indirect|IT|Software
+	Software licenses, SaaS, and enterprise applications
+Indirect|Professional Services|Consulting
+	Management consulting and advisory services
+Indirect|Professional Services|Legal
+	Legal, compliance, and regulatory services
+Indirect|Facilities|Office Supplies
+	Office supplies, stationery, and consumables
+Indirect|Facilities|Maintenance
+	Building maintenance, janitorial, and repair services
+Exempt|Intercompany|Transfers
+	Intercompany transfers and internal charges
+Exempt|Taxes|Government Fees
+	Tax payments, government fees, and regulatory charges

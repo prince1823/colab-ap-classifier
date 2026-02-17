@@ -25,14 +25,14 @@ afterAll(() => {
 });
 
 describe('listTaxonomies', () => {
-  it('should return correct taxonomy names and .txt file counts', async () => {
+  it('should return correct taxonomy names and leaf node counts', async () => {
     const taxonomies = await listTaxonomies();
 
     expect(taxonomies).toEqual(
       expect.arrayContaining([
-        { name: 'healthcare', nodeCount: 78 },
-        { name: 'general', nodeCount: 6 },
-        { name: 'manufacturing', nodeCount: 25 },
+        { name: 'healthcare', nodeCount: 58 },
+        { name: 'general', nodeCount: 2 },
+        { name: 'manufacturing', nodeCount: 14 },
       ])
     );
     expect(taxonomies).toHaveLength(3);
@@ -73,25 +73,43 @@ describe('listRulePacks', () => {
 });
 
 describe('readTaxonomy', () => {
-  it('should parse valid .txt files with correct paths and descriptions', async () => {
+  it('should parse taxonomy.txt and auto-generate parent nodes', async () => {
     const result = await readTaxonomy('healthcare');
 
-    // Healthcare taxonomy has 78 nodes (L1, L2, and L3)
+    // Healthcare: 58 leaves + 20 auto-generated parents = 78 total nodes
     expect(result.nodes).toHaveLength(78);
 
-    // Check first few nodes (sorted by numeric filename: 1.txt, 2.txt, 3.txt)
-    expect(result.nodes[0]).toEqual({
-      path: 'Clinical',
-      description: expect.stringContaining('Clinical costs'),
-    });
-    expect(result.nodes[1]).toEqual({
-      path: 'Non Clinical',
-      description: expect.stringContaining('Non-clinical'),
-    });
-    expect(result.nodes[2]).toEqual({
-      path: 'Non-Sourceable',
-      description: expect.stringContaining('Non-procurement'),
-    });
+    // Auto-generated parents come first (no descriptions)
+    const parents = result.nodes.filter((n) => n.path.split('|').length < 3);
+    expect(parents.length).toBe(20);
+    parents.forEach((p) => expect(p.description).toBe(''));
+
+    // Leaves have descriptions
+    const leaves = result.nodes.filter((n) => n.path.split('|').length === 3);
+    expect(leaves.length).toBe(58);
+    leaves.forEach((l) => expect(l.description).not.toBe(''));
+  });
+
+  it('should include all L1 and L2 parent paths', async () => {
+    const result = await readTaxonomy('healthcare');
+    const paths = result.nodes.map((n) => n.path);
+
+    // L1 parents
+    expect(paths).toContain('Clinical');
+    expect(paths).toContain('Non Clinical');
+    expect(paths).toContain('Non-Sourceable');
+
+    // L2 parents
+    expect(paths).toContain('Clinical|Clinical Equipment');
+    expect(paths).toContain('Clinical|Clinical Services');
+    expect(paths).toContain('Non Clinical|General & Administrative');
+  });
+
+  it('should parse leaf descriptions correctly', async () => {
+    const result = await readTaxonomy('healthcare');
+    const software = result.nodes.find((n) => n.path === 'Clinical|IT - Clinical|EHR/EMR');
+    expect(software).toBeDefined();
+    expect(software!.description).toContain('Electronic Health Record');
   });
 
   it('should not include nodes with empty paths', async () => {
@@ -100,21 +118,8 @@ describe('readTaxonomy', () => {
     expect(paths).not.toContain('');
   });
 
-  it('should return sorted nodes (numeric filename order)', async () => {
-    const result = await readTaxonomy('healthcare');
-    // 1.txt = Clinical, 2.txt = Non Clinical, 3.txt = Non-Sourceable
-    expect(result.nodes[0].path).toBe('Clinical');
-    expect(result.nodes[1].path).toBe('Non Clinical');
-    expect(result.nodes[2].path).toBe('Non-Sourceable');
-  });
-
   it('should return empty nodes for non-existent industry', async () => {
     const result = await readTaxonomy('nonexistent');
-    expect(result.nodes).toEqual([]);
-  });
-
-  it('should return empty nodes for empty taxonomy directory', async () => {
-    const result = await readTaxonomy('empty');
     expect(result.nodes).toEqual([]);
   });
 });

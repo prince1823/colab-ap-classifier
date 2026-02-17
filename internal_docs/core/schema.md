@@ -294,12 +294,10 @@ ColabIP is a Git repository that stores master data shared across projects. All 
 colabip/
 ├── taxonomies/
 │   ├── healthcare/
-│   │   ├── 1.txt
-│   │   ├── 2.txt
-│   │   ├── ...
+│   │   ├── taxonomy.txt
 │   │   └── rules.csv
 │   └── {industry_name}/
-│       ├── {id}.txt
+│       ├── taxonomy.txt
 │       └── rules.csv
 └── suppliers/
     └── supplier_universe.csv
@@ -307,19 +305,26 @@ colabip/
 
 ### Taxonomies
 
-**Path:** `colabip/taxonomies/{industry_name}/{id}.txt`
+**Path:** `colabip/taxonomies/{industry_name}/taxonomy.txt`
 
-One `.txt` file per taxonomy node, numbered sequentially. Each industry is a separate folder.
+Single flat file per taxonomy. Each industry is a separate folder. Only depth-3 leaf nodes are stored in the file; L1 and L2 parent nodes are auto-generated during import.
 
-**File format (2 lines):**
-- **Line 1:** Pipe-delimited path (e.g., `clinical|clinical equipment|diagnostic imaging equipment|diagnostic imaging equipment`)
-- **Line 2:** Description text with supplier examples in parentheses
+**File format (alternating lines):**
+- **Path line:** Pipe-delimited depth-3 path (e.g., `Clinical|Clinical Equipment|Diagnostic Imaging Equipment`)
+- **Description line:** Tab-indented description text (e.g., `\tDiagnostic imaging equipment suppliers including...`)
+
+```
+Clinical|Clinical Equipment|Diagnostic Imaging Equipment
+	Diagnostic imaging equipment suppliers including X-ray machines, ultrasound...
+Clinical|Clinical Services|Clinical Staffing
+	Staffing agencies for temporary clinical labor...
+```
 
 ### Taxonomy Rules
 
 **Path:** `colabip/taxonomies/{industry_name}/rules.csv`
 
-Each taxonomy has its own rules file, stored alongside the taxonomy node files. Synced into the project's `override_rules` table at classification time with `source='taxonomy'`.
+Each taxonomy has its own rules file, stored alongside the taxonomy file. Synced into the project's `override_rules` table at classification time with `source='taxonomy'`.
 
 CSV with the following columns:
 

@@ -41,4 +41,4 @@ gh repo view kavyald/colab-ap-classifier --json name --jq '.name' &>/dev/null &&
 
 echo ""
 echo "GitHub CLI authenticated successfully!"
-echo "You can now run: bash .github/issues/create-all-issues.sh"
+echo "Use /create-issue to create new issues with proper board fields."

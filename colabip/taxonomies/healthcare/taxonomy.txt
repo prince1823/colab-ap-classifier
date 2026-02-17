@@ -1,0 +1,110 @@
+clinical|clinical equipment|clinical equipment other
+	any other type of equipment apart from diagnostic imaging equipment used at the physician clinic for providing healthcare to patients. examples include examination chairs, treatment tables, diagnostic tools, autoclave equipment, medication dispensers, vital sign monitors, and other non-imaging clinical equipment. (medical equipment manufacturers, medical supply distributors, clinical equipment vendors.)
+clinical|clinical equipment|diagnostic imaging equipment
+	diagnostic imaging equipment suppliers including x-ray machines, ultrasound equipment, ct scanners, mri machines, digital radiography systems, mammography equipment, and related imaging technology. (medical imaging equipment manufacturers (ge healthcare, siemens, philips), imaging equipment vendors, specialized medical device companies.)
+clinical|clinical services|clinical services other
+	clinical services such as specialized clinical assessments, clinical audits, quality improvement support, clinical protocol development, or other ad-hoc clinical work performed by external clinical consultants or agencies. (clinical consulting firms, healthcare service organizations, specialized clinical service providers.)
+clinical|clinical services|clinical staffing
+	staffing agencies or independent contractors for temporary labor associated with clinical work like registered nurses, lpns, medical assistants, phlebotomists, respiratory therapists, and other non-physician clinical personnel. (healthcare staffing agencies (aya healthcare, trustaff), clinical temporary labor providers, nursing agencies, medical staffing companies.)
+clinical|clinical services|doctor/physician
+	doctors or physicians (that are not on payroll) for their services provided to innovacare, including contracted primary care physicians, specialty consultants, medical directors, peer review services, or advisory services. (independent physician practitioners, physician networks, specialist groups, medical director service providers, locum tenens agencies.)
+clinical|clinical services|patient care
+	clinical patient care services including member support services, care navigation, transportation for medical appointments, wellness programs, community health initiatives, and other clinical patient-facing care delivery not categorized elsewhere. (patient transportation services (medical transport companies), patient advocacy organizations, care navigation service providers, member services vendors, community health organizations.)
+clinical|clinical supplies|clinical supplies other
+	clinical supplies including bandages, wound care products, syringes, needles, diagnostic test kits, gloves, protective equipment, iv supplies, and other consumable clinical supplies used in patient care. (medical supply manufacturers, healthcare distributors (cardinal health, mckesson, henry schein), clinical consumables vendors, pharmaceutical distributors.)
+clinical|clinical supplies|medical-surgical supplies
+	medical and surgical supplies including sterile instruments, surgical trays, sutures, gauze, dressings, catheters, stents, orthopedic implants, and other surgical/procedural consumables. (surgical supply manufacturers, medical device companies (medtronic, stryker, zimmer), hospital supply distributors, specialty surgical suppliers.)
+clinical|it - clinical|clinical decision support tools
+	
+clinical|it - clinical|ehr/emr
+	electronic health record (ehr) or electronic medical record (emr) systems and related services including software licenses, maintenance, updates, hosting, integration, and support. (major ehr vendors (epic systems, cerner, athena health, nextgen, practice fusion), cloud-based ehr providers, healthcare it integrators.)
+clinical|it - clinical|practice management software
+	practice management software systems used for scheduling, billing, patient registration, claims submission, and administrative workflow management across physician clinics. (practice management vendors (athena health, nextgen healthcare, eclinicalworks), integrated ehr/pm vendors, healthcare it service providers.)
+clinical|it - clinical|telehealth
+	telehealth and virtual care platforms enabling remote consultations, virtual visits, remote patient monitoring, digital therapeutics, and virtual care delivery capabilities. (telehealth platform vendors (teladoc, amwell, mdlive), video conferencing companies adapted for healthcare, healthcare it vendors offering telehealth modules.)
+clinical|laboratory|laboratory services
+	laboratory testing services including chemistry, hematology, microbiology, pathology, genetic testing, and specialized lab analysis services for patient samples. (laboratory service providers (labcorp, quest diagnostics, sonic healthcare), hospital labs, specialized reference labs, diagnostic testing companies.)
+clinical|pharmacy|pharmacy other
+	pharmacy services including medication management programs, formulary services, drug therapy consulting, medication synchronization programs, or specialized pharmacy services. (pharmacy benefit managers (cvs caremark, express scripts), specialty pharmacy providers, independent pharmacy networks, pharmaceutical consulting firms.)
+clinical|professional services - clinical|healthcare consulting
+	'healthcare
+clinical|professional services - clinical|revenue cycle management (rcm) services
+	
+non-sourceable|non-sourceable|business related
+	business-related expenses not otherwise classified that cannot be clearly categorized into a specific department or cost center. (various, as this category captures miscellaneous business expenses.)
+non-sourceable|non-sourceable|employee related
+	employee-related expenses including employee reimbursements, welfare, and miscellaneous employee support. (internal processing and employee reimbursements.)
+non-sourceable|non-sourceable|intercompany
+	payments and transfers between innovacare entities, subsidiaries, and related companies for internal reallocation of funds and intercompany settlements. (internal innovacare entities and affiliates.)
+non-sourceable|non-sourceable|payroll
+	all payroll-related costs including employee wages, salaries, bonuses, overtime, and payroll tax withholdings. (internal payroll processing (employees are the recipients).)
+non-sourceable|non-sourceable|taxes and regulatory fees
+	
+non-clinical|facilities|construction services
+	architectural and engineering firms for design, planning, feasibility studies, and engineering support for clinic renovations, facility expansions, and construction projects. (architectural firms, engineering consulting companies, healthcare facility design specialists, construction planning consultants.)
+non-clinical|facilities|facilities maintenance services
+	electrical system installation, repair, maintenance, and troubleshooting services including wiring, outlets, lighting systems, generators, and electrical code compliance. (licensed electricians, electrical contractors, facility maintenance service providers, industrial electrical companies.)
+non-clinical|facilities|facilities management
+	employee cafeteria services, meal provision, catering for events, and food service management at innovacare facilities. (food service management companies (aramark, compass group), cafeteria operators, catering companies, employee meal service providers.)
+non-clinical|facilities|mro supplies
+	janitorial and cleaning supplies including soaps, disinfectants, paper products, trash bags, cleaning chemicals, and related consumables. (janitorial supply distributors (essendant, us plastics), supply wholesalers, cleaning product manufacturers, office supply companies.)
+non-clinical|facilities|utilities
+	electricity, natural gas, heating oil, and other energy sources used to power and heat clinic and office facilities. (utility companies (local electric and gas providers), energy suppliers, utility management service providers.)
+non-clinical|general & administrative|financial services
+	collection agencies for accounts receivable collection, debt recovery, and collection management services. (debt collection agencies, third-party collection firms, accounts receivable management companies, credit management services.)
+non-clinical|general & administrative|insurance
+	corporate liability insurance, property insurance, directors and officers (d&o) insurance, and other general business liability coverage. (insurance brokers, insurance carriers, risk management firms, insurance underwriters.)
+non-clinical|general & administrative|office supplies & equipment
+	
+non-clinical|general & administrative|office support
+	copier equipment leases, maintenance contracts, repair services, and toner/supplies for photocopying and document management. (copier manufacturers (xerox, canon, ricoh), equipment leasing companies, managed print service providers.)
+non-clinical|general & administrative|services
+	flowers, gifts, commemorative items, and related items for employee recognition, client appreciation, and business events. (florists, gift shops, corporate gift vendors, event planning companies.)
+non-clinical|human resources|employee benefits
+	employee benefits including wellness programs, employee assistance programs (eap), fitness benefits, and other benefit services. (wellness program providers, eap vendors (compysch, magellan), fitness app providers, employee benefit administrators.)
+non-clinical|human resources|human resource services
+	hr services including payroll processing support, hr systems administration, hr compliance services, and general hr outsourcing. (hr service providers, peo (professional employer organization) companies, hr consulting firms, payroll service providers.)
+non-clinical|human resources|insurance / medical benefit
+	
+non-clinical|human resources|relocation services
+	employee relocation services including moving expenses, temporary housing, and relocation consulting for employees transferred to new locations. (moving and relocation companies (united van lines, bekins), corporate relocation services, real estate relocation consultants.)
+non-clinical|human resources|workforce management
+	recruitment agencies, executive search firms, and recruiting services for employee sourcing, candidate screening, and talent acquisition support. (recruitment agencies, executive search firms, staffing companies, online job boards offering recruitment services.)
+non-clinical|it & telecom|it products & services
+	cloud infrastructure services including servers, storage, database services, and compute capacity provided by cloud providers. (cloud providers (amazon web services, microsoft azure, google cloud), cloud service integrators, cloud management vendors.)
+non-clinical|it & telecom|software
+	enterprise resource planning (erp) software licenses, maintenance, updates, hosting, and support services including sap, oracle, or similar platforms. (erp software vendors (sap, oracle, microsoft dynamics), implementation partners, software support providers.)
+non-clinical|it & telecom|telecom
+	call center service providers and help desk vendors for customer support, technical support, and call handling services. (call center vendors, business process outsourcing firms, managed services providers, technical support companies.)
+non-clinical|logistics|transportation
+	fleet vehicle maintenance, fuel, insurance, repairs, and leasing for company-owned or operated vehicles and transportation assets. (fleet management companies, vehicle maintenance providers, fuel suppliers, vehicle leasing companies.)
+non-clinical|marketing & print|agency
+	creative and marketing agencies for strategic services, campaign development, and general marketing support not tied to specific campaign execution. (advertising agencies, marketing agencies, creative services firms, brand consultancies.)
+non-clinical|marketing & print|events
+	event planning, sponsorships, conference participation, trade shows, and corporate events including venue rental, catering, and event services. (event planning companies, conference organizers, venue providers, event management services, catering companies.)
+non-clinical|marketing & print|marketing
+	marketing services and activities including marketing research, brand studies, and miscellaneous marketing support. (market research firms, marketing consultants, brand consulting companies.)
+non-clinical|marketing & print|media
+	media buying and media placements including programmatic media, media agencies, and media planning services. (media buying agencies, media planning firms, advertising networks, programmatic platforms.)
+non-clinical|marketing & print|print
+	clinical mail campaigns, promotional materials printing, mail fulfillment services, and clinical mail distribution. (clinical mail service providers, printing companies, mail fulfillment houses, promotional product vendors.)
+non-clinical|marketing & print|promotional items
+	branded promotional merchandise and giveaway items including t-shirts, pens, bags, and other branded marketing materials. (promotional product companies, branded merchandise vendors, screen printing services, promotional distributors.)
+non-clinical|professional services|audit and tax services
+	accounting and tax firms for external audit services, tax preparation, tax planning, compliance, and financial statement preparation. (accounting firms, big four auditors (deloitte, ey, kpmg, pwc), tax service providers, cpa firms.)
+non-clinical|professional services|consulting
+	consulting services including process improvement, organizational development, and general business consulting. (management consulting firms, business consultants, process improvement specialists, organizational development consultants.)
+non-clinical|professional services|legal services
+	'law firms and
+non-clinical|professional services|non-it temp labor
+	temporary staffing agencies for non-it temporary workers including administrative staff, finance support, operations support, and other non-clinical, non-it personnel. (temporary staffing agencies, general staffing companies, administrative staffing specialists.)
+non-clinical|professional services|professional services
+	professional services including specialized advisory, expert witnesses, and miscellaneous professional support. (professional service providers, consultants, specialized advisors.)
+non-clinical|professional services|specialty services
+	specialized firms providing translation services for documents, meetings, conferences, and multilingual communications support. (professional translation companies, interpretation services, multilingual staffing agencies, specialized language service providers.)
+non-clinical|travel & entertainment|business travel other
+	travel and entertainment related expenses, including but not limited to, meals, airfare, car rentals, travel agency fees, hotel incidentals, and miscellaneous travel costs. (airlines, car rental companies, restaurants, travel agencies, hotel booking services.)
+non-clinical|travel & entertainment|hotel room & conference room rental
+	
+non-clinical|travel & entertainment|parking/tolls
+	parking or toll charges including parking garage fees, parking lot charges, highway tolls, and bridge fees for business travel. (parking facilities, toll authorities, parking management companies.)

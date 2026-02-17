@@ -35,11 +35,15 @@ Renderer (React) <-- IPC --> Main Process (Node.js)
 colab-ap-classifier/
 ├── CLAUDE.md
 ├── .gitignore
-├── internal_docs/          # Specs — dev branch only, not pushed to main
+├── internal_docs/          # Specs & dev docs — dev branch only
+│   ├── core/               # Authoritative spec documents
+│   ├── daily_logs/         # Session logs captured by /close-session
+│   ├── practices.md        # Development workflow conventions
+│   └── sprint_docs/        # Sprint feature checklists
 ├── .claude/                # Claude Code skills
 │   └── skills/             # Slash command skills (/implement-issue)
-├── .github/                # GitHub issues, scripts
-│   └── issues/             # Issue body files + creation script
+├── .github/                # GitHub config
+│   └── issues/             # Archive only (S1 artifacts in archive/sprint-1/)
 ├── claude/                 # Claude Code config (agents, skills)
 ├── projects/               # .c91 project files (gitignored)
 ├── colabip/                # Local ColabIP clone
@@ -61,15 +65,15 @@ colab-ap-classifier/
 
 ## Spec Documents
 
-Authoritative specs live in `internal_docs/` (dev branch only). Read before implementing.
+Authoritative specs live in `internal_docs/core/` (dev branch only). Read before implementing.
 
 | File | Covers |
 |------|--------|
-| `internal_docs/features.md` | Product spec — business rules, feature definitions (the "what" and "why") |
-| `internal_docs/backend_spec.md` | Backend architecture, classification pipeline, LLM config |
-| `internal_docs/frontend_spec.md` | UI layouts, interactions, workflow constraints |
-| `internal_docs/ipc_contract.md` | Full IPC API contract with TypeScript types (50+ channels) |
-| `internal_docs/schema.md` | DuckDB schema — 10 tables with SQL and field descriptions |
+| `internal_docs/core/features.md` | Product spec — business rules, feature definitions (the "what" and "why") |
+| `internal_docs/core/backend_spec.md` | Backend architecture, classification pipeline, LLM config |
+| `internal_docs/core/frontend_spec.md` | UI layouts, interactions, workflow constraints |
+| `internal_docs/core/ipc_contract.md` | Full IPC API contract with TypeScript types (50+ channels) |
+| `internal_docs/core/schema.md` | DuckDB schema — 10 tables with SQL and field descriptions |
 | `internal_docs/sprint_docs/` | Sprint feature checklists (v1 in-progress, v2 planned) |
 
 ## Key Conventions
@@ -104,54 +108,33 @@ Authoritative specs live in `internal_docs/` (dev branch only). Read before impl
 ### Branches
 - `dev` — active development (feature PRs target here)
 - `main` — stable (release PRs from dev)
-- `feature/s1-{NN}-{slug}` — backend feature branches off dev
-- `feature/s1-fe-{NN}-{slug}` — frontend feature branches off dev
+- Feature/fix/docs branches: see `internal_docs/practices.md` for naming conventions
 
 ### Development Workflow
 
-**Issue-driven development using `/implement-issue` skill:**
+Skills-based, issue-driven development. Full workflow documented in `internal_docs/practices.md`.
 
-Backend and frontend are developed as **separate tracks** with independent dependency graphs. They are tested together via integration tests.
+```
+/create-issue  →  /implement-issue  →  /close-session  →  /update-docs  →  /merge-pr
+  (define)         (build + PR)       (log session)  (sync specs)     (merge + track)
+```
 
-1. **Pick an issue:** `/implement-issue backend next` or `/implement-issue frontend 42`
-2. The skill will:
-   - Filter issues by track label (`backend` or `frontend`)
-   - Check dependency issues are closed (within-track + cross-track prerequisites for frontend)
-   - Read closed dependencies for deviations
-   - Create a track-appropriate feature branch from dev
-   - Implement the issue per spec with track-specific conventions
-   - Write and run tests
-   - Create a PR to dev
-   - Document any deviations on the issue
-
-**Manual workflow:**
-1. Check the appropriate dependency graph:
-   - Backend: `.github/issues/DEPENDENCY_GRAPH.md`
-   - Frontend: `.github/issues/FRONTEND_DEPENDENCY_GRAPH.md`
-2. Create feature branch:
-   - Backend: `git checkout -b feature/s1-{NN}-{slug} dev`
-   - Frontend: `git checkout -b feature/s1-fe-{NN}-{slug} dev`
-3. Implement per the issue spec in `.github/issues/{NN}-*.md`
-4. Run all tests: `npm run test`
-5. Type check: `npx tsc --noEmit`
-6. PR to dev, not main
+- `/create-issue` — reads specs, plans scope with user, creates GitHub issue with board fields
+- `/implement-issue` — reads issue + board fields, implements on branch, presents summary, creates PR to `dev` after user approval
+- `/close-session` — classifies session (Feature/Scratchpad), captures verbatim summary with session link
+- `/update-docs <PR_number>` — reads PR diff + connected daily logs/sessions, detects spec drift, proposes doc updates
+- `/merge-pr` — merges PR into `dev`, posts cross-impact comments on affected issues
+- All issue metadata lives on the GitHub Project board (Thread, Track, Type, Priority, Size)
+- Issues support sub-issues for decomposing large features
 
 ### GitHub Setup
 
 ```bash
 # Authenticate gh CLI (one-time)
 GH_TOKEN=ghp_your_token bash .github/setup-gh-auth.sh
-
-# Create all sprint issues (one-time)
-bash .github/issues/create-all-issues.sh
 ```
-
-### Sprint 1 Issues
-- **Backend track:** 25 issues in `.github/issues/` — see `.github/issues/DEPENDENCY_GRAPH.md`
-- **Frontend track:** issues in `.github/issues/` — see `.github/issues/FRONTEND_DEPENDENCY_GRAPH.md`
 
 ## Current Status
 
-**Sprint 1 in progress.** Specs complete, issues created, implementation starting.
-- Sprint 1 (v1): in-progress — see `internal_docs/sprint_docs/sprint_1.md`
-- Sprint 2 (v2): not started
+- Sprint 1 (v1): **complete** — 25 backend + 17 frontend issues closed. Artifacts archived in `.github/issues/archive/sprint-1/`.
+- Sprint 2 (v2): **in progress** — see `internal_docs/sprint_docs/sprint_2.md`

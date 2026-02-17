@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { useDrag, useDrop } from 'react-dnd'
 import { Plus, X, Filter, Search, BarChart3, ChevronRight, ChevronDown, ArrowUp, ArrowDown } from 'lucide-react'
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
+import { ipc } from '../../lib/ipc'
 import '../../styles/MultiTableSystem.css'
 
 export const ITEM_TYPE = 'FILTER_ROW'
@@ -384,6 +385,17 @@ const FilterTable = ({
   // Active taxonomy level filter for classification_path tree (1–4). null = show all.
   const [activeTaxonomyLevel, setActiveTaxonomyLevel] = useState(null)
 
+  // Fetch all taxonomy nodes so the classification_path table shows the full
+  // taxonomy tree (all 74 nodes) — not just nodes that have transactions.
+  const [taxonomyNodes, setTaxonomyNodes] = useState([])
+  useEffect(() => {
+    if (isTaxonomyTable) {
+      ipc.taxonomy.getNodes().then((nodes) => {
+        setTaxonomyNodes(nodes || [])
+      }).catch(() => {})
+    }
+  }, [isTaxonomyTable])
+
   // Close filter panel when table is collapsed
   useEffect(() => {
     if (collapsed) {
@@ -575,97 +587,142 @@ const FilterTable = ({
   const tableData = useMemo(() => {
     if (!locallyFilteredData || !column) return []
 
+    // ── Taxonomy table: build tree from ALL taxonomy nodes, then overlay
+    //    transaction amounts so every node is visible even with $0 spend.
+    if (isTaxonomyTable && taxonomyNodes.length > 0) {
+      // 1. Accumulate spend per full_path from transaction data
+      const spendByPath = {}
+      for (const row of locallyFilteredData) {
+        const rawPath = row.classification_path || row.taxonomy_path || ''
+        if (!rawPath) continue
+        const path = String(rawPath).trim()
+        const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
+        spendByPath[path] = (spendByPath[path] || 0) + amount
+      }
+
+      // 2. Build nested tree from taxonomy nodes
+      const tree = {}
+      for (const node of taxonomyNodes) {
+        const parts = node.fullPath.split('|').map(p => p.trim()).filter(Boolean)
+        let current = tree
+        parts.forEach((part, idx) => {
+          const fp = parts.slice(0, idx + 1).join('|')
+          if (!current[part]) {
+            current[part] = { value: part, amount: 0, children: {}, fullPath: fp }
+          }
+          current = current[part].children
+        })
+      }
+
+      // 3. Roll up transaction amounts into every ancestor level
+      for (const [path, amount] of Object.entries(spendByPath)) {
+        const parts = path.split('|').map(p => p.trim()).filter(Boolean)
+        let current = tree
+        for (let i = 0; i < parts.length; i++) {
+          const key = parts[i]
+          if (current[key]) {
+            current[key].amount = (current[key].amount || 0) + amount
+            current = current[key].children
+          } else {
+            // Transaction path not in taxonomy — create ad-hoc node
+            const fp = parts.slice(0, i + 1).join('|')
+            current[key] = { value: key, amount: amount, children: {}, fullPath: fp }
+            current = current[key].children
+          }
+        }
+      }
+
+      // 4. Convert nested object to sorted array
+      const buildHierarchy = (obj) => {
+        return Object.values(obj)
+          .map(item => ({
+            ...item,
+            amount: item.amount || 0,
+            children: item.children && Object.keys(item.children).length > 0
+              ? buildHierarchy(item.children)
+              : []
+          }))
+          .sort((a, b) => {
+            if (sortColumn === 'amount') {
+              return sortDirection === 'asc'
+                ? (a.amount || 0) - (b.amount || 0)
+                : (b.amount || 0) - (a.amount || 0)
+            }
+            return sortDirection === 'asc'
+              ? (a.value || '').localeCompare(b.value || '', undefined, { sensitivity: 'base' })
+              : (b.value || '').localeCompare(a.value || '', undefined, { sensitivity: 'base' })
+          })
+      }
+      return buildHierarchy(tree)
+    }
+
+    // ── Non-taxonomy tables: original grouping logic
     const grouped = locallyFilteredData.reduce((acc, row) => {
-      // Handle empty/null values consistently - normalize to string and trim
-      const rawValue = isTaxonomyTable
-        ? (row.classification_path || row.taxonomy_path || row[column])
-        : row[column]
-      const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '') 
-        ? String(rawValue).trim() 
+      const rawValue = row[column]
+      const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '')
+        ? String(rawValue).trim()
         : 'Unknown'
       const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
-      
+
       if (effectiveHierarchical) {
-        // In hierarchical mode, always treat values hierarchically and
-        // roll up amounts to every level (L1, L2, L3, L4) so parents
-        // never show $0 when their children have spend.
-        const parts = value.includes('|') 
+        const parts = value.includes('|')
           ? value.split('|').filter(p => p.trim())
           : [value.trim() || 'Unknown']
         let current = acc
-        
+
         parts.forEach((part, idx) => {
           const key = part.trim()
           if (!current || typeof current !== 'object' || Array.isArray(current)) {
-            // Safety check: if current is not a plain object, reset to acc
             current = acc
           }
-          // Check if current[key] exists and is already a number/string (from previous flat processing)
-          // Convert it to hierarchical structure
           if (current[key] && typeof current[key] !== 'object') {
-            // Convert flat value to hierarchical structure
             const existingAmount = typeof current[key] === 'number' ? current[key] : 0
             current[key] = { value: key, amount: existingAmount, children: {}, fullPath: parts.slice(0, idx + 1).join('|') }
           }
           if (!current[key]) {
             current[key] = { value: key, amount: 0, children: {}, fullPath: parts.slice(0, idx + 1).join('|') }
           }
-          // Double-check that current[key] is an object before accessing properties
           if (typeof current[key] !== 'object' || current[key] === null || Array.isArray(current[key])) {
             current[key] = { value: key, amount: 0, children: {}, fullPath: parts.slice(0, idx + 1).join('|') }
           }
-          // Always add this row's amount at every level so parents roll up children
           current[key].amount = (current[key].amount || 0) + amount
-          // Ensure children is always an object before assigning
           if (!current[key].children || typeof current[key].children !== 'object' || Array.isArray(current[key].children)) {
             current[key].children = {}
           }
           current = current[key].children
         })
       } else {
-        // Flat structure: just accumulate amounts
         acc[value] = (acc[value] || 0) + amount
       }
-      
+
       return acc
     }, {})
 
     if (effectiveHierarchical) {
-      // Convert hierarchical structure to array
       const buildHierarchy = (obj) => {
         return Object.values(obj)
           .map(item => ({
             ...item,
             amount: item.amount || 0,
-            children: item.children && Object.keys(item.children).length > 0 
-              ? buildHierarchy(item.children) 
+            children: item.children && Object.keys(item.children).length > 0
+              ? buildHierarchy(item.children)
               : []
           }))
           .filter(item => {
-            // Filter out entries with zero amount and no children
             const hasZeroAmount = (item.amount || 0) === 0
             const hasNoChildren = !item.children || item.children.length === 0
-            
-            // Filter out entries with zero amount and no children
-            if (hasZeroAmount && hasNoChildren) {
-              return false
-            }
-            
-            // Filter out blank/empty values with no children
-            const isBlank = !item.value || 
-                           item.value.trim() === '' || 
-                           item.value.toLowerCase() === '[blank]' || 
+            if (hasZeroAmount && hasNoChildren) return false
+            const isBlank = !item.value ||
+                           item.value.trim() === '' ||
+                           item.value.toLowerCase() === '[blank]' ||
                            item.value.toLowerCase() === 'unknown' ||
                            item.value.toLowerCase() === 'blank'
-            if (isBlank && hasNoChildren) {
-              return false
-            }
-            
+            if (isBlank && hasNoChildren) return false
             return true
           })
           .sort((a, b) => {
             if (sortColumn === 'amount') {
-              return sortDirection === 'asc' 
+              return sortDirection === 'asc'
                 ? (a.amount || 0) - (b.amount || 0)
                 : (b.amount || 0) - (a.amount || 0)
             } else {
@@ -737,10 +794,25 @@ const FilterTable = ({
     selectedFilterItems,
     sortColumn,
     sortDirection,
-    tableSearchTerm
+    tableSearchTerm,
+    taxonomyNodes
   ])
 
-  // When a taxonomy level (L1–L4) pill is active for the Classification Path
+  // Compute the max depth of the taxonomy tree so we only show level tabs that exist
+  const maxTaxonomyDepth = useMemo(() => {
+    if (!isTaxonomyTable || !effectiveHierarchical) return 0
+    const getDepth = (items, level) => {
+      if (!Array.isArray(items) || items.length === 0) return level - 1
+      return Math.max(...items.map(item =>
+        item.children && item.children.length > 0
+          ? getDepth(item.children, level + 1)
+          : level
+      ))
+    }
+    return getDepth(tableData, 1)
+  }, [isTaxonomyTable, effectiveHierarchical, tableData])
+
+  // When a taxonomy level pill is active for the Classification Path
   // table, flatten the hierarchy to that exact level and sort globally so the
   // list appears in clear descending or ascending order by Amount.
   const displayedHierarchicalData = useMemo(() => {
@@ -965,48 +1037,21 @@ const FilterTable = ({
       {!collapsed && (
         <>
           {/* Legend for hierarchy levels in the Classification Path tree */}
-          {isTaxonomyTable && (
+          {isTaxonomyTable && maxTaxonomyDepth > 0 && (
             <div className="taxonomy-level-toggle taxonomy-level-legend">
-              <button
-                type="button"
-                className={`taxonomy-level-pill taxonomy-level-pill-l1 ${activeTaxonomyLevel === 1 ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setActiveTaxonomyLevel(prev => (prev === 1 ? null : 1))
-                }}
-              >
-                L1
-              </button>
-              <button
-                type="button"
-                className={`taxonomy-level-pill taxonomy-level-pill-l2 ${activeTaxonomyLevel === 2 ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setActiveTaxonomyLevel(prev => (prev === 2 ? null : 2))
-                }}
-              >
-                L2
-              </button>
-              <button
-                type="button"
-                className={`taxonomy-level-pill taxonomy-level-pill-l3 ${activeTaxonomyLevel === 3 ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setActiveTaxonomyLevel(prev => (prev === 3 ? null : 3))
-                }}
-              >
-                L3
-              </button>
-              <button
-                type="button"
-                className={`taxonomy-level-pill taxonomy-level-pill-l4 ${activeTaxonomyLevel === 4 ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setActiveTaxonomyLevel(prev => (prev === 4 ? null : 4))
-                }}
-              >
-                L4
-              </button>
+              {Array.from({ length: maxTaxonomyDepth }, (_, i) => i + 1).map((lvl) => (
+                <button
+                  key={lvl}
+                  type="button"
+                  className={`taxonomy-level-pill taxonomy-level-pill-l${lvl} ${activeTaxonomyLevel === lvl ? 'active' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setActiveTaxonomyLevel(prev => (prev === lvl ? null : lvl))
+                  }}
+                >
+                  L{lvl}
+                </button>
+              ))}
             </div>
           )}
 

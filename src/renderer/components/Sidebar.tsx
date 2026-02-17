@@ -9,6 +9,7 @@ import {
   DocumentDuplicateIcon,
   ClockIcon,
   SparklesIcon,
+  TableCellsIcon,
 } from '@heroicons/react/24/outline'
 
 interface SidebarProps {
@@ -23,6 +24,7 @@ const projectViews = [
   { path: '/project/override-rules', label: 'Override Rules', icon: DocumentDuplicateIcon },
   { path: '/project/version-history', label: 'Version History', icon: ClockIcon },
   { path: '/project/feedback', label: 'Feedback', icon: SparklesIcon },
+  { path: '/project/pivot', label: 'Pivot', icon: TableCellsIcon },
 ]
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {

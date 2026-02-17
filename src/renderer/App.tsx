@@ -12,6 +12,7 @@ import SuppliersPage from './pages/SuppliersPage'
 import OverrideRulesPage from './pages/OverrideRulesPage'
 import VersionHistoryPage from './pages/VersionHistoryPage'
 import FeedbackDashboardPage from './pages/FeedbackDashboardPage'
+import PivotPage from './pages/PivotPage'
 import { WorkflowStateProvider } from './contexts/WorkflowStateContext'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -117,6 +118,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <FeedbackDashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="project/pivot"
+            element={
+              <ProtectedRoute>
+                <PivotPage />
               </ProtectedRoute>
             }
           />

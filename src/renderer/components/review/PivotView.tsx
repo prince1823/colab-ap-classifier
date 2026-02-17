@@ -1,50 +1,23 @@
-import { useState, useMemo } from 'react'
+import { usePivotData } from '../../hooks/usePivotData'
 
 interface PivotViewProps {
   transactions: Record<string, unknown>[]
   availableColumns: string[]
+  rowDimension: string
+  colDimension: string
+  onRowDimensionChange: (dim: string) => void
+  onColDimensionChange: (dim: string) => void
 }
 
-export default function PivotView({ transactions, availableColumns }: PivotViewProps) {
-  const [rowDimension, setRowDimension] = useState('gl_description')
-  const [colDimension, setColDimension] = useState('supplier_name')
-
-  const pivotData = useMemo(() => {
-    if (!transactions.length) return null
-
-    // Build aggregation
-    const matrix = new Map<string, Map<string, number>>()
-    const colTotals = new Map<string, number>()
-    const rowTotals = new Map<string, number>()
-    let grandTotal = 0
-
-    for (const t of transactions) {
-      const rowKey = String(t[rowDimension] || '(blank)')
-      const colKey = String(t[colDimension] || '(blank)')
-      const amount = Number(t.spend_amount || t.amount || t.invoice_amount || 0)
-
-      if (!matrix.has(rowKey)) matrix.set(rowKey, new Map())
-      const row = matrix.get(rowKey)!
-      row.set(colKey, (row.get(colKey) || 0) + amount)
-
-      colTotals.set(colKey, (colTotals.get(colKey) || 0) + amount)
-      rowTotals.set(rowKey, (rowTotals.get(rowKey) || 0) + amount)
-      grandTotal += amount
-    }
-
-    // Sort columns by total spend, take top 15
-    const sortedCols = [...colTotals.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 15)
-      .map(([k]) => k)
-
-    // Sort rows by total spend
-    const sortedRows = [...rowTotals.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([k]) => k)
-
-    return { matrix, sortedCols, sortedRows, colTotals, rowTotals, grandTotal }
-  }, [transactions, rowDimension, colDimension])
+export default function PivotView({
+  transactions,
+  availableColumns,
+  rowDimension,
+  colDimension,
+  onRowDimensionChange,
+  onColDimensionChange,
+}: PivotViewProps) {
+  const pivotData = usePivotData(transactions, rowDimension, colDimension)
 
   const fmt = (n: number) =>
     n === 0
@@ -71,7 +44,7 @@ export default function PivotView({ transactions, availableColumns }: PivotViewP
           Rows:
           <select
             value={rowDimension}
-            onChange={(e) => setRowDimension(e.target.value)}
+            onChange={(e) => onRowDimensionChange(e.target.value)}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           >
             {availableColumns.map((col) => (
@@ -85,7 +58,7 @@ export default function PivotView({ transactions, availableColumns }: PivotViewP
           Columns:
           <select
             value={colDimension}
-            onChange={(e) => setColDimension(e.target.value)}
+            onChange={(e) => onColDimensionChange(e.target.value)}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           >
             {availableColumns.map((col) => (

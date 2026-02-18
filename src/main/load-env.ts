@@ -17,7 +17,7 @@ let loaded = false;
 export function loadEnv(rootDir?: string): void {
   if (loaded) return;
 
-  const root = rootDir ?? path.resolve(__dirname, '..', '..');
+  const root = rootDir ?? path.resolve(__dirname, '..', '..', '..');
   const envPath = path.join(root, '.env');
 
   if (!fs.existsSync(envPath)) return;

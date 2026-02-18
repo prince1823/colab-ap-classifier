@@ -1,8 +1,9 @@
 import fs from 'fs';
-import { dialog } from 'electron';
+import { dialog, BrowserWindow } from 'electron';
 import { parse } from 'csv-parse/sync';
 import type { CSVPreview, CSVPreviewWithMappings, CanonicalizationResult } from '../../shared/types/canonicalization';
-import { CANONICAL_COLUMNS, suggestMappings } from '../agents/canonicalization-agent';
+import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
+import { suggestMappings } from '../agents/canonicalization-agent';
 
 const SAMPLE_ROW_LIMIT = 10;
 
@@ -16,7 +17,8 @@ const DELIMITERS = [',', ';', '\t'] as const;
  * Returns the chosen path, or null if the user cancelled.
  */
 export async function selectFile(): Promise<string | null> {
-  const result = await dialog.showOpenDialog({
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const result = await dialog.showOpenDialog(win!, {
     title: 'Select CSV File',
     filters: [{ name: 'CSV Files', extensions: ['csv', 'tsv', 'txt'] }],
     properties: ['openFile'],

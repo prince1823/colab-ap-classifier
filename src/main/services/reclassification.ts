@@ -12,7 +12,7 @@ import { analyzeFeedback } from '../agents/feedback-agent';
  * 2. Read current classification state (old_values)
  * 3. Update transactions
  * 4. Create changelog entry
- * 5. Optionally trigger feedback agent (async, non-blocking)
+ * 5. Optionally trigger feedback agent (awaited to avoid DuckDB mutex conflicts)
  */
 export async function reclassifyTransactions(
   transactionIds: string[],
@@ -70,18 +70,21 @@ export async function reclassifyTransactions(
     description: `Reclassified ${transactionIds.length} transaction(s) to ${targetNode.fullPath}`,
   });
 
-  // Trigger feedback agent asynchronously if feedback text provided
+  // Trigger feedback agent if feedback text provided
+  // NOTE: We await this to avoid concurrent DuckDB access (mutex lock errors).
+  // The LLM call inside is the slow part, but DB reads/writes before and after
+  // must not overlap with other IPC handlers (e.g., transactions:query refresh).
   if (feedback) {
-    triggerFeedbackAsync(transactionIds, firstOldId, targetNode.fullPath, feedback).catch(
-      (err) => {
-        console.error('[Reclassification] Feedback agent error:', err);
-      }
-    );
+    try {
+      await triggerFeedbackAsync(transactionIds, firstOldId, targetNode.fullPath, feedback);
+    } catch (err) {
+      console.error('[Reclassification] Feedback agent error:', err);
+    }
   }
 }
 
 /**
- * Trigger the feedback agent asynchronously (fire-and-forget).
+ * Trigger the feedback agent — gathers context, calls LLM, stores suggestion.
  */
 async function triggerFeedbackAsync(
   transactionIds: string[],

@@ -1,4 +1,5 @@
 import { Database } from 'duckdb-async';
+import { existsSync, unlinkSync } from 'fs';
 
 class DatabaseService {
   private db: Database | null = null;
@@ -9,7 +10,24 @@ class DatabaseService {
       await this.closeDatabase();
     }
 
-    this.db = await Database.create(filePath);
+    try {
+      this.db = await Database.create(filePath);
+    } catch (err) {
+      // Handle corrupted WAL file — delete it and retry
+      const walPath = filePath + '.wal';
+      if (existsSync(walPath)) {
+        console.warn(`[Database] Failed to open database, removing corrupted WAL file: ${walPath}`);
+        try {
+          unlinkSync(walPath);
+        } catch {
+          // Ignore WAL deletion errors
+        }
+        this.db = await Database.create(filePath);
+      } else {
+        throw err;
+      }
+    }
+
     this.currentFilePath = filePath;
 
     const tables = await this.db.all(
@@ -27,6 +45,12 @@ class DatabaseService {
 
   async closeDatabase(): Promise<void> {
     if (this.db) {
+      // Flush WAL to main database file before closing to prevent corruption
+      try {
+        await this.db.run('CHECKPOINT');
+      } catch {
+        // Ignore checkpoint errors — close anyway
+      }
       await this.db.close();
       this.db = null;
       this.currentFilePath = null;

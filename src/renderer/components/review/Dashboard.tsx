@@ -6,6 +6,7 @@ import ClassificationTree from './ClassificationTree'
 import ActiveFilters from './ActiveFilters'
 import ReclassificationLoader from './ReclassificationLoader'
 import SystemFeedbackModal from './SystemFeedbackModal'
+import ReclassifyConfirmModal from './ReclassifyConfirmModal'
 import { Table, X, ChevronDown, Sparkles, Plus, CheckCircle, BarChart3 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import MetricsTab from './MetricsTab'
@@ -32,6 +33,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   const [reclassToast, setReclassToast] = useState<{ show: boolean; rowCount: number; targetPath: string }>({ show: false, rowCount: 0, targetPath: '' })
   const reclassToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showDashboardModal, setShowDashboardModal] = useState(false)
+  const [pendingReclassification, setPendingReclassification] = useState<{ rows: any[]; targetPath: string } | null>(null)
 
   // Keyboard navigation state - coordinates between tree and tables
   const [keyboardFocus, setKeyboardFocus] = useState('tree') // 'tree' or 'tables'
@@ -680,6 +682,184 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     ))
   }, [])
 
+  // Core reclassification logic — extracted so it can be called directly or from the feedback modal
+  const executeReclassification = useCallback(async (rows: any[], targetPath: string, feedbackText?: string) => {
+    // Show loader
+    setIsReclassifying(true)
+    setReclassificationProgress({ current: 0, total: rows.length })
+
+    try {
+      // Get row indices to update
+      const rowIndices = rows.map(row => {
+        return row.row_index !== undefined
+          ? row.row_index
+          : row.index !== undefined
+            ? row.index
+            : row.__index !== undefined
+              ? row.__index
+              : undefined
+      }).filter(idx => idx !== undefined)
+
+      // Store previous classifications for feedback generation
+      const previousClassifications = new Map()
+      rows.forEach(row => {
+        const rowId = row.row_index !== undefined ? row.row_index : row.index
+        if (rowId !== undefined) {
+          previousClassifications.set(rowId, row.classification_path || row.taxonomy_path || '')
+        }
+      })
+
+      // Use rows.length as fallback if no indices found
+      const rowCount = rowIndices.length > 0 ? rowIndices.length : rows.length
+
+      // Update transactions in memory (client-side only)
+      setReclassificationProgress({ current: 0, total: rows.length })
+
+      // Update the transactions state directly
+      if (setTransactions) {
+        setTransactions(prevTransactions => {
+          const updated = prevTransactions.map((t, idx) => {
+            if (rowIndices.length > 0) {
+              // Use row indices if available
+              if (rowIndices.includes(t.row_index) || rowIndices.includes(idx)) {
+                // Parse target path and update L1-L4
+                const pathParts = targetPath.split('|').filter(p => p.trim())
+                const updatedRow = {
+                  ...t,
+                  classification_path: targetPath,
+                  taxonomy_path: targetPath,
+                  L1: pathParts[0] || '',
+                  L2: pathParts[1] || '',
+                  L3: pathParts[2] || '',
+                  L4: pathParts[3] || '',
+                  L5: pathParts[4] || '',
+                  override_rule_applied: 'manual_reclassification'
+                }
+                // Update reclassification history
+                const rowId = t.row_index !== undefined ? t.row_index : idx
+                if (rowId !== undefined) {
+                  setReclassificationHistory(prev => new Map(prev).set(rowId, targetPath))
+                }
+                setReclassificationProgress(prev => ({
+                  current: prev.current + 1,
+                  total: prev.total
+                }))
+                return updatedRow
+              }
+            } else {
+              // Fallback: match by comparing row data
+              const matches = rows.some(r => {
+                // Try to match by key fields
+                return (r.supplier_name && r.supplier_name === t.supplier_name) ||
+                  (r.vendor_name && r.vendor_name === t.vendor_name) ||
+                  (r.invoice_number && r.invoice_number === t.invoice_number) ||
+                  (r.amount && r.amount === t.amount && r.supplier_name === t.supplier_name)
+              })
+              if (matches) {
+                const pathParts = targetPath.split('|').filter(p => p.trim())
+                const updatedRow = {
+                  ...t,
+                  classification_path: targetPath,
+                  taxonomy_path: targetPath,
+                  L1: pathParts[0] || '',
+                  L2: pathParts[1] || '',
+                  L3: pathParts[2] || '',
+                  L4: pathParts[3] || '',
+                  L5: pathParts[4] || '',
+                  override_rule_applied: 'manual_reclassification'
+                }
+                // Update reclassification history
+                const rowId = t.row_index !== undefined ? t.row_index : idx
+                if (rowId !== undefined) {
+                  setReclassificationHistory(prev => new Map(prev).set(rowId, targetPath))
+                }
+                setReclassificationProgress(prev => ({
+                  current: prev.current + 1,
+                  total: prev.total
+                }))
+                return updatedRow
+              }
+            }
+            return t
+          })
+          return updated
+        })
+      }
+
+      // Persist reclassification to backend via IPC
+      try {
+        // Resolve taxonomy node ID from the target path
+        const taxonomyNodes = await ipc.taxonomy.getNodes()
+        // The ClassificationTree prepends 'root|' — strip it for matching
+        const cleanPath = targetPath.replace(/^root\|/, '')
+        const targetNode = taxonomyNodes.find((n) => n.fullPath === cleanPath)
+
+        if (targetNode) {
+          // Extract transaction IDs from the rows being reclassified
+          const transactionIds = rows
+            .map((row) => row.id)
+            .filter((id) => id != null)
+
+          if (transactionIds.length > 0) {
+            await ipc.transactions.reclassify(transactionIds, targetNode.id, feedbackText)
+            console.log(`[Reclassify] Persisted ${transactionIds.length} rows to backend (node: ${targetNode.id}, feedback: ${feedbackText ? 'yes' : 'no'})`)
+          }
+        } else {
+          console.warn(`[Reclassify] No taxonomy node found for path: ${cleanPath}`)
+        }
+      } catch (persistErr) {
+        console.error('[Reclassify] Failed to persist to backend:', persistErr)
+      }
+
+      // Refresh transactions from backend to get updated classification paths
+      if (refreshTransactions) {
+        try {
+          await refreshTransactions()
+        } catch (refreshErr) {
+          console.error('[Reclassify] Failed to refresh transactions:', refreshErr)
+        }
+      }
+
+      // Refresh feedback suggestions from backend if enabled
+      // The backend now awaits the feedback agent, so suggestions are ready immediately
+      if (systemFeedbackEnabled && feedbackText) {
+        refreshFeedbackSuggestions()
+      }
+
+      console.log(`✓ Successfully reclassified ${rowCount} rows`)
+
+      // Show success toast
+      const displayPath = targetPath.replace(/^root\|/, '').replace(/\|/g, ' → ')
+      if (reclassToastTimer.current) clearTimeout(reclassToastTimer.current)
+      setReclassToast({ show: true, rowCount, targetPath: displayPath })
+      reclassToastTimer.current = setTimeout(() => setReclassToast({ show: false, rowCount: 0, targetPath: '' }), 5000)
+
+      return true // Return true to indicate successful reclassification
+
+    } catch (err: any) {
+      console.error('Failed to reclassify rows:', err)
+
+      // Still show toast even on partial failure (rows updated locally)
+      const displayPath = targetPath.replace(/^root\|/, '').replace(/\|/g, ' → ')
+      if (reclassToastTimer.current) clearTimeout(reclassToastTimer.current)
+      setReclassToast({ show: true, rowCount: rows.length, targetPath: displayPath })
+      reclassToastTimer.current = setTimeout(() => setReclassToast({ show: false, rowCount: 0, targetPath: '' }), 5000)
+
+      return true
+    } finally {
+      setIsReclassifying(false)
+      setReclassificationProgress({ current: 0, total: 0 })
+    }
+  }, [setTransactions, refreshTransactions, systemFeedbackEnabled, refreshFeedbackSuggestions])
+
+  // Handle reclassification confirmation from the feedback modal
+  const handleConfirmReclassify = useCallback(async (feedbackText?: string) => {
+    if (!pendingReclassification) return
+    const { rows, targetPath } = pendingReclassification
+    setPendingReclassification(null)
+    await executeReclassification(rows, targetPath, feedbackText)
+  }, [pendingReclassification, executeReclassification])
+
   // Remove local filter from a table (must be declared before any early return)
   const handleRemoveLocalFilter = useCallback((tableId, filterKey, value) => {
     setSelectedRows(prev => {
@@ -1000,172 +1180,14 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                       }))
                     }
 
-                    // Show loader
-                    setIsReclassifying(true)
-                    setReclassificationProgress({ current: 0, total: rows.length })
-
-                    try {
-                      // Get row indices to update
-                      const rowIndices = rows.map(row => {
-                        return row.row_index !== undefined
-                          ? row.row_index
-                          : row.index !== undefined
-                            ? row.index
-                            : row.__index !== undefined
-                              ? row.__index
-                              : undefined
-                      }).filter(idx => idx !== undefined)
-
-                      // Store previous classifications for feedback generation
-                      const previousClassifications = new Map()
-                      rows.forEach(row => {
-                        const rowId = row.row_index !== undefined ? row.row_index : row.index
-                        if (rowId !== undefined) {
-                          previousClassifications.set(rowId, row.classification_path || row.taxonomy_path || '')
-                        }
-                      })
-
-                      // Use rows.length as fallback if no indices found
-                      const rowCount = rowIndices.length > 0 ? rowIndices.length : rows.length
-
-                      // Update transactions in memory (client-side only)
-                      setReclassificationProgress({ current: 0, total: rows.length })
-
-                      // Update the transactions state directly
-                      if (setTransactions) {
-                        setTransactions(prevTransactions => {
-                          const updated = prevTransactions.map((t, idx) => {
-                            if (rowIndices.length > 0) {
-                              // Use row indices if available
-                              if (rowIndices.includes(t.row_index) || rowIndices.includes(idx)) {
-                                // Parse target path and update L1-L4
-                                const pathParts = targetPath.split('|').filter(p => p.trim())
-                                const updatedRow = {
-                                  ...t,
-                                  classification_path: targetPath,
-                                  taxonomy_path: targetPath,
-                                  L1: pathParts[0] || '',
-                                  L2: pathParts[1] || '',
-                                  L3: pathParts[2] || '',
-                                  L4: pathParts[3] || '',
-                                  L5: pathParts[4] || '',
-                                  override_rule_applied: 'manual_reclassification'
-                                }
-                                // Update reclassification history
-                                const rowId = t.row_index !== undefined ? t.row_index : idx
-                                if (rowId !== undefined) {
-                                  setReclassificationHistory(prev => new Map(prev).set(rowId, targetPath))
-                                }
-                                setReclassificationProgress(prev => ({
-                                  current: prev.current + 1,
-                                  total: prev.total
-                                }))
-                                return updatedRow
-                              }
-                            } else {
-                              // Fallback: match by comparing row data
-                              const matches = rows.some(r => {
-                                // Try to match by key fields
-                                return (r.supplier_name && r.supplier_name === t.supplier_name) ||
-                                  (r.vendor_name && r.vendor_name === t.vendor_name) ||
-                                  (r.invoice_number && r.invoice_number === t.invoice_number) ||
-                                  (r.amount && r.amount === t.amount && r.supplier_name === t.supplier_name)
-                              })
-                              if (matches) {
-                                const pathParts = targetPath.split('|').filter(p => p.trim())
-                                const updatedRow = {
-                                  ...t,
-                                  classification_path: targetPath,
-                                  taxonomy_path: targetPath,
-                                  L1: pathParts[0] || '',
-                                  L2: pathParts[1] || '',
-                                  L3: pathParts[2] || '',
-                                  L4: pathParts[3] || '',
-                                  L5: pathParts[4] || '',
-                                  override_rule_applied: 'manual_reclassification'
-                                }
-                                // Update reclassification history
-                                const rowId = t.row_index !== undefined ? t.row_index : idx
-                                if (rowId !== undefined) {
-                                  setReclassificationHistory(prev => new Map(prev).set(rowId, targetPath))
-                                }
-                                setReclassificationProgress(prev => ({
-                                  current: prev.current + 1,
-                                  total: prev.total
-                                }))
-                                return updatedRow
-                              }
-                            }
-                            return t
-                          })
-                          return updated
-                        })
-                      }
-
-                    // Persist reclassification to backend via IPC
-                    try {
-                      // Resolve taxonomy node ID from the target path
-                      const taxonomyNodes = await ipc.taxonomy.getNodes()
-                      // The ClassificationTree prepends 'root|' — strip it for matching
-                      const cleanPath = targetPath.replace(/^root\|/, '')
-                      const targetNode = taxonomyNodes.find((n) => n.fullPath === cleanPath)
-
-                      if (targetNode) {
-                        // Extract transaction IDs from the rows being reclassified
-                        const transactionIds = rows
-                          .map((row) => row.id)
-                          .filter((id) => id != null)
-
-                        if (transactionIds.length > 0) {
-                          await ipc.transactions.reclassify(transactionIds, targetNode.id)
-                          console.log(`[Reclassify] Persisted ${transactionIds.length} rows to backend (node: ${targetNode.id})`)
-                        }
-                      } else {
-                        console.warn(`[Reclassify] No taxonomy node found for path: ${cleanPath}`)
-                      }
-                    } catch (persistErr) {
-                      console.error('[Reclassify] Failed to persist to backend:', persistErr)
-                    }
-
-                    // Refresh transactions from backend to get updated classification paths
-                    if (refreshTransactions) {
-                      try {
-                        await refreshTransactions()
-                      } catch (refreshErr) {
-                        console.error('[Reclassify] Failed to refresh transactions:', refreshErr)
-                      }
-                    }
-
-                    // Refresh feedback suggestions from backend if enabled
+                    // If system feedback is enabled, show the confirm modal to collect feedback text
                     if (systemFeedbackEnabled) {
-                      // Small delay to allow backend to process feedback agent
-                      setTimeout(() => refreshFeedbackSuggestions(), 2000)
-                    }
-
-                      console.log(`✓ Successfully reclassified ${rowCount} rows`)
-
-                      // Show success toast
-                      const displayPath = targetPath.replace(/^root\|/, '').replace(/\|/g, ' → ')
-                      if (reclassToastTimer.current) clearTimeout(reclassToastTimer.current)
-                      setReclassToast({ show: true, rowCount, targetPath: displayPath })
-                      reclassToastTimer.current = setTimeout(() => setReclassToast({ show: false, rowCount: 0, targetPath: '' }), 5000)
-
-                      return true // Return true to indicate successful reclassification
-
-                    } catch (err: any) {
-                      console.error('Failed to reclassify rows:', err)
-
-                      // Still show toast even on partial failure (rows updated locally)
-                      const displayPath = targetPath.replace(/^root\|/, '').replace(/\|/g, ' → ')
-                      if (reclassToastTimer.current) clearTimeout(reclassToastTimer.current)
-                      setReclassToast({ show: true, rowCount: rows.length, targetPath: displayPath })
-                      reclassToastTimer.current = setTimeout(() => setReclassToast({ show: false, rowCount: 0, targetPath: '' }), 5000)
-
+                      setPendingReclassification({ rows, targetPath })
                       return true
-                    } finally {
-                      setIsReclassifying(false)
-                      setReclassificationProgress({ current: 0, total: 0 })
                     }
+
+                    // Feedback disabled — reclassify immediately without feedback text
+                    return await executeReclassification(rows, targetPath)
                   }}
                   datasetId={datasetId}
                   foldername={foldername}
@@ -1182,6 +1204,16 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
         <ReclassificationLoader
           rowCount={reclassificationProgress.total}
           currentRow={reclassificationProgress.current}
+        />
+      )}
+
+      {/* Reclassify Confirm Modal — collects feedback text when system feedback is enabled */}
+      {pendingReclassification && (
+        <ReclassifyConfirmModal
+          rowCount={pendingReclassification.rows.length}
+          targetPath={pendingReclassification.targetPath}
+          onConfirm={handleConfirmReclassify}
+          onCancel={() => setPendingReclassification(null)}
         />
       )}
 

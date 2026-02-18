@@ -175,6 +175,7 @@ CREATE TABLE project_suppliers (
   supplier_name VARCHAR NOT NULL UNIQUE,
   aliases JSON,
   parent_supplier_id VARCHAR,
+  parent_name VARCHAR,
   supplier_info JSON,
   category_a BOOLEAN DEFAULT FALSE,
   category_a_taxonomy_node_id VARCHAR,
@@ -192,6 +193,7 @@ CREATE TABLE project_suppliers (
 | `supplier_name` | Normalized supplier name. Used for matching and display. |
 | `aliases` | JSON array of alternative names for matching (e.g., `["GE Medical", "GEHC"]`). Imported from supplier universe. |
 | `parent_supplier_id` | Self-referencing FK to `project_suppliers.id`. Links subsidiary to parent company for spend aggregation. |
+| `parent_name` | Parent company name. Stored independently of `parent_supplier_id` — may be set even when no parent supplier exists in the project. Imported from supplier universe. |
 | `supplier_info` | JSON: research results including `supplierType` (company/individual/government), website, industry, services, NAICS, confidence, sources, etc. See `SupplierInfo` type. |
 | `category_a` | Whether this supplier has a predetermined classification |
 | `category_a_taxonomy_node_id` | FK to `taxonomy.id`. The predetermined classification for Category A suppliers. |

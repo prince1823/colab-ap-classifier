@@ -101,10 +101,11 @@ export async function researchBatch(
   let done = 0;
   const total = supplierNames.length;
 
-  // Filter out already-researched suppliers (those with substantive info)
+  // Filter out already-researched suppliers (1 bulk query instead of N sequential)
+  const supplierMap = await supplierService.getSuppliersByNames(supplierNames);
   const toResearch: string[] = [];
   for (const name of supplierNames) {
-    const supplier = await supplierService.getSupplierByName(name);
+    const supplier = supplierMap.get(name);
     const info = supplier?.supplierInfo;
     const hasSubstantiveInfo = !!(info?.industry || info?.description);
     if (!hasSubstantiveInfo) {

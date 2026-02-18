@@ -97,6 +97,25 @@ export async function getSupplierByAlias(alias: string): Promise<ProjectSupplier
 }
 
 /**
+ * Get multiple suppliers by name in a single query.
+ */
+export async function getSuppliersByNames(names: string[]): Promise<Map<string, ProjectSupplier>> {
+  if (names.length === 0) return new Map();
+
+  const placeholders = names.map(() => '?').join(',');
+  const rows = await databaseService.all<SupplierRow>(
+    `SELECT id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE supplier_name IN (${placeholders})`,
+    ...names
+  );
+
+  const result = new Map<string, ProjectSupplier>();
+  for (const row of rows) {
+    result.set(row.supplier_name, rowToSupplier(row));
+  }
+  return result;
+}
+
+/**
  * Update specific fields of a supplier identified by name.
  */
 export async function updateSupplier(

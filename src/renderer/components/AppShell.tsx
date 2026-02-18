@@ -3,12 +3,11 @@ import { Outlet, useLocation } from 'react-router-dom'
 import Header from './Header'
 import Sidebar from './Sidebar'
 import WorkflowTabs from './WorkflowTabs'
-import ClassificationBanner from './classification/ClassificationBanner'
 import { useWorkflowStore } from '../stores/workflowStore'
 
 export default function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const { isClassifying, subscribeToClassificationProgress, hasProject, refreshMetadata } = useWorkflowStore()
+  const { subscribeToClassificationProgress, hasProject, refreshMetadata } = useWorkflowStore()
   const location = useLocation()
 
   // Subscribe to classification progress events when a project is open
@@ -43,7 +42,6 @@ export default function AppShell() {
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
         <main className="flex flex-1 flex-col overflow-hidden">
           <WorkflowTabs />
-          {isClassifying && <ClassificationBanner />}
           <div className="flex-1 overflow-auto">
             <Outlet />
           </div>

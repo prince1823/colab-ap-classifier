@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import StatsCards from '../components/data-review/StatsCards'
 import SupplierTable from '../components/data-review/SupplierTable'
-import SpendDistribution from '../components/data-review/SpendDistribution'
 import { ipc } from '../lib/ipc'
 import type { TransactionStats } from '../../shared/types/transactions'
 import type { ProjectSupplier } from '../../shared/types/suppliers'
@@ -68,14 +67,9 @@ export default function DataReviewPage() {
 
       {stats && <StatsCards stats={stats} />}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <h3 className="mb-3 text-sm font-medium text-gray-700">Suppliers</h3>
-          <SupplierTable suppliers={suppliers} onUpdated={loadData} />
-        </div>
-        <div>
-          <SpendDistribution suppliers={suppliers} />
-        </div>
+      <div>
+        <h3 className="mb-3 text-sm font-medium text-gray-700">Suppliers</h3>
+        <SupplierTable suppliers={suppliers} onUpdated={loadData} />
       </div>
     </div>
   )

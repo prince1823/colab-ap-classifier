@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplier, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
 import '../styles/SuppliersPage.css'
@@ -10,7 +10,6 @@ const INFO_COLUMNS: { key: keyof SupplierInfo; label: string; editable: boolean;
   { key: 'supplierType', label: 'Type', editable: true, type: 'select' },
   { key: 'officialBusinessName', label: 'Official Name', editable: true, type: 'text' },
   { key: 'industry', label: 'Industry', editable: true, type: 'text' },
-  { key: 'parentCompany', label: 'Parent Company', editable: true, type: 'text' },
   { key: 'productsServices', label: 'Products/Services', editable: true, type: 'text', wide: true },
   { key: 'description', label: 'Description', editable: true, type: 'text', wide: true },
   { key: 'naicsCode', label: 'NAICS', editable: true, type: 'text' },
@@ -162,6 +161,22 @@ export default function SuppliersPage() {
     }
   }, [])
 
+  /** Save parentName for a supplier */
+  const saveParentName = useCallback(async (supplier: ProjectSupplier, newValue: string) => {
+    setSaving(true)
+    try {
+      const parentName = newValue || null
+      await ipc.suppliers.update(supplier.supplierName, { parentName })
+      setSuppliers(prev => prev.map(s =>
+        s.id === supplier.id ? { ...s, parentName } : s
+      ))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update')
+    } finally {
+      setSaving(false)
+    }
+  }, [])
+
   /** Save categoryA toggle */
   const saveCategoryA = useCallback(async (supplier: ProjectSupplier, checked: boolean) => {
     setSaving(true)
@@ -200,6 +215,7 @@ export default function SuppliersPage() {
     if (q) {
       result = result.filter(s => {
         if (s.supplierName.toLowerCase().includes(q)) return true
+        if (s.parentName && s.parentName.toLowerCase().includes(q)) return true
         const info = s.supplierInfo
         if (!info) return false
         return INFO_COLUMNS.some(col => {
@@ -270,7 +286,10 @@ export default function SuppliersPage() {
               <th className="col-right">Spend</th>
               <th className="col-center">Cat. A</th>
               {INFO_COLUMNS.map(col => (
-                <th key={col.key}>{col.label}</th>
+                <React.Fragment key={col.key}>
+                  <th>{col.label}</th>
+                  {col.key === 'officialBusinessName' && <th>Parent</th>}
+                </React.Fragment>
               ))}
             </tr>
           </thead>
@@ -293,68 +312,90 @@ export default function SuppliersPage() {
 
                 {INFO_COLUMNS.map(col => {
                   const val = getFieldValue(s, col.key)
+                  const parentCell = col.key === 'officialBusinessName' ? (
+                    <td>
+                      <EditableCell
+                        value={s.parentName || ''}
+                        onSave={(newVal) => saveParentName(s, newVal)}
+                      />
+                    </td>
+                  ) : null
 
                   // Read-only columns
                   if (!col.editable) {
                     if (col.key === 'confidence') {
                       return (
-                        <td key={col.key}>
-                          {val ? (
-                            <span className={`confidence-badge ${val}`}>{val}</span>
-                          ) : (
-                            <span className="cell-placeholder">-</span>
-                          )}
-                        </td>
+                        <React.Fragment key={col.key}>
+                          <td>
+                            {val ? (
+                              <span className={`confidence-badge ${val}`}>{val}</span>
+                            ) : (
+                              <span className="cell-placeholder">-</span>
+                            )}
+                          </td>
+                          {parentCell}
+                        </React.Fragment>
                       )
                     }
                     if (col.key === 'sources') {
                       const sources = s.supplierInfo?.sources
                       return (
-                        <td key={col.key}>
-                          {sources && sources.length > 0 ? (
-                            <div className="sources-list">
-                              {sources.map((src, i) => (
-                                <a
-                                  key={i}
-                                  className="source-tag source-link"
-                                  href={`https://www.google.com/search?q=${encodeURIComponent(src)}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title={`Search Google for "${src}"`}
-                                  onClick={(e) => {
-                                    e.preventDefault()
-                                    window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
-                                  }}
-                                >
-                                  {src}
-                                </a>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="cell-placeholder">-</span>
-                          )}
-                        </td>
+                        <React.Fragment key={col.key}>
+                          <td>
+                            {sources && sources.length > 0 ? (
+                              <div className="sources-list">
+                                {sources.map((src, i) => (
+                                  <a
+                                    key={i}
+                                    className="source-tag source-link"
+                                    href={`https://www.google.com/search?q=${encodeURIComponent(src)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={`Search Google for "${src}"`}
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
+                                    }}
+                                  >
+                                    {src}
+                                  </a>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="cell-placeholder">-</span>
+                            )}
+                          </td>
+                          {parentCell}
+                        </React.Fragment>
                       )
                     }
-                    return <td key={col.key}><span className="cell-placeholder">{val || '-'}</span></td>
+                    return (
+                      <React.Fragment key={col.key}>
+                        <td><span className="cell-placeholder">{val || '-'}</span></td>
+                        {parentCell}
+                      </React.Fragment>
+                    )
                   }
 
                   // Editable columns
                   return (
-                    <td key={col.key} className={col.wide ? 'supplier-col-wide' : ''}>
-                      <EditableCell
-                        value={val}
-                        type={col.type === 'select' ? 'select' : 'text'}
-                        onSave={(newVal) => saveField(s, col.key, newVal)}
-                      />
-                    </td>
+                    <React.Fragment key={col.key}>
+                      <td className={col.wide ? 'supplier-col-wide' : ''}>
+                        <EditableCell
+                          value={val}
+                          type={col.type === 'select' ? 'select' : 'text'}
+                          onSave={(newVal) => saveField(s, col.key, newVal)}
+                        />
+                      </td>
+                      {parentCell}
+                    </React.Fragment>
                   )
                 })}
               </tr>
             ))}
             {filteredSuppliers.length === 0 && (
               <tr>
-                <td colSpan={4 + INFO_COLUMNS.length} className="suppliers-empty">
+                <td colSpan={4 + INFO_COLUMNS.length + 1} className="suppliers-empty">
                   {search ? `No suppliers matching "${search}"` : 'No suppliers found. Upload a CSV and run classification to populate suppliers.'}
                 </td>
               </tr>

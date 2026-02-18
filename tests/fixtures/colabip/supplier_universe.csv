@@ -1,0 +1,10 @@
+id,supplier_name,aliases,parent_id,parent_name,category_a,category_a_taxonomy_path,supplier_info
+sup_9d275eab,com office developers llc,"[""com office developers llc""]",,,,,"{ ""supplierType"":""company""}"
+sup_21e171ea,microsoft corporation,"[""microsoft corporation""]",,,,,"{ ""supplierType"":""company""}"
+sup_f7d34d98,nationwide,"[""nationwide""]",,,,,"{ ""supplierType"":""company""}"
+sup_35b244ee,southern group inc.,"[""southern group inc.""]",,,,,"{ ""supplierType"":""company""}"
+sup_ecd96a54,verizon,"[""verizon"", ""verizon communication""]",,,true,Non Clinical|Non Clinical|Telecom,"{ ""supplierType"":""company""}"
+sup_1db97c3f,west publishing corporation,"[""west publishing corporation""]",,,,,"{ ""supplierType"":""company""}"
+sup_f55da022,ct corporation system,"[""ct corporation system""]",,,,,"{ ""supplierType"":""company""}"
+sup_a1b2c3d4,ge healthcare,"[""ge medical"", ""gehc""]",,general electric,,,"{ ""supplierType"":""company"",""websiteUrl"":""https://www.gehealthcare.com"",""industry"":""Healthcare"",""productsServices"":""Medical imaging, diagnostics"",""description"":""GE Healthcare is a leading provider of medical imaging and diagnostics equipment."",""confidence"":""high"",""sources"":[""ColabIP Supplier Universe""]}"
+sup_e5f6a7b8,pfizer inc,"[""pfizer""]",,pfizer inc,,,"{ ""supplierType"":""company"",""websiteUrl"":""https://www.pfizer.com"",""industry"":""Pharmaceuticals"",""description"":""Pfizer is a global pharmaceutical and biotechnology corporation."",""confidence"":""high"",""sources"":[""ColabIP Supplier Universe""]}"

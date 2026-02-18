@@ -36,10 +36,10 @@ export function buildSystemPrompt(): string {
    - NEVER return just L1 or L1|L2 — must return L1|L2|L3 (exactly 3 levels)
 
 2. SUPPLIER TYPE AS SIGNAL:
-   - Government supplier_type is a STRONG signal for Exempt classification, but NOT a hard rule
+   - Government supplierType is a STRONG signal for Exempt classification, but NOT a hard rule
    - EXCEPTION: Government utility payments (electricity, water, gas) should be classified
      under the appropriate Utilities category, NOT Exempt
-   - Use supplier_type as one signal among many — evaluate contextually
+   - Use supplierType as one signal among many — evaluate contextually
 
 3. INTERCOMPANY SPEND:
    - Check if the supplier appears to be a subsidiary of the client company (from domain_context)
@@ -81,7 +81,7 @@ Taxonomy descriptions are AUTHORITATIVE — they define category boundaries.
 
 1. CHECK CRITICAL RULES FIRST:
    a. Is supplier a subsidiary of the client company? → Exempt (STOP)
-   b. Is supplier_type "government"? → Strong signal for Exempt, UNLESS it's a utility payment
+   b. Is supplierType "government"? → Strong signal for Exempt, UNLESS it's a utility payment
 
 2. REVIEW COMPANY CONTEXT:
    a. Read the company_context provided — it describes the business domain
@@ -175,6 +175,7 @@ export function formatSupplierResearch(supplier: SupplierInfo | null): string {
   }
 
   const parts: string[] = [];
+  if (supplier.supplierType) parts.push(`Supplier Type: ${supplier.supplierType}`);
   if (supplier.officialBusinessName) parts.push(`Business Name: ${supplier.officialBusinessName}`);
   if (supplier.description) parts.push(`Description: ${supplier.description}`);
   if (supplier.industry) parts.push(`Industry: ${supplier.industry}`);

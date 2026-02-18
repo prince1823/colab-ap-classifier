@@ -214,18 +214,27 @@ export async function readRulePack(
 }
 
 /**
- * Read the supplier universe from colabip/suppliers/supplier_universe.csv.
+ * Row shape returned by readSupplierUniverse().
+ * CSV columns: id, supplier_name, aliases, parent_id, parent_name,
+ * category_a, category_a_taxonomy_path, supplier_info
+ * Note: supplierType lives inside supplier_info.
  */
-export async function readSupplierUniverse(): Promise<
-  Array<{
-    supplierName: string;
-    parentCompany: string;
-    supplierType: string;
-    website: string;
-    industry: string;
-  }>
-> {
-  const csvPath = path.join(basePath, 'suppliers', 'supplier_universe.csv');
+export interface SupplierUniverseRow {
+  id: string;
+  supplierName: string;
+  aliases: string[];
+  parentId: string | null;
+  parentName: string;
+  categoryA: boolean;
+  categoryATaxonomyPath: string | null;
+  supplierInfo: Record<string, unknown> | null;
+}
+
+/**
+ * Read the supplier universe from colabip/supplier_universe.csv.
+ */
+export async function readSupplierUniverse(): Promise<SupplierUniverseRow[]> {
+  const csvPath = path.join(basePath, 'supplier_universe.csv');
 
   try {
     const content = await fs.readFile(csvPath, 'utf-8');
@@ -235,17 +244,79 @@ export async function readSupplierUniverse(): Promise<
       skip_empty_lines: true,
     }) as Record<string, string>[];
 
-    return records.map((record) => ({
-      supplierName: record.supplier_name || '',
-      parentCompany: record.parent_company || '',
-      supplierType: record.supplier_type || '',
-      website: record.website || '',
-      industry: record.industry || '',
-    }));
+    return records.map((record) => {
+      let aliases: string[] = [];
+      try {
+        const parsed = JSON.parse(record.aliases || '[]');
+        aliases = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        console.warn(`[ColabIP] Failed to parse aliases for supplier "${record.supplier_name}": ${String(record.aliases).slice(0, 100)}`);
+        aliases = [];
+      }
+
+      let supplierInfo: Record<string, unknown> | null = null;
+      try {
+        if (record.supplier_info) {
+          supplierInfo = JSON.parse(record.supplier_info);
+        }
+      } catch {
+        console.warn(`[ColabIP] Failed to parse supplier_info for supplier "${record.supplier_name}": ${String(record.supplier_info).slice(0, 100)}`);
+        supplierInfo = null;
+      }
+
+      return {
+        id: record.id || '',
+        supplierName: record.supplier_name || '',
+        aliases,
+        parentId: record.parent_id || null,
+        parentName: record.parent_name || '',
+        categoryA: record.category_a === 'true',
+        categoryATaxonomyPath: record.category_a_taxonomy_path || null,
+        supplierInfo,
+      };
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return [];
     }
     throw error;
   }
+}
+
+/**
+ * Write the supplier universe back to colabip/suppliers/supplier_universe.csv.
+ * Stub for S2-13c — merge logic and atomic write will be added later.
+ */
+export async function writeSupplierUniverse(
+  suppliers: SupplierUniverseRow[]
+): Promise<void> {
+  const csvPath = path.join(basePath, 'supplier_universe.csv');
+
+  const header = 'id,supplier_name,aliases,parent_id,parent_name,category_a,category_a_taxonomy_path,supplier_info';
+
+  const rows = suppliers.map((s) => {
+    return [
+      escapeCsv(s.id),
+      escapeCsv(s.supplierName),
+      escapeCsv(JSON.stringify(s.aliases)),
+      escapeCsv(s.parentId || ''),
+      escapeCsv(s.parentName),
+      s.categoryA ? 'true' : 'false',
+      escapeCsv(s.categoryATaxonomyPath || ''),
+      escapeCsv(s.supplierInfo ? JSON.stringify(s.supplierInfo) : ''),
+    ].join(',');
+  });
+
+  await fs.writeFile(csvPath, [header, ...rows].join('\n') + '\n', 'utf-8');
+}
+
+/**
+ * Escape a CSV field value. Wraps in double-quotes if the value contains
+ * commas, double-quotes, newlines, or carriage returns. Internal double-quotes are doubled.
+ */
+function escapeCsv(value: string): string {
+  if (value.includes(',') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
 }

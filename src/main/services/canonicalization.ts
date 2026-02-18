@@ -2,6 +2,10 @@ import fs from 'fs';
 import { parse } from 'csv-parse/sync';
 import { v4 as uuidv4 } from 'uuid';
 import { databaseService } from './database';
+import { readSupplierUniverse } from './colabip';
+import { buildMatcherIndex } from './supplier-matcher';
+import { resolveTaxonomyPath } from './taxonomy-utils';
+import { getNodes as getTaxonomyNodes } from './taxonomy';
 import type {
   CanonicalColumnMapping,
 } from '../../shared/types/canonicalization';
@@ -263,11 +267,16 @@ export async function importCSV(
     await databaseService.run(insertSQL, ...values);
   }
 
-  // 6. Extract distinct supplier_name values -> INSERT INTO project_suppliers
+  // 6. Extract distinct supplier_name values -> match against universe -> INSERT INTO project_suppliers
   const supplierCanonicalCol = 'supplier_name';
   const supplierCsvCol = mappings[supplierCanonicalCol];
 
   if (supplierCsvCol) {
+    // Load supplier universe and taxonomy nodes for matching
+    const universe = await readSupplierUniverse();
+    const matcher = buildMatcherIndex(universe);
+    const taxonomyNodes = await getTaxonomyNodes();
+
     // Collect distinct supplier names from imported data
     const supplierNames = new Set<string>();
     for (const record of allRecords) {
@@ -277,19 +286,70 @@ export async function importCSV(
       }
     }
 
-    for (const name of supplierNames) {
-      // Check if supplier already exists
-      const existing = await databaseService.get<{ id: string }>(
-        'SELECT id FROM project_suppliers WHERE supplier_name = ?',
-        name
-      );
+    // Bulk-load all existing supplier names to avoid N+1 existence checks
+    const existingRows = await databaseService.all<{ supplier_name: string }>(
+      'SELECT supplier_name FROM project_suppliers'
+    );
+    const existingSupplierNames = new Set(existingRows.map((r) => r.supplier_name));
 
-      if (!existing) {
-        const supplierId = uuidv4();
+    // Map raw CSV names to resolved canonical names (for updating transaction rows)
+    const nameResolution = new Map<string, string>();
+
+    for (const name of supplierNames) {
+      // Try to match against supplier universe
+      const universeMatch = matcher.match(name);
+      const canonicalName = universeMatch ? universeMatch.supplierName : name;
+      nameResolution.set(name, canonicalName);
+
+      // Check if supplier already exists under the canonical name (in-memory, no query)
+      if (!existingSupplierNames.has(canonicalName)) {
+        existingSupplierNames.add(canonicalName); // prevent duplicate inserts within this batch
+        const supplierId = universeMatch?.id ?? uuidv4();
+
+        if (universeMatch) {
+          // Pre-populate with universe metadata
+          const categoryATaxonomyNodeId = universeMatch.categoryATaxonomyPath
+            ? resolveTaxonomyPath(universeMatch.categoryATaxonomyPath, taxonomyNodes)
+            : null;
+
+          if (universeMatch.categoryATaxonomyPath && categoryATaxonomyNodeId === null) {
+            console.warn(
+              `[Canonicalization] Could not resolve categoryATaxonomyPath "${universeMatch.categoryATaxonomyPath}" for supplier "${canonicalName}" — Category A path will be null`
+            );
+          }
+
+          const supplierInfoJson = universeMatch.supplierInfo
+            ? JSON.stringify(universeMatch.supplierInfo)
+            : null;
+
+          await databaseService.run(
+            `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            supplierId,
+            canonicalName,
+            universeMatch.aliases.length > 0 ? JSON.stringify(universeMatch.aliases) : null,
+            universeMatch.parentId,
+            supplierInfoJson,
+            universeMatch.categoryA,
+            categoryATaxonomyNodeId
+          );
+        } else {
+          await databaseService.run(
+            'INSERT INTO project_suppliers (id, supplier_name) VALUES (?, ?)',
+            supplierId,
+            canonicalName
+          );
+        }
+      }
+    }
+
+    // Update transaction rows with resolved canonical supplier names
+    for (const [rawName, canonicalName] of nameResolution) {
+      if (rawName !== canonicalName) {
         await databaseService.run(
-          'INSERT INTO project_suppliers (id, supplier_name) VALUES (?, ?)',
-          supplierId,
-          name
+          'UPDATE transactions SET supplier_name = ? WHERE supplier_name = ?',
+          canonicalName,
+          rawName
         );
       }
     }
@@ -298,7 +358,7 @@ export async function importCSV(
     const spendCanonicalCol = 'spend_amount';
     const spendCsvCol = mappings[spendCanonicalCol];
 
-    // Build aggregation from the imported records
+    // Build aggregation using resolved canonical names
     const supplierStats = new Map<
       string,
       { count: number; spend: number }
@@ -309,7 +369,8 @@ export async function importCSV(
       if (!name || name.trim().length === 0) continue;
 
       const trimmedName = name.trim();
-      const stats = supplierStats.get(trimmedName) || {
+      const canonicalName = nameResolution.get(trimmedName) ?? trimmedName;
+      const stats = supplierStats.get(canonicalName) || {
         count: 0,
         spend: 0,
       };
@@ -327,7 +388,7 @@ export async function importCSV(
         }
       }
 
-      supplierStats.set(trimmedName, stats);
+      supplierStats.set(canonicalName, stats);
     }
 
     for (const [name, stats] of supplierStats) {

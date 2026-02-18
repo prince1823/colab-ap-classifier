@@ -286,7 +286,6 @@ describe('DatabaseService', () => {
       expect(names).toContain('id');
       expect(names).toContain('supplier_name');
       expect(names).toContain('parent_supplier_id');
-      expect(names).toContain('supplier_type');
       expect(names).toContain('supplier_info');
       expect(names).toContain('category_a');
       expect(names).toContain('category_a_taxonomy_node_id');

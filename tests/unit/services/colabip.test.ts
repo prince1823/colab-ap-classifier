@@ -162,28 +162,46 @@ describe('readSupplierUniverse', () => {
   it('should parse supplier_universe.csv with all fields', async () => {
     const suppliers = await readSupplierUniverse();
 
-    expect(suppliers).toHaveLength(3);
+    expect(suppliers).toHaveLength(9);
+
+    // First row: basic entry with self-referencing alias
     expect(suppliers[0]).toEqual({
-      supplierName: 'GE Healthcare',
-      parentCompany: 'General Electric',
+      id: 'sup_9d275eab',
+      supplierName: 'com office developers llc',
+      aliases: ['com office developers llc'],
+      parentId: null,
+      parentName: '',
+      categoryA: false,
+      categoryATaxonomyPath: null,
+      supplierInfo: { supplierType: 'company' },
+    });
+
+    // Entry with category_a and taxonomy path
+    const verizon = suppliers.find((s) => s.supplierName === 'verizon');
+    expect(verizon).toBeDefined();
+    expect(verizon!.categoryA).toBe(true);
+    expect(verizon!.categoryATaxonomyPath).toBe('Non Clinical|Non Clinical|Telecom');
+    expect(verizon!.aliases).toEqual(['verizon', 'verizon communication']);
+    expect(verizon!.supplierInfo).toEqual(expect.objectContaining({ supplierType: 'company' }));
+
+    // Entry with parent relationship and substantive info
+    const geHealthcare = suppliers.find((s) => s.supplierName === 'ge healthcare');
+    expect(geHealthcare).toBeDefined();
+    expect(geHealthcare!.parentName).toBe('general electric');
+    expect(geHealthcare!.aliases).toEqual(['ge medical', 'gehc']);
+    expect(geHealthcare!.supplierInfo).toEqual(expect.objectContaining({
       supplierType: 'company',
-      website: 'https://www.gehealthcare.com',
+      websiteUrl: 'https://www.gehealthcare.com',
       industry: 'Healthcare',
-    });
-    expect(suppliers[1]).toEqual({
-      supplierName: 'Pfizer Inc',
-      parentCompany: '',
+    }));
+
+    // Entry with substantive info (Pfizer)
+    const pfizer = suppliers.find((s) => s.supplierName === 'pfizer inc');
+    expect(pfizer).toBeDefined();
+    expect(pfizer!.supplierInfo).toEqual(expect.objectContaining({
       supplierType: 'company',
-      website: 'https://www.pfizer.com',
       industry: 'Pharmaceuticals',
-    });
-    expect(suppliers[2]).toEqual({
-      supplierName: 'John Doe Consulting',
-      parentCompany: '',
-      supplierType: 'individual',
-      website: '',
-      industry: 'Consulting',
-    });
+    }));
   });
 
   it('should return empty array when supplier file does not exist', async () => {

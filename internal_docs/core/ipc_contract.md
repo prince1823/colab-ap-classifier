@@ -606,9 +606,9 @@ Get all suppliers in the current project with stats and metadata.
 interface ProjectSupplier {
   id: string;
   supplierName: string;
+  aliases: string[] | null;                   // Alternative names (from supplier universe)
   parentSupplierId: string | null;            // Self-referencing FK
-  supplierType: SupplierType | null;
-  supplierInfo: SupplierInfo | null;          // JSON research results
+  supplierInfo: SupplierInfo | null;          // JSON research results (includes supplierType)
   categoryA: boolean;
   categoryATaxonomyNodeId: string | null;     // FK to taxonomy.id
   transactionCount: number;
@@ -632,7 +632,7 @@ Update supplier metadata.
 ```typescript
 interface SupplierUpdateInput {
   parentSupplierId?: string | null;
-  supplierType?: SupplierType | null;
+  aliases?: string[] | null;
   categoryA?: boolean;
   categoryATaxonomyNodeId?: string | null;    // Required when categoryA = true
   supplierInfo?: SupplierInfo;
@@ -652,7 +652,7 @@ Trigger the ResearchAgent to research a specific supplier.
 | **Args** | `supplierName: string` |
 | **Response** | `SupplierResearchResult` |
 
-| **Notes** | Calls the ResearchAgent with the supplier name and company context. Updates `supplier_type` and `supplier_info` on the `project_suppliers` row. Returns the research result for display. |
+| **Notes** | Calls the ResearchAgent with the supplier name and company context. Updates `supplier_info` on the `project_suppliers` row (includes supplierType). Returns the research result for display. |
 
 ---
 

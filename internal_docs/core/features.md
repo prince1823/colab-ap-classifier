@@ -44,7 +44,7 @@
 
 ### Supplier Type
 
-- Every supplier is classified as one of: **company**, **individual**, or **government** (or null if not yet researched).
+- Every supplier is classified as one of: **company**, **individual**, or **government** (or undefined if not yet researched). Stored as `supplierType` inside the `supplier_info` JSON.
 - Supplier type is passed to the LLM as context during classification. It is a signal, not a hard rule. For example, a government supplier strongly suggests L1 = Exempt, but the LLM makes the final call based on the full context. **Exception:** government utility payments (electricity, water, gas) should be classified under Utilities, not Exempt.
 
 ### Automatic Research
@@ -56,20 +56,21 @@
 
 Research uses a fallback chain — try each method in order, stop when a clear match is found:
 
-1. **Existing data** — check the Supplier Universe (ColabIP global master list) and any existing `supplier_info` / `supplier_type` from prior research. If data already exists, use it directly (no external calls needed).
+1. **Existing data** — check the Supplier Universe (ColabIP global master list) and any existing `supplier_info` from prior research. If substantive data already exists (industry or description populated), use it directly (no external calls needed).
 2. **Supplier name → website + LinkedIn lookup** (external)
-3. **Supplier name + address** (external, if address is available in transaction data) - ? find website? 
+3. **Supplier name + address** (external, if address is available in transaction data) - ? find website?
 4. **Supplier name + client company name** (external)
 
 ### Research Output
 
-The ResearchAgent returns:
-- supplier_type (company / individual / government)
+The ResearchAgent returns a single `SupplierInfo` JSON object stored in `supplier_info`. Fields include:
+- `supplierType` (company / individual / government) — also set via heuristic fallback if LLM doesn't return it
 - website
 - industry / NAICS codes — v2: add NAICS lookup table for validation
 - parent company
 - key offerings / services
-- research_confidence (how confident the agent is in the match)
+- `confidence` (how confident the agent is in the match)
+- `sources` (e.g., `["Exa Web Search"]` or `["ColabIP Supplier Universe"]`)
 
 The ResearchAgent uses web search to find supplier info. The prompt instructs the LLM to return "Unknown" for any field it cannot verify from search results, rather than guessing.
 
@@ -200,8 +201,8 @@ After sync, go through each rule (sorted by priority_score ascending) and query 
 - View and edit: industry, sector, description, business focus, procurement nuances.
 
 ### Supplier Database
-- Table showing: supplier name, supplier type (company/individual/government), parent company, historical classifications, Category A status and classification, research info.
-- Edit supplier parent, supplier type, and Category A designation inline.
+- Table showing: supplier name, supplier type (from supplier_info: company/individual/government), parent company, historical classifications, Category A status and classification, research info.
+- Edit supplier parent, supplier type (via supplier_info), and Category A designation inline.
 
 ### Override Rules
 - Table showing: rule name, priority_score, source, conditions, target classification, affected row count.

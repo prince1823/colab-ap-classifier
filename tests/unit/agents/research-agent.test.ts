@@ -277,7 +277,7 @@ describe('buildUserPrompt', () => {
 
 describe('parseResponse', () => {
   it('should parse a full valid JSON response', () => {
-    const result = parseResponse(MOCK_LLM_RESPONSE);
+    const { result } = parseResponse(MOCK_LLM_RESPONSE);
 
     expect(result.officialBusinessName).toBe('Acme Corporation');
     expect(result.description).toBe('Global provider of industrial supplies and equipment');
@@ -295,11 +295,12 @@ describe('parseResponse', () => {
     expect(result.targetMarket).toBe('Manufacturing, Construction, Mining');
     expect(result.confidence).toBe('high');
     expect(result.sources).toEqual(['Company website', 'Industry databases', 'Business registries']);
+    expect(result.supplierType).toBe('company');
   });
 
   it('should handle markdown code fences around JSON', () => {
     const wrapped = '```json\n' + MOCK_LLM_RESPONSE + '\n```';
-    const result = parseResponse(wrapped);
+    const { result } = parseResponse(wrapped);
 
     expect(result.officialBusinessName).toBe('Acme Corporation');
     expect(result.confidence).toBe('high');
@@ -307,13 +308,13 @@ describe('parseResponse', () => {
 
   it('should handle code fences without language tag', () => {
     const wrapped = '```\n' + MOCK_LLM_RESPONSE + '\n```';
-    const result = parseResponse(wrapped);
+    const { result } = parseResponse(wrapped);
 
     expect(result.officialBusinessName).toBe('Acme Corporation');
   });
 
   it('should handle null fields by omitting them from result', () => {
-    const result = parseResponse(MOCK_MINIMAL_RESPONSE);
+    const { result } = parseResponse(MOCK_MINIMAL_RESPONSE);
 
     expect(result.officialBusinessName).toBe('Unknown Corp');
     expect(result.industry).toBe('Unknown');
@@ -332,6 +333,7 @@ describe('parseResponse', () => {
     expect(result.targetMarket).toBeUndefined();
     expect(result.confidence).toBe('low');
     expect(result.sources).toEqual(['Limited information available']);
+    expect(result.supplierType).toBe('company');
   });
 
   it('should handle empty string fields by omitting them from result', () => {
@@ -342,7 +344,7 @@ describe('parseResponse', () => {
       confidence: 'low',
       sources: [],
     });
-    const result = parseResponse(response);
+    const { result } = parseResponse(response);
 
     expect(result.officialBusinessName).toBeUndefined();
     expect(result.description).toBeUndefined();
@@ -354,7 +356,7 @@ describe('parseResponse', () => {
       confidence: 'very-high',
       sources: [],
     });
-    const result = parseResponse(response);
+    const { result } = parseResponse(response);
     expect(result.confidence).toBe('low');
   });
 
@@ -363,7 +365,7 @@ describe('parseResponse', () => {
       officialBusinessName: 'Test Corp',
       sources: [],
     });
-    const result = parseResponse(response);
+    const { result } = parseResponse(response);
     expect(result.confidence).toBe('low');
   });
 
@@ -372,7 +374,7 @@ describe('parseResponse', () => {
       officialBusinessName: 'Test Corp',
       confidence: 'high',
     });
-    const result = parseResponse(response);
+    const { result } = parseResponse(response);
     expect(result.sources).toEqual([]);
   });
 
@@ -381,7 +383,7 @@ describe('parseResponse', () => {
       confidence: 'high',
       sources: ['valid source', 42, null, 'another source', true],
     });
-    const result = parseResponse(response);
+    const { result } = parseResponse(response);
     expect(result.sources).toEqual(['valid source', 'another source']);
   });
 
@@ -398,17 +400,29 @@ describe('parseResponse', () => {
   });
 
   it('should parse government supplier response', () => {
-    const result = parseResponse(MOCK_GOVERNMENT_RESPONSE);
+    const { result } = parseResponse(MOCK_GOVERNMENT_RESPONSE);
     expect(result.officialBusinessName).toBe('City of Springfield');
     expect(result.industry).toBe('Government');
     expect(result.confidence).toBe('high');
+    expect(result.supplierType).toBe('government');
   });
 
   it('should parse individual supplier response', () => {
-    const result = parseResponse(MOCK_INDIVIDUAL_RESPONSE);
+    const { result } = parseResponse(MOCK_INDIVIDUAL_RESPONSE);
     expect(result.officialBusinessName).toBe('John Smith Consulting');
     expect(result.serviceType).toBe('Consulting');
     expect(result.confidence).toBe('medium');
+    expect(result.supplierType).toBe('individual');
+  });
+
+  it('should return undefined supplierType when not in LLM response', () => {
+    const response = JSON.stringify({
+      officialBusinessName: 'Test Corp',
+      confidence: 'medium',
+      sources: [],
+    });
+    const { result } = parseResponse(response);
+    expect(result.supplierType).toBeUndefined();
   });
 });
 
@@ -418,13 +432,14 @@ describe('researchSupplier', () => {
   it('should call LLM client and return parsed result', async () => {
     mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
 
-    const result = await researchSupplier('Acme Corporation');
+    const { result } = await researchSupplier('Acme Corporation');
 
     expect(mockChat).toHaveBeenCalledOnce();
     expect(result.officialBusinessName).toBe('Acme Corporation');
     expect(result.industry).toBe('Industrial Supply');
     expect(result.confidence).toBe('high');
     expect(result.sources).toHaveLength(3);
+    expect(result.supplierType).toBe('company');
   });
 
   it('should pass correct model options to LLM client', async () => {
@@ -510,7 +525,7 @@ describe('researchSupplier', () => {
   });
 
   it('should return low confidence result for empty supplier name', async () => {
-    const result = await researchSupplier('');
+    const { result } = await researchSupplier('');
 
     expect(mockChat).not.toHaveBeenCalled();
     expect(result.confidence).toBe('low');
@@ -518,7 +533,7 @@ describe('researchSupplier', () => {
   });
 
   it('should return low confidence result for whitespace-only supplier name', async () => {
-    const result = await researchSupplier('   ');
+    const { result } = await researchSupplier('   ');
 
     expect(mockChat).not.toHaveBeenCalled();
     expect(result.confidence).toBe('low');
@@ -545,7 +560,7 @@ describe('researchSupplier', () => {
     const wrappedResponse = '```json\n' + MOCK_LLM_RESPONSE + '\n```';
     mockChat.mockResolvedValueOnce(wrappedResponse);
 
-    const result = await researchSupplier('Acme Corporation');
+    const { result } = await researchSupplier('Acme Corporation');
 
     expect(result.officialBusinessName).toBe('Acme Corporation');
     expect(result.confidence).toBe('high');
@@ -554,7 +569,7 @@ describe('researchSupplier', () => {
   it('should handle minimal LLM response with mostly null fields', async () => {
     mockChat.mockResolvedValueOnce(MOCK_MINIMAL_RESPONSE);
 
-    const result = await researchSupplier('Unknown Company XYZ');
+    const { result } = await researchSupplier('Unknown Company XYZ');
 
     expect(result.confidence).toBe('low');
     expect(result.officialBusinessName).toBe('Unknown Corp');
@@ -565,21 +580,23 @@ describe('researchSupplier', () => {
   it('should handle government supplier research', async () => {
     mockChat.mockResolvedValueOnce(MOCK_GOVERNMENT_RESPONSE);
 
-    const result = await researchSupplier('City of Springfield');
+    const { result } = await researchSupplier('City of Springfield');
 
     expect(result.officialBusinessName).toBe('City of Springfield');
     expect(result.industry).toBe('Government');
     expect(result.confidence).toBe('high');
+    expect(result.supplierType).toBe('government');
   });
 
   it('should handle individual supplier research', async () => {
     mockChat.mockResolvedValueOnce(MOCK_INDIVIDUAL_RESPONSE);
 
-    const result = await researchSupplier('John Smith');
+    const { result } = await researchSupplier('John Smith');
 
     expect(result.officialBusinessName).toBe('John Smith Consulting');
     expect(result.serviceType).toBe('Consulting');
     expect(result.confidence).toBe('medium');
+    expect(result.supplierType).toBe('individual');
   });
 
   it('should include search results in user prompt when provided', async () => {

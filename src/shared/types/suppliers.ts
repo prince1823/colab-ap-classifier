@@ -3,6 +3,7 @@ import type { ConfidenceLevel } from './canonicalization';
 export type SupplierType = 'company' | 'individual' | 'government';
 
 export interface SupplierInfo {
+  supplierType?: SupplierType;
   officialBusinessName?: string;
   description?: string;
   websiteUrl?: string;
@@ -18,18 +19,21 @@ export interface SupplierInfo {
   primaryRevenueStreams?: string;
   serviceCategories?: string;
   targetMarket?: string;
+  confidence?: ConfidenceLevel;
+  sources?: string[];
 }
 
-export interface SupplierResearchResult extends SupplierInfo {
-  confidence: ConfidenceLevel;
-  sources: string[];
-}
+/**
+ * SupplierResearchResult is SupplierInfo with required confidence and sources.
+ */
+export type SupplierResearchResult = SupplierInfo &
+  Required<Pick<SupplierInfo, 'confidence' | 'sources'>>;
 
 export interface ProjectSupplier {
   id: string;
   supplierName: string;
+  aliases: string[] | null;
   parentSupplierId: string | null;
-  supplierType: SupplierType | null;
   supplierInfo: SupplierInfo | null;
   categoryA: boolean;
   categoryATaxonomyNodeId: string | null;
@@ -41,8 +45,8 @@ export interface ProjectSupplier {
 
 export interface SupplierUpdateInput {
   parentSupplierId?: string | null;
-  supplierType?: SupplierType | null;
   categoryA?: boolean;
   categoryATaxonomyNodeId?: string | null;
   supplierInfo?: SupplierInfo;
+  aliases?: string[] | null;
 }

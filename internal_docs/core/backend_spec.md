@@ -87,7 +87,7 @@ flowchart TB
 
 *Data Tables:*
 - **transactions** — dynamic schema: fixed columns (id, row_index, classification results with `review_score` 0-100 integer) + canonical columns added from column_mappings
-- **project_suppliers** — suppliers with parent_name, `supplier_type` (company/individual/government/null), supplier_info (JSON), Category A designation (`category_a`, `category_a_taxonomy_node_id`), transaction_count, total_spend
+- **project_suppliers** — suppliers with aliases (JSON array), parent_name, supplier_info (JSON with research data including supplierType, confidence, and sources), Category A designation (`category_a`, `category_a_taxonomy_node_id`), transaction_count, total_spend
 - **override_rules** — rules with name, source (`project`/`taxonomy`/`supplier`), conditions (JSON), target_classification, priority_score. `supplier` and `taxonomy` rules synced at classification time; `project` rules created directly.
 - **change_log** — audit trail: change_type, source, affected_table, old/new values
 - **system_feedback** — AI-generated suggestions: feedback_type, action_details (JSON), status
@@ -188,7 +188,7 @@ flowchart TB
 - User reviews and edits the pre-populated mappings → `canonicalization:save` → update `column_mappings` table
 - User sets invoice grouping columns → update `invoice_grouping_columns` table
 - On confirmation:
-  - Extract distinct suppliers from transactions using supplier_name column → insert into project_suppliers
+  - Extract distinct supplier names from transactions → normalize (trim, collapse whitespace) → match against ColabIP supplier universe (exact name + alias match) → resolve to canonical name → update transaction rows with canonical name → insert into project_suppliers pre-populated with universe metadata (aliases, supplierInfo, categoryA) where matched, otherwise insert bare row
 
 **Constraint:** Mapping is applied at upload time. If mapping is changed after data exists, existing rows are NOT re-mapped.
 
@@ -199,7 +199,7 @@ flowchart TB
 - Data quality stats → `transactions:stats` → aggregate query (total rows, total spend, classified %, flagged for review count)
 - Data summary → `transactions:query` with filters → paginated transaction results
 - Supplier list → `suppliers:list` → query project_suppliers with transaction_count, total_spend
-- User updates supplier → `suppliers:update` → update project_suppliers (parent_name, supplier_type, supplier_info)
+- User updates supplier → `suppliers:update` → update project_suppliers (parent_name, aliases, supplier_info)
 
 ---
 
@@ -234,10 +234,11 @@ flowchart TB
 
 > See [features.md §4](./features.md) for research behavior and fallback chain.
 
-- Query all suppliers in the project that lack research data (`supplier_info` is null or `supplier_type` is null)
+- Query all suppliers in the project that lack research data (`supplier_info` is null)
 - For each unresearched supplier, run the ResearchAgent using the fallback chain: existing data → name + web/LinkedIn → name + address → name + client name
 - Research runs in parallel batches to manage API cost/latency
-- Store results: `supplier_type` in dedicated column, remaining fields in `supplier_info` JSON
+- Store results in `supplier_info` JSON (includes supplierType, confidence, sources, and all other research fields)
+- Supplier universe matches also import `aliases` and `category_a` status
 
 **Step 2: Identify rows to classify**
 

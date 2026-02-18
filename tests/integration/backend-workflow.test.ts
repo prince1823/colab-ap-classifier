@@ -439,7 +439,6 @@ describe('Integration: Supplier CRUD', () => {
 
     await supplierService.upsertSupplier({
       supplierName: 'Acme Corp',
-      supplierType: 'company',
       transactionCount: 5,
       totalSpend: 10000,
     });
@@ -454,7 +453,6 @@ describe('Integration: Supplier CRUD', () => {
       id: 's1',
       supplier_name: 'Acme Corp',
       parent_supplier_id: null,
-      supplier_type: 'company',
       supplier_info: null,
       category_a: false,
       category_a_taxonomy_node_id: null,

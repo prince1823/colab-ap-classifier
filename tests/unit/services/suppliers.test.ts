@@ -30,8 +30,8 @@ function makeRow(overrides: Partial<Record<string, unknown>> = {}): Record<strin
   return {
     id: 'sup-1',
     supplier_name: 'Acme Corp',
+    aliases: null,
     parent_supplier_id: null,
-    supplier_type: 'company',
     supplier_info: null,
     category_a: false,
     category_a_taxonomy_node_id: null,
@@ -55,7 +55,6 @@ describe('SuppliersService', () => {
         makeRow({
           id: 'sup-2',
           supplier_name: 'Beta Inc',
-          supplier_type: 'individual',
           category_a: true,
           transaction_count: 10,
           total_spend: 25000,
@@ -74,8 +73,8 @@ describe('SuppliersService', () => {
       expect(result[0]).toEqual<ProjectSupplier>({
         id: 'sup-1',
         supplierName: 'Acme Corp',
+        aliases: null,
         parentSupplierId: null,
-        supplierType: 'company',
         supplierInfo: null,
         categoryA: false,
         categoryATaxonomyNodeId: null,
@@ -86,7 +85,6 @@ describe('SuppliersService', () => {
       });
 
       expect(result[1].supplierName).toBe('Beta Inc');
-      expect(result[1].supplierType).toBe('individual');
       expect(result[1].categoryA).toBe(true);
     });
 
@@ -191,15 +189,6 @@ describe('SuppliersService', () => {
       expect(params).toContain('node-123');
     });
 
-    it('should update supplierType field', async () => {
-      await updateSupplier('Acme Corp', { supplierType: 'government' });
-
-      expect(mockedDb.run).toHaveBeenCalledOnce();
-      const [sql, ...params] = mockedDb.run.mock.calls[0];
-      expect(sql).toContain('supplier_type = ?');
-      expect(params).toContain('government');
-    });
-
     it('should update parentSupplierId field', async () => {
       await updateSupplier('Acme Corp', { parentSupplierId: 'parent-1' });
 
@@ -236,14 +225,12 @@ describe('SuppliersService', () => {
       await updateSupplier('Acme Corp', {
         categoryA: true,
         categoryATaxonomyNodeId: 'node-456',
-        supplierType: 'company',
       });
 
       expect(mockedDb.run).toHaveBeenCalledOnce();
       const [sql] = mockedDb.run.mock.calls[0];
       expect(sql).toContain('category_a = ?');
       expect(sql).toContain('category_a_taxonomy_node_id = ?');
-      expect(sql).toContain('supplier_type = ?');
       expect(sql).toContain('updated_at = CURRENT_TIMESTAMP');
     });
 
@@ -260,7 +247,6 @@ describe('SuppliersService', () => {
 
       await upsertSupplier({
         supplierName: 'New Supplier',
-        supplierType: 'company',
         categoryA: false,
       });
 
@@ -273,7 +259,7 @@ describe('SuppliersService', () => {
       expect(sql).toContain('INSERT INTO project_suppliers');
       expect(params[0]).toBe('test-uuid-1234'); // id from mocked uuid
       expect(params[1]).toBe('New Supplier');    // supplier_name
-      expect(params[3]).toBe('company');         // supplier_type
+      expect(params[2]).toBeNull();              // aliases
       expect(params[5]).toBe(false);             // category_a
     });
 
@@ -295,7 +281,6 @@ describe('SuppliersService', () => {
       await upsertSupplier({
         supplierName: 'Acme Corp',
         categoryA: true,
-        supplierType: 'government',
       });
 
       // get is called once for the existence check
@@ -316,8 +301,8 @@ describe('SuppliersService', () => {
       expect(sql).toContain('INSERT INTO project_suppliers');
       expect(params[0]).toBe('test-uuid-1234'); // id
       expect(params[1]).toBe('Minimal Supplier'); // supplier_name
-      expect(params[2]).toBeNull();               // parent_supplier_id
-      expect(params[3]).toBeNull();               // supplier_type
+      expect(params[2]).toBeNull();               // aliases
+      expect(params[3]).toBeNull();               // parent_supplier_id
       expect(params[4]).toBeNull();               // supplier_info
       expect(params[5]).toBe(false);              // category_a
       expect(params[6]).toBeNull();               // category_a_taxonomy_node_id
@@ -339,6 +324,7 @@ describe('SuppliersService', () => {
       });
 
       const [, ...params] = mockedDb.run.mock.calls[0];
+      // supplier_info is the 5th param (index 4) — after id, supplier_name, aliases, parent_supplier_id
       expect(params[4]).toBe(JSON.stringify(info));
     });
 
@@ -435,7 +421,7 @@ describe('SuppliersService', () => {
       });
 
       const [, ...params] = mockedDb.run.mock.calls[0];
-      // supplier_info is the 5th param (index 4)
+      // supplier_info is the 5th param (index 4): id, supplier_name, aliases, parent_supplier_id, supplier_info
       expect(params[4]).toBe(JSON.stringify(info));
     });
   });

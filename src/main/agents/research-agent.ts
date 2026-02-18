@@ -1,6 +1,6 @@
 import type { ConfidenceLevel } from '../../shared/types/canonicalization';
 import type { CompanyContext } from '../../shared/types/project';
-import type { SupplierResearchResult } from '../../shared/types/suppliers';
+import type { SupplierResearchResult, SupplierType } from '../../shared/types/suppliers';
 import type { ExaSearchResult } from '../services/exa-search';
 import * as llmClient from '../services/llm-client';
 import * as settingsService from '../services/settings';
@@ -12,8 +12,8 @@ export function buildSystemPrompt(): string {
   return `You are a supplier research analyst. Extract structured supplier information for spend classification.
 
 CONTEXT: This agent runs as the first step of the classification pipeline. It researches
-suppliers that don't already have data before classification proceeds. Results are stored
-in project_suppliers (supplier_type in its own column, remaining fields in supplier_info JSON).
+suppliers that don't already have data before classification proceeds. Results (including
+supplierType) are stored in the project_suppliers.supplier_info JSON column.
 
 STRATEGY: Use supplier address if available. Prioritize first result (official website).
 Check "Services"/"About Us" for L1. Extract address if found. Select most relevant result if multiple.
@@ -32,7 +32,7 @@ Classify every supplier as one of:
   "treasury", "regulatory agency", "licensing agency", "municipal", "federal"
 - **null** — cannot determine from available information
 
-Supplier type is passed to the classification LLM as a signal. Government supplier_type
+Supplier type is passed to the classification LLM as a signal. Government supplierType
 strongly suggests Exempt classification (except government utilities).
 
 ## NAICS/SIC Codes
@@ -119,10 +119,15 @@ export function buildUserPrompt(
   return sections.join('\n\n');
 }
 
+export interface ResearchParseResult {
+  result: SupplierResearchResult;
+}
+
 /**
- * Parse and validate the JSON response from the LLM into a SupplierResearchResult.
+ * Parse and validate the JSON response from the LLM.
+ * Returns the SupplierResearchResult with supplierType included.
  */
-export function parseResponse(responseText: string): SupplierResearchResult {
+export function parseResponse(responseText: string): ResearchParseResult {
   // Strip markdown code fences if present
   let cleaned = responseText.trim();
   if (cleaned.startsWith('```')) {
@@ -212,7 +217,10 @@ export function parseResponse(responseText: string): SupplierResearchResult {
   const targetMarket = optStr('targetMarket');
   if (targetMarket) result.targetMarket = targetMarket;
 
-  return result;
+  const supplierType = optStr('supplierType');
+  if (supplierType) result.supplierType = supplierType as SupplierType;
+
+  return { result };
 }
 
 /**
@@ -223,18 +231,17 @@ export function parseResponse(responseText: string): SupplierResearchResult {
  * @param companyContext - Optional context about the purchasing company
  * @param supplierAddress - Optional known address of the supplier
  * @param searchResults - Optional Exa web search results to include as context
- * @returns A SupplierResearchResult with supplier metadata and confidence
+ * @returns A ResearchParseResult with supplier metadata (including supplierType)
  */
 export async function researchSupplier(
   supplierName: string,
   companyContext?: CompanyContext,
   supplierAddress?: string,
   searchResults?: ExaSearchResult[]
-): Promise<SupplierResearchResult> {
+): Promise<ResearchParseResult> {
   if (!supplierName.trim()) {
     return {
-      confidence: 'low',
-      sources: [],
+      result: { confidence: 'low', sources: [] },
     };
   }
 

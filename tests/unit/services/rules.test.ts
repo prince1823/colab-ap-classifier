@@ -148,7 +148,7 @@ describe('RulesService', () => {
       vi.mocked(supplierService.listSuppliers).mockResolvedValue([
         {
           id: 's1', supplierName: 'Cat A Supplier', parentSupplierId: null,
-          supplierType: 'company', supplierInfo: null, categoryA: true,
+          supplierInfo: null, categoryA: true,
           categoryATaxonomyNodeId: 'tid1', transactionCount: 10, totalSpend: 5000,
           createdAt: '', updatedAt: '',
         },

@@ -1,5 +1,6 @@
 import { researchSupplier } from '../agents/research-agent';
 import { readSupplierUniverse } from './colabip';
+import { buildMatcherIndex, type SupplierMatcherIndex } from './supplier-matcher';
 import * as exaSearch from './exa-search';
 import * as supplierService from './suppliers';
 import * as projectService from './project';
@@ -7,30 +8,44 @@ import type { SupplierResearchResult, SupplierInfo } from '../../shared/types';
 
 /**
  * Research a single supplier and store results.
+ * Optionally accepts a pre-built matcher index to avoid rebuilding per call.
  */
-export async function researchSingle(supplierName: string): Promise<SupplierResearchResult> {
-  // Check supplier universe first
-  const universe = await readSupplierUniverse();
-  const knownSupplier = universe.find(
-    (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
-  );
+export async function researchSingle(
+  supplierName: string,
+  matcher?: SupplierMatcherIndex
+): Promise<SupplierResearchResult> {
+  // Check supplier universe first (exact normalized name + alias match)
+  if (!matcher) {
+    const universe = await readSupplierUniverse();
+    matcher = buildMatcherIndex(universe);
+  }
+  const knownSupplier = matcher.match(supplierName);
 
   if (knownSupplier) {
-    const result: SupplierResearchResult = {
-      officialBusinessName: knownSupplier.supplierName,
-      industry: knownSupplier.industry,
-      parentCompany: knownSupplier.parentCompany,
-      websiteUrl: knownSupplier.website,
-      confidence: 'high' as const,
-      sources: ['ColabIP Supplier Universe'],
-    };
+    const universeInfo = (knownSupplier.supplierInfo ?? {}) as SupplierInfo;
+    const hasSubstantiveInfo = !!(universeInfo.industry || universeInfo.description);
 
-    await supplierService.updateSupplier(supplierName, {
-      supplierInfo: result as SupplierInfo,
-      supplierType: (knownSupplier.supplierType as 'company' | 'individual' | 'government') || null,
-    });
+    if (hasSubstantiveInfo) {
+      // Universe has real data — use it directly, skip LLM research
+      const result: SupplierResearchResult = {
+        ...universeInfo,
+        officialBusinessName: universeInfo.officialBusinessName ?? knownSupplier.supplierName,
+        parentCompany: universeInfo.parentCompany ?? (knownSupplier.parentName || undefined),
+        confidence: 'high' as const,
+        sources: ['ColabIP Supplier Universe'],
+      };
 
-    return result;
+      await supplierService.updateSupplier(supplierName, {
+        supplierInfo: result,
+        aliases: knownSupplier.aliases.length > 0 ? knownSupplier.aliases : undefined,
+        categoryA: knownSupplier.categoryA || undefined,
+      });
+
+      return result;
+    }
+
+    // Universe match but sparse info — fall through to Exa + LLM research.
+    // Universe metadata (aliases, type, categoryA) was already stored at import time.
   }
 
   // Get company context for research
@@ -55,19 +70,22 @@ export async function researchSingle(supplierName: string): Promise<SupplierRese
   }
 
   // Research via LLM, enriched with web search results
-  const result = await researchSupplier(supplierName, companyContext, address, searchResults);
+  const { result } = await researchSupplier(supplierName, companyContext, address, searchResults);
 
   // Track that Exa was used as a source
   if (searchResults.length > 0 && !result.sources.includes('Exa Web Search')) {
     result.sources.push('Exa Web Search');
   }
 
+  // Apply heuristic fallback if LLM didn't return supplierType
+  if (!result.supplierType) {
+    const heuristicType = determineSupplierType(result);
+    if (heuristicType) result.supplierType = heuristicType;
+  }
+
   // Store results
   await supplierService.updateSupplier(supplierName, {
-    supplierInfo: result as SupplierInfo,
-    supplierType: result.confidence !== 'low'
-      ? determineSupplierType(result)
-      : null,
+    supplierInfo: result,
   });
 
   return result;
@@ -84,11 +102,13 @@ export async function researchBatch(
   let done = 0;
   const total = supplierNames.length;
 
-  // Filter out already-researched suppliers
+  // Filter out already-researched suppliers (those with substantive info)
   const toResearch: string[] = [];
   for (const name of supplierNames) {
     const supplier = await supplierService.getSupplierByName(name);
-    if (!supplier?.supplierInfo) {
+    const info = supplier?.supplierInfo;
+    const hasSubstantiveInfo = !!(info?.industry || info?.description);
+    if (!hasSubstantiveInfo) {
       toResearch.push(name);
     } else {
       done++;
@@ -97,12 +117,16 @@ export async function researchBatch(
 
   if (onProgress) onProgress(done, total);
 
+  // Build matcher index once for the entire batch
+  const universe = await readSupplierUniverse();
+  const matcher = buildMatcherIndex(universe);
+
   // Process in batches
   for (let i = 0; i < toResearch.length; i += BATCH_SIZE) {
     const batch = toResearch.slice(i, i + BATCH_SIZE);
     const promises = batch.map(async (name) => {
       try {
-        await researchSingle(name);
+        await researchSingle(name, matcher);
       } catch (error) {
         console.error(`[SupplierResearch] Failed to research ${name}:`, error);
       }
@@ -113,6 +137,10 @@ export async function researchBatch(
   }
 }
 
+/**
+ * Heuristic fallback for determining supplier type from research results.
+ * Used only when the LLM doesn't return an explicit supplierType.
+ */
 function determineSupplierType(result: SupplierResearchResult): 'company' | 'individual' | 'government' | null {
   const desc = (result.description || '').toLowerCase();
   const industry = (result.industry || '').toLowerCase();

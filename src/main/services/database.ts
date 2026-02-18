@@ -20,6 +20,8 @@ class DatabaseService {
       await this.initializeSchema();
     }
 
+    await this.runMigrations();
+
     return this.db;
   }
 
@@ -60,6 +62,22 @@ class DatabaseService {
     const db = this.getDatabase();
     const results = await db.all(sql, ...params) as T[];
     return results[0];
+  }
+
+  /**
+   * Run schema migrations for existing databases.
+   * Adds columns that may be missing from older .c91 files.
+   */
+  private async runMigrations(): Promise<void> {
+    const db = this.getDatabase();
+
+    // Add aliases column to project_suppliers if missing
+    const cols = await db.all(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'aliases'"
+    );
+    if (cols.length === 0) {
+      await db.run('ALTER TABLE project_suppliers ADD COLUMN aliases JSON');
+    }
   }
 
   private async initializeSchema(): Promise<void> {
@@ -119,8 +137,8 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS project_suppliers (
         id VARCHAR PRIMARY KEY,
         supplier_name VARCHAR NOT NULL UNIQUE,
+        aliases JSON,
         parent_supplier_id VARCHAR,
-        supplier_type VARCHAR,
         supplier_info JSON,
         category_a BOOLEAN DEFAULT FALSE,
         category_a_taxonomy_node_id VARCHAR,

@@ -173,8 +173,8 @@ Supplier information. Category A suppliers have a predetermined classification t
 CREATE TABLE project_suppliers (
   id VARCHAR PRIMARY KEY,
   supplier_name VARCHAR NOT NULL UNIQUE,
+  aliases JSON,
   parent_supplier_id VARCHAR,
-  supplier_type VARCHAR,
   supplier_info JSON,
   category_a BOOLEAN DEFAULT FALSE,
   category_a_taxonomy_node_id VARCHAR,
@@ -190,9 +190,9 @@ CREATE TABLE project_suppliers (
 | Column | Description |
 |--------|-------------|
 | `supplier_name` | Normalized supplier name. Used for matching and display. |
+| `aliases` | JSON array of alternative names for matching (e.g., `["GE Medical", "GEHC"]`). Imported from supplier universe. |
 | `parent_supplier_id` | Self-referencing FK to `project_suppliers.id`. Links subsidiary to parent company for spend aggregation. |
-| `supplier_type` | `company`, `individual`, `government`, or null. Passed to LLM as signal (see [features.md §4](./features.md)). |
-| `supplier_info` | JSON: research results (website, industry, services, NAICS, research_confidence, etc.) |
+| `supplier_info` | JSON: research results including `supplierType` (company/individual/government), website, industry, services, NAICS, confidence, sources, etc. See `SupplierInfo` type. |
 | `category_a` | Whether this supplier has a predetermined classification |
 | `category_a_taxonomy_node_id` | FK to `taxonomy.id`. The predetermined classification for Category A suppliers. |
 | `transaction_count` | Number of transactions for this supplier |
@@ -343,8 +343,11 @@ Single CSV containing all known suppliers globally. Used as the first lookup in 
 
 | Column | Description |
 |--------|-------------|
+| `id` | Unique supplier identifier (e.g., `sup-ge-healthcare-001`) |
 | `supplier_name` | Supplier name |
-| `parent_company` | Parent company name |
-| `supplier_type` | `company`, `individual`, or `government` |
-| `website` | Supplier website |
-| `industry` | Industry classification |
+| `aliases` | JSON array of alternative names (e.g., `["GE Medical", "GEHC"]`) |
+| `parent_id` | ID of parent supplier (or empty) |
+| `parent_name` | Parent company name |
+| `category_a` | `true`/`false` — whether supplier has a predetermined classification |
+| `category_a_taxonomy_path` | Pipe-delimited taxonomy path for Category A suppliers |
+| `supplier_info` | JSON object with research data (supplierType, websiteUrl, industry, productsServices, confidence, sources) |

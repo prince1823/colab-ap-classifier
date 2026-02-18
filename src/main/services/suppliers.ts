@@ -4,7 +4,6 @@ import type {
   ProjectSupplier,
   SupplierUpdateInput,
   SupplierInfo,
-  SupplierType,
 } from '../../shared/types/suppliers';
 
 /**
@@ -13,8 +12,8 @@ import type {
 interface SupplierRow {
   id: string;
   supplier_name: string;
+  aliases: string | null;
   parent_supplier_id: string | null;
-  supplier_type: string | null;
   supplier_info: string | null;
   category_a: boolean;
   category_a_taxonomy_node_id: string | null;
@@ -38,11 +37,20 @@ function rowToSupplier(row: SupplierRow): ProjectSupplier {
     }
   }
 
+  let aliases: string[] | null = null;
+  if (row.aliases) {
+    try {
+      aliases = JSON.parse(row.aliases);
+    } catch {
+      aliases = null;
+    }
+  }
+
   return {
     id: row.id,
     supplierName: row.supplier_name,
+    aliases,
     parentSupplierId: row.parent_supplier_id,
-    supplierType: (row.supplier_type as SupplierType) ?? null,
     supplierInfo,
     categoryA: Boolean(row.category_a),
     categoryATaxonomyNodeId: row.category_a_taxonomy_node_id,
@@ -58,7 +66,7 @@ function rowToSupplier(row: SupplierRow): ProjectSupplier {
  */
 export async function listSuppliers(): Promise<ProjectSupplier[]> {
   const rows = await databaseService.all<SupplierRow>(
-    'SELECT id, supplier_name, parent_supplier_id, supplier_type, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers ORDER BY supplier_name'
+    'SELECT id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers ORDER BY supplier_name'
   );
   return rows.map(rowToSupplier);
 }
@@ -68,8 +76,20 @@ export async function listSuppliers(): Promise<ProjectSupplier[]> {
  */
 export async function getSupplierByName(name: string): Promise<ProjectSupplier | null> {
   const row = await databaseService.get<SupplierRow>(
-    'SELECT id, supplier_name, parent_supplier_id, supplier_type, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE supplier_name = ?',
+    'SELECT id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE supplier_name = ?',
     name
+  );
+  return row ? rowToSupplier(row) : null;
+}
+
+/**
+ * Find a project supplier whose aliases array contains the given name.
+ * Uses json_contains on the JSON-encoded aliases column.
+ */
+export async function getSupplierByAlias(alias: string): Promise<ProjectSupplier | null> {
+  const row = await databaseService.get<SupplierRow>(
+    "SELECT id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE aliases IS NOT NULL AND json_contains(aliases, ?)",
+    JSON.stringify(alias)
   );
   return row ? rowToSupplier(row) : null;
 }
@@ -89,11 +109,6 @@ export async function updateSupplier(
     params.push(updates.parentSupplierId);
   }
 
-  if (updates.supplierType !== undefined) {
-    setClauses.push('supplier_type = ?');
-    params.push(updates.supplierType);
-  }
-
   if (updates.categoryA !== undefined) {
     setClauses.push('category_a = ?');
     params.push(updates.categoryA);
@@ -107,6 +122,11 @@ export async function updateSupplier(
   if (updates.supplierInfo !== undefined) {
     setClauses.push('supplier_info = ?');
     params.push(JSON.stringify(updates.supplierInfo));
+  }
+
+  if (updates.aliases !== undefined) {
+    setClauses.push('aliases = ?');
+    params.push(updates.aliases ? JSON.stringify(updates.aliases) : null);
   }
 
   if (setClauses.length === 0) {
@@ -137,9 +157,6 @@ export async function upsertSupplier(
     if (supplier.parentSupplierId !== undefined) {
       updates.parentSupplierId = supplier.parentSupplierId;
     }
-    if (supplier.supplierType !== undefined) {
-      updates.supplierType = supplier.supplierType;
-    }
     if (supplier.categoryA !== undefined) {
       updates.categoryA = supplier.categoryA;
     }
@@ -148,6 +165,9 @@ export async function upsertSupplier(
     }
     if (supplier.supplierInfo !== undefined) {
       updates.supplierInfo = supplier.supplierInfo ?? undefined;
+    }
+    if (supplier.aliases !== undefined) {
+      updates.aliases = supplier.aliases;
     }
 
     // Also handle transactionCount and totalSpend if provided
@@ -181,14 +201,17 @@ export async function upsertSupplier(
     const supplierInfoJson = supplier.supplierInfo
       ? JSON.stringify(supplier.supplierInfo)
       : null;
+    const aliasesJson = supplier.aliases
+      ? JSON.stringify(supplier.aliases)
+      : null;
 
     await databaseService.run(
-      `INSERT INTO project_suppliers (id, supplier_name, parent_supplier_id, supplier_type, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend)
+      `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       supplier.supplierName,
+      aliasesJson,
       supplier.parentSupplierId ?? null,
-      supplier.supplierType ?? null,
       supplierInfoJson,
       supplier.categoryA ?? false,
       supplier.categoryATaxonomyNodeId ?? null,

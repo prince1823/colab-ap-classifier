@@ -95,6 +95,9 @@ import * as supplierService from '../../src/main/services/suppliers';
 import * as classificationPipeline from '../../src/main/services/classification-pipeline';
 import * as exportService from '../../src/main/services/export';
 import * as colabipService from '../../src/main/services/colabip';
+import * as llmClient from '../../src/main/services/llm-client';
+
+const mockChat = vi.mocked(llmClient.chat);
 
 // --- Paths ---
 const FIXTURES_DIR = path.resolve(__dirname, '..', 'fixtures');
@@ -102,12 +105,14 @@ const COLABIP_DIR = path.join(FIXTURES_DIR, 'colabip');
 const MOCK_DATA_DIR = path.join(__dirname, '..', 'fixtures', 'mock-data');
 
 // Create mock CSV data for testing
+// Includes "GE Healthcare" which matches the supplier universe fixture
+// (has parent_name "general electric" with no parent_id)
 function createMockCSV(): string {
   const csvPath = path.join(os.tmpdir(), `mock-test-${Date.now()}.csv`);
   const content = `Supplier,Amount,Date,Description
 Acme Corp,1000.50,2024-01-15,Software licenses
 Tech Solutions Inc,2500.00,2024-01-20,Consulting services
-Office Depot,150.75,2024-01-22,Office supplies`;
+GE Healthcare,4500.00,2024-01-22,Medical imaging equipment`;
 
   fs.writeFileSync(csvPath, content, 'utf-8');
   return csvPath;
@@ -217,6 +222,12 @@ describe('Pipeline Mock Integration Test', () => {
     const suppliers = await supplierService.listSuppliers();
     expect(suppliers.length).toBe(3);
 
+    // Verify GE Healthcare was matched to universe and parent_name stored without parent_id
+    const geSupplier = suppliers.find((s) => s.supplierName === 'ge healthcare');
+    expect(geSupplier).toBeDefined();
+    expect(geSupplier!.parentName).toBe('general electric');
+    expect(geSupplier!.parentSupplierId).toBeNull();
+
     console.log(`  ✓ Imported ${result.rowsInserted} mock transactions`);
   });
 
@@ -254,6 +265,16 @@ describe('Pipeline Mock Integration Test', () => {
 
     expect(status).toBeDefined();
     expect(status!.status).toBe('completed');
+
+    // Verify the classification LLM call for GE Healthcare included parent company in prompt
+    const classificationCalls = mockChat.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('AP transaction classifier')
+    );
+    const geCall = classificationCalls.find(
+      (call) => typeof call[1] === 'string' && call[1].includes('ge healthcare')
+    );
+    expect(geCall).toBeDefined();
+    expect(geCall![1]).toContain('Parent Company: general electric');
 
     console.log(`  ✓ Mock pipeline completed in ${Date.now() - startTime}ms`);
   }, 40000);

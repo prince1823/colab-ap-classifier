@@ -163,6 +163,7 @@ class DatabaseService {
         supplier_name VARCHAR NOT NULL UNIQUE,
         aliases JSON,
         parent_supplier_id VARCHAR,
+        parent_name VARCHAR,
         supplier_info JSON,
         category_a BOOLEAN DEFAULT FALSE,
         category_a_taxonomy_node_id VARCHAR,

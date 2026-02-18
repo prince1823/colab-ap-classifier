@@ -648,7 +648,7 @@ describe(`Pipeline Full Run [${TEST_NAME}]`, () => {
         const confidence = info.confidence ?? '—';
         const sources = info.sources?.join(', ') ?? '—';
         // List which substantive info fields are populated (excluding metadata fields)
-        const infoFields = ['description', 'industry', 'websiteUrl', 'productsServices', 'parentCompany', 'naicsCode', 'primaryBusinessModel'] as const;
+        const infoFields = ['description', 'industry', 'websiteUrl', 'productsServices', 'naicsCode', 'primaryBusinessModel'] as const;
         const populated = infoFields.filter((f) => info[f]);
         const infoSummary = populated.length > 0 ? populated.join(', ') : '(none)';
 

@@ -31,6 +31,26 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(),
 }));
 
+// Mock colabip for supplier universe
+vi.mock('../../../src/main/services/colabip', () => ({
+  readSupplierUniverse: vi.fn(),
+}));
+
+// Mock supplier-matcher
+vi.mock('../../../src/main/services/supplier-matcher', () => ({
+  buildMatcherIndex: vi.fn(),
+}));
+
+// Mock taxonomy (getNodes)
+vi.mock('../../../src/main/services/taxonomy', () => ({
+  getNodes: vi.fn(),
+}));
+
+// Mock taxonomy-utils
+vi.mock('../../../src/main/services/taxonomy-utils', () => ({
+  resolveTaxonomyPath: vi.fn(),
+}));
+
 import fs from 'fs';
 import { databaseService } from '../../../src/main/services/database';
 import {
@@ -39,9 +59,16 @@ import {
   getGroupingColumns,
   importCSV,
 } from '../../../src/main/services/canonicalization';
+import { readSupplierUniverse } from '../../../src/main/services/colabip';
+import { buildMatcherIndex } from '../../../src/main/services/supplier-matcher';
+import { getNodes as getTaxonomyNodes } from '../../../src/main/services/taxonomy';
+import type { SupplierUniverseRow } from '../../../src/main/services/colabip';
 
 const mockedDb = vi.mocked(databaseService);
 const mockedFs = vi.mocked(fs);
+const mockedReadUniverse = vi.mocked(readSupplierUniverse);
+const mockedBuildMatcherIndex = vi.mocked(buildMatcherIndex);
+const mockedGetTaxonomyNodes = vi.mocked(getTaxonomyNodes);
 
 describe('CanonicalizationService', () => {
   beforeEach(() => {
@@ -257,6 +284,11 @@ describe('CanonicalizationService', () => {
 
       // Mock run to succeed
       mockedDb.run.mockResolvedValue(undefined);
+
+      // Default: empty supplier universe (no matches)
+      mockedReadUniverse.mockResolvedValue([]);
+      mockedBuildMatcherIndex.mockReturnValue({ match: () => null });
+      mockedGetTaxonomyNodes.mockResolvedValue([]);
     }
 
     it('should import CSV rows and return the row count', async () => {
@@ -379,13 +411,13 @@ describe('CanonicalizationService', () => {
     it('should not insert duplicate suppliers', async () => {
       setupImportMocks();
 
-      // Simulate Acme Corp already exists
-      mockedDb.get.mockImplementation(async (_sql: string, ...params: unknown[]) => {
-        const name = params[0];
-        if (name === 'Acme Corp') {
-          return { id: 'existing-id' };
+      // Override the all mock to return Acme Corp as an existing supplier
+      const originalAll = mockedDb.all.getMockImplementation()!;
+      mockedDb.all.mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM project_suppliers')) {
+          return [{ supplier_name: 'Acme Corp' }];
         }
-        return undefined;
+        return originalAll(sql);
       });
 
       await importCSV('/path/to/data.csv');
@@ -457,6 +489,78 @@ describe('CanonicalizationService', () => {
       expect(ids[0]).not.toBe(ids[1]);
       expect(ids[0]).toBe('test-uuid-1');
       expect(ids[1]).toBe('test-uuid-2');
+    });
+
+    it('should store parent_name from universe even when parent_id is null', async () => {
+      const csvWithGE =
+        'Vendor,Amount,Date,Description\nGE Healthcare,5000.00,2024-02-01,Medical Equipment\n';
+      const csvBufferGE = Buffer.from(csvWithGE, 'utf-8');
+
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readFileSync.mockReturnValue(csvBufferGE);
+      mockedDb.run.mockResolvedValue(undefined);
+
+      mockedDb.all.mockImplementation(async (sql: string) => {
+        if (sql.includes('column_mappings')) {
+          return [
+            { canonical_name: 'supplier_name', csv_column_name: 'Vendor' },
+            { canonical_name: 'spend_amount', csv_column_name: 'Amount' },
+            { canonical_name: 'invoice_date', csv_column_name: 'Date' },
+            { canonical_name: 'line_description', csv_column_name: 'Description' },
+          ];
+        }
+        if (sql.includes('information_schema.columns')) {
+          return [
+            { column_name: 'id' },
+            { column_name: 'row_index' },
+            { column_name: 'invoice_group_key' },
+            { column_name: 'taxonomy_node_id' },
+            { column_name: 'review_score' },
+            { column_name: 'classification_reasoning' },
+            { column_name: 'created_at' },
+            { column_name: 'updated_at' },
+          ];
+        }
+        return [];
+      });
+
+      const universeRow: SupplierUniverseRow = {
+        id: 'sup_a1b2c3d4',
+        supplierName: 'ge healthcare',
+        aliases: ['ge medical', 'gehc'],
+        parentId: null,
+        parentName: 'general electric',
+        categoryA: false,
+        categoryATaxonomyPath: null,
+        supplierInfo: { supplierType: 'company' },
+      };
+
+      mockedReadUniverse.mockResolvedValue([universeRow]);
+      mockedBuildMatcherIndex.mockReturnValue({
+        match: (name: string) => {
+          if (name.toLowerCase().includes('ge healthcare')) return universeRow;
+          return null;
+        },
+      });
+      mockedGetTaxonomyNodes.mockResolvedValue([]);
+
+      await importCSV('/path/to/data.csv');
+
+      const supplierInsertCalls = mockedDb.run.mock.calls.filter(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0].includes('INSERT INTO project_suppliers')
+      );
+
+      expect(supplierInsertCalls).toHaveLength(1);
+      const [sql, ...params] = supplierInsertCalls[0];
+
+      // Params: id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id
+      expect(params[0]).toBe('sup_a1b2c3d4');           // id from universe
+      expect(params[1]).toBe('ge healthcare');           // supplier_name
+      expect(params[3]).toBeNull();                      // parent_supplier_id (no parent ID)
+      expect(params[4]).toBe('general electric');        // parent_name stored even without parent ID
+      expect(params[6]).toBe(false);                     // category_a
     });
   });
 });

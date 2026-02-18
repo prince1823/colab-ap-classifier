@@ -59,7 +59,6 @@ You MUST respond with valid JSON only (no markdown fencing, no explanation text 
   "websiteUrl": "<string or null>",
   "industry": "<string or null>",
   "productsServices": "<string or null>",
-  "parentCompany": "<string or null>",
   "supplierAddress": "<string or null>",
   "serviceType": "<brief description of primary service type or null>",
   "naicsCode": "<string or null>",
@@ -186,9 +185,6 @@ export function parseResponse(responseText: string): ResearchParseResult {
 
   const productsServices = optStr('productsServices');
   if (productsServices) result.productsServices = productsServices;
-
-  const parentCompany = optStr('parentCompany');
-  if (parentCompany) result.parentCompany = parentCompany;
 
   const supplierAddress = optStr('supplierAddress');
   if (supplierAddress) result.supplierAddress = supplierAddress;

@@ -4,7 +4,7 @@ import { getNodes } from './taxonomy';
 import { getMetadata } from './project';
 import { researchBatch } from './supplier-research';
 import { syncRulesFromSources, evaluateRules } from './rules';
-import { getSupplierByName } from './suppliers';
+import { getSuppliersByNames } from './suppliers';
 import { classifyInvoiceGroup } from '../agents/classification-agent';
 import { logChange } from './changelog';
 import type {
@@ -155,28 +155,38 @@ async function runPipeline(
 
     // Step 4: Apply override rules
     const ruleMatches = await evaluateRules(transactionIds);
-    const matchedTxnIds: string[] = [];
+    const matchedTxnIds = new Set<string>();
+
+    // Pre-fetch all matched rule targets in one query
+    const uniqueRuleIds = [...new Set(ruleMatches.values())];
+    const ruleTargets = new Map<string, string>();
+    if (uniqueRuleIds.length > 0) {
+      const placeholders = uniqueRuleIds.map(() => '?').join(',');
+      const rules = await databaseService.all<{ id: string; target_taxonomy_node_id: string }>(
+        `SELECT id, target_taxonomy_node_id FROM override_rules WHERE id IN (${placeholders})`,
+        ...uniqueRuleIds
+      );
+      for (const r of rules) {
+        ruleTargets.set(r.id, r.target_taxonomy_node_id);
+      }
+    }
 
     for (const [txnId, ruleId] of ruleMatches.entries()) {
-      // Get the rule's target taxonomy node
-      const rule = await databaseService.get<{ target_taxonomy_node_id: string }>(
-        'SELECT target_taxonomy_node_id FROM override_rules WHERE id = ?',
-        ruleId
-      );
-      if (rule) {
+      const targetNodeId = ruleTargets.get(ruleId);
+      if (targetNodeId) {
         await databaseService.run(
           'UPDATE transactions SET taxonomy_node_id = ?, review_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          rule.target_taxonomy_node_id,
+          targetNodeId,
           txnId
         );
-        matchedTxnIds.push(txnId);
+        matchedTxnIds.add(txnId);
       }
     }
 
     if (isCancelled(runId)) return;
 
     // Step 5: LLM classification for unmatched transactions
-    const unmatchedIds = transactionIds.filter((id) => !matchedTxnIds.includes(id));
+    const unmatchedIds = transactionIds.filter((id) => !matchedTxnIds.has(id));
 
     updateRun({
       status: 'classifying',
@@ -195,6 +205,7 @@ async function runPipeline(
     });
 
     if (unmatchedIds.length > 0) {
+      const CLASSIFICATION_BATCH_SIZE = 7;
       const taxonomy = await getNodes();
       let metadata;
       try {
@@ -212,84 +223,101 @@ async function runPipeline(
       // Group transactions by invoice group
       const groups = await groupTransactionsByInvoice(unmatchedIds, groupingCols);
 
+      // Pre-fetch all supplier research in bulk (1 query instead of N per-group)
+      const uniqueSupplierNames = [
+        ...new Set(
+          groups
+            .map((g) => g.transactions[0]?.supplier_name as string | undefined)
+            .filter((n): n is string => !!n)
+        ),
+      ];
+      const supplierMap = await getSuppliersByNames(uniqueSupplierNames);
+
       let processed = 0;
       const total = groups.length;
 
-      for (const group of groups) {
+      // Process groups in parallel batches
+      for (let batchStart = 0; batchStart < groups.length; batchStart += CLASSIFICATION_BATCH_SIZE) {
         if (isCancelled(runId)) return;
 
-        try {
-          // Get supplier research if available
-          const supplierName = group.transactions[0]?.supplier_name as string | undefined;
-          let supplierResearch = null;
-          if (supplierName) {
-            const supplier = await getSupplierByName(supplierName);
-            supplierResearch = supplier?.supplierInfo ?? null;
-          }
+        const batch = groups.slice(batchStart, batchStart + CLASSIFICATION_BATCH_SIZE);
 
-          // Clean descriptions (strip if ≥70% numeric)
-          const cleanedTxns = group.transactions.map((txn) => {
-            const cleaned = { ...txn };
-            if (typeof cleaned.gl_description === 'string') {
-              cleaned.gl_description = cleanDescription(cleaned.gl_description);
+        const batchResults = await Promise.all(
+          batch.map(async (group) => {
+            try {
+              // Get supplier research from pre-fetched map
+              const supplierName = group.transactions[0]?.supplier_name as string | undefined;
+              let supplierResearch = null;
+              let parentName: string | null = null;
+              if (supplierName) {
+                const supplier = supplierMap.get(supplierName);
+                supplierResearch = supplier?.supplierInfo ?? null;
+                parentName = supplier?.parentName ?? null;
+              }
+
+              // Clean descriptions (strip if ≥70% numeric)
+              const cleanedTxns = group.transactions.map((txn) => {
+                const cleaned = { ...txn };
+                if (typeof cleaned.gl_description === 'string') {
+                  cleaned.gl_description = cleanDescription(cleaned.gl_description);
+                }
+                return cleaned;
+              });
+
+              // Classify via LLM (runs in parallel with other groups in this batch)
+              const result = await classifyInvoiceGroup({
+                transactions: cleanedTxns,
+                taxonomy,
+                companyContext,
+                supplierResearch,
+                parentName,
+                historicalClassifications: [],
+              });
+
+              // Find taxonomy node by path
+              const taxonomyNode = taxonomy.find(
+                (n) => n.fullPath === result.classificationPath
+              );
+
+              return { group, result, taxonomyNodeId: taxonomyNode?.id ?? null, error: null as unknown };
+            } catch (err) {
+              console.error(`[Pipeline] Failed to classify group:`, err);
+              return { group, result: null, taxonomyNodeId: null, error: err };
             }
-            return cleaned;
-          });
+          })
+        );
 
-          // Classify
-          const result = await classifyInvoiceGroup({
-            transactions: cleanedTxns,
-            taxonomy,
-            companyContext,
-            supplierResearch,
-            historicalClassifications: [],
-          });
-
-          // Find taxonomy node by path
-          const taxonomyNode = taxonomy.find(
-            (n) => n.fullPath === result.classificationPath
-          );
-          const taxonomyNodeId = taxonomyNode?.id ?? null;
-
-          // Write results to transactions
-          for (const txnId of group.transactionIds) {
-            await databaseService.run(
-              'UPDATE transactions SET taxonomy_node_id = ?, classification_reasoning = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-              taxonomyNodeId,
-              result.reasoning,
-              txnId
-            );
+        // Write results sequentially after the batch (DuckDB single-writer)
+        for (const { group, result, taxonomyNodeId, error } of batchResults) {
+          if (!error && result) {
+            const reviewScore = result.descriptionSupplierAligned ? 0 : 50;
+            for (const txnId of group.transactionIds) {
+              await databaseService.run(
+                `UPDATE transactions SET taxonomy_node_id = ?, classification_reasoning = ?, review_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+                taxonomyNodeId,
+                result.reasoning,
+                reviewScore,
+                txnId
+              );
+            }
           }
 
-          // Calculate review score based on alignment
-          const reviewScore = result.descriptionSupplierAligned ? 0 : 50;
-          for (const txnId of group.transactionIds) {
-            await databaseService.run(
-              'UPDATE transactions SET review_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-              reviewScore,
-              txnId
-            );
-          }
-        } catch (err) {
-          console.error(`[Pipeline] Failed to classify group:`, err);
-          // Partial failure: continue with next group
+          processed++;
+          updateRun({
+            progressProcessed: processed,
+            progressPercentage: total > 0 ? Math.round((processed / total) * 100) : 0,
+          });
+
+          emitProgress({
+            runId,
+            status: 'classifying',
+            phase: 'classifying',
+            total,
+            processed,
+            percentage: total > 0 ? Math.round((processed / total) * 100) : 0,
+            currentStep: `Classified ${processed}/${total} groups`,
+          });
         }
-
-        processed++;
-        updateRun({
-          progressProcessed: processed,
-          progressPercentage: total > 0 ? Math.round((processed / total) * 100) : 0,
-        });
-
-        emitProgress({
-          runId,
-          status: 'classifying',
-          phase: 'classifying',
-          total,
-          processed,
-          percentage: total > 0 ? Math.round((processed / total) * 100) : 0,
-          currentStep: `Classified ${processed}/${total} groups`,
-        });
       }
     }
 

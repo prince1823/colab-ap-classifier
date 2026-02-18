@@ -9,7 +9,6 @@ export interface SupplierInfo {
   websiteUrl?: string;
   industry?: string;
   productsServices?: string;
-  parentCompany?: string;
   supplierAddress?: string;
   serviceType?: string;
   naicsCode?: string;
@@ -34,6 +33,7 @@ export interface ProjectSupplier {
   supplierName: string;
   aliases: string[] | null;
   parentSupplierId: string | null;
+  parentName: string | null;
   supplierInfo: SupplierInfo | null;
   categoryA: boolean;
   categoryATaxonomyNodeId: string | null;
@@ -45,6 +45,7 @@ export interface ProjectSupplier {
 
 export interface SupplierUpdateInput {
   parentSupplierId?: string | null;
+  parentName?: string | null;
   categoryA?: boolean;
   categoryATaxonomyNodeId?: string | null;
   supplierInfo?: SupplierInfo;

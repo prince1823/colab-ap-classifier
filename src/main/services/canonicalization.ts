@@ -323,12 +323,13 @@ export async function importCSV(
             : null;
 
           await databaseService.run(
-            `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             supplierId,
             canonicalName,
             universeMatch.aliases.length > 0 ? JSON.stringify(universeMatch.aliases) : null,
             universeMatch.parentId,
+            universeMatch.parentName || null,
             supplierInfoJson,
             universeMatch.categoryA,
             categoryATaxonomyNodeId

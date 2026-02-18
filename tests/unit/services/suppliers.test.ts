@@ -32,6 +32,7 @@ function makeRow(overrides: Partial<Record<string, unknown>> = {}): Record<strin
     supplier_name: 'Acme Corp',
     aliases: null,
     parent_supplier_id: null,
+    parent_name: null,
     supplier_info: null,
     category_a: false,
     category_a_taxonomy_node_id: null,
@@ -75,6 +76,7 @@ describe('SuppliersService', () => {
         supplierName: 'Acme Corp',
         aliases: null,
         parentSupplierId: null,
+        parentName: null,
         supplierInfo: null,
         categoryA: false,
         categoryATaxonomyNodeId: null,
@@ -260,7 +262,7 @@ describe('SuppliersService', () => {
       expect(params[0]).toBe('test-uuid-1234'); // id from mocked uuid
       expect(params[1]).toBe('New Supplier');    // supplier_name
       expect(params[2]).toBeNull();              // aliases
-      expect(params[5]).toBe(false);             // category_a
+      expect(params[6]).toBe(false);             // category_a
     });
 
     it('should use provided id instead of generating one', async () => {
@@ -303,11 +305,12 @@ describe('SuppliersService', () => {
       expect(params[1]).toBe('Minimal Supplier'); // supplier_name
       expect(params[2]).toBeNull();               // aliases
       expect(params[3]).toBeNull();               // parent_supplier_id
-      expect(params[4]).toBeNull();               // supplier_info
-      expect(params[5]).toBe(false);              // category_a
-      expect(params[6]).toBeNull();               // category_a_taxonomy_node_id
-      expect(params[7]).toBe(0);                  // transaction_count
-      expect(params[8]).toBe(0);                  // total_spend
+      expect(params[4]).toBeNull();               // parent_name
+      expect(params[5]).toBeNull();               // supplier_info
+      expect(params[6]).toBe(false);              // category_a
+      expect(params[7]).toBeNull();               // category_a_taxonomy_node_id
+      expect(params[8]).toBe(0);                  // transaction_count
+      expect(params[9]).toBe(0);                  // total_spend
     });
 
     it('should JSON.stringify supplierInfo when inserting', async () => {
@@ -324,8 +327,8 @@ describe('SuppliersService', () => {
       });
 
       const [, ...params] = mockedDb.run.mock.calls[0];
-      // supplier_info is the 5th param (index 4) — after id, supplier_name, aliases, parent_supplier_id
-      expect(params[4]).toBe(JSON.stringify(info));
+      // supplier_info is the 6th param (index 5) — after id, supplier_name, aliases, parent_supplier_id, parent_name
+      expect(params[5]).toBe(JSON.stringify(info));
     });
 
     it('should update transactionCount and totalSpend on existing supplier', async () => {
@@ -357,7 +360,6 @@ describe('SuppliersService', () => {
         websiteUrl: 'https://fullinfo.com',
         industry: 'Manufacturing',
         productsServices: 'Industrial equipment',
-        parentCompany: 'Parent Holdings Inc',
         supplierAddress: '123 Main St, City, State 12345',
         serviceType: 'Product & Service',
         naicsCode: '333111',
@@ -421,8 +423,8 @@ describe('SuppliersService', () => {
       });
 
       const [, ...params] = mockedDb.run.mock.calls[0];
-      // supplier_info is the 5th param (index 4): id, supplier_name, aliases, parent_supplier_id, supplier_info
-      expect(params[4]).toBe(JSON.stringify(info));
+      // supplier_info is the 6th param (index 5): id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info
+      expect(params[5]).toBe(JSON.stringify(info));
     });
   });
 });

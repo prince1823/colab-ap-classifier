@@ -608,6 +608,7 @@ interface ProjectSupplier {
   supplierName: string;
   aliases: string[] | null;                   // Alternative names (from supplier universe)
   parentSupplierId: string | null;            // Self-referencing FK
+  parentName: string | null;                   // Parent company name (may exist without parentSupplierId)
   supplierInfo: SupplierInfo | null;          // JSON research results (includes supplierType)
   categoryA: boolean;
   categoryATaxonomyNodeId: string | null;     // FK to taxonomy.id
@@ -632,6 +633,7 @@ Update supplier metadata.
 ```typescript
 interface SupplierUpdateInput {
   parentSupplierId?: string | null;
+  parentName?: string | null;
   aliases?: string[] | null;
   categoryA?: boolean;
   categoryATaxonomyNodeId?: string | null;    // Required when categoryA = true
@@ -976,12 +978,12 @@ type ConfidenceLevel = "high" | "medium" | "low";
 type SupplierType = "company" | "individual" | "government";
 
 interface SupplierInfo {
+  supplierType?: SupplierType;
   officialBusinessName?: string;
   description?: string;
   websiteUrl?: string;
   industry?: string;
   productsServices?: string;
-  parentCompany?: string;
   supplierAddress?: string;
   serviceType?: string;
   naicsCode?: string;
@@ -991,12 +993,13 @@ interface SupplierInfo {
   primaryRevenueStreams?: string;
   serviceCategories?: string;
   targetMarket?: string;
+  confidence?: ConfidenceLevel;
+  sources?: string[];
 }
 
-interface SupplierResearchResult extends SupplierInfo {
-  confidence: ConfidenceLevel;
-  sources: string[];
-}
+// SupplierInfo with required confidence and sources
+type SupplierResearchResult = SupplierInfo &
+  Required<Pick<SupplierInfo, 'confidence' | 'sources'>>;
 ```
 
 ### Override Rules

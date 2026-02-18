@@ -2,12 +2,24 @@ import { create } from 'zustand'
 import { ipc } from '../lib/ipc'
 import type { ProjectMetadata } from '../../shared/types/project'
 import type { ClassificationProgress } from '../../shared/types/classification'
+import type { CSVPreviewWithMappings, CanonicalColumnMapping } from '../../shared/types/canonicalization'
+
+interface UploadDraft {
+  filePath: string | null
+  preview: CSVPreviewWithMappings | null
+  mapping: CanonicalColumnMapping
+  groupingColumns: string[]
+  showUploader: boolean
+}
 
 interface WorkflowState {
   // Core state
   projectMetadata: ProjectMetadata | null
   classificationProgress: ClassificationProgress | null
   classifiedRows: number
+
+  // Upload draft (persists across tab navigation)
+  uploadDraft: UploadDraft
 
   // Derived booleans
   hasProject: boolean
@@ -27,6 +39,8 @@ interface WorkflowState {
   refreshStats: () => Promise<void>
   subscribeToClassificationProgress: () => () => void
   setClassificationProgress: (progress: ClassificationProgress | null) => void
+  setUploadDraft: (draft: Partial<UploadDraft>) => void
+  clearUploadDraft: () => void
   reset: () => void
 }
 
@@ -53,10 +67,19 @@ function deriveState(metadata: ProjectMetadata | null, classifiedRows: number, p
   }
 }
 
+const defaultUploadDraft: UploadDraft = {
+  filePath: null,
+  preview: null,
+  mapping: {},
+  groupingColumns: [],
+  showUploader: true,
+}
+
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   projectMetadata: null,
   classificationProgress: null,
   classifiedRows: 0,
+  uploadDraft: { ...defaultUploadDraft },
 
   ...deriveState(null, 0, null),
 
@@ -67,6 +90,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       projectMetadata: null,
       classifiedRows: 0,
       classificationProgress: null,
+      uploadDraft: { ...defaultUploadDraft },
       ...deriveState(null, 0, null),
     })
 
@@ -87,6 +111,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       projectMetadata: null,
       classifiedRows: 0,
       classificationProgress: null,
+      uploadDraft: { ...defaultUploadDraft },
       ...deriveState(null, 0, null),
     })
 
@@ -161,6 +186,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       projectMetadata: null,
       classifiedRows: 0,
       classificationProgress: null,
+      uploadDraft: { ...defaultUploadDraft },
       ...deriveState(null, 0, null),
     })
   },
@@ -239,11 +265,20 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     })
   },
 
+  setUploadDraft: (draft) => {
+    set({ uploadDraft: { ...get().uploadDraft, ...draft } })
+  },
+
+  clearUploadDraft: () => {
+    set({ uploadDraft: { ...defaultUploadDraft } })
+  },
+
   reset: () => {
     set({
       projectMetadata: null,
       classifiedRows: 0,
       classificationProgress: null,
+      uploadDraft: { ...defaultUploadDraft },
       ...deriveState(null, 0, null),
     })
   },

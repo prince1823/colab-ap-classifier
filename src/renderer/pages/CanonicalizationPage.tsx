@@ -1,22 +1,40 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import ColumnMappingEditor from '../components/upload/ColumnMappingEditor'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
 import type { CanonicalColumnMapping, CanonicalizationResult } from '../../shared/types/canonicalization'
 
 export default function CanonicalizationPage() {
+  const navigate = useNavigate()
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
+  const hasUploadedData = useWorkflowStore((s) => s.hasUploadedData)
 
+  // Upload draft from global store (set during upload flow)
+  const uploadDraft = useWorkflowStore((s) => s.uploadDraft)
+  const setUploadDraft = useWorkflowStore((s) => s.setUploadDraft)
+  const clearUploadDraft = useWorkflowStore((s) => s.clearUploadDraft)
+
+  // Local state for editing existing mappings (when no draft is active)
   const [columns, setColumns] = useState<string[]>([])
   const [mapping, setMapping] = useState<CanonicalColumnMapping>({})
   const [groupingColumns, setGroupingColumns] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Load fresh data from backend on mount
+  // Determine if we're in "fresh upload" mode (draft has preview) vs "edit existing" mode
+  const hasDraftPreview = uploadDraft.preview !== null
+
+  // Load existing mappings from backend (only when there's no draft preview)
   useEffect(() => {
+    if (hasDraftPreview) {
+      setLoading(false)
+      return
+    }
+
     const load = async () => {
       try {
         const metadata = await ipc.project.getMetadata()
@@ -24,31 +42,20 @@ export default function CanonicalizationPage() {
         if (metadata?.columnMappings) {
           setMapping(metadata.columnMappings)
 
-          // The mapping values ARE the original CSV column names
-          // e.g. { supplier_name: "Vendor Name", spend_amount: "Total Cost" }
-          // Extract CSV column names from the mapping values
           const csvColumnNames = Object.values(metadata.columnMappings)
 
-          // Also get all columns from transactions table to find any that aren't
-          // in the mapping (e.g. columns that weren't mapped to canonical fields)
           try {
             const dbCols = await ipc.transactions.getColumns()
-            // DB columns include both fixed columns (id, row_index, etc.)
-            // and canonical columns. The CSV column names are what we want
-            // to show. Any DB column NOT in the base set and NOT in the
-            // canonical mapping could be an extra column.
             const BASE_COLS = ['id', 'row_index', 'invoice_group_key', 'taxonomy_node_id',
               'review_score', 'classification_reasoning', 'created_at', 'updated_at']
             const canonicalNames = Object.keys(metadata.columnMappings)
             const extraCols = dbCols.filter(c => !BASE_COLS.includes(c) && !canonicalNames.includes(c))
-            // Combine CSV names + any extra columns
             const allCsvColumns = [...new Set([...csvColumnNames, ...extraCols])]
             setColumns(allCsvColumns)
           } catch {
             setColumns(csvColumnNames)
           }
         } else {
-          // No mappings saved yet — try to get columns from transactions table
           try {
             const cols = await ipc.transactions.getColumns()
             setColumns(cols)
@@ -67,13 +74,12 @@ export default function CanonicalizationPage() {
       }
     }
     load()
-  }, []) // Only run on mount
+  }, [hasDraftPreview])
 
-  // Build a pseudo CanonicalizationResult from existing mappings
-  // Memoize to prevent infinite re-render loops with ColumnMappingEditor's useEffect
+  // Build a pseudo CanonicalizationResult from existing mappings (for edit-existing mode)
   const mappingKey = JSON.stringify(mapping)
   const columnsKey = JSON.stringify(columns)
-  const suggestion: CanonicalizationResult = useMemo(() => ({
+  const existingSuggestion: CanonicalizationResult = useMemo(() => ({
     mappings: mapping,
     confidence: 'high' as const,
     unmappedClientColumns: columns.filter((c) => !Object.values(mapping).includes(c)),
@@ -82,6 +88,7 @@ export default function CanonicalizationPage() {
     reasoning: 'Loaded from current project settings.',
   }), [mappingKey, columnsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Save existing mappings (edit mode)
   const handleSave = async () => {
     setSaving(true)
     setError(null)
@@ -97,6 +104,24 @@ export default function CanonicalizationPage() {
     }
   }
 
+  // Confirm & Import (fresh upload mode)
+  const handleImport = async () => {
+    if (!uploadDraft.filePath) return
+    setImporting(true)
+    setError(null)
+    try {
+      await ipc.canonicalization.save(uploadDraft.mapping, uploadDraft.groupingColumns)
+      await ipc.upload.csv(uploadDraft.filePath)
+      await refreshMetadata()
+      clearUploadDraft()
+      navigate('/workflow/data-review')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to import data')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -108,6 +133,49 @@ export default function CanonicalizationPage() {
     )
   }
 
+  // Fresh upload mode — show draft mapping editor + Confirm & Import
+  if (hasDraftPreview) {
+    return (
+      <div className="space-y-6 p-6">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Column Mappings</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Review and adjust how your CSV columns map to canonical fields, then import.
+          </p>
+        </div>
+
+        {error && (
+          <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>
+        )}
+
+        <ColumnMappingEditor
+          suggestion={uploadDraft.preview!.mappingSuggestion}
+          csvColumns={uploadDraft.preview!.columns}
+          onMappingChange={(m) => setUploadDraft({ mapping: m })}
+          groupingColumns={uploadDraft.groupingColumns}
+          onGroupingChange={(g) => setUploadDraft({ groupingColumns: g })}
+        />
+
+        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+          <button
+            onClick={() => navigate('/workflow/upload')}
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            ← Back to Upload
+          </button>
+          <button
+            onClick={handleImport}
+            disabled={importing}
+            className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {importing ? 'Importing...' : 'Confirm & Import'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // No data at all
   if (columns.length === 0 && Object.keys(mapping).length === 0 && !error) {
     return (
       <div className="p-6">
@@ -120,6 +188,7 @@ export default function CanonicalizationPage() {
     )
   }
 
+  // Edit existing mappings mode
   return (
     <div className="space-y-6 p-6">
       <div>
@@ -137,7 +206,7 @@ export default function CanonicalizationPage() {
       )}
 
       <ColumnMappingEditor
-        suggestion={suggestion}
+        suggestion={existingSuggestion}
         csvColumns={columns}
         onMappingChange={setMapping}
         groupingColumns={groupingColumns}

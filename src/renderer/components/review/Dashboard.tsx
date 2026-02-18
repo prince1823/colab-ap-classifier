@@ -35,6 +35,9 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   const [showDashboardModal, setShowDashboardModal] = useState(false)
   const [pendingReclassification, setPendingReclassification] = useState<{ rows: any[]; targetPath: string } | null>(null)
 
+  // Review score filter
+  const [reviewScoreFilter, setReviewScoreFilter] = useState<{ min: string; max: string; active: boolean }>({ min: '', max: '100', active: false })
+
   // Keyboard navigation state - coordinates between tree and tables
   const [keyboardFocus, setKeyboardFocus] = useState('tree') // 'tree' or 'tables'
   const [tableNav, setTableNav] = useState({ tableIndex: 0, rowIndex: 0 }) // Current table and row position
@@ -597,11 +600,21 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
         if (!filterState.lineDescription.includes(row.line_description)) return false
       }
 
+      // Review score filter
+      if (reviewScoreFilter.active) {
+        const score = typeof row.review_score === 'number' ? row.review_score : 0
+        const parsedMin = parseInt(reviewScoreFilter.min)
+        const parsedMax = parseInt(reviewScoreFilter.max)
+        const min = !isNaN(parsedMin) ? parsedMin : 0
+        const max = !isNaN(parsedMax) ? parsedMax : 100
+        if (score < min || score > max) return false
+      }
+
       return true
     })
-    
+
     return filtered
-  }, [transactions, activeFilters, filterState])
+  }, [transactions, activeFilters, filterState, reviewScoreFilter])
 
   // Check if there are low-confidence rows (for enabling system feedback toggle)
   const hasLowConfidenceRows = useMemo(() => {
@@ -1031,6 +1044,65 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                   onRemoveLocalFilter={handleRemoveLocalFilter}
                   compact={true}
                 />
+                <div className="review-score-filter-inline">
+                  <button
+                    type="button"
+                    className={`review-score-toggle ${reviewScoreFilter.active ? 'active' : ''}`}
+                    onClick={() => setReviewScoreFilter(prev => ({ ...prev, active: !prev.active }))}
+                    title="Filter by review score"
+                  >
+                    Review Score
+                  </button>
+                  {reviewScoreFilter.active && (
+                    <div className="review-score-inputs">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        className="review-score-input"
+                        placeholder="0"
+                        value={reviewScoreFilter.min}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/[^0-9]/g, '')
+                          setReviewScoreFilter(prev => ({ ...prev, min: raw }))
+                        }}
+                        onBlur={(e) => {
+                          const val = parseInt(e.target.value)
+                          if (!isNaN(val)) {
+                            setReviewScoreFilter(prev => ({ ...prev, min: String(Math.min(Math.max(val, 0), 100)) }))
+                          }
+                        }}
+                      />
+                      <span className="review-score-separator">–</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        className="review-score-input"
+                        placeholder="100"
+                        value={reviewScoreFilter.max}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/[^0-9]/g, '')
+                          setReviewScoreFilter(prev => ({ ...prev, max: raw }))
+                        }}
+                        onBlur={(e) => {
+                          const val = parseInt(e.target.value)
+                          if (!isNaN(val)) {
+                            setReviewScoreFilter(prev => ({ ...prev, max: String(Math.min(Math.max(val, 0), 100)) }))
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="review-score-clear"
+                        onClick={() => setReviewScoreFilter({ min: '', max: '100', active: false })}
+                        title="Clear review score filter"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   className="compact-control dashboard-btn"
@@ -1038,7 +1110,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                   title="Open Dashboard"
                 >
                   <BarChart3 size={14} />
-                  <span>Dashboard</span>
                 </button>
                 <button
                   type="button"
@@ -1049,7 +1120,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                   aria-checked={systemFeedbackEnabled}
                 >
                   <Sparkles size={14} className="system-feedback-icon" />
-                  <span className="system-feedback-label">System feedback</span>
                   <span className="toggle-switch compact" aria-hidden="true">
                     <span className="toggle-knob" />
                   </span>

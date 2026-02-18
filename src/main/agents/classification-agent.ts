@@ -12,6 +12,7 @@ export interface ClassificationInput {
   taxonomy: TaxonomyNode[];
   companyContext: CompanyContext;
   supplierResearch: SupplierInfo | null;
+  parentName?: string | null;
   historicalClassifications: { l1: string; l2: string; l3: string; count: number }[];
 }
 
@@ -169,7 +170,7 @@ export function formatTaxonomyTree(taxonomy: TaxonomyNode[]): string {
 /**
  * Format supplier research into a readable block for the prompt.
  */
-export function formatSupplierResearch(supplier: SupplierInfo | null): string {
+export function formatSupplierResearch(supplier: SupplierInfo | null, parentName?: string | null): string {
   if (!supplier) {
     return '(No supplier research available)';
   }
@@ -180,7 +181,7 @@ export function formatSupplierResearch(supplier: SupplierInfo | null): string {
   if (supplier.description) parts.push(`Description: ${supplier.description}`);
   if (supplier.industry) parts.push(`Industry: ${supplier.industry}`);
   if (supplier.productsServices) parts.push(`Products/Services: ${supplier.productsServices}`);
-  if (supplier.parentCompany) parts.push(`Parent Company: ${supplier.parentCompany}`);
+  if (parentName) parts.push(`Parent Company: ${parentName}`);
   if (supplier.serviceType) parts.push(`Service Type: ${supplier.serviceType}`);
   if (supplier.naicsCode) parts.push(`NAICS Code: ${supplier.naicsCode}`);
   if (supplier.naicsDescription) parts.push(`NAICS Description: ${supplier.naicsDescription}`);
@@ -230,7 +231,7 @@ export function formatTransactions(transactions: Array<Record<string, unknown>>)
  * Build the user prompt with all classification context.
  */
 export function buildUserPrompt(input: ClassificationInput): string {
-  const { taxonomy, companyContext, supplierResearch, historicalClassifications, transactions } = input;
+  const { taxonomy, companyContext, supplierResearch, parentName, historicalClassifications, transactions } = input;
 
   const contextParts: string[] = [];
   contextParts.push(`Industry: ${companyContext.industry}`);
@@ -246,7 +247,7 @@ ${formatTaxonomyTree(taxonomy)}
 ${contextParts.join('\n')}
 
 ## Supplier Research
-${formatSupplierResearch(supplierResearch)}
+${formatSupplierResearch(supplierResearch, parentName)}
 
 ## Historical Classifications
 ${formatHistoricalClassifications(historicalClassifications)}

@@ -222,9 +222,11 @@ async function runPipeline(
           // Get supplier research if available
           const supplierName = group.transactions[0]?.supplier_name as string | undefined;
           let supplierResearch = null;
+          let parentName: string | null = null;
           if (supplierName) {
             const supplier = await getSupplierByName(supplierName);
             supplierResearch = supplier?.supplierInfo ?? null;
+            parentName = supplier?.parentName ?? null;
           }
 
           // Clean descriptions (strip if ≥70% numeric)
@@ -242,6 +244,7 @@ async function runPipeline(
             taxonomy,
             companyContext,
             supplierResearch,
+            parentName,
             historicalClassifications: [],
           });
 

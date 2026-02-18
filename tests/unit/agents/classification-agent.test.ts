@@ -116,6 +116,7 @@ function makeInput(overrides?: Partial<ClassificationInput>): ClassificationInpu
       overrides && 'supplierResearch' in overrides
         ? overrides.supplierResearch ?? null
         : SAMPLE_SUPPLIER_RESEARCH,
+    parentName: overrides?.parentName ?? undefined,
     historicalClassifications: overrides?.historicalClassifications ?? SAMPLE_HISTORICAL,
   };
 }
@@ -216,6 +217,16 @@ describe('buildUserPrompt', () => {
     const prompt = buildUserPrompt(makeInput({ transactions: [] }));
     expect(prompt).toContain('No transactions provided');
   });
+
+  it('should include parent company name in prompt when parentName is provided', () => {
+    const prompt = buildUserPrompt(makeInput({ parentName: 'General Electric' }));
+    expect(prompt).toContain('Parent Company: General Electric');
+  });
+
+  it('should not include parent company in prompt when parentName is null', () => {
+    const prompt = buildUserPrompt(makeInput({ parentName: null }));
+    expect(prompt).not.toContain('Parent Company');
+  });
 });
 
 // --- formatTaxonomyTree ---
@@ -275,6 +286,16 @@ describe('formatSupplierResearch', () => {
   it('should handle empty supplier object', () => {
     const result = formatSupplierResearch({});
     expect(result).toContain('No supplier research available');
+  });
+
+  it('should include parent company name when parentName is provided', () => {
+    const result = formatSupplierResearch(SAMPLE_SUPPLIER_RESEARCH, 'General Electric');
+    expect(result).toContain('Parent Company: General Electric');
+  });
+
+  it('should not include parent company line when parentName is null', () => {
+    const result = formatSupplierResearch(SAMPLE_SUPPLIER_RESEARCH, null);
+    expect(result).not.toContain('Parent Company');
   });
 });
 

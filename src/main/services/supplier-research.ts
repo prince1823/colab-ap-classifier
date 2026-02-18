@@ -30,7 +30,6 @@ export async function researchSingle(
       const result: SupplierResearchResult = {
         ...universeInfo,
         officialBusinessName: universeInfo.officialBusinessName ?? knownSupplier.supplierName,
-        parentCompany: universeInfo.parentCompany ?? (knownSupplier.parentName || undefined),
         confidence: 'high' as const,
         sources: ['ColabIP Supplier Universe'],
       };

@@ -14,6 +14,7 @@ interface SupplierRow {
   supplier_name: string;
   aliases: string | null;
   parent_supplier_id: string | null;
+  parent_name: string | null;
   supplier_info: string | null;
   category_a: boolean;
   category_a_taxonomy_node_id: string | null;
@@ -51,6 +52,7 @@ function rowToSupplier(row: SupplierRow): ProjectSupplier {
     supplierName: row.supplier_name,
     aliases,
     parentSupplierId: row.parent_supplier_id,
+    parentName: row.parent_name,
     supplierInfo,
     categoryA: Boolean(row.category_a),
     categoryATaxonomyNodeId: row.category_a_taxonomy_node_id,
@@ -66,7 +68,7 @@ function rowToSupplier(row: SupplierRow): ProjectSupplier {
  */
 export async function listSuppliers(): Promise<ProjectSupplier[]> {
   const rows = await databaseService.all<SupplierRow>(
-    'SELECT id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers ORDER BY supplier_name'
+    'SELECT id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers ORDER BY supplier_name'
   );
   return rows.map(rowToSupplier);
 }
@@ -76,7 +78,7 @@ export async function listSuppliers(): Promise<ProjectSupplier[]> {
  */
 export async function getSupplierByName(name: string): Promise<ProjectSupplier | null> {
   const row = await databaseService.get<SupplierRow>(
-    'SELECT id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE supplier_name = ?',
+    'SELECT id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE supplier_name = ?',
     name
   );
   return row ? rowToSupplier(row) : null;
@@ -88,7 +90,7 @@ export async function getSupplierByName(name: string): Promise<ProjectSupplier |
  */
 export async function getSupplierByAlias(alias: string): Promise<ProjectSupplier | null> {
   const row = await databaseService.get<SupplierRow>(
-    "SELECT id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE aliases IS NOT NULL AND json_contains(aliases, ?)",
+    "SELECT id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE aliases IS NOT NULL AND json_contains(aliases, ?)",
     JSON.stringify(alias)
   );
   return row ? rowToSupplier(row) : null;
@@ -107,6 +109,11 @@ export async function updateSupplier(
   if (updates.parentSupplierId !== undefined) {
     setClauses.push('parent_supplier_id = ?');
     params.push(updates.parentSupplierId);
+  }
+
+  if (updates.parentName !== undefined) {
+    setClauses.push('parent_name = ?');
+    params.push(updates.parentName);
   }
 
   if (updates.categoryA !== undefined) {
@@ -157,6 +164,9 @@ export async function upsertSupplier(
     if (supplier.parentSupplierId !== undefined) {
       updates.parentSupplierId = supplier.parentSupplierId;
     }
+    if (supplier.parentName !== undefined) {
+      updates.parentName = supplier.parentName;
+    }
     if (supplier.categoryA !== undefined) {
       updates.categoryA = supplier.categoryA;
     }
@@ -206,12 +216,13 @@ export async function upsertSupplier(
       : null;
 
     await databaseService.run(
-      `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       supplier.supplierName,
       aliasesJson,
       supplier.parentSupplierId ?? null,
+      supplier.parentName ?? null,
       supplierInfoJson,
       supplier.categoryA ?? false,
       supplier.categoryATaxonomyNodeId ?? null,

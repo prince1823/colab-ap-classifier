@@ -110,6 +110,7 @@ async function triggerFeedbackAsync(
 
   // Get supplier info for the first transaction
   let supplierInfo;
+  let parentName: string | null = null;
   try {
     const row = await databaseService.get<{ supplier_name: string }>(
       'SELECT supplier_name FROM transactions WHERE id = ?',
@@ -118,6 +119,7 @@ async function triggerFeedbackAsync(
     if (row?.supplier_name) {
       const supplier = await getSupplierByName(row.supplier_name);
       supplierInfo = supplier?.supplierInfo ?? undefined;
+      parentName = supplier?.parentName ?? null;
     }
   } catch {
     // Ignore supplier lookup errors
@@ -130,6 +132,7 @@ async function triggerFeedbackAsync(
     userFeedback,
     companyContext,
     supplierInfo,
+    parentName,
   });
 
   // Store feedback in the system_feedback table

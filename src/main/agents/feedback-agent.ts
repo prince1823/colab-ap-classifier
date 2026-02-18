@@ -21,6 +21,7 @@ export interface FeedbackInput {
   userFeedback?: string;
   companyContext: CompanyContext;
   supplierInfo?: SupplierInfo;
+  parentName?: string | null;
 }
 
 /**
@@ -209,7 +210,7 @@ ${input.userFeedback}`);
       si.description ? `- Description: ${si.description}` : null,
       si.industry ? `- Industry: ${si.industry}` : null,
       si.productsServices ? `- Products/Services: ${si.productsServices}` : null,
-      si.parentCompany ? `- Parent Company: ${si.parentCompany}` : null,
+      input.parentName ? `- Parent Company: ${input.parentName}` : null,
       si.serviceType ? `- Service Type: ${si.serviceType}` : null,
       si.naicsCode ? `- NAICS Code: ${si.naicsCode}` : null,
       si.naicsDescription ? `- NAICS Description: ${si.naicsDescription}` : null,

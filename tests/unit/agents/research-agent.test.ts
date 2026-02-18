@@ -31,7 +31,6 @@ const MOCK_LLM_RESPONSE = JSON.stringify({
   websiteUrl: 'https://acme.example.com',
   industry: 'Industrial Supply',
   productsServices: 'Industrial equipment, safety supplies, tools',
-  parentCompany: null,
   supplierAddress: '123 Main St, Springfield, IL 62701',
   serviceType: 'Distribution',
   naicsCode: '423840',
@@ -52,7 +51,6 @@ const MOCK_MINIMAL_RESPONSE = JSON.stringify({
   websiteUrl: null,
   industry: 'Unknown',
   productsServices: null,
-  parentCompany: null,
   supplierAddress: null,
   serviceType: null,
   naicsCode: null,
@@ -73,7 +71,6 @@ const MOCK_GOVERNMENT_RESPONSE = JSON.stringify({
   websiteUrl: 'https://springfield.gov',
   industry: 'Government',
   productsServices: 'Municipal services, permits, regulatory oversight',
-  parentCompany: null,
   supplierAddress: '200 City Hall Plaza, Springfield, IL 62701',
   serviceType: 'Government Services',
   naicsCode: '921110',
@@ -94,7 +91,6 @@ const MOCK_INDIVIDUAL_RESPONSE = JSON.stringify({
   websiteUrl: null,
   industry: 'Information Technology',
   productsServices: 'IT consulting, software development',
-  parentCompany: null,
   supplierAddress: null,
   serviceType: 'Consulting',
   naicsCode: '541511',
@@ -135,7 +131,6 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('websiteUrl');
     expect(prompt).toContain('industry');
     expect(prompt).toContain('productsServices');
-    expect(prompt).toContain('parentCompany');
     expect(prompt).toContain('supplierAddress');
     expect(prompt).toContain('serviceType');
     expect(prompt).toContain('naicsCode');
@@ -321,7 +316,6 @@ describe('parseResponse', () => {
     expect(result.description).toBeUndefined();
     expect(result.websiteUrl).toBeUndefined();
     expect(result.productsServices).toBeUndefined();
-    expect(result.parentCompany).toBeUndefined();
     expect(result.supplierAddress).toBeUndefined();
     expect(result.serviceType).toBeUndefined();
     expect(result.naicsCode).toBeUndefined();

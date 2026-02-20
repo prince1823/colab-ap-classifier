@@ -85,10 +85,9 @@ Share with the user:
 ### 2.2 Propose Issue Scope
 
 Draft the issue with:
-- **Title:** Following convention:
-  - Standalone/parent: `S2-{NN}: {descriptive title}`
-  - Sub-issue: `S2-{NN}.{X}: {descriptive title}` where `{NN}` is the parent's number and `{X}` is the next sub-issue index
-  - Get next number from existing issues
+- **Title:** A clear, descriptive title (no sprint prefix). Examples:
+  - `Tail spend optimization in classification`
+  - `Add NAICS lookup table for supplier validation`
 - **Summary:** 1-2 sentences describing the work
 - **Acceptance Criteria:** Checkboxed list of deliverables
 - **Deliverables:** For coding issues, list files to create/modify. For non-coding issues, describe the output (e.g., "Architecture doc in `internal_docs/`", "Updated spec section", "Research summary in issue")
@@ -118,15 +117,7 @@ Continue until the user is satisfied.
 
 ## Phase 3: Create Issue
 
-### 3.1 Get Next Issue Number
-
-```bash
-gh issue list --repo kavyald/colab-ap-classifier --state all --json number --jq '.[].number' | sort -n | tail -1
-```
-
-Use the next number for the `S2-{NN}` prefix.
-
-### 3.2 Create the Issue
+### 3.1 Create the Issue
 
 Auto-assign based on Track:
 - Track=Backend → `--assignee kavyald`
@@ -135,7 +126,7 @@ Auto-assign based on Track:
 
 ```bash
 gh issue create --repo kavyald/colab-ap-classifier \
-  --title "S2-{NN}: {title}" \
+  --title "{descriptive title}" \
   --milestone "Sprint 2" \
   --assignee "{assignee if Backend or Frontend}" \
   --body "$(cat <<'EOF'

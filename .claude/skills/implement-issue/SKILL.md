@@ -117,14 +117,14 @@ git checkout dev
 git pull origin dev
 ```
 
-Determine branch name from board **Track** and **Type** fields:
-- Track=Backend + Type=Feature: `git checkout -b feature/s2-{NN}-{short-slug}`
-- Track=Frontend + Type=Feature: `git checkout -b feature/s2-fe-{NN}-{short-slug}`
-- Track=Backend + Type=Bug: `git checkout -b fix/s2-{short-slug}`
-- Track=Frontend + Type=Bug: `git checkout -b fix/s2-fe-{short-slug}`
-- Track=Docs (any Type): `git checkout -b docs/s2-{NN}-{short-slug}`
+Determine branch name from board **Track** and **Type** fields, using the GitHub issue number:
+- Track=Backend + Type=Feature: `git checkout -b feature/{issue-number}-{short-slug}`
+- Track=Frontend + Type=Feature: `git checkout -b feature/fe-{issue-number}-{short-slug}`
+- Track=Backend + Type=Bug: `git checkout -b fix/{issue-number}-{short-slug}`
+- Track=Frontend + Type=Bug: `git checkout -b fix/fe-{issue-number}-{short-slug}`
+- Track=Docs (any Type): `git checkout -b docs/{issue-number}-{short-slug}`
 
-Where `{NN}` is derived from the issue title (e.g., S2-03 → 03) and `{short-slug}` is a kebab-case description.
+Where `{issue-number}` is the GitHub issue number and `{short-slug}` is a kebab-case description.
 
 ### 3.2 Implement
 
@@ -227,7 +227,7 @@ git push -u origin {branch-name}
 ```bash
 gh pr create --repo kavyald/colab-ap-classifier \
   --base dev \
-  --title "S2-{NN}: {Issue Title}" \
+  --title "{Issue Title}" \
   --body "$(cat <<'EOF'
 ## Summary
 

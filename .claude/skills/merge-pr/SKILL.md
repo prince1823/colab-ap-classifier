@@ -95,7 +95,7 @@ git log --follow --diff-filter=A --format="%H %s" -- <file>
 
 This shows the commit that first created the file. Parse the commit message for issue references:
 - `Closes #NN`
-- `S1-NN:` or `S2-NN:` in commit message
+- Issue number reference in commit message (e.g., `#NN`)
 - `Implements #NN`
 
 Skip files that:

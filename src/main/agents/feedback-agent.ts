@@ -407,7 +407,7 @@ export async function analyzeFeedback(
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
     model: settings.model,
     temperature: 0,
-    maxTokens: 4096,
+    maxTokens: 512,
   });
 
   return parseResponse(responseText);

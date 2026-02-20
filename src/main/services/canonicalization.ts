@@ -2,6 +2,7 @@ import fs from 'fs';
 import { parse } from 'csv-parse/sync';
 import { v4 as uuidv4 } from 'uuid';
 import { databaseService } from './database';
+import { invalidateColumnCache } from './transactions';
 import { readSupplierUniverse } from './colabip';
 import { buildMatcherIndex } from './supplier-matcher';
 import { resolveTaxonomyPath } from './taxonomy-utils';
@@ -40,21 +41,27 @@ export async function saveMappings(
   await databaseService.run('DELETE FROM column_mappings');
   await databaseService.run('DELETE FROM invoice_grouping_columns');
 
-  // Insert column mappings
-  for (const [canonicalName, csvColumnName] of Object.entries(mapping)) {
+  // Insert column mappings (batch)
+  const mappingEntries = Object.entries(mapping);
+  if (mappingEntries.length > 0) {
+    const rowPlaceholders = mappingEntries.map(() => '(?, ?)').join(', ');
+    const values = mappingEntries.flat();
     await databaseService.run(
-      'INSERT INTO column_mappings (canonical_name, csv_column_name) VALUES (?, ?)',
-      canonicalName,
-      csvColumnName
+      `INSERT INTO column_mappings (canonical_name, csv_column_name) VALUES ${rowPlaceholders}`,
+      ...values
     );
   }
 
-  // Insert grouping columns with position
-  for (let i = 0; i < groupingColumns.length; i++) {
+  // Insert grouping columns with position (batch)
+  if (groupingColumns.length > 0) {
+    const rowPlaceholders = groupingColumns.map(() => '(?, ?)').join(', ');
+    const values: unknown[] = [];
+    for (let i = 0; i < groupingColumns.length; i++) {
+      values.push(groupingColumns[i], i);
+    }
     await databaseService.run(
-      'INSERT INTO invoice_grouping_columns (canonical_name, position) VALUES (?, ?)',
-      groupingColumns[i],
-      i
+      `INSERT INTO invoice_grouping_columns (canonical_name, position) VALUES ${rowPlaceholders}`,
+      ...values
     );
   }
 }
@@ -247,24 +254,44 @@ export async function importCSV(
     }
   }
 
-  // 5. Bulk INSERT rows into transactions table
+  // Invalidate cached column list after schema changes
+  invalidateColumnCache();
+
+  // Add index on supplier_name after column creation
+  if (canonicalColumns.includes('supplier_name')) {
+    await databaseService.run(
+      'CREATE INDEX IF NOT EXISTS idx_transactions_supplier ON transactions(supplier_name)'
+    );
+  }
+
+  // 5. Bulk INSERT rows into transactions table (batched for performance)
   const allColumns = ['id', 'row_index', ...canonicalColumns];
-  const placeholders = allColumns.map(() => '?').join(', ');
   const columnList = allColumns.map((c) => `"${c}"`).join(', ');
-  const insertSQL = `INSERT INTO transactions (${columnList}) VALUES (${placeholders})`;
+  const singleRowPlaceholders = `(${allColumns.map(() => '?').join(', ')})`;
+  const INSERT_BATCH_SIZE = 500;
 
-  for (let i = 0; i < allRecords.length; i++) {
-    const record = allRecords[i];
-    const id = uuidv4();
-    const rowIndex = i + 1;
+  for (let batchStart = 0; batchStart < allRecords.length; batchStart += INSERT_BATCH_SIZE) {
+    const batchEnd = Math.min(batchStart + INSERT_BATCH_SIZE, allRecords.length);
+    const batchValues: unknown[] = [];
+    const rowPlaceholders: string[] = [];
 
-    const values: unknown[] = [id, rowIndex];
-    for (const canonicalCol of canonicalColumns) {
-      const csvCol = mappings[canonicalCol];
-      values.push(record[csvCol] ?? null);
+    for (let i = batchStart; i < batchEnd; i++) {
+      const record = allRecords[i];
+      const id = uuidv4();
+      const rowIndex = i + 1;
+
+      batchValues.push(id, rowIndex);
+      for (const canonicalCol of canonicalColumns) {
+        const csvCol = mappings[canonicalCol];
+        batchValues.push(record[csvCol] ?? null);
+      }
+      rowPlaceholders.push(singleRowPlaceholders);
     }
 
-    await databaseService.run(insertSQL, ...values);
+    await databaseService.run(
+      `INSERT INTO transactions (${columnList}) VALUES ${rowPlaceholders.join(', ')}`,
+      ...batchValues
+    );
   }
 
   // 6. Extract distinct supplier_name values -> match against universe -> INSERT INTO project_suppliers
@@ -295,6 +322,10 @@ export async function importCSV(
     // Map raw CSV names to resolved canonical names (for updating transaction rows)
     const nameResolution = new Map<string, string>();
 
+    // Collect new suppliers for batch insert
+    const newSuppliersWithMeta: unknown[][] = [];
+    const newSuppliersBasic: unknown[][] = [];
+
     for (const name of supplierNames) {
       // Try to match against supplier universe
       const universeMatch = matcher.match(name);
@@ -322,9 +353,7 @@ export async function importCSV(
             ? JSON.stringify(universeMatch.supplierInfo)
             : null;
 
-          await databaseService.run(
-            `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          newSuppliersWithMeta.push([
             supplierId,
             canonicalName,
             universeMatch.aliases.length > 0 ? JSON.stringify(universeMatch.aliases) : null,
@@ -332,27 +361,54 @@ export async function importCSV(
             universeMatch.parentName || null,
             supplierInfoJson,
             universeMatch.categoryA,
-            categoryATaxonomyNodeId
-          );
+            categoryATaxonomyNodeId,
+          ]);
         } else {
-          await databaseService.run(
-            'INSERT INTO project_suppliers (id, supplier_name) VALUES (?, ?)',
-            supplierId,
-            canonicalName
-          );
+          newSuppliersBasic.push([supplierId, canonicalName]);
         }
       }
     }
 
-    // Update transaction rows with resolved canonical supplier names
-    for (const [rawName, canonicalName] of nameResolution) {
-      if (rawName !== canonicalName) {
-        await databaseService.run(
-          'UPDATE transactions SET supplier_name = ? WHERE supplier_name = ?',
-          canonicalName,
-          rawName
-        );
+    // Batch insert suppliers with universe metadata
+    const SUPPLIER_BATCH_SIZE = 200;
+    for (let i = 0; i < newSuppliersWithMeta.length; i += SUPPLIER_BATCH_SIZE) {
+      const batch = newSuppliersWithMeta.slice(i, i + SUPPLIER_BATCH_SIZE);
+      const rowPlaceholders = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      await databaseService.run(
+        `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id) VALUES ${rowPlaceholders}`,
+        ...batch.flat()
+      );
+    }
+
+    // Batch insert basic suppliers (no universe match)
+    for (let i = 0; i < newSuppliersBasic.length; i += SUPPLIER_BATCH_SIZE) {
+      const batch = newSuppliersBasic.slice(i, i + SUPPLIER_BATCH_SIZE);
+      const rowPlaceholders = batch.map(() => '(?, ?)').join(', ');
+      await databaseService.run(
+        `INSERT INTO project_suppliers (id, supplier_name) VALUES ${rowPlaceholders}`,
+        ...batch.flat()
+      );
+    }
+
+    // Update transaction rows with resolved canonical supplier names (batched)
+    const nameMappings = Array.from(nameResolution.entries()).filter(
+      ([rawName, canonicalName]) => rawName !== canonicalName
+    );
+    const NAME_BATCH_SIZE = 200;
+    for (let i = 0; i < nameMappings.length; i += NAME_BATCH_SIZE) {
+      const batch = nameMappings.slice(i, i + NAME_BATCH_SIZE);
+      const caseClauses = batch.map(() => 'WHEN supplier_name = ? THEN ?').join(' ');
+      const rawNames = batch.map(([raw]) => raw);
+      const caseParams: unknown[] = [];
+      for (const [rawName, canonicalName] of batch) {
+        caseParams.push(rawName, canonicalName);
       }
+      const inPlaceholders = rawNames.map(() => '?').join(',');
+      await databaseService.run(
+        `UPDATE transactions SET supplier_name = CASE ${caseClauses} ELSE supplier_name END WHERE supplier_name IN (${inPlaceholders})`,
+        ...caseParams,
+        ...rawNames
+      );
     }
 
     // 7. Update transaction_count and total_spend on project_suppliers
@@ -392,12 +448,28 @@ export async function importCSV(
       supplierStats.set(canonicalName, stats);
     }
 
-    for (const [name, stats] of supplierStats) {
+    // Batch update supplier stats using CASE expressions
+    const statsEntries = Array.from(supplierStats.entries());
+    const STATS_BATCH_SIZE = 200;
+    for (let i = 0; i < statsEntries.length; i += STATS_BATCH_SIZE) {
+      const batch = statsEntries.slice(i, i + STATS_BATCH_SIZE);
+      const names = batch.map(([name]) => name);
+      const namePlaceholders = names.map(() => '?').join(',');
+      const countCases = batch.map(() => 'WHEN supplier_name = ? THEN transaction_count + ?').join(' ');
+      const spendCases = batch.map(() => 'WHEN supplier_name = ? THEN total_spend + ?').join(' ');
+
+      const countParams: unknown[] = [];
+      const spendParams: unknown[] = [];
+      for (const [name, stats] of batch) {
+        countParams.push(name, stats.count);
+        spendParams.push(name, stats.spend);
+      }
+
       await databaseService.run(
-        'UPDATE project_suppliers SET transaction_count = transaction_count + ?, total_spend = total_spend + ?, updated_at = CURRENT_TIMESTAMP WHERE supplier_name = ?',
-        stats.count,
-        stats.spend,
-        name
+        `UPDATE project_suppliers SET transaction_count = CASE ${countCases} ELSE transaction_count END, total_spend = CASE ${spendCases} ELSE total_spend END, updated_at = CURRENT_TIMESTAMP WHERE supplier_name IN (${namePlaceholders})`,
+        ...countParams,
+        ...spendParams,
+        ...names
       );
     }
   }

@@ -249,7 +249,7 @@ export async function researchSupplier(
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
     model: settings.model,
     temperature: 0,
-    maxTokens: 4096,
+    maxTokens: 1024,
   });
 
   return parseResponse(responseText);

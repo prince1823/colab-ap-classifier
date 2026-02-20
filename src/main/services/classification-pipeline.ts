@@ -171,16 +171,27 @@ async function runPipeline(
       }
     }
 
+    // Group matched transactions by target node for bulk UPDATE
+    const txnsByTargetNode = new Map<string, string[]>();
     for (const [txnId, ruleId] of ruleMatches.entries()) {
       const targetNodeId = ruleTargets.get(ruleId);
       if (targetNodeId) {
-        await databaseService.run(
-          'UPDATE transactions SET taxonomy_node_id = ?, review_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          targetNodeId,
-          txnId
-        );
+        let ids = txnsByTargetNode.get(targetNodeId);
+        if (!ids) {
+          ids = [];
+          txnsByTargetNode.set(targetNodeId, ids);
+        }
+        ids.push(txnId);
         matchedTxnIds.add(txnId);
       }
+    }
+    for (const [targetNodeId, ids] of txnsByTargetNode) {
+      const placeholders = ids.map(() => '?').join(',');
+      await databaseService.run(
+        `UPDATE transactions SET taxonomy_node_id = ?, review_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+        targetNodeId,
+        ...ids
+      );
     }
 
     if (isCancelled(runId)) return;
@@ -205,7 +216,7 @@ async function runPipeline(
     });
 
     if (unmatchedIds.length > 0) {
-      const CLASSIFICATION_BATCH_SIZE = 7;
+      const CLASSIFICATION_BATCH_SIZE = 8;
       const taxonomy = await getNodes();
       let metadata;
       try {
@@ -287,17 +298,19 @@ async function runPipeline(
           })
         );
 
-        // Write results sequentially after the batch (DuckDB single-writer)
+        // Write results in bulk after the batch (DuckDB single-writer)
         for (const { group, result, taxonomyNodeId, error } of batchResults) {
           if (!error && result) {
             const reviewScore = result.descriptionSupplierAligned ? 0 : 50;
-            for (const txnId of group.transactionIds) {
+            const ids = group.transactionIds;
+            if (ids.length > 0) {
+              const placeholders = ids.map(() => '?').join(',');
               await databaseService.run(
-                `UPDATE transactions SET taxonomy_node_id = ?, classification_reasoning = ?, review_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+                `UPDATE transactions SET taxonomy_node_id = ?, classification_reasoning = ?, review_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
                 taxonomyNodeId,
                 result.reasoning,
                 reviewScore,
-                txnId
+                ...ids
               );
             }
           }

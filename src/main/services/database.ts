@@ -77,6 +77,15 @@ class DatabaseService {
     await db.run(sql, ...params);
   }
 
+  /**
+   * Execute one or more SQL statements (semicolon-separated), without returning results.
+   * Useful for multi-statement batches like multiple INSERTs.
+   */
+  async exec(sql: string): Promise<void> {
+    const db = this.getDatabase();
+    await db.exec(sql);
+  }
+
   async all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T[]> {
     const db = this.getDatabase();
     return db.all(sql, ...params) as Promise<T[]>;
@@ -101,6 +110,14 @@ class DatabaseService {
     );
     if (cols.length === 0) {
       await db.run('ALTER TABLE project_suppliers ADD COLUMN aliases JSON');
+    }
+
+    // Add supplier_name index if the column exists but index is missing
+    const supplierCol = await db.all(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'supplier_name'"
+    );
+    if (supplierCol.length > 0) {
+      await db.run('CREATE INDEX IF NOT EXISTS idx_transactions_supplier ON transactions(supplier_name)');
     }
   }
 

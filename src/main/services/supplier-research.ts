@@ -97,7 +97,7 @@ export async function researchBatch(
   supplierNames: string[],
   onProgress?: (done: number, total: number) => void
 ): Promise<void> {
-  const BATCH_SIZE = 5;
+  const BATCH_SIZE = 10;
   let done = 0;
   const total = supplierNames.length;
 

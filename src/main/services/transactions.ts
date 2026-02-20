@@ -7,6 +7,9 @@ const BASE_COLUMNS = [
   'review_score', 'classification_reasoning', 'created_at', 'updated_at',
 ];
 
+// In-memory cache for transaction columns (avoids information_schema query per page load)
+let cachedColumns: string[] | null = null;
+
 /**
  * Query transactions with dynamic filters, pagination, sorting.
  */
@@ -99,60 +102,65 @@ export async function queryTransactions(
 
 /**
  * Get aggregate stats for all transactions.
+ * Uses a single query with conditional aggregates instead of 5 separate queries.
  */
 export async function getStats(): Promise<TransactionStats> {
   const columns = await getColumns();
   const hasSpend = columns.includes('spend_amount');
   const hasSupplier = columns.includes('supplier_name');
 
-  const totalResult = await databaseService.get<{ cnt: number }>(
-    'SELECT COUNT(*) as cnt FROM transactions'
+  const spendExpr = hasSpend
+    ? 'COALESCE(SUM(TRY_CAST(spend_amount AS DOUBLE)), 0)'
+    : '0';
+  const supplierExpr = hasSupplier
+    ? 'COUNT(DISTINCT supplier_name)'
+    : '0';
+
+  const result = await databaseService.get<{
+    total_rows: number;
+    total_spend: number;
+    unique_suppliers: number;
+    classified_rows: number;
+    flagged_rows: number;
+  }>(
+    `SELECT
+      COUNT(*) as total_rows,
+      ${spendExpr} as total_spend,
+      ${supplierExpr} as unique_suppliers,
+      COUNT(CASE WHEN taxonomy_node_id IS NOT NULL THEN 1 END) as classified_rows,
+      COUNT(CASE WHEN review_score > 0 THEN 1 END) as flagged_rows
+    FROM transactions`
   );
-  const totalRows = totalResult?.cnt || 0;
-
-  let totalSpend = 0;
-  if (hasSpend) {
-    const spendResult = await databaseService.get<{ total: number }>(
-      'SELECT COALESCE(SUM(TRY_CAST(spend_amount AS DOUBLE)), 0) as total FROM transactions'
-    );
-    totalSpend = spendResult?.total || 0;
-  }
-
-  let uniqueSuppliers = 0;
-  if (hasSupplier) {
-    const supplierResult = await databaseService.get<{ cnt: number }>(
-      'SELECT COUNT(DISTINCT supplier_name) as cnt FROM transactions'
-    );
-    uniqueSuppliers = supplierResult?.cnt || 0;
-  }
-
-  const classifiedResult = await databaseService.get<{ cnt: number }>(
-    'SELECT COUNT(*) as cnt FROM transactions WHERE taxonomy_node_id IS NOT NULL'
-  );
-  const classifiedRows = classifiedResult?.cnt || 0;
-
-  const flaggedResult = await databaseService.get<{ cnt: number }>(
-    'SELECT COUNT(*) as cnt FROM transactions WHERE review_score > 0'
-  );
-  const flaggedForReviewRows = flaggedResult?.cnt || 0;
 
   return {
-    totalRows,
-    totalSpend,
-    uniqueSuppliers,
-    classifiedRows,
-    flaggedForReviewRows,
+    totalRows: result?.total_rows || 0,
+    totalSpend: result?.total_spend || 0,
+    uniqueSuppliers: result?.unique_suppliers || 0,
+    classifiedRows: result?.classified_rows || 0,
+    flaggedForReviewRows: result?.flagged_rows || 0,
   };
 }
 
 /**
  * Discover available columns on the transactions table.
+ * Results are cached in memory — call invalidateColumnCache() after ALTER TABLE.
  */
 export async function getColumns(): Promise<string[]> {
+  if (cachedColumns) return cachedColumns;
+
   const rows = await databaseService.all<{ column_name: string }>(
     "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' ORDER BY ordinal_position"
   );
-  return rows.map((r) => r.column_name);
+  cachedColumns = rows.map((r) => r.column_name);
+  return cachedColumns;
+}
+
+/**
+ * Invalidate the cached column list.
+ * Must be called after ALTER TABLE adds new columns or when a new project is opened.
+ */
+export function invalidateColumnCache(): void {
+  cachedColumns = null;
 }
 
 async function getTailSpendThreshold(): Promise<number> {

@@ -59,6 +59,47 @@ const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_TEMPERATURE = 0;
 const REQUEST_TIMEOUT_MS = 60_000;
 
+// Retry configuration for transient errors (429, 5xx)
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1_000;
+const MAX_RETRY_DELAY_MS = 30_000;
+
+/** Status codes that should trigger a retry. */
+function isRetryableStatus(status: number, errorBody?: string): boolean {
+  if (status >= 500) return true;
+  if (status === 429) {
+    // OpenAI uses 429 for both rate limits AND quota exhaustion.
+    // Anthropic/OpenRouter use 429 only for rate limits (quota = 402).
+    // Check body to skip retries on OpenAI quota exhaustion.
+    if (errorBody && isQuotaExhausted(errorBody)) return false;
+    return true;
+  }
+  return false;
+}
+
+/** Detect quota-exhaustion 429s (OpenAI-specific: no money left). */
+function isQuotaExhausted(errorBody: string): boolean {
+  const lower = errorBody.toLowerCase();
+  return (
+    lower.includes('insufficient_quota') ||
+    lower.includes('exceeded your current quota')
+  );
+}
+
+/** Exponential backoff with jitter. */
+function retryDelay(attempt: number, retryAfterHeader?: string | null): number {
+  // Honour Retry-After header if the server provided one (seconds)
+  if (retryAfterHeader) {
+    const seconds = Number(retryAfterHeader);
+    if (!isNaN(seconds) && seconds > 0) {
+      return Math.min(seconds * 1_000, MAX_RETRY_DELAY_MS);
+    }
+  }
+  const base = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+  const jitter = Math.random() * base * 0.25;
+  return Math.min(base + jitter, MAX_RETRY_DELAY_MS);
+}
+
 /**
  * Build the request body for the Anthropic API format.
  */
@@ -215,57 +256,84 @@ export async function chat(
 
   const headers = buildHeaders(provider, apiKey, config.format);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let lastError: LLMClientError | null = null;
 
-  let response: Response;
-  try {
-    response = await fetch(config.url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (error: unknown) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(config.url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (error: unknown) {
+      clearTimeout(timeoutId);
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new LLMClientError(
+          `Request to ${provider} timed out after ${REQUEST_TIMEOUT_MS}ms`,
+          'TIMEOUT'
+        );
+      }
       throw new LLMClientError(
-        `Request to ${provider} timed out after ${REQUEST_TIMEOUT_MS}ms`,
-        'TIMEOUT'
+        `Network error calling ${provider}: ${error instanceof Error ? error.message : String(error)}`,
+        'API_ERROR'
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      let errorBody = '';
+      try {
+        errorBody = await response.text();
+      } catch {
+        // ignore read errors on error responses
+      }
+
+      // Retry on transient rate limits and 5xx — skip quota exhaustion
+      if (isRetryableStatus(response.status, errorBody) && attempt < MAX_RETRIES) {
+        const delay = retryDelay(attempt, response.headers.get('retry-after'));
+        console.warn(
+          `[LLM] ${provider} returned HTTP ${response.status}, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`
+        );
+        lastError = new LLMClientError(
+          `${provider} API returned HTTP ${response.status}: ${errorBody}`,
+          'API_ERROR',
+          response.status
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+
+      throw new LLMClientError(
+        `${provider} API returned HTTP ${response.status}: ${errorBody}`,
+        'API_ERROR',
+        response.status
       );
     }
-    throw new LLMClientError(
-      `Network error calling ${provider}: ${error instanceof Error ? error.message : String(error)}`,
-      'API_ERROR'
-    );
-  } finally {
-    clearTimeout(timeoutId);
-  }
 
-  if (!response.ok) {
-    let errorBody = '';
+    let data: unknown;
     try {
-      errorBody = await response.text();
+      data = await response.json();
     } catch {
-      // ignore read errors on error responses
+      throw new LLMClientError(
+        `Failed to parse JSON response from ${provider}`,
+        'INVALID_RESPONSE'
+      );
     }
-    throw new LLMClientError(
-      `${provider} API returned HTTP ${response.status}: ${errorBody}`,
-      'API_ERROR',
-      response.status
-    );
+
+    return config.format === 'anthropic'
+      ? extractAnthropicText(data)
+      : extractOpenAIText(data);
   }
 
-  let data: unknown;
-  try {
-    data = await response.json();
-  } catch {
-    throw new LLMClientError(
-      `Failed to parse JSON response from ${provider}`,
-      'INVALID_RESPONSE'
-    );
-  }
-
-  return config.format === 'anthropic'
-    ? extractAnthropicText(data)
-    : extractOpenAIText(data);
+  // All retries exhausted
+  throw lastError ?? new LLMClientError(
+    `${provider} API failed after ${MAX_RETRIES} retries`,
+    'API_ERROR'
+  );
 }

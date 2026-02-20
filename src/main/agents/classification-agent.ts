@@ -208,8 +208,21 @@ export function formatHistoricalClassifications(
     .join('\n');
 }
 
+/** System/metadata columns to exclude from LLM prompts — not useful for classification. */
+const EXCLUDED_FIELDS = new Set([
+  'id',
+  'row_index',
+  'created_at',
+  'updated_at',
+  'taxonomy_node_id',
+  'classification_reasoning',
+  'invoice_group_key',
+  'review_score',
+]);
+
 /**
  * Format transaction details into a readable block for the prompt.
+ * Excludes system/metadata columns to reduce token usage.
  */
 export function formatTransactions(transactions: Array<Record<string, unknown>>): string {
   if (transactions.length === 0) {
@@ -219,7 +232,7 @@ export function formatTransactions(transactions: Array<Record<string, unknown>>)
   return transactions
     .map((txn, i) => {
       const fields = Object.entries(txn)
-        .filter(([, v]) => v !== null && v !== undefined && v !== '')
+        .filter(([k, v]) => v !== null && v !== undefined && v !== '' && !EXCLUDED_FIELDS.has(k))
         .map(([k, v]) => `  ${k}: ${String(v)}`)
         .join('\n');
       return `Transaction ${i + 1}:\n${fields}`;
@@ -535,7 +548,7 @@ export async function classifyInvoiceGroup(
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
     model: settings.model,
     temperature: 0,
-    maxTokens: 4096,
+    maxTokens: 512,
   });
 
   const rawResult = parseResponse(responseText);

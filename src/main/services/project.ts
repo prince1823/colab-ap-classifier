@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { dialog, BrowserWindow } from 'electron';
 import { databaseService } from './database';
+import { invalidateColumnCache } from './transactions';
 import type {
   ProjectMetadata,
   ProjectMetadataUpdate,
@@ -58,6 +59,7 @@ export async function createProject(
   }
 
   await databaseService.openDatabase(filePath);
+  invalidateColumnCache();
 
   // Store the project name in settings
   await databaseService.run(
@@ -88,6 +90,7 @@ export async function openProject(
   }
 
   await databaseService.openDatabase(filePath);
+  invalidateColumnCache();
 
   // Validate schema — all expected tables must be present
   const tables = await databaseService.all<{ table_name: string }>(

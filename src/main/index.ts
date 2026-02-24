@@ -4,9 +4,10 @@ loadEnv();
 
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
-import fs from 'fs';
 import { registerAllHandlers } from './ipc';
 import { setMainWindow } from './services/classification-pipeline';
+import { ensureAppDirectories, getColabipDir } from './services/app-paths';
+import { setColabipBasePath } from './services/colabip';
 
 // Prevent unhandled errors from crashing the entire Electron app
 process.on('uncaughtException', (error) => {
@@ -34,19 +35,13 @@ function createWindow(): void {
     title: 'Colab91 Classifier',
   });
 
-  // Ensure projects directory exists
-  const projectsDir = path.join(process.cwd(), 'projects');
-  if (!fs.existsSync(projectsDir)) {
-    fs.mkdirSync(projectsDir, { recursive: true });
-  }
-
   // In development, load from Vite dev server; in production, load built files
   const isDev = !app.isPackaged;
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    const indexPath = path.join(__dirname, '..', 'renderer', 'index.html');
+    const indexPath = path.join(__dirname, '..', '..', 'renderer', 'index.html');
     mainWindow.loadFile(indexPath);
   }
 
@@ -56,6 +51,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  ensureAppDirectories();
+  setColabipBasePath(getColabipDir());
   registerAllHandlers();
   createWindow();
   if (mainWindow) {

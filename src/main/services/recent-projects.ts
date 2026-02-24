@@ -5,7 +5,27 @@ import type { RecentProject } from '../../shared/types/project';
 
 const MAX_RECENT_PROJECTS = 20;
 
-const DEFAULT_CONFIG_DIR = path.join(os.homedir(), '.config', 'Colab91 Classifier');
+/**
+ * Return the platform-appropriate config directory for this app.
+ *   Win32:  %APPDATA%\Colab91 Classifier
+ *   macOS:  ~/Library/Application Support/Colab91 Classifier
+ *   Linux:  ~/.config/Colab91 Classifier
+ */
+function getConfigDir(): string {
+  if (process.platform === 'win32') {
+    return path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'Colab91 Classifier'
+    );
+  }
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'Colab91 Classifier');
+  }
+  // Linux and other Unix
+  return path.join(os.homedir(), '.config', 'Colab91 Classifier');
+}
+
+const DEFAULT_CONFIG_DIR = getConfigDir();
 const DEFAULT_FILE_PATH = path.join(DEFAULT_CONFIG_DIR, 'recent-projects.json');
 
 /** Mutable path references — overridable via _setStoragePath for testing. */

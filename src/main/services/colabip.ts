@@ -36,7 +36,7 @@ export async function listTaxonomies(): Promise<TaxonomyInfo[]> {
         try {
           const content = await fs.readFile(filePath, 'utf-8');
           const cleaned = stripBOM(content);
-          const pathLines = cleaned.split('\n').filter((l) => l.trim() && !l.startsWith('\t'));
+          const pathLines = cleaned.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith('\t'));
           results.push({ name: entry.name, nodeCount: pathLines.length });
         } catch {
           // No taxonomy.txt in this directory — skip
@@ -101,7 +101,7 @@ export async function readTaxonomy(
   try {
     const content = await fs.readFile(filePath, 'utf-8');
     const cleaned = stripBOM(content);
-    const lines = cleaned.split('\n');
+    const lines = cleaned.split(/\r?\n/);
 
     const parentPaths = new Map<string, true>();
     const nodes: Array<{ path: string; description: string }> = [];
@@ -307,7 +307,7 @@ export async function writeSupplierUniverse(
     ].join(',');
   });
 
-  await fs.writeFile(csvPath, [header, ...rows].join('\n') + '\n', 'utf-8');
+  await fs.writeFile(csvPath, [header, ...rows].join('\r\n') + '\r\n', 'utf-8');
 }
 
 /**

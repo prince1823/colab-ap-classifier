@@ -11,6 +11,7 @@ export default defineConfig({
   },
   root: './',
   publicDir: 'public',
+  base: './',
   build: {
     // Output renderer into its own subdirectory so we can safely clean it
     // without wiping dist/main/ or dist/preload/ produced by tsc.

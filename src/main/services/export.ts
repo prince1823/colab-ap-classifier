@@ -80,7 +80,7 @@ export async function exportCSV(
     csvLines.push(values.map((v) => escapeCSV(String(v))).join(','));
   }
 
-  fs.writeFileSync(filePath, csvLines.join('\n'), 'utf-8');
+  fs.writeFileSync(filePath, csvLines.join('\r\n') + '\r\n', 'utf-8');
 
   return { rowsExported: rows.length };
 }

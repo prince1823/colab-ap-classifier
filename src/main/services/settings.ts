@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import { app } from 'electron';
 import type {
   AppSettings,
   SettingsUpdateInput,
@@ -56,6 +59,63 @@ let currentProvider: string =
 let currentModel: string = process.env.CLASSIFIER_MODEL || DEFAULT_MODEL;
 const apiKeys: Map<string, string> = new Map();
 
+// Persistence
+const SETTINGS_FILE = 'app-settings.json';
+
+function getSettingsPath(): string {
+  return path.join(app.getPath('userData'), SETTINGS_FILE);
+}
+
+interface PersistedSettings {
+  provider?: string;
+  model?: string;
+  apiKeys?: Record<string, string>;
+}
+
+function loadPersistedSettings(): void {
+  try {
+    const filePath = getSettingsPath();
+    if (!fs.existsSync(filePath)) return;
+    const data: PersistedSettings = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+
+    if (data.provider && PROVIDERS.some((p) => p.id === data.provider)) {
+      currentProvider = data.provider;
+    }
+    if (data.model) {
+      currentModel = data.model;
+    }
+    if (data.apiKeys) {
+      for (const [provider, key] of Object.entries(data.apiKeys)) {
+        if (typeof key === 'string' && key.length > 0) {
+          apiKeys.set(provider, key);
+        }
+      }
+    }
+  } catch {
+    // Ignore corrupt file
+  }
+}
+
+function persistSettings(): void {
+  try {
+    const data: PersistedSettings = {
+      provider: currentProvider,
+      model: currentModel,
+      apiKeys: Object.fromEntries(apiKeys.entries()),
+    };
+    const dir = path.dirname(getSettingsPath());
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(getSettingsPath(), JSON.stringify(data, null, 2), 'utf-8');
+  } catch {
+    // Best-effort — don't crash if write fails
+  }
+}
+
+// Load persisted settings at module init (after env vars have been applied)
+loadPersistedSettings();
+
 /**
  * Get the current application settings.
  */
@@ -88,6 +148,8 @@ export function updateSettings(input: SettingsUpdateInput): void {
       apiKeys.set(provider, key);
     }
   }
+
+  persistSettings();
 }
 
 /**

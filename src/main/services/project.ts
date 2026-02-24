@@ -3,6 +3,7 @@ import fs from 'fs';
 import { dialog, BrowserWindow } from 'electron';
 import { databaseService } from './database';
 import { ensureIndexes, invalidateColumnCache } from './transactions';
+import { getProjectsDir } from './app-paths';
 import type {
   ProjectMetadata,
   ProjectMetadataUpdate,
@@ -45,7 +46,7 @@ export async function createProject(
     throw new Error('Project name must not be empty');
   }
 
-  const projectsDir = path.join(process.cwd(), 'projects');
+  const projectsDir = getProjectsDir();
 
   // Ensure the projects directory exists
   if (!fs.existsSync(projectsDir)) {
@@ -279,7 +280,7 @@ export async function selectSavePath(): Promise<string | null> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   const result = await dialog.showSaveDialog(win!, {
     title: 'Create New Project',
-    defaultPath: path.join(process.cwd(), 'projects', 'Untitled.c91'),
+    defaultPath: path.join(getProjectsDir(), 'Untitled.c91'),
     filters: [{ name: 'C91 Project', extensions: ['c91'] }],
   });
 

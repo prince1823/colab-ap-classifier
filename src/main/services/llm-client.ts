@@ -60,9 +60,9 @@ const DEFAULT_TEMPERATURE = 0;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 // Retry configuration for transient errors (429, 5xx)
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 6;
 const INITIAL_RETRY_DELAY_MS = 1_000;
-const MAX_RETRY_DELAY_MS = 30_000;
+const MAX_RETRY_DELAY_MS = 60_000;
 
 /** Status codes that should trigger a retry. */
 function isRetryableStatus(status: number, errorBody?: string): boolean {

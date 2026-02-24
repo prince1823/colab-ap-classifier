@@ -11,19 +11,22 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { app } from 'electron';
 
 let loaded = false;
 
 export function loadEnv(rootDir?: string): void {
   if (loaded) return;
 
-  const root = rootDir ?? path.resolve(__dirname, '..', '..', '..');
+  const root = rootDir ?? (app.isPackaged
+    ? app.getPath('userData')
+    : path.resolve(__dirname, '..', '..', '..'));
   const envPath = path.join(root, '.env');
 
   if (!fs.existsSync(envPath)) return;
 
   const content = fs.readFileSync(envPath, 'utf-8');
-  for (const line of content.split('\n')) {
+  for (const line of content.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
 

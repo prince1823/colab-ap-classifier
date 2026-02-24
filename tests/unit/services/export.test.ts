@@ -178,7 +178,7 @@ describe('ExportService', () => {
         expect(result.rowsExported).toBe(0);
 
         const csvContent = fs.readFileSync(tmpPath, 'utf-8');
-        const lines = csvContent.split('\n');
+        const lines = csvContent.trimEnd().split(/\r?\n/);
         expect(lines).toHaveLength(1); // Header only
       } finally {
         if (fs.existsSync(tmpPath)) {

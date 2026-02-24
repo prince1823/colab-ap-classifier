@@ -36,8 +36,8 @@ describe('DatabaseService', () => {
       expect(databaseService.isOpen()).toBe(false);
     });
 
-    it('should throw when accessing a closed database', () => {
-      expect(() => databaseService.getDatabase()).toThrow('No database is currently open');
+    it('should throw when querying a closed database', async () => {
+      await expect(() => databaseService.all("SELECT 1")).rejects.toThrow('No database is currently open');
     });
 
     it('should auto-close previous database when opening a new one', async () => {
@@ -59,10 +59,10 @@ describe('DatabaseService', () => {
       }
     });
 
-    it('should return the database instance from getDatabase()', async () => {
+    it('should be queryable after opening', async () => {
       await databaseService.openDatabase(dbPath);
-      const db = databaseService.getDatabase();
-      expect(db).toBeDefined();
+      const result = await databaseService.get<{ val: number }>("SELECT 1 as val");
+      expect(result?.val).toBe(1);
     });
   });
 

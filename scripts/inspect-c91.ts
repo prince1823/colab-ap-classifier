@@ -5,12 +5,13 @@
  * Usage: npm run script:inspect
  */
 
-import { Database } from 'duckdb-async';
+import { DuckDBInstance } from '@duckdb/node-api';
 import path from 'path';
 
 async function main() {
   const dbPath = path.join(process.cwd(), 'pipeline-runs/test-run.c91');
-  const db = await Database.create(dbPath);
+  const instance = await DuckDBInstance.create(dbPath);
+  const conn = await instance.connect();
 
   console.log('\n' + '='.repeat(70));
   console.log('DATABASE INSPECTION: test-run.c91');
@@ -19,7 +20,7 @@ async function main() {
   // Transactions
   console.log('\n📊 TRANSACTIONS:');
   console.log('='.repeat(70));
-  const transactions = await db.all(`
+  const txReader = await conn.runAndReadAll(`
     SELECT
       id,
       supplier_name,
@@ -32,6 +33,7 @@ async function main() {
       substr(classification_reasoning, 1, 80) || '...' as reasoning_preview
     FROM transactions
   `);
+  const transactions = txReader.getRowObjectsJson();
 
   transactions.forEach((row: any) => {
     console.log(`\nTransaction #${row.id}:`);
@@ -48,7 +50,7 @@ async function main() {
   // Taxonomy stats
   console.log('\n\n📚 TAXONOMY:');
   console.log('='.repeat(70));
-  const taxonomyStats = await db.all(`
+  const taxReader = await conn.runAndReadAll(`
     SELECT
       depth,
       COUNT(*) as count
@@ -56,6 +58,7 @@ async function main() {
     GROUP BY depth
     ORDER BY depth
   `);
+  const taxonomyStats = taxReader.getRowObjectsJson();
 
   taxonomyStats.forEach((row: any) => {
     console.log(`  L${row.depth}: ${row.count} nodes`);
@@ -64,7 +67,7 @@ async function main() {
   // Suppliers
   console.log('\n\n🏢 SUPPLIERS:');
   console.log('='.repeat(70));
-  const suppliers = await db.all(`
+  const supReader = await conn.runAndReadAll(`
     SELECT
       name,
       supplier_type,
@@ -73,6 +76,7 @@ async function main() {
     FROM suppliers
     WHERE research_data IS NOT NULL
   `);
+  const suppliers = supReader.getRowObjectsJson();
 
   suppliers.forEach((row: any) => {
     console.log(`\n${row.name}:`);
@@ -84,9 +88,10 @@ async function main() {
   // Settings
   console.log('\n\n⚙️  SETTINGS:');
   console.log('='.repeat(70));
-  const settings = await db.all(`
+  const setReader = await conn.runAndReadAll(`
     SELECT key, value FROM settings
   `);
+  const settings = setReader.getRowObjectsJson();
 
   settings.forEach((row: any) => {
     console.log(`  ${row.key} = ${row.value}`);
@@ -96,7 +101,8 @@ async function main() {
   console.log('END OF INSPECTION');
   console.log('='.repeat(70) + '\n');
 
-  await db.close();
+  conn.closeSync();
+  instance.closeSync();
 }
 
 main().catch((error) => {

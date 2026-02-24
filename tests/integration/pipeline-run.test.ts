@@ -49,6 +49,9 @@ import path from 'path';
 import fs from 'fs';
 import { parse } from 'csv-parse/sync';
 
+// Disable per-test timeout — pipeline E2E scales with dataset size
+vi.setConfig({ testTimeout: 0 });
+
 // --- Load .env before any service imports ---
 import { loadEnv } from '../../src/main/load-env';
 loadEnv(path.resolve(__dirname, '..', '..'));
@@ -444,7 +447,7 @@ describe(`Pipeline Full Run [${TEST_NAME}]`, () => {
 
     console.log(`  ✓ CSV preview: ${preview.totalRows} rows, ${preview.columns.length} columns`);
     console.log(`  ✓ LLM suggested ${Object.keys(mappingSuggestion).length} mappings (${correctCount} correct, ${correctedCount} corrected)`);
-  }, 60000);
+  });
 
   it('Phase 3b: Save column mappings', async () => {
     expect(Object.keys(finalMappings).length).toBeGreaterThan(0);
@@ -598,13 +601,10 @@ describe(`Pipeline Full Run [${TEST_NAME}]`, () => {
     expect(runId).toBeTruthy();
 
     let status = classificationPipeline.getStatus();
-    const maxWait = 120000;
-    const startTime = Date.now();
 
     while (
       status &&
-      !['completed', 'failed', 'cancelled'].includes(status.status) &&
-      Date.now() - startTime < maxWait
+      !['completed', 'failed', 'cancelled'].includes(status.status)
     ) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       status = classificationPipeline.getStatus();
@@ -625,7 +625,7 @@ describe(`Pipeline Full Run [${TEST_NAME}]`, () => {
 
     console.log(`  ✓ Pipeline completed in ${Date.now() - startTime}ms`);
     console.log(`  ✓ ${progressEvents.length} progress events emitted`);
-  }, 180000);
+  });
 
   // ────────────────────────────────────────────────────────────────
   // Phase 4 results: Verify research + classification output

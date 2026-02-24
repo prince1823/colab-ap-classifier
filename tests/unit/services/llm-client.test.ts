@@ -31,6 +31,7 @@ function mockResponse(body: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(),
     json: vi.fn().mockResolvedValue(body),
     text: vi.fn().mockResolvedValue(JSON.stringify(body)),
   } as unknown as Response;
@@ -251,8 +252,9 @@ describe('llm-client chat', () => {
       settingsService.updateSettings({
         apiKeys: { anthropic: 'sk-ant-test' },
       });
+      // Use a non-retryable status (400) so it throws immediately without retries
       mockFetch.mockResolvedValueOnce(
-        mockResponse({ error: { message: 'Rate limited' } }, 429)
+        mockResponse({ error: { message: 'Bad request' } }, 400)
       );
 
       try {
@@ -260,7 +262,7 @@ describe('llm-client chat', () => {
       } catch (err) {
         expect(err).toBeInstanceOf(LLMClientError);
         expect((err as LLMClientError).code).toBe('API_ERROR');
-        expect((err as LLMClientError).statusCode).toBe(429);
+        expect((err as LLMClientError).statusCode).toBe(400);
       }
     });
 

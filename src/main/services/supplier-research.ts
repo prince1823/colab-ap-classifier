@@ -4,6 +4,7 @@ import { buildMatcherIndex, type SupplierMatcherIndex } from './supplier-matcher
 import * as exaSearch from './exa-search';
 import * as supplierService from './suppliers';
 import * as projectService from './project';
+import { AdaptiveRateLimiter, executeWithRateLimiter } from './rate-limiter';
 import type { SupplierResearchResult, SupplierInfo } from '../../shared/types';
 
 /**
@@ -123,12 +124,19 @@ export async function researchBatch(
   const universe = await readSupplierUniverse();
   const matcher = buildMatcherIndex(universe);
 
-  // Process in batches — check cancellation between each batch
-  for (let i = 0; i < toResearch.length; i += BATCH_SIZE) {
-    if (shouldCancel?.()) return;
+  // Process with adaptive rate limiting (starts at 10, reduces on 429)
+  const limiter = new AdaptiveRateLimiter({
+    initialConcurrency: BATCH_SIZE,
+    minConcurrency: 1,
+    maxConcurrency: BATCH_SIZE,
+    recoveryThreshold: 5,
+  });
 
-    const batch = toResearch.slice(i, i + BATCH_SIZE);
-    const promises = batch.map(async (name) => {
+  await executeWithRateLimiter(
+    toResearch,
+    limiter,
+    async (name) => {
+      if (shouldCancel?.()) throw new Error('Cancelled');
       try {
         await researchSingle(name, matcher);
       } catch (error) {
@@ -136,9 +144,8 @@ export async function researchBatch(
       }
       done++;
       if (onProgress) onProgress(done, total);
-    });
-    await Promise.all(promises);
-  }
+    }
+  );
 }
 
 /**

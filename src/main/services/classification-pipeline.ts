@@ -7,6 +7,7 @@ import { syncRulesFromSources, evaluateRules } from './rules';
 import { getSuppliersByNames } from './suppliers';
 import { classifyInvoiceGroup } from '../agents/classification-agent';
 import { logChange } from './changelog';
+import { AdaptiveRateLimiter, executeWithRateLimiter } from './rate-limiter';
 import type {
   ClassificationStartOptions,
   ClassificationProgress,
@@ -235,7 +236,6 @@ async function runPipeline(
     });
 
     if (unmatchedIds.length > 0) {
-      const CLASSIFICATION_BATCH_SIZE = 8;
       const taxonomy = await getNodes();
       let metadata;
       try {
@@ -266,75 +266,72 @@ async function runPipeline(
       let processed = 0;
       const total = groups.length;
 
-      // Process groups in parallel batches
-      for (let batchStart = 0; batchStart < groups.length; batchStart += CLASSIFICATION_BATCH_SIZE) {
-        if (isCancelled(runId)) return;
+      // Adaptive rate limiter — starts at 8, halves on 429, recovers on success streaks
+      const limiter = new AdaptiveRateLimiter({
+        initialConcurrency: 8,
+        minConcurrency: 1,
+        maxConcurrency: 8,
+        recoveryThreshold: 5,
+      });
 
-        const batch = groups.slice(batchStart, batchStart + CLASSIFICATION_BATCH_SIZE);
+      // Helper to classify a single group
+      const classifyGroup = async (group: TransactionGroup) => {
+        const supplierName = group.transactions[0]?.supplier_name as string | undefined;
+        let supplierResearch = null;
+        let parentName: string | null = null;
+        if (supplierName) {
+          const supplier = supplierMap.get(supplierName);
+          supplierResearch = supplier?.supplierInfo ?? null;
+          parentName = supplier?.parentName ?? null;
+        }
 
-        const batchResults = await Promise.all(
-          batch.map(async (group) => {
-            try {
-              // Get supplier research from pre-fetched map
-              const supplierName = group.transactions[0]?.supplier_name as string | undefined;
-              let supplierResearch = null;
-              let parentName: string | null = null;
-              if (supplierName) {
-                const supplier = supplierMap.get(supplierName);
-                supplierResearch = supplier?.supplierInfo ?? null;
-                parentName = supplier?.parentName ?? null;
-              }
+        const cleanedTxns = group.transactions.map((txn) => {
+          const cleaned = { ...txn };
+          if (typeof cleaned.gl_description === 'string') {
+            cleaned.gl_description = cleanDescription(cleaned.gl_description);
+          }
+          return cleaned;
+        });
 
-              // Clean descriptions (strip if ≥70% numeric)
-              const cleanedTxns = group.transactions.map((txn) => {
-                const cleaned = { ...txn };
-                if (typeof cleaned.gl_description === 'string') {
-                  cleaned.gl_description = cleanDescription(cleaned.gl_description);
-                }
-                return cleaned;
-              });
+        const result = await classifyInvoiceGroup({
+          transactions: cleanedTxns,
+          taxonomy,
+          companyContext,
+          supplierResearch,
+          parentName,
+          historicalClassifications: [],
+        });
 
-              // Classify via LLM (runs in parallel with other groups in this batch)
-              const result = await classifyInvoiceGroup({
-                transactions: cleanedTxns,
-                taxonomy,
-                companyContext,
-                supplierResearch,
-                parentName,
-                historicalClassifications: [],
-              });
-
-              // Find taxonomy node by path
-              const taxonomyNode = taxonomy.find(
-                (n) => n.fullPath === result.classificationPath
-              );
-
-              return { group, result, taxonomyNodeId: taxonomyNode?.id ?? null, error: null as unknown };
-            } catch (err) {
-              console.error(`[Pipeline] Failed to classify group:`, err);
-              return { group, result: null, taxonomyNodeId: null, error: err };
-            }
-          })
+        const taxonomyNode = taxonomy.find(
+          (n) => n.fullPath === result.classificationPath
         );
 
-        // Write results in bulk after the batch (DuckDB single-writer)
-        for (const { group, result, taxonomyNodeId, error } of batchResults) {
-          if (!error && result) {
-            const reviewScore = result.descriptionSupplierAligned ? 0 : 50;
-            const ids = group.transactionIds;
-            if (ids.length > 0) {
-              const placeholders = ids.map(() => '?').join(',');
-              await databaseService.run(
-                `UPDATE transactions SET taxonomy_node_id = ?, classification_reasoning = ?, review_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
-                taxonomyNodeId,
-                result.reasoning,
-                reviewScore,
-                ...ids
-              );
-            }
+        return { result, taxonomyNodeId: taxonomyNode?.id ?? null };
+      };
+
+      // First pass: classify all groups with adaptive concurrency
+      const firstPassResults = await executeWithRateLimiter(
+        groups,
+        limiter,
+        async (group, _index) => {
+          if (isCancelled(runId)) throw new Error('Cancelled');
+          const outcome = await classifyGroup(group);
+
+          // Write result immediately (sequential DB writes are fine — DuckDB single-writer)
+          processed++;
+          const reviewScore = outcome.result.descriptionSupplierAligned ? 0 : 50;
+          const ids = group.transactionIds;
+          if (ids.length > 0) {
+            const placeholders = ids.map(() => '?').join(',');
+            await databaseService.run(
+              `UPDATE transactions SET taxonomy_node_id = ?, classification_reasoning = ?, review_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+              outcome.taxonomyNodeId,
+              outcome.result.reasoning,
+              reviewScore,
+              ...ids
+            );
           }
 
-          processed++;
           updateRun({
             progressProcessed: processed,
             progressPercentage: total > 0 ? Math.round((processed / total) * 100) : 0,
@@ -351,6 +348,97 @@ async function runPipeline(
               percentage: total > 0 ? Math.round((processed / total) * 100) : 0,
               currentStep: `Classified ${processed}/${total} groups`,
             });
+          }
+
+          return outcome;
+        }
+      );
+
+      // Mark failed groups with sentinel (review_score = -1) so they're visible in Review tab
+      const stillFailedGroups: TransactionGroup[] = [];
+      for (let i = 0; i < firstPassResults.length; i++) {
+        const r = firstPassResults[i];
+        if (r.error) {
+          const group = groups[i];
+          const errMsg = r.error instanceof Error ? r.error.message : String(r.error);
+          const ids = group.transactionIds;
+          if (ids.length > 0) {
+            const placeholders = ids.map(() => '?').join(',');
+            await databaseService.run(
+              `UPDATE transactions SET review_score = -1, classification_reasoning = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+              `Classification failed: ${errMsg}`,
+              ...ids
+            );
+          }
+          stillFailedGroups.push(group);
+        }
+      }
+
+      // Retry pass: re-attempt failed groups with reduced concurrency
+      if (stillFailedGroups.length > 0 && !isCancelled(runId)) {
+        console.log(
+          `[Pipeline] Retrying ${stillFailedGroups.length} failed groups with reduced concurrency`
+        );
+
+        const retryLimiter = new AdaptiveRateLimiter({
+          initialConcurrency: 2,
+          minConcurrency: 1,
+          maxConcurrency: 4,
+          recoveryThreshold: 3,
+        });
+
+        const retryResults = await executeWithRateLimiter(
+          stillFailedGroups,
+          retryLimiter,
+          async (group) => {
+            if (isCancelled(runId)) throw new Error('Cancelled');
+            const outcome = await classifyGroup(group);
+            const reviewScore = outcome.result.descriptionSupplierAligned ? 0 : 50;
+            const ids = group.transactionIds;
+            if (ids.length > 0) {
+              const placeholders = ids.map(() => '?').join(',');
+              await databaseService.run(
+                `UPDATE transactions SET taxonomy_node_id = ?, classification_reasoning = ?, review_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+                outcome.taxonomyNodeId,
+                outcome.result.reasoning,
+                reviewScore,
+                ...ids
+              );
+            }
+
+            // Don't emit classifying progress if already cancelled
+            if (!isCancelled(runId)) {
+              emitProgress({
+                runId,
+                status: 'classifying',
+                phase: 'classifying',
+                total,
+                processed: total,
+                percentage: total > 0 ? Math.round((processed / total) * 100) : 0,
+                currentStep: `Retrying failed groups (${stillFailedGroups.length} remaining)`,
+              });
+            }
+
+            return outcome;
+          }
+        );
+
+        // Mark any groups that still failed after retry with sentinel
+        for (let i = 0; i < retryResults.length; i++) {
+          const r = retryResults[i];
+          if (r.error) {
+            const group = stillFailedGroups[i];
+            const errMsg = r.error instanceof Error ? r.error.message : String(r.error);
+            const ids = group.transactionIds;
+            if (ids.length > 0) {
+              const placeholders = ids.map(() => '?').join(',');
+              await databaseService.run(
+                `UPDATE transactions SET review_score = -1, classification_reasoning = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+                `Classification failed after retry: ${errMsg}`,
+                ...ids
+              );
+            }
+            console.error(`[Pipeline] Group permanently failed after retry:`, r.error);
           }
         }
       }
@@ -436,7 +524,6 @@ async function identifyRows(
 async function getDistinctSupplierNames(transactionIds: string[]): Promise<string[]> {
   if (transactionIds.length === 0) return [];
 
-  // Check if supplier_name column exists
   try {
     const placeholders = transactionIds.map(() => '?').join(',');
     const rows = await databaseService.all<{ supplier_name: string }>(
@@ -444,8 +531,15 @@ async function getDistinctSupplierNames(transactionIds: string[]): Promise<strin
       ...transactionIds
     );
     return rows.map((r) => r.supplier_name);
-  } catch {
-    return [];
+  } catch (err) {
+    // Only swallow "column not found" — supplier_name may not exist if not mapped
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('supplier_name') && (msg.includes('not found') || msg.includes('does not exist'))) {
+      console.warn('[Pipeline] supplier_name column not found — skipping supplier research');
+      return [];
+    }
+    // Re-throw unexpected errors (query timeout, DB locked, etc.)
+    throw err;
   }
 }
 

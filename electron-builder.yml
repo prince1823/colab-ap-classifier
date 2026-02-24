@@ -9,7 +9,7 @@ files:
   - "!dist/**/*.map"
 
 asarUnpack:
-  - "node_modules/@duckdb/node-bindings/**/*.node"
+  - "node_modules/@duckdb/node-bindings*/**"
 
 extraMetadata:
   main: dist/main/main/index.js
@@ -27,3 +27,6 @@ win:
 nsis:
   oneClick: true
   allowToChangeInstallationDirectory: false
+
+publish:
+  provider: github

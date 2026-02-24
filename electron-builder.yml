@@ -1,0 +1,29 @@
+appId: com.colab91.classifier
+productName: Colab91 Classifier
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+  - "!dist/**/*.map"
+
+asarUnpack:
+  - "node_modules/@duckdb/node-bindings/**/*.node"
+
+extraMetadata:
+  main: dist/main/main/index.js
+
+mac:
+  category: public.app-category.business
+  target:
+    - dmg
+    - zip
+
+win:
+  target:
+    - nsis
+
+nsis:
+  oneClick: true
+  allowToChangeInstallationDirectory: false

@@ -1,0 +1,236 @@
+.reclass-confirm-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  animation: reclassConfirmFadeIn 0.2s ease-out;
+}
+
+@keyframes reclassConfirmFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.reclass-confirm-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 480px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  animation: reclassConfirmSlideUp 0.3s ease-out;
+}
+
+@keyframes reclassConfirmSlideUp {
+  from {
+    transform: translate(-50%, -40%);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, -50%);
+    opacity: 1;
+  }
+}
+
+/* Header */
+.reclass-confirm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.reclass-confirm-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reclass-confirm-title svg {
+  color: #3b82f6;
+}
+
+.reclass-confirm-title h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.reclass-confirm-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.2s;
+}
+
+.reclass-confirm-close:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+/* Content */
+.reclass-confirm-content {
+  padding: 16px 20px;
+}
+
+/* Summary row */
+.reclass-confirm-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f0f9ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.reclass-row-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: #3b82f6;
+  color: white;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reclass-arrow {
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.reclass-target-path {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e40af;
+  word-break: break-word;
+}
+
+/* Feedback section */
+.reclass-confirm-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reclass-feedback-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.reclass-feedback-optional {
+  font-weight: 400;
+  color: #9ca3af;
+}
+
+.reclass-feedback-textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #374151;
+  resize: vertical;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.reclass-feedback-textarea::placeholder {
+  color: #9ca3af;
+}
+
+.reclass-feedback-textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.reclass-feedback-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.reclass-feedback-hint kbd {
+  display: inline-block;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-family: inherit;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  color: #6b7280;
+}
+
+/* Footer */
+.reclass-confirm-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.reclass-btn-skip,
+.reclass-btn-submit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.reclass-btn-skip {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.reclass-btn-skip:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.reclass-btn-submit {
+  background: #3b82f6;
+  color: white;
+  box-shadow: 0 1px 2px rgba(59, 130, 246, 0.2);
+}
+
+.reclass-btn-submit:hover {
+  background: #2563eb;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}

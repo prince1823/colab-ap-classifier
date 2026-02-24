@@ -1,0 +1,557 @@
+/* Hierarchical Pivot Table — tree styles */
+
+/* Hierarchical pivot table container */
+.pivot-hierarchy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.pivot-hierarchy-table th,
+.pivot-hierarchy-table td {
+  padding: 6px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Sticky header */
+.pivot-hierarchy-thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-tertiary);
+}
+
+.pivot-hierarchy-thead th {
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.pivot-hierarchy-thead th:first-child {
+  text-align: left;
+}
+
+/* Sticky footer */
+.pivot-hierarchy-tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background: var(--bg-tertiary);
+}
+
+.pivot-hierarchy-tfoot td {
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: right;
+  border-top: 2px solid var(--border-color);
+  border-bottom: none;
+}
+
+.pivot-hierarchy-tfoot td:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  z-index: 20;
+  background: var(--bg-tertiary);
+}
+
+/* Tree row — base */
+.pivot-tree-row {
+  transition: background 0.1s;
+}
+
+/* Depth-specific hover — matching pastel tones */
+.pivot-tree-row[data-depth="0"]:hover,
+.pivot-tree-row[data-depth="0"]:hover .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="0"]:hover .pivot-tree-total-cell {
+  background: #e6ecf5;
+}
+.pivot-tree-row[data-depth="1"]:hover,
+.pivot-tree-row[data-depth="1"]:hover .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="1"]:hover .pivot-tree-total-cell {
+  background: #edf2f8;
+}
+.pivot-tree-row[data-depth="2"]:hover,
+.pivot-tree-row[data-depth="2"]:hover .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="2"]:hover .pivot-tree-total-cell {
+  background: #f2f5fa;
+}
+.pivot-tree-row[data-depth="3"]:hover,
+.pivot-tree-row[data-depth="3"]:hover .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="3"]:hover .pivot-tree-total-cell,
+.pivot-tree-row[data-depth="4"]:hover,
+.pivot-tree-row[data-depth="4"]:hover .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="4"]:hover .pivot-tree-total-cell {
+  background: #f6f8fc;
+}
+
+/* Label cell (indented tree column) */
+.pivot-tree-label-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 260px;
+}
+
+
+/* Expand/collapse chevron */
+.pivot-tree-chevron {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.pivot-tree-chevron:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-primary);
+}
+
+.pivot-tree-chevron-placeholder {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+/* Row label text */
+.pivot-tree-label {
+}
+
+/* ── Depth-based visual blocks — each level is a distinct visual band ── */
+
+/* L1 — bold header band: light tinted background, left accent */
+.pivot-tree-row[data-depth="0"] {
+  background: #f1f4f9;
+  border-left: 4px solid #a8c4e6;
+}
+.pivot-tree-row[data-depth="0"] .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="0"] .pivot-tree-total-cell {
+  background: #f1f4f9;
+}
+.pivot-tree-row[data-depth="0"] td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.pivot-tree-row[data-depth="0"] .pivot-tree-label {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.pivot-tree-row[data-depth="0"] .pivot-tree-total-cell {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* L2 — medium band: very subtle tint, thinner accent */
+.pivot-tree-row[data-depth="1"] {
+  background: #f6f8fb;
+  border-left: 3px solid #c4d6eb;
+}
+.pivot-tree-row[data-depth="1"] .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="1"] .pivot-tree-total-cell {
+  background: #f6f8fb;
+}
+.pivot-tree-row[data-depth="1"] td {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.pivot-tree-row[data-depth="1"] .pivot-tree-label {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.pivot-tree-row[data-depth="1"] .pivot-tree-total-cell {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* L3 — light band: near-white, thin muted accent */
+.pivot-tree-row[data-depth="2"] {
+  background: #fafbfc;
+  border-left: 2px solid #dce4ed;
+}
+.pivot-tree-row[data-depth="2"] .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="2"] .pivot-tree-total-cell {
+  background: #fafbfc;
+}
+.pivot-tree-row[data-depth="2"] .pivot-tree-label {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.pivot-tree-row[data-depth="2"] .pivot-tree-total-cell {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* L4+ — plain rows: white, no accent */
+.pivot-tree-row[data-depth="3"],
+.pivot-tree-row[data-depth="4"] {
+  background: var(--bg-primary);
+  border-left: 2px solid transparent;
+}
+.pivot-tree-row[data-depth="3"] .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="3"] .pivot-tree-total-cell,
+.pivot-tree-row[data-depth="4"] .pivot-tree-label-cell,
+.pivot-tree-row[data-depth="4"] .pivot-tree-total-cell {
+  background: var(--bg-primary);
+}
+.pivot-tree-row[data-depth="3"] .pivot-tree-label,
+.pivot-tree-row[data-depth="4"] .pivot-tree-label {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-light);
+}
+.pivot-tree-row[data-depth="3"] .pivot-tree-total-cell,
+.pivot-tree-row[data-depth="4"] .pivot-tree-total-cell {
+  color: var(--text-light);
+  font-weight: 400;
+}
+
+/* Data cells */
+.pivot-tree-data-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* Row total */
+.pivot-tree-total-cell {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  border-left: 1px solid var(--border-color);
+  min-width: 110px;
+  background: var(--bg-primary);
+}
+
+/* Depth-based indentation for totals — L1 leftmost, deeper levels shift right */
+.pivot-tree-row[data-depth="0"] .pivot-tree-total-cell {
+  padding-right: 60px;
+}
+.pivot-tree-row[data-depth="1"] .pivot-tree-total-cell {
+  padding-right: 40px;
+}
+.pivot-tree-row[data-depth="2"] .pivot-tree-total-cell {
+  padding-right: 25px;
+}
+.pivot-tree-row[data-depth="3"] .pivot-tree-total-cell,
+.pivot-tree-row[data-depth="4"] .pivot-tree-total-cell {
+  padding-right: 10px;
+}
+
+.pivot-hierarchy-thead th:last-child {
+  text-align: right;
+  min-width: 110px;
+}
+
+.pivot-hierarchy-tfoot td:last-child {
+  text-align: right;
+  font-weight: 700;
+  color: var(--primary-color);
+}
+
+/* L1 group separator — strong top border between major groups */
+.pivot-tree-row-group-start {
+  border-top: 3px solid #cbd5e1;
+}
+
+/* L2 sub-group separator — lighter divider */
+.pivot-tree-row-subgroup-start {
+  border-top: 1px solid var(--border-color);
+}
+
+/* Toolbar styles */
+.pivot-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  flex-wrap: wrap;
+}
+
+.pivot-toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+}
+
+.pivot-toolbar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Row dimension chips */
+.pivot-dim-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: default;
+  transition: border-color 0.15s;
+}
+
+.pivot-dim-chip:hover {
+  border-color: var(--primary-color);
+}
+
+.pivot-dim-chip-x {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  opacity: 0.5;
+  transition: all 0.15s;
+}
+
+.pivot-dim-chip:hover .pivot-dim-chip-x {
+  opacity: 1;
+}
+
+.pivot-dim-chip-x:hover {
+  color: #ef4444;
+}
+
+.pivot-dim-chip-arrow {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0 1px;
+  display: flex;
+  align-items: center;
+  opacity: 0.4;
+  transition: all 0.15s;
+  font-size: 9px;
+}
+
+.pivot-dim-chip-arrow:hover {
+  opacity: 1;
+  color: var(--primary-color);
+}
+
+/* Add field button */
+.pivot-add-field-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: 1px dashed var(--border-color);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.pivot-add-field-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: rgba(59, 130, 246, 0.04);
+}
+
+/* Add field dropdown */
+.pivot-add-field-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  padding: 3px;
+  min-width: 160px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.pivot-add-field-item {
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.pivot-add-field-item:hover {
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--primary-color);
+}
+
+/* Small select dropdowns */
+.pivot-toolbar-select {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 11px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+  max-width: 150px;
+}
+
+.pivot-toolbar-select:focus {
+  border-color: var(--primary-color);
+}
+
+/* Expand/Collapse all buttons */
+.pivot-toolbar-icon-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 3px 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.pivot-toolbar-icon-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: rgba(59, 130, 246, 0.04);
+}
+
+/* Search input in toolbar */
+.pivot-toolbar-search {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+  width: 130px;
+  transition: border-color 0.15s;
+}
+
+.pivot-toolbar-search:focus {
+  border-color: var(--primary-color);
+}
+
+.pivot-toolbar-search::placeholder {
+  color: var(--text-light);
+}
+
+/* Dimension chip trigger — label + filter icon as one clickable area */
+.pivot-dim-chip-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.pivot-dim-chip-trigger:hover {
+  color: var(--primary-color);
+}
+
+.pivot-dim-chip-filter-icon {
+  flex-shrink: 0;
+  opacity: 0.35;
+  transition: all 0.15s;
+}
+
+.pivot-dim-chip-trigger:hover .pivot-dim-chip-filter-icon,
+.pivot-dim-chip-filter-icon[data-active] {
+  opacity: 1;
+  color: var(--primary-color);
+}
+
+.pivot-dim-chip[data-filterable] {
+  cursor: pointer;
+}
+
+/* Inline dimension filter button (overflow items) */
+.pivot-dim-filter-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 1px 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0.4;
+  transition: all 0.15s;
+  border-radius: 3px;
+  position: relative;
+}
+
+.pivot-dim-filter-btn:hover,
+.pivot-dim-filter-btn[data-active] {
+  opacity: 1;
+  color: var(--primary-color);
+}
+
+.pivot-dim-filter-btn[data-active] {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.pivot-dim-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 7px;
+  font-weight: 700;
+  min-width: 11px;
+  height: 11px;
+  border-radius: 6px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+/* Transaction count badge */
+.pivot-tree-count {
+  font-size: 9px;
+  color: var(--text-light);
+  margin-left: 4px;
+  font-weight: 400;
+}

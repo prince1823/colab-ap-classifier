@@ -8,6 +8,6 @@ export function registerChangelogHandlers(): void {
 
   registerHandler('changelog:revert', async (_event, ...args: unknown[]) => {
     const changeId = args[0] as string;
-    await revertChange(changeId);
+    return revertChange(changeId);
   });
 }

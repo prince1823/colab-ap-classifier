@@ -20,9 +20,7 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
     quarter: 'Quarter',
     month: 'Month',
     costCenter: 'Cost Center',
-    supplierCategory: 'Supplier Category',
     country: 'Country',
-    clientSpendCategory: 'Client Spend Category'
   }
 
   // Map backend/activeFilters keys to human-readable labels
@@ -38,9 +36,7 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
     quarter: 'Quarter',
     month: 'Month',
     costCenter: 'Cost Center',
-    supplierCategory: 'Supplier Category',
     country: 'Country',
-    clientSpendCategory: 'Client Spend Category'
   }
 
   const combined = useMemo(() => {

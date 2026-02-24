@@ -7,6 +7,14 @@ export function registerTransactionsHandlers(): void {
     return transactionsService.queryTransactions(filters as TransactionFilter | undefined);
   });
 
+  registerHandler('transactions:queryPaginated', async (_event, filters: unknown) => {
+    return transactionsService.queryTransactionsPaginated(filters as TransactionFilter | undefined);
+  });
+
+  registerHandler('transactions:count', async (_event, filters: unknown) => {
+    return transactionsService.getCount(filters as TransactionFilter | undefined);
+  });
+
   registerHandler('transactions:stats', async () => {
     return transactionsService.getStats();
   });

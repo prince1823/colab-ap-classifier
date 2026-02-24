@@ -18,6 +18,8 @@ export interface RuleCondition {
   field: string;
   operator: RuleOperator;
   value: string | number | string[];
+  /** How this condition joins to the next condition. Default: 'AND'. Ignored on the last condition. */
+  connector?: 'AND' | 'OR';
 }
 
 export interface OverrideRule {

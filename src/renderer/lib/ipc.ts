@@ -2,7 +2,7 @@ import type { IPCResponse } from '../../shared/types/ipc';
 import type { ProjectMetadata, ProjectMetadataUpdate, RecentProject } from '../../shared/types/project';
 import type { CSVPreviewWithMappings, CanonicalColumnMapping } from '../../shared/types/canonicalization';
 import type { ClassificationStartOptions, ClassificationProgress, ProjectRun } from '../../shared/types/classification';
-import type { Transaction, TransactionFilter, TransactionStats } from '../../shared/types/transactions';
+import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions } from '../../shared/types/transactions';
 import type { TaxonomyNode, TaxonomyMetadata, TaxonomySetInput, TaxonomyInfo, RulePackInfo } from '../../shared/types/taxonomy';
 import type { ProjectSupplier, SupplierUpdateInput, SupplierResearchResult } from '../../shared/types/suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
@@ -74,9 +74,12 @@ export const ipc = {
       on<ClassificationProgress>('classification:progress', callback),
   },
 
-  // ── Transactions (4 channels) ──
+  // ── Transactions (6 channels) ──
   transactions: {
     query: (filters?: TransactionFilter) => invoke<Transaction[]>('transactions:query', filters),
+    queryPaginated: (filters?: TransactionFilter) =>
+      invoke<PaginatedTransactions>('transactions:queryPaginated', filters),
+    count: (filters?: TransactionFilter) => invoke<number>('transactions:count', filters),
     stats: () => invoke<TransactionStats>('transactions:stats'),
     getColumns: () => invoke<string[]>('transactions:getColumns'),
     reclassify: (transactionIds: string[], taxonomyNodeId: string, feedback?: string) =>
@@ -125,7 +128,7 @@ export const ipc = {
   // ── Changelog (2 channels) ──
   changelog: {
     list: () => invoke<ChangeLog[]>('changelog:list'),
-    revert: (changeId: string) => invoke<void>('changelog:revert', changeId),
+    revert: (changeId: string) => invoke<string>('changelog:revert', changeId),
   },
 
   // ── Export (2 channels) ──
@@ -138,7 +141,7 @@ export const ipc = {
   settings: {
     get: () => invoke<AppSettings>('settings:get'),
     update: (input: SettingsUpdateInput) => invoke<void>('settings:update', input),
-    getModels: () => invoke<ModelInfo[]>('settings:getModels'),
+    getModels: (provider?: string) => invoke<ModelInfo[]>('settings:getModels', provider),
     getProviders: () => invoke<ProviderInfo[]>('settings:getProviders'),
   },
 };

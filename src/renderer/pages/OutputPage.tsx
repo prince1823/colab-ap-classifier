@@ -86,9 +86,11 @@ export default function OutputPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h2 className="text-lg font-semibold text-gray-900">Export</h2>
-        <p className="mt-1 text-sm text-gray-500">Export your classified transaction data to CSV.</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Export</h2>
+          <p className="mt-1 text-sm text-gray-500">Export your classified transaction data to CSV.</p>
+        </div>
       </div>
 
       {error && (

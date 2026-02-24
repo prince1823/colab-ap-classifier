@@ -23,11 +23,11 @@ export default function SettingsDialog({ open, onClose }: Props) {
     if (!open) return
     const load = async () => {
       try {
-        const [s, p, m] = await Promise.all([
+        const [s, p] = await Promise.all([
           ipc.settings.get(),
           ipc.settings.getProviders(),
-          ipc.settings.getModels(),
         ])
+        const m = await ipc.settings.getModels(s.provider)
         setSettings(s)
         setProviders(p)
         setModels(m)
@@ -41,6 +41,24 @@ export default function SettingsDialog({ open, onClose }: Props) {
     }
     load()
   }, [open])
+
+  // Re-fetch models when provider changes in the dropdown
+  useEffect(() => {
+    if (!provider) return
+    const loadModels = async () => {
+      try {
+        const m = await ipc.settings.getModels(provider)
+        setModels(m)
+        // Auto-select first model if current model isn't in the new list
+        if (m.length > 0 && !m.some((item) => item.id === model)) {
+          setModel(m[0].id)
+        }
+      } catch (e) {
+        // Ignore — models will just stay stale
+      }
+    }
+    loadModels()
+  }, [provider])
 
   const handleSave = async () => {
     setSaving(true)

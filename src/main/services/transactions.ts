@@ -1,5 +1,5 @@
 import { databaseService } from './database';
-import type { Transaction, TransactionFilter, TransactionStats } from '../../shared/types';
+import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions } from '../../shared/types';
 
 // Base columns that always exist on the transactions table
 const BASE_COLUMNS = [
@@ -9,6 +9,14 @@ const BASE_COLUMNS = [
 
 // In-memory cache for transaction columns (avoids information_schema query per page load)
 let cachedColumns: string[] | null = null;
+
+/**
+ * Invalidate the cached column list.
+ * Must be called after ALTER TABLE adds new columns or when a new project is opened.
+ */
+export function invalidateColumnCache(): void {
+  cachedColumns = null;
+}
 
 /**
  * Query transactions with dynamic filters, pagination, sorting.
@@ -58,13 +66,15 @@ export async function queryTransactions(
   const safeSortBy = validColumns.includes(sortBy) ? sortBy : 'row_index';
   const safeOrder = sortOrder === 'desc' ? 'DESC' : 'ASC';
 
-  // Pagination
+  // Pagination — return all rows when no pageSize specified
   const page = filters?.page || 1;
-  const pageSize = filters?.pageSize || 50;
-  const offset = (page - 1) * pageSize;
+  const pageSize = filters?.pageSize;
+  const offset = pageSize ? (page - 1) * pageSize : 0;
 
   // Get all dynamic columns to build SELECT
   const dynamicCols = validColumns.filter((c) => !BASE_COLUMNS.includes(c));
+
+  const limitClause = pageSize ? `LIMIT ${pageSize} OFFSET ${offset}` : '';
 
   const sql = `
     SELECT t.*, tax.full_path as classification_path
@@ -72,7 +82,7 @@ export async function queryTransactions(
     LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
     ${whereSQL}
     ORDER BY t.${safeSortBy} ${safeOrder}
-    LIMIT ${pageSize} OFFSET ${offset}
+    ${limitClause}
   `;
 
   const rows = await databaseService.all<Record<string, unknown>>(sql, ...params);
@@ -85,15 +95,22 @@ export async function queryTransactions(
       }
     }
 
+    // Convert any BigInt values to Number for JSON serialization safety.
+    // DuckDB may return BigInt for INTEGER columns depending on the driver version.
+    const safeCanonicFields: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(canonicalFields)) {
+      safeCanonicFields[k] = typeof v === 'bigint' ? Number(v) : v;
+    }
+
     return {
-      id: row.id as string,
-      rowIndex: row.row_index as number,
-      invoiceGroupKey: (row.invoice_group_key as string) || null,
-      taxonomyNodeId: (row.taxonomy_node_id as string) || null,
-      classificationPath: (row.classification_path as string) || null,
-      reviewScore: row.review_score !== null ? (row.review_score as number) : null,
-      classificationReasoning: (row.classification_reasoning as string) || null,
-      canonicalFields,
+      id: String(row.id),
+      rowIndex: Number(row.row_index ?? 0),
+      invoiceGroupKey: row.invoice_group_key ? String(row.invoice_group_key) : null,
+      taxonomyNodeId: row.taxonomy_node_id ? String(row.taxonomy_node_id) : null,
+      classificationPath: row.classification_path ? String(row.classification_path) : null,
+      reviewScore: row.review_score != null ? Number(row.review_score) : null,
+      classificationReasoning: row.classification_reasoning ? String(row.classification_reasoning) : null,
+      canonicalFields: safeCanonicFields,
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     };
@@ -117,11 +134,11 @@ export async function getStats(): Promise<TransactionStats> {
     : '0';
 
   const result = await databaseService.get<{
-    total_rows: number;
-    total_spend: number;
-    unique_suppliers: number;
-    classified_rows: number;
-    flagged_rows: number;
+    total_rows: number | bigint;
+    total_spend: number | bigint;
+    unique_suppliers: number | bigint;
+    classified_rows: number | bigint;
+    flagged_rows: number | bigint;
   }>(
     `SELECT
       COUNT(*) as total_rows,
@@ -133,11 +150,11 @@ export async function getStats(): Promise<TransactionStats> {
   );
 
   return {
-    totalRows: result?.total_rows || 0,
-    totalSpend: result?.total_spend || 0,
-    uniqueSuppliers: result?.unique_suppliers || 0,
-    classifiedRows: result?.classified_rows || 0,
-    flaggedForReviewRows: result?.flagged_rows || 0,
+    totalRows: Number(result?.total_rows ?? 0),
+    totalSpend: Number(result?.total_spend ?? 0),
+    uniqueSuppliers: Number(result?.unique_suppliers ?? 0),
+    classifiedRows: Number(result?.classified_rows ?? 0),
+    flaggedForReviewRows: Number(result?.flagged_rows ?? 0),
   };
 }
 
@@ -156,11 +173,102 @@ export async function getColumns(): Promise<string[]> {
 }
 
 /**
- * Invalidate the cached column list.
- * Must be called after ALTER TABLE adds new columns or when a new project is opened.
+ * Get total count of transactions matching the given filters.
  */
-export function invalidateColumnCache(): void {
-  cachedColumns = null;
+export async function getCount(filters?: TransactionFilter): Promise<number> {
+  const whereClauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters?.supplierName) {
+    whereClauses.push('t.supplier_name = ?');
+    params.push(filters.supplierName);
+  }
+  if (filters?.taxonomyNodeId) {
+    whereClauses.push('t.taxonomy_node_id = ?');
+    params.push(filters.taxonomyNodeId);
+  }
+  if (filters?.reviewScoreMin !== undefined) {
+    whereClauses.push('t.review_score >= ?');
+    params.push(filters.reviewScoreMin);
+  }
+  if (filters?.reviewScoreMax !== undefined) {
+    whereClauses.push('t.review_score <= ?');
+    params.push(filters.reviewScoreMax);
+  }
+  if (filters?.spendMin !== undefined) {
+    whereClauses.push('t.spend_amount >= ?');
+    params.push(filters.spendMin);
+  }
+  if (filters?.spendMax !== undefined) {
+    whereClauses.push('t.spend_amount <= ?');
+    params.push(filters.spendMax);
+  }
+  if (filters?.excludeTailSpend) {
+    const threshold = await getTailSpendThreshold();
+    whereClauses.push('t.spend_amount >= ?');
+    params.push(threshold);
+  }
+
+  const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const sql = `SELECT COUNT(*) as cnt FROM transactions t ${whereSQL}`;
+  const result = await databaseService.get<{ cnt: number | bigint }>(sql, ...params);
+  return Number(result?.cnt ?? 0);
+}
+
+/**
+ * Query transactions with forced pagination for large datasets.
+ * Returns rows + totalCount so frontend can track loading progress.
+ */
+export async function queryTransactionsPaginated(
+  filters?: TransactionFilter
+): Promise<PaginatedTransactions> {
+  const page = filters?.page || 1;
+  const pageSize = filters?.pageSize || 5000;
+  const totalCount = await getCount(filters);
+
+  const rows = await queryTransactions({
+    ...filters,
+    page,
+    pageSize,
+  });
+
+  return {
+    rows,
+    totalCount,
+    page,
+    pageSize,
+  };
+}
+
+/**
+ * Ensure performance indexes exist on the transactions table.
+ * Called once when a project is opened. DuckDB ignores IF NOT EXISTS
+ * so we catch errors from duplicate index names.
+ */
+export async function ensureIndexes(): Promise<void> {
+  const indexDefs = [
+    'CREATE INDEX IF NOT EXISTS idx_transactions_review_score ON transactions(review_score)',
+    'CREATE INDEX IF NOT EXISTS idx_transactions_row_index ON transactions(row_index)',
+  ];
+
+  // For dynamic canonical columns, only index well-known ones if they exist
+  const cols = await getColumns();
+  const optionalIndexCols = ['supplier_name', 'gl_description', 'spend_amount', 'line_description'];
+  for (const col of optionalIndexCols) {
+    if (cols.includes(col)) {
+      indexDefs.push(
+        `CREATE INDEX IF NOT EXISTS idx_transactions_${col} ON transactions(${col})`
+      );
+    }
+  }
+
+  for (const sql of indexDefs) {
+    try {
+      await databaseService.run(sql);
+    } catch {
+      // Index may already exist — safe to ignore
+    }
+  }
 }
 
 async function getTailSpendThreshold(): Promise<number> {

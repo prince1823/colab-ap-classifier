@@ -91,8 +91,20 @@ export function getStatus(): ProjectRun | null {
 export async function cancelClassification(runId: string): Promise<void> {
   cancelledRunIds.add(runId);
   if (currentRun && currentRun.id === runId) {
+    const phase = currentRun.status === 'classifying' ? 'classifying' : 'researching';
     currentRun.status = 'cancelled';
     currentRun.completedAt = new Date().toISOString();
+
+    // Immediately notify the frontend so the UI updates
+    emitProgress({
+      runId,
+      status: 'cancelled',
+      phase,
+      total: currentRun.progressTotal,
+      processed: currentRun.progressProcessed,
+      percentage: currentRun.progressPercentage,
+      currentStep: 'Cancelled',
+    });
   }
 }
 
@@ -133,17 +145,24 @@ async function runPipeline(
     // Step 2: Supplier research
     const supplierNames = await getDistinctSupplierNames(transactionIds);
     if (supplierNames.length > 0) {
-      await researchBatch(supplierNames, (done, total) => {
-        emitProgress({
-          runId,
-          status: 'researching',
-          phase: 'researching',
-          total,
-          processed: done,
-          percentage: total > 0 ? Math.round((done / total) * 100) : 0,
-          currentStep: `Researched ${done}/${total} suppliers`,
-        });
-      });
+      await researchBatch(
+        supplierNames,
+        (done, total) => {
+          // Don't emit researching progress if already cancelled —
+          // otherwise it overwrites the 'cancelled' status in the frontend
+          if (isCancelled(runId)) return;
+          emitProgress({
+            runId,
+            status: 'researching',
+            phase: 'researching',
+            total,
+            processed: done,
+            percentage: total > 0 ? Math.round((done / total) * 100) : 0,
+            currentStep: `Researched ${done}/${total} suppliers`,
+          });
+        },
+        () => isCancelled(runId)
+      );
     }
 
     if (isCancelled(runId)) return;
@@ -321,15 +340,18 @@ async function runPipeline(
             progressPercentage: total > 0 ? Math.round((processed / total) * 100) : 0,
           });
 
-          emitProgress({
-            runId,
-            status: 'classifying',
-            phase: 'classifying',
-            total,
-            processed,
-            percentage: total > 0 ? Math.round((processed / total) * 100) : 0,
-            currentStep: `Classified ${processed}/${total} groups`,
-          });
+          // Don't emit classifying progress if already cancelled
+          if (!isCancelled(runId)) {
+            emitProgress({
+              runId,
+              status: 'classifying',
+              phase: 'classifying',
+              total,
+              processed,
+              percentage: total > 0 ? Math.round((processed / total) * 100) : 0,
+              currentStep: `Classified ${processed}/${total} groups`,
+            });
+          }
         }
       }
     }

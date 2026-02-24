@@ -66,7 +66,15 @@ git branch --show-current
 
 Record the current git branch name.
 
-### 2.4 Check for Existing Log
+### 2.4 Get Commit ID
+
+```bash
+git rev-parse --short HEAD
+```
+
+Record the short commit hash (e.g., `a1b2c3d`).
+
+### 2.5 Check for Existing Log
 
 Each developer has one persistent log file: `{developer}.md`.
 
@@ -150,6 +158,7 @@ The file is always `internal_docs/daily_logs/{developer}.md` (one persistent fil
 ### {Feature | Scratchpad}
 
 **Branch:** `{git branch}`
+**Commit:** `{short commit hash}`
 **Session:** `{session filename}`
 
 #### What I worked on
@@ -176,6 +185,7 @@ The file is always `internal_docs/daily_logs/{developer}.md` (one persistent fil
 ### {Feature | Scratchpad}
 
 **Branch:** `{git branch}`
+**Commit:** `{short commit hash}`
 **Session:** `{session filename}`
 
 #### What I worked on
@@ -202,6 +212,7 @@ The file is always `internal_docs/daily_logs/{developer}.md` (one persistent fil
 ### {Feature | Scratchpad}
 
 **Branch:** `{git branch}`
+**Commit:** `{short commit hash}`
 **Session:** `{session filename}`
 
 #### What I worked on

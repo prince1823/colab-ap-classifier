@@ -92,10 +92,12 @@ export async function researchSingle(
 
 /**
  * Research multiple suppliers in parallel batches.
+ * Accepts an optional `shouldCancel` callback to abort between batches.
  */
 export async function researchBatch(
   supplierNames: string[],
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  shouldCancel?: () => boolean
 ): Promise<void> {
   const BATCH_SIZE = 10;
   let done = 0;
@@ -121,8 +123,10 @@ export async function researchBatch(
   const universe = await readSupplierUniverse();
   const matcher = buildMatcherIndex(universe);
 
-  // Process in batches
+  // Process in batches — check cancellation between each batch
   for (let i = 0; i < toResearch.length; i += BATCH_SIZE) {
+    if (shouldCancel?.()) return;
+
     const batch = toResearch.slice(i, i + BATCH_SIZE);
     const promises = batch.map(async (name) => {
       try {

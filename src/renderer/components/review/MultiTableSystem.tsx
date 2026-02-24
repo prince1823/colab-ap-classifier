@@ -1,12 +1,15 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { useDrag, useDrop } from 'react-dnd'
-import { Plus, X, Filter, Search, BarChart3, ChevronRight, ChevronDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronDown } from 'lucide-react'
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
 import { ipc } from '../../lib/ipc'
+import CurrentFiltersPanel from './CurrentFiltersPanel'
+import { evaluateFilterConditions } from '../../utils/filterEvaluation'
 import '../../styles/MultiTableSystem.css'
 
 export const ITEM_TYPE = 'FILTER_ROW'
 export const TABLE_ROW_TYPE = 'TABLE_ROW'
+export const TABLE_CARD_TYPE = 'TABLE_CARD'
 
 // Helper function to format column names for display
 const formatColumnTitle = (title) => {
@@ -14,7 +17,6 @@ const formatColumnTitle = (title) => {
   
   // Map of long names to shorter, cleaner versions
   const titleMap = {
-    'Client Spend Category Name': 'Spend Category',
     'supplier_name': 'Supplier',
     'gl_description': 'GL Description',
     'classification_l1': 'Classification L1',
@@ -41,18 +43,19 @@ const truncateName = (str) => {
 }
 
 // Hierarchical row component with expand/collapse
-const HierarchicalRow = ({ 
-  item, 
-  level = 0, 
-  expandedNodes, 
-  toggleExpanded, 
-  onSelect, 
-  isSelected, 
-  onDragStart, 
-  data, 
+const HierarchicalRow = ({
+  item,
+  level = 0,
+  expandedNodes,
+  toggleExpanded,
+  onSelect,
+  isSelected,
+  onDragStart,
+  data,
   column,
   taxonomyLevelFilter = null, // When set (1–4), only show rows for that taxonomy level
-  focusedPath = null // Full classification path string to visually highlight
+  focusedPath = null, // Full classification path string to visually highlight
+  onDoubleClickFilter = null
 }) => {
   const hasChildren = item.children && item.children.length > 0
   const isExpanded = expandedNodes.has(item.value)
@@ -78,8 +81,15 @@ const HierarchicalRow = ({
     }
   }
 
+  const handleDoubleClick = (e) => {
+    e.stopPropagation()
+    if (!onDoubleClickFilter) return
+    const selectionValue = item.fullPath || item.value
+    onDoubleClickFilter(column, [selectionValue])
+  }
+
   // Calculate total amount including children if not already calculated
-  const displayAmount = hasChildren && amount === 0 
+  const displayAmount = hasChildren && amount === 0
     ? item.children.reduce((sum, child) => sum + (child.amount || 0), 0)
     : amount
 
@@ -155,6 +165,7 @@ const HierarchicalRow = ({
         <div
           className={`table-row hierarchical level-${level} ${isSelected ? 'selected' : ''} ${isFocused ? 'focused' : ''}`}
           onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
           style={{ paddingLeft: `${level * 12 + 8}px` }}
         >
           <div className="row-left">
@@ -193,6 +204,7 @@ const HierarchicalRow = ({
           column={column}
           taxonomyLevelFilter={taxonomyLevelFilter}
           focusedPath={focusedPath}
+          onDoubleClickFilter={onDoubleClickFilter}
         />
       ))}
     </>
@@ -200,7 +212,7 @@ const HierarchicalRow = ({
 }
 
 // Regular draggable row component - can be dragged for filtering or reclassification
-const DraggableTableRow = ({ row, column, amount, onDragEnd, isSelected, isKeyboardFocused = false, onSelect, transactionRows, onToggleSelect, isMultiSelectMode, selectedRowsInTable = [], data, rowRef }) => {
+const DraggableTableRow = ({ row, column, amount, onDragEnd, isSelected, isKeyboardFocused = false, onSelect, transactionRows, onToggleSelect, isMultiSelectMode, selectedRowsInTable = [], data, rowRef, onDoubleClickFilter }) => {
   // Collect all selected rows from the same table for multi-drag
   const selectedValues = selectedRowsInTable.length > 0 && isSelected
     ? selectedRowsInTable
@@ -259,6 +271,17 @@ const DraggableTableRow = ({ row, column, amount, onDragEnd, isSelected, isKeybo
     } else {
       // Regular click: select/deselect
       onSelect && onSelect(row)
+    }
+  }
+
+  const handleDoubleClick = (e) => {
+    e.stopPropagation()
+    if (!onDoubleClickFilter) return
+    // If multi-selected, apply all selected values as filter
+    if (isSelected && selectedRowsInTable.length > 1) {
+      onDoubleClickFilter(column, selectedRowsInTable)
+    } else {
+      onDoubleClickFilter(column, [row])
     }
   }
 
@@ -329,6 +352,7 @@ const DraggableTableRow = ({ row, column, amount, onDragEnd, isSelected, isKeybo
       ref={combinedRef}
       className={`table-row ${isDragging ? 'dragging' : ''} ${isSelected ? 'selected' : ''} ${isKeyboardFocused ? 'keyboard-focused' : ''}`}
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       style={{ opacity: isDragging ? 0.5 : 1 }}
       title={tooltipText}
     >
@@ -343,41 +367,32 @@ const DraggableTableRow = ({ row, column, amount, onDragEnd, isSelected, isKeybo
 }
 
 
-// Table Component
-const FilterTable = ({
+// Table Component — wrapped with React.memo to avoid re-rendering when
+// only sibling tables' selection/filter state changes (props are shallow-compared).
+const FilterTable = React.memo(({
   tableId,
   title,
   column,
   data,
   activeFilters,
-  localFilters = {}, // Local filters specific to this table (from drag-drop)
   onClose,
-  onDropFilter,
-  onClearLocalFilters,
   selectedRows,
   onSelectRow,
   onToggleRowSelect,
   isHierarchical = false,
   collapsed = false,
   onToggleCollapse,
-  onFiltersChange,
-  clearFiltersRef,
   keyboardFocus = 'tree',
   tableNav = { tableIndex: 0, rowIndex: 0 },
   tableIndex = 0,
   focusedClassificationPath = null,
-  // Lifted from parent so search term is never lost on re-render
-  filterSearchTerm = '',
-  onFilterSearchChange
+  headerDragRef = null, // ref from DraggableTableCard — attaches to header bar for drag
+  onDoubleClickFilter = null // callback for double-click to apply filter
 }) => {
   const isTaxonomyTable = column === 'classification_path'
   const [expandedNodes, setExpandedNodes] = useState(new Set())
-  const [sortColumn, setSortColumn] = useState('amount') // 'amount' or 'name'
-  const [sortDirection, setSortDirection] = useState('desc') // 'asc' or 'desc'
-  const tableSearchTerm = filterSearchTerm
-  const setTableSearchTerm = onFilterSearchChange || (() => {})
-  const [selectedFilterItems, setSelectedFilterItems] = useState(new Set()) // Selected items for filtering
-  const [showFilterPanel, setShowFilterPanel] = useState(false) // Show/hide filter panel
+  const sortColumn = 'amount'
+  const sortDirection = 'desc'
   const tableContentRef = useRef(null) // Ref for scrollable table content
   const focusedRowRef = useRef(null) // Ref for currently focused row
   // For taxonomy table we always show a hierarchical tree view
@@ -396,33 +411,6 @@ const FilterTable = ({
     }
   }, [isTaxonomyTable])
 
-  // Close filter panel when table is collapsed
-  useEffect(() => {
-    if (collapsed) {
-      setShowFilterPanel(false)
-    }
-  }, [collapsed])
-
-  // Close filter panel when clicking outside (ignore clicks inside panel, including the search input)
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (!showFilterPanel || collapsed) return
-      const target = e.target
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.closest('input') || target.closest('textarea')) return
-      const filterPanel = target.closest('.table-filter-panel')
-      const filterButton = target.closest('.table-filter-btn')
-      const filterWrapper = target.closest('.table-filter-wrapper')
-      if (!filterPanel && !filterButton && !filterWrapper) {
-        setShowFilterPanel(false)
-      }
-    }
-
-    if (showFilterPanel) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showFilterPanel, collapsed])
-
   // Auto-scroll to focused row when keyboard navigation changes
   useEffect(() => {
     if (keyboardFocus === 'tables' && tableNav?.tableIndex === tableIndex && focusedRowRef.current) {
@@ -439,73 +427,6 @@ const FilterTable = ({
     }
   }, [keyboardFocus, tableNav, tableIndex])
 
-  // Get all unique values from table data for filter dropdown
-  const filterOptions = useMemo(() => {
-    if (!data || !column) return []
-    const uniqueValues = new Set()
-    data.forEach(row => {
-      const rawValue = row[column]
-      const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '') 
-        ? String(rawValue).trim() 
-        : 'Unknown'
-      uniqueValues.add(value)
-    })
-    return Array.from(uniqueValues).sort()
-  }, [data, column])
-
-  // Filter options based on search term
-  const filteredOptions = useMemo(() => {
-    if (!tableSearchTerm) return filterOptions
-    return filterOptions.filter(option => 
-      option.toLowerCase().includes(tableSearchTerm.toLowerCase())
-    )
-  }, [filterOptions, tableSearchTerm])
-
-  // Toggle filter item selection
-  const toggleFilterItem = (value) => {
-    setSelectedFilterItems(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(value)) {
-        newSet.delete(value)
-      } else {
-        newSet.add(value)
-      }
-      // Notify parent of filter changes
-      if (onFiltersChange) {
-        onFiltersChange(tableId, newSet.size > 0)
-      }
-      return newSet
-    })
-  }
-
-  // Clear all filters for this table
-  const clearAllFilters = () => {
-    setSelectedFilterItems(new Set())
-    setTableSearchTerm('')
-    if (onFilterSearchChange) onFilterSearchChange('')
-    if (onFiltersChange) {
-      onFiltersChange(tableId, false)
-    }
-  }
-
-  // Expose clear function to parent via ref
-  useEffect(() => {
-    if (clearFiltersRef && typeof clearFiltersRef === 'function') {
-      clearFiltersRef(() => {
-        setSelectedFilterItems(new Set())
-        setTableSearchTerm('')
-        if (onFilterSearchChange) onFilterSearchChange('')
-        if (onFiltersChange) {
-          onFiltersChange(tableId, false)
-        }
-      })
-      // Cleanup: remove ref when component unmounts
-      return () => {
-        clearFiltersRef(null)
-      }
-    }
-  }, [clearFiltersRef, tableId, onFiltersChange])
-
   const toggleExpanded = (value) => {
     setExpandedNodes(prev => {
       const newSet = new Set(prev)
@@ -518,39 +439,7 @@ const FilterTable = ({
     })
   }
 
-  // Handle sorting
-  const handleSort = (columnName) => {
-    if (sortColumn === columnName) {
-      // Toggle direction if same column
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')
-    } else {
-      // Set new column and default to desc
-      setSortColumn(columnName)
-      setSortDirection('desc')
-    }
-  }
-
-  const [{ isOver }, drop] = useDrop({
-    accept: ITEM_TYPE,
-    drop: (item) => {
-      if (item.type === 'filter' && item.column !== column) {
-        // Check if we have multiple selected values to drop
-        if (item.selectedValues && item.selectedValues.length > 1) {
-          // Drop all selected rows as multiple filters (OR logic within column)
-          // Pass target table ID so filter is applied locally to this table only
-          onDropFilter(item.column, item.value, column, tableId, item.selectedValues)
-        } else {
-          // Drop single row (adds to existing array if column already has filters)
-          // Pass target table ID so filter is applied locally to this table only
-          onDropFilter(item.column, item.value, column, tableId)
-        }
-      }
-      return { tableId }
-    },
-    collect: (monitor) => ({
-      isOver: monitor.isOver(),
-    }),
-  })
+  // Tables no longer accept drag-drop filters — drops go to the filter panel instead
   
   // Get selected rows for this table
   const tableSelectedRows = useMemo(() => {
@@ -559,44 +448,41 @@ const FilterTable = ({
       .map(key => key.split(':').slice(1).join(':'))
   }, [selectedRows, column])
 
-  // Apply local filters to data first (only affects this table)
-  const locallyFilteredData = useMemo(() => {
-    if (!data || Object.keys(localFilters).length === 0) return data
-    
-    return data.filter(row => {
-      // Apply local filters (from drag-drop) - OR logic within each column
-      return Object.entries(localFilters).every(([key, value]) => {
-        if (!value) return true
-        if (Array.isArray(value)) {
-          // OR logic: row matches if it matches any value in the array
-          return value.some(v => {
-            const rowVal = (row[key] || '').toString().trim()
-            const filterVal = (v || '').toString().trim()
-            return rowVal === filterVal
-          })
-        }
-        // Single value match
-        const rowVal = (row[key] || '').toString().trim()
-        const filterVal = (value || '').toString().trim()
-        return rowVal === filterVal
-      })
-    })
-  }, [data, localFilters])
+  // Data is used directly — no per-table local filters
+
+  // Pre-build a lookup map: column value → matching transaction rows.
+  // This replaces the O(n) data.filter() that was running inside EVERY row render,
+  // turning O(rows × transactions) into O(transactions) once + O(1) per row.
+  const transactionsByValue = useMemo(() => {
+    const map = new Map<string, any[]>()
+    if (!data || !column) return map
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i]
+      const val = (row[column] || '').toString().trim() || 'Unknown'
+      let arr = map.get(val)
+      if (!arr) {
+        arr = []
+        map.set(val, arr)
+      }
+      arr.push(row)
+    }
+    return map
+  }, [data, column])
 
   // Build hierarchical or flat table data
   const tableData = useMemo(() => {
-    if (!locallyFilteredData || !column) return []
+    if (!data || !column) return []
 
     // ── Taxonomy table: build tree from ALL taxonomy nodes, then overlay
     //    transaction amounts so every node is visible even with $0 spend.
     if (isTaxonomyTable && taxonomyNodes.length > 0) {
       // 1. Accumulate spend per full_path from transaction data
       const spendByPath = {}
-      for (const row of locallyFilteredData) {
+      for (const row of data) {
         const rawPath = row.classification_path || row.taxonomy_path || ''
         if (!rawPath) continue
         const path = String(rawPath).trim()
-        const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
+        const amount = parseFloat(row.spend_amount || 0) || 0
         spendByPath[path] = (spendByPath[path] || 0) + amount
       }
 
@@ -657,12 +543,12 @@ const FilterTable = ({
     }
 
     // ── Non-taxonomy tables: original grouping logic
-    const grouped = locallyFilteredData.reduce((acc, row) => {
+    const grouped = data.reduce((acc, row) => {
       const rawValue = row[column]
       const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '')
         ? String(rawValue).trim()
         : 'Unknown'
-      const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
+      const amount = parseFloat(row.spend_amount || 0) || 0
 
       if (effectiveHierarchical) {
         const parts = value.includes('|')
@@ -709,9 +595,7 @@ const FilterTable = ({
               : []
           }))
           .filter(item => {
-            const hasZeroAmount = (item.amount || 0) === 0
             const hasNoChildren = !item.children || item.children.length === 0
-            if (hasZeroAmount && hasNoChildren) return false
             const isBlank = !item.value ||
                            item.value.trim() === '' ||
                            item.value.toLowerCase() === '[blank]' ||
@@ -742,35 +626,16 @@ const FilterTable = ({
         amount: amount || 0 
       }))
       .filter(item => {
-        // Filter out entries with zero amount
-        const hasZeroAmount = (item.amount || 0) === 0
-        if (hasZeroAmount) {
-          return false
-        }
-        
         // Filter out blank/empty values
-        const isBlank = !item.value || 
-                       item.value.trim() === '' || 
-                       item.value.toLowerCase() === '[blank]' || 
+        const isBlank = !item.value ||
+                       item.value.trim() === '' ||
+                       item.value.toLowerCase() === '[blank]' ||
                        item.value.toLowerCase() === 'unknown' ||
                        item.value.toLowerCase() === 'blank'
         if (isBlank) {
           return false
         }
-        
-        // Apply search term filter: when user types in the filter box, only show matching rows
-        const term = (tableSearchTerm || '').toString().trim()
-        if (term) {
-          if (!item.value || !String(item.value).toLowerCase().includes(term.toLowerCase())) {
-            return false
-          }
-        }
-        
-        // Apply per-table filter (selected items) if present
-        if (selectedFilterItems.size > 0) {
-          return selectedFilterItems.has(item.value)
-        }
-        
+
         return true
       })
       .sort((a, b) => {
@@ -787,14 +652,12 @@ const FilterTable = ({
     
     return flatData
   }, [
-    locallyFilteredData,
+    data,
     column,
     isTaxonomyTable,
     effectiveHierarchical,
-    selectedFilterItems,
     sortColumn,
     sortDirection,
-    tableSearchTerm,
     taxonomyNodes
   ])
 
@@ -866,28 +729,24 @@ const FilterTable = ({
   }, [tableData, effectiveHierarchical])
 
   return (
-    <div 
-      ref={drop}
-      className={`filter-table ${isTaxonomyTable ? 'taxonomy-table' : ''} ${isOver ? 'drag-over' : ''}`}
+    <div
+      className={`filter-table ${isTaxonomyTable ? 'taxonomy-table' : ''}`}
     >
-      {/* Table Header with Title and Close - no click action so content stays visible */}
-      <div 
-        className="table-header-bar" 
+      {/* Table Header with Title and Close - header bar is the drag handle for reordering */}
+      <div
+        ref={headerDragRef}
+        className={`table-header-bar ${headerDragRef ? 'draggable' : ''}`}
         style={{ position: 'relative' }}
       >
-        {/* Do not render a close button for the permanent Classification Path table */}
-        {!isTaxonomyTable && (
-          <div className="table-header-actions" onClick={(e) => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => onClose(tableId)} title="Close">
-              <X size={12} />
-            </button>
-          </div>
-        )}
+        <div className="table-header-actions" onClick={(e) => e.stopPropagation()}>
+          <button className="close-btn" onClick={() => onClose && onClose(tableId)} title="Close">
+            <X size={12} />
+          </button>
+        </div>
         <div className="table-title-section">
-          <span 
-            className="table-title-text" 
+          <span
+            className="table-title-text"
             title={title}
-            onMouseEnter={(e) => e.stopPropagation()}
           >
             {formatColumnTitle(title)}
           </span>
@@ -896,141 +755,8 @@ const FilterTable = ({
               <span className="table-total-badge" title={`Total: $${totalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}>
                 ${(totalAmount / 1000).toFixed(0)}k
               </span>
-              {/* Classification Path table: sort button to the right of amount */}
-              {isTaxonomyTable && (
-                <button
-                  type="button"
-                  className="table-sort-btn"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleSort('amount')
-                  }}
-                  title={sortDirection === 'asc' ? 'Sort descending' : 'Sort ascending'}
-                >
-                  {sortColumn === 'amount' ? (
-                    sortDirection === 'asc' ? (
-                      <ArrowUp size={14} className="sort-icon active" />
-                    ) : (
-                      <ArrowDown size={14} className="sort-icon active" />
-                    )
-                  ) : (
-                    <ArrowDown size={14} className="sort-icon" />
-                  )}
-                </button>
-              )}
-              {/* For the Classification Path table we keep the UI ultra-simple:
-                  no per-table filter dropdown, just the hierarchy view. */}
-              {!isTaxonomyTable && (
-                <div 
-                  className="table-filter-wrapper" 
-                  onClick={(e) => e.stopPropagation()} 
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  <button 
-                    className={`table-filter-btn ${selectedFilterItems.size > 0 ? 'active' : ''}`}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      e.preventDefault()
-                      setShowFilterPanel(!showFilterPanel)
-                    }}
-                    title={selectedFilterItems.size > 0 ? `${selectedFilterItems.size} filter(s) active - Click to modify` : "Filter this table"}
-                  >
-                    <Filter size={14} />
-                    {selectedFilterItems.size > 0 && (
-                      <span className="filter-badge-count">{selectedFilterItems.size}</span>
-                    )}
-                  </button>
-              
-              {/* Filter Panel - Dropdown with Items */}
-              {showFilterPanel && !collapsed && (
-                <div 
-                  className="table-filter-panel"
-                  onClick={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  {/* Header */}
-                  <div className="table-filter-header">
-                    <h4 className="table-filter-title">Filter</h4>
-                  </div>
-                  
-                  {/* Search Bar */}
-                  <div className="table-filter-search">
-                    <Search size={14} className="filter-search-icon" />
-                    <input
-                      type="text"
-                      placeholder="Search items..."
-                      value={tableSearchTerm ?? ''}
-                      onChange={(e) => setTableSearchTerm(e.target.value)}
-                      className="table-filter-input"
-                      autoFocus
-                      autoComplete="off"
-                    />
-                    {tableSearchTerm && (
-                      <button 
-                        className="table-filter-clear-btn"
-                        onClick={() => setTableSearchTerm('')}
-                        title="Clear search"
-                      >
-                        <X size={14} />
-                      </button>
-                    )}
-                  </div>
-                  
-                  {/* Filter Items List - multi-select checkboxes; filter by search when typing */}
-                  <div className="table-filter-items">
-                    {tableSearchTerm && filteredOptions.length === 0 ? (
-                      <div className="table-filter-empty">
-                        <p>No items found</p>
-                      </div>
-                    ) : (
-                      (tableSearchTerm ? filteredOptions : filterOptions).map((option) => {
-                        const isSelected = selectedFilterItems.has(option)
-                        return (
-                          <label
-                            key={option}
-                            className={`table-filter-item ${isSelected ? 'selected' : ''}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => toggleFilterItem(option)}
-                            />
-                            <span className="filter-item-label">{option}</span>
-                          </label>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
-                  {/* Sort: ascending/descending to the right of filter */}
-                  <button
-                    type="button"
-                    className="table-sort-btn"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleSort('amount')
-                    }}
-                    title={sortDirection === 'asc' ? 'Sort descending' : 'Sort ascending'}
-                  >
-                    {sortColumn === 'amount' ? (
-                      sortDirection === 'asc' ? (
-                        <ArrowUp size={14} className="sort-icon active" />
-                      ) : (
-                        <ArrowDown size={14} className="sort-icon active" />
-                      )
-                    ) : (
-                      <ArrowDown size={14} className="sort-icon" />
-                    )}
-                  </button>
-                </div>
-              )}
             </>
           )}
-        </div>
-        <div className="table-header-actions" onClick={(e) => e.stopPropagation()}>
-          {/* Empty for now - filter moved to title section */}
         </div>
       </div>
 
@@ -1090,14 +816,6 @@ const FilterTable = ({
                     ? displayedHierarchicalData
                     : tableData
 
-                  // Apply filter based on selected items
-                  const filteredData = baseData.filter(item => {
-                    if (selectedFilterItems.size > 0) {
-                      return selectedFilterItems.has(item.value) || 
-                             (item.fullPath && selectedFilterItems.has(item.fullPath))
-                    }
-                    return true
-                  })
                   // When using the flattened list for a specific taxonomy level,
                   // we don't want HierarchicalRow to apply an extra level filter,
                   // otherwise nothing will render (all rows are rendered at level 0).
@@ -1107,7 +825,7 @@ const FilterTable = ({
                       : (isTaxonomyTable ? activeTaxonomyLevel : null)
                   return (
                     <>
-                      {filteredData.map((item, idx) => (
+                      {baseData.map((item, idx) => (
                         <HierarchicalRow
                           key={`${item.fullPath || item.value}-${idx}`}
                           item={item}
@@ -1116,10 +834,11 @@ const FilterTable = ({
                           toggleExpanded={toggleExpanded}
                           onSelect={onSelectRow}
                           isSelected={selectedRows?.includes(item.value)}
-                          data={locallyFilteredData}
+                          data={data}
                           column={column}
                           taxonomyLevelFilter={taxonomyLevelFilterProp}
                           focusedPath={isTaxonomyTable ? focusedClassificationPath : null}
+                          onDoubleClickFilter={onDoubleClickFilter}
                         />
                       ))}
                     </>
@@ -1132,13 +851,9 @@ const FilterTable = ({
                   return (
                     <>
                       {tableData.map((item, idx) => {
-                        // Find transaction rows that match this value for reclassification
-                        // Use locallyFilteredData to only find transactions that pass local filters
-                        const matchingTransactions = locallyFilteredData.filter(t => {
-                          const val = (t[column] || '').toString().trim() || 'Unknown'
-                          const itemVal = (item.value || '').toString().trim() || 'Unknown'
-                          return val === itemVal
-                        })
+                        // O(1) lookup from pre-built map (was O(n) data.filter per row)
+                        const itemVal = (item.value || '').toString().trim() || 'Unknown'
+                        const matchingTransactions = transactionsByValue.get(itemVal) || []
 
                         const rowKey = `${column}:${item.value}`
                         const isSelected = selectedRows?.includes(rowKey)
@@ -1158,6 +873,7 @@ const FilterTable = ({
                             selectedRowsInTable={tableSelectedRows}
                             data={data}
                             rowRef={isKeyboardFocused ? focusedRowRef : null}
+                            onDoubleClickFilter={onDoubleClickFilter}
                           />
                         )
                       })}
@@ -1171,16 +887,81 @@ const FilterTable = ({
       </div>
     </div>
   )
+})
+
+// Wrapper component that makes a FilterTable draggable for reordering
+const DraggableTableCard = ({ tableId, index, isDraggable, moveTable, children }) => {
+  const ref = useRef(null)
+
+  const [{ isDragging }, drag, preview] = useDrag({
+    type: TABLE_CARD_TYPE,
+    item: () => ({ tableId, index }),
+    canDrag: () => isDraggable,
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  })
+
+  const [{ isOver, canDrop }, drop] = useDrop({
+    accept: TABLE_CARD_TYPE,
+    canDrop: () => isDraggable,
+    hover: (dragItem: { tableId: string; index: number }, monitor) => {
+      if (!ref.current) return
+      const dragIndex = dragItem.index
+      const hoverIndex = index
+      if (dragIndex === hoverIndex) return
+
+      // Determine rectangle on screen
+      const hoverBoundingRect = ref.current.getBoundingClientRect()
+      // Get horizontal middle
+      const hoverMiddleX = (hoverBoundingRect.right - hoverBoundingRect.left) / 2
+      // Determine mouse position
+      const clientOffset = monitor.getClientOffset()
+      if (!clientOffset) return
+      // Get pixels to the left
+      const hoverClientX = clientOffset.x - hoverBoundingRect.left
+
+      // Only perform the move when the mouse has crossed half of the item's width
+      // When dragging right, only move when cursor is past 50%
+      if (dragIndex < hoverIndex && hoverClientX < hoverMiddleX) return
+      // When dragging left, only move when cursor is before 50%
+      if (dragIndex > hoverIndex && hoverClientX > hoverMiddleX) return
+
+      moveTable(dragIndex, hoverIndex)
+      dragItem.index = hoverIndex
+    },
+    collect: (monitor) => ({
+      isOver: monitor.isOver(),
+      canDrop: monitor.canDrop(),
+    }),
+  })
+
+  // Connect both drag preview and drop to the same ref
+  preview(drop(ref))
+
+  return (
+    <div
+      ref={ref}
+      className={`draggable-table-card ${isDragging ? 'table-dragging' : ''} ${isOver && canDrop ? 'table-drop-target' : ''}`}
+      style={{ opacity: isDragging ? 0.4 : 1 }}
+    >
+      {React.Children.map(children, child => {
+        if (React.isValidElement(child)) {
+          return React.cloneElement(child as React.ReactElement<any>, { headerDragRef: isDraggable ? drag : null })
+        }
+        return child
+      })}
+    </div>
+  )
 }
 
-const MultiTableSystem = ({ 
-  transactions, 
-  activeFilters, 
-  setActiveFilters, 
-  selectedRows, 
+const MultiTableSystem = ({
+  transactions,
+  allTransactions = [],
+  activeFilters,
+  setActiveFilters,
+  selectedRows,
   setSelectedRows,
-  mode,
-  onSwitchToVisualizations,
   // Props from Dashboard
   filterState = {
     supplier: '',
@@ -1194,29 +975,46 @@ const MultiTableSystem = ({
     quarter: '',
     month: '',
     costCenter: '',
-    supplierCategory: '',
     country: '',
-    clientSpendCategory: ''
+    lineDescription: ''
   },
   setFilterState,
   tables = [],
   setTables,
+  onReorderTables, // raw setTables without undo — used for drag reorder
   availableColumns = [],
   addTable,
   tableLocalFilters = {},
   setTableLocalFilters,
-  onTableFiltersChange,
-  clearAllTableFiltersRef,
+  // Global filter panel props
+  filterCombinator = 'AND',
+  filterConnectors = {},
+  filterGroupOperators = {},
+  onSetFilterCombinator,
+  onSetFilterConnector,
+  onSetFilterOperator,
+  onRemoveFilter,
+  onRemoveLocalFilter,
+  onClearAll,
+  onAddFilter,
+  onDoubleClickFilter,
+  onApplySelectionAsFilter,
   keyboardFocus,
   setKeyboardFocus,
   tableNav,
   setTableNav,
   onFocusedClassificationPathChange
 }) => {
-  const [showChartPanel, setShowChartPanel] = useState(false)
-  const clearFiltersCallbacks = useRef(new Map())
-  const tableFilterStates = useRef(new Map())
   const [focusedClassificationPath, setFocusedClassificationPath] = useState(null)
+
+  // Double-click applies ALL selected rows as filters (any table), not just the clicked row
+  const effectiveOnDoubleClickFilter = useCallback((column, values) => {
+    if ((selectedRows && selectedRows.length > 0) && onApplySelectionAsFilter) {
+      onApplySelectionAsFilter()
+      return
+    }
+    if (onDoubleClickFilter) onDoubleClickFilter(column, values)
+  }, [selectedRows, onApplySelectionAsFilter, onDoubleClickFilter])
 
   const setFocusedPath = useCallback((path) => {
     setFocusedClassificationPath(path)
@@ -1230,34 +1028,22 @@ const MultiTableSystem = ({
     }
   }, [focusedClassificationPath, onFocusedClassificationPathChange])
 
-  // Filter search term per table (lifted so it never resets on re-render)
-  const [filterSearchByTableId, setFilterSearchByTableId] = useState({})
-
-  // Expose clear all filters function
-  const clearAllTableFilters = useCallback(() => {
-    clearFiltersCallbacks.current.forEach(clearFn => {
-      if (clearFn) clearFn()
-    })
-    tableFilterStates.current.clear()
-    if (onTableFiltersChange) {
-      onTableFiltersChange(false)
-    }
-  }, [onTableFiltersChange])
-  
-  // Expose clear function to parent via ref
-  useEffect(() => {
-    if (clearAllTableFiltersRef) {
-      clearAllTableFiltersRef.current = clearAllTableFilters
-    }
-  }, [clearAllTableFilters, clearAllTableFiltersRef])
 
   const removeTable = (tableId) => {
     setTables(tables.filter(t => t.id !== tableId))
   }
 
-  const setTableFilterSearch = useCallback((tableId, term) => {
-    setFilterSearchByTableId(prev => ({ ...prev, [tableId]: term }))
-  }, [])
+  // Move table from one position to another (for drag-and-drop reordering)
+  // Uses onReorderTables (raw setter) so reordering is NOT undoable
+  const moveTable = useCallback((fromIndex: number, toIndex: number) => {
+    const setter = onReorderTables || setTables
+    setter((prevTables) => {
+      const updated = [...prevTables]
+      const [moved] = updated.splice(fromIndex, 1)
+      updated.splice(toIndex, 0, moved)
+      return updated
+    })
+  }, [onReorderTables, setTables])
 
   const toggleTableCollapse = (tableId) => {
     setTables(tables.map(t => 
@@ -1265,45 +1051,7 @@ const MultiTableSystem = ({
     ))
   }
 
-  const handleDropFilter = (sourceColumn, sourceValue, targetColumn, targetTableId, allSelectedRows = null) => {
-    // Apply filter locally to target table only, not globally
-    // This ensures only the target table is affected by the drag-drop filter
-    const filterValues = allSelectedRows && allSelectedRows.length > 1 ? allSelectedRows : [sourceValue]
-    
-    if (setTableLocalFilters) {
-      setTableLocalFilters(prev => {
-        const targetFilters = prev[targetTableId] || {}
-        const existingValues = Array.isArray(targetFilters[sourceColumn]) 
-          ? targetFilters[sourceColumn] 
-          : targetFilters[sourceColumn] 
-            ? [targetFilters[sourceColumn]] 
-            : []
-        
-        const newValues = [...new Set([...existingValues, ...filterValues])]
-        
-        return {
-          ...prev,
-          [targetTableId]: {
-            ...targetFilters,
-            [sourceColumn]: newValues
-          }
-        }
-      })
-    }
-    
-    console.log(`Local filter applied to table ${targetTableId}: ${sourceColumn} = ${filterValues.length} value(s), viewing ${targetColumn}`)
-  }
-  
-  // Clear local filters for a specific table
-  const clearTableLocalFilters = useCallback((tableId) => {
-    if (setTableLocalFilters) {
-      setTableLocalFilters(prev => {
-        const next = { ...prev }
-        delete next[tableId]
-        return next
-      })
-    }
-  }, [setTableLocalFilters])
+  // Drag-drop filter functions removed — drops now go to the filter panel
   
   // Clear all local filters
   const clearAllLocalFilters = useCallback(() => {
@@ -1317,141 +1065,175 @@ const MultiTableSystem = ({
     setSelectedRows([])
   }, [])
 
-  // Handle toggle row selection (for multi-select with Ctrl/Cmd+Click)
+  // Handle toggle row selection (for multi-select with Ctrl/Cmd+Click).
+  // Supports cross-table selection: Ctrl+click in any table adds/removes that row
+  // without clearing selections in other tables.
   const handleToggleRowSelect = useCallback((rowValue, column) => {
+    // Activate table keyboard focus on Ctrl/Cmd+Click
+    if (column && setKeyboardFocus) {
+      setKeyboardFocus('tables')
+      const clickedTableIndex = tables.findIndex(t => t.column === column)
+      if (clickedTableIndex >= 0 && setTableNav) {
+        setTableNav(prev => ({ ...prev, tableIndex: clickedTableIndex }))
+      }
+    }
+
     const key = column ? `${column}:${rowValue}` : rowValue
     setSelectedRows(prev => {
       if (!column) {
-        // No column specified - simple toggle
-        if (prev.includes(key)) {
-          return prev.filter(v => v !== key)
-        } else {
-          return [...prev, key]
-        }
-      }
-      
-      // Check if there are selections from a different table
-      const currentTableSelections = prev.filter(v => {
-        const [prevColumn] = v.split(':')
-        return prevColumn === column
-      })
-      
-      // If toggling from a different table, clear all previous selections first
-      if (prev.length > 0 && currentTableSelections.length === 0) {
-        // This is a toggle from a different table, clear all and start fresh
-        return [key]
-      }
-      
-      // Same table - allow multiple selections
-      if (prev.includes(key)) {
-        return prev.filter(v => v !== key)
-      } else {
+        if (prev.includes(key)) return prev.filter(v => v !== key)
         return [...prev, key]
       }
+      // Toggle this row (add or remove) regardless of which table other selections are from
+      if (prev.includes(key)) {
+        return prev.filter(v => v !== key)
+      }
+      return [...prev, key]
     })
   }, [])
 
 
-  // Get unique values for filter dropdowns
+  // Get unique values for filter dropdowns.
+  // Depend on transactions.length (not reference) to avoid recomputing on every chunk.
+  const txnLen = transactions.length
   const filterOptions = useMemo(() => {
+    if (txnLen === 0) return { confidences: [], suppliers: [], classifications: [] }
     const confidences = new Set()
     const suppliers = new Set()
     const classifications = new Set()
-    
-    transactions.forEach(row => {
-      const conf = (row.confidence || row.classification_confidence || 'high').toLowerCase()
-      confidences.add(conf === 'h' ? 'high' : conf === 'm' ? 'medium' : conf === 'l' ? 'low' : conf)
+
+    for (let i = 0; i < transactions.length; i++) {
+      const row = transactions[i]
+      const score = typeof row.review_score === 'number' ? row.review_score : null
+      if (score !== null) {
+        if (score >= 80) confidences.add('high')
+        else if (score >= 50) confidences.add('medium')
+        else confidences.add('low')
+      }
       if (row.supplier_name) suppliers.add(row.supplier_name)
       if (row.classification_path) {
         const l1 = row.classification_path.split('|')[0]
         if (l1) classifications.add(l1.trim())
       }
-    })
-    
+    }
+
     return {
       confidences: Array.from(confidences).sort(),
       suppliers: Array.from(suppliers).sort().slice(0, 50), // Top 50
       classifications: Array.from(classifications).sort()
     }
-  }, [transactions])
+  }, [txnLen])
+
+  // Map filterState keys → backend keys (for normalizing operator/connector lookups)
+  const fsKeyToBackendKey = useMemo(() => ({
+    supplier: 'supplier_name',
+    classificationL1: 'classification_l1',
+    classificationL2: 'classification_l2',
+    classificationL3: 'classification_l3',
+    classificationL4: 'classification_l4',
+    glDescription: 'gl_description',
+    lineDescription: 'line_description',
+  }), [])
 
   // Base filtered transactions - apply global filters (from filter panel) EXCEPT
   // the per-level taxonomy filters (classificationL1–L4). We will apply those
   // separately so that the Classification Path table can always show the full
   // taxonomy while other tables respect the level filters.
   const baseFilteredTransactions = useMemo(() => {
-    return transactions.filter(row => {
-      // Apply global active filters (from filter panel) - OR logic within each column
-      const passesActiveFilters = Object.entries(activeFilters).every(([key, value]) => {
-        // Ignore legacy per-level classification filters here; we handle
-        // all taxonomy filtering via filterState.classificationL1–L4 using
-        // the full classification_path / taxonomy_path below.
-        if (key === 'classification_l1' || key === 'classification_l2' || key === 'classification_l3' || key === 'classification_l4') {
-          return true
-        }
-        if (!value) return true
-        if (Array.isArray(value)) {
-          // OR logic: row matches if it matches any value in the array
-          return value.some(v => {
-            const rowVal = (row[key] || '').toString().trim()
-            const filterVal = (v || '').toString().trim()
-            return rowVal === filterVal
-          })
-        }
-        // Single value match
-        const rowVal = (row[key] || '').toString().trim()
-        const filterVal = (value || '').toString().trim()
-        return rowVal === filterVal
-      })
-      
-      if (!passesActiveFilters) return false
-      
-      // Apply advanced filters (from filter panel) - OR logic within each category,
-      // but skip classificationL1–L4 in this base pass so the taxonomy table
-      // always sees the full tree.
-      if (Array.isArray(filterState.supplier) && filterState.supplier.length > 0) {
-        if (!filterState.supplier.includes(row.supplier_name)) return false
-      }
+    const isOrMode = filterCombinator === 'OR'
 
-      if (Array.isArray(filterState.glDescription) && filterState.glDescription.length > 0) {
-        if (!filterState.glDescription.includes(row.gl_description)) return false
+    // Operator-aware match
+    const matchWithOperator = (rowVal: string, filterVal: string, operator: string): boolean => {
+      const rv = (rowVal || '').toString().trim().toLowerCase()
+      const fv = (filterVal || '').toString().trim().toLowerCase()
+      switch (operator) {
+        case 'is': return rv === fv
+        case 'is_not': return rv !== fv
+        case 'contains': return rv.includes(fv)
+        case 'not_contains': return !rv.includes(fv)
+        case 'starts_with': return rv.startsWith(fv)
+        case 'ends_with': return rv.endsWith(fv)
+        default: return rv === fv
       }
-      
-      if (Array.isArray(filterState.company) && filterState.company.length > 0) {
-        if (!filterState.company.includes(row.company)) return false
+    }
+
+    // Helper: check if a row matches a single activeFilter category
+    // Uses backend key for operator lookup
+    const matchesActiveFilter = (row, key, value) => {
+      if (!value) return true
+      const op = filterGroupOperators[key] || 'is'
+      if (Array.isArray(value)) {
+        const isNegative = op === 'is_not' || op === 'not_contains'
+        const rowVal = (row[key] || '').toString().trim()
+        if (isNegative) return value.every(v => matchWithOperator(rowVal, v, op))
+        return value.some(v => matchWithOperator(rowVal, v, op))
       }
-      
-      if (Array.isArray(filterState.year) && filterState.year.length > 0) {
-        if (!filterState.year.includes(row['Accounting Date-Year'])) return false
+      return matchWithOperator((row[key] || '').toString().trim(), (value || '').toString().trim(), op)
+    }
+
+    // Resolve actual row value for a filterState key
+    const getRowValueForFsKey = (row, fsKey) => {
+      switch (fsKey) {
+        case 'supplier': return row.supplier_name || ''
+        case 'glDescription': return row.gl_description || ''
+        case 'lineDescription': return row.line_description || ''
+        case 'company': return row.company || ''
+        case 'year': return row.year || ''
+        case 'quarter': return row.quarter || ''
+        case 'month': return row.month || ''
+        case 'costCenter': return row.cost_center || ''
+        case 'country': return row.country || ''
+        default: return ''
       }
-      
-      if (Array.isArray(filterState.quarter) && filterState.quarter.length > 0) {
-        if (!filterState.quarter.includes(row['Accounting Date-Quarter'])) return false
-      }
-      
-      if (Array.isArray(filterState.month) && filterState.month.length > 0) {
-        if (!filterState.month.includes(row['Accounting Date-Month'])) return false
-      }
-      
-      if (Array.isArray(filterState.costCenter) && filterState.costCenter.length > 0) {
-        if (!filterState.costCenter.includes(row['Cost Center Name'])) return false
-      }
-      
-      if (Array.isArray(filterState.supplierCategory) && filterState.supplierCategory.length > 0) {
-        if (!filterState.supplierCategory.includes(row['Supplier Category'])) return false
-      }
-      
-      if (Array.isArray(filterState.country) && filterState.country.length > 0) {
-        if (!filterState.country.includes(row.Country)) return false
-      }
-      
-      if (Array.isArray(filterState.clientSpendCategory) && filterState.clientSpendCategory.length > 0) {
-        if (!filterState.clientSpendCategory.includes(row['Client Spend Category Name'])) return false
-      }
-      
-      return true
+    }
+
+    // Helper: check if a row matches a single filterState category
+    // Returns null if the filter is not active (skip it)
+    // Uses backend key for operator lookup
+    const matchesFilterStateEntry = (row, fsKey, fsValues) => {
+      if (!Array.isArray(fsValues) || fsValues.length === 0) return null
+      // Skip classificationL1–L4 in base pass (handled separately for taxonomy table)
+      if (fsKey === 'classificationL1' || fsKey === 'classificationL2' || fsKey === 'classificationL3' || fsKey === 'classificationL4') return null
+      const backendKey = fsKeyToBackendKey[fsKey] || fsKey
+      const op = filterGroupOperators[backendKey] || 'is'
+      const rowVal = getRowValueForFsKey(row, fsKey)
+      const isNegative = op === 'is_not' || op === 'not_contains'
+      if (isNegative) return fsValues.every(v => matchWithOperator(rowVal, v, op))
+      return fsValues.some(v => matchWithOperator(rowVal, v, op))
+    }
+
+    return transactions.filter(row => {
+      // Collect all filter condition results with their group keys (using backend keys)
+      const conditionEntries: Array<{ key: string; result: boolean }> = []
+      const seenBackendKeys = new Set<string>()
+
+      // filterState conditions FIRST (source of truth for UI-managed filters)
+      // Skip classificationL1–L4 in base pass
+      Object.entries(filterState).forEach(([fsKey, fsValues]) => {
+        const result = matchesFilterStateEntry(row, fsKey, fsValues)
+        if (result !== null) {
+          const backendKey = fsKeyToBackendKey[fsKey] || fsKey
+          conditionEntries.push({ key: backendKey, result })
+          seenBackendKeys.add(backendKey)
+        }
+      })
+
+      // activeFilters conditions — skip keys already covered by filterState
+      // Also skip classification_l* (handled via classificationL1–L4 filterState)
+      Object.entries(activeFilters).forEach(([key, value]) => {
+        if (key === 'classification_l1' || key === 'classification_l2' || key === 'classification_l3' || key === 'classification_l4') return
+        if (!value || (Array.isArray(value) && value.length === 0)) return
+        if (seenBackendKeys.has(key)) return // already handled via filterState
+        conditionEntries.push({ key, result: matchesActiveFilter(row, key, value) })
+      })
+
+      // If no filter conditions, row passes
+      if (conditionEntries.length === 0) return true
+
+      // Evaluate with SQL-like AND/OR precedence (AND binds tighter than OR)
+      return evaluateFilterConditions(conditionEntries, filterConnectors, filterCombinator)
     })
-  }, [transactions, activeFilters, filterState])
+  }, [transactions, activeFilters, filterState, filterCombinator, filterConnectors, filterGroupOperators, fsKeyToBackendKey])
 
   // Transactions used for the Classification Path table: use the RAW transactions
   // so the full taxonomy always stays visible, regardless of any filters.
@@ -1504,6 +1286,16 @@ const MultiTableSystem = ({
   }, [])
 
   const handleRowSelect = useCallback((rowValue, column = null) => {
+    // Activate table keyboard focus when a row is clicked
+    if (column && setKeyboardFocus) {
+      setKeyboardFocus('tables')
+      // Also update tableNav to point to the clicked table
+      const clickedTableIndex = tables.findIndex(t => t.column === column)
+      if (clickedTableIndex >= 0 && setTableNav) {
+        setTableNav(prev => ({ ...prev, tableIndex: clickedTableIndex }))
+      }
+    }
+
     // Special behavior: when clicking in the taxonomy table (classification_path),
     // drive the global classification filters so other tables (supplier, spend category,
     // GL description, etc.) automatically update.
@@ -1657,34 +1449,19 @@ const MultiTableSystem = ({
     
     setSelectedRows(prev => {
       if (!column) {
-        // No column specified - simple toggle
-        if (prev.includes(key)) {
-          return prev.filter(v => v !== key)
-        } else {
-          return [...prev, key]
-        }
-      }
-      
-      // Check if there are selections from a different table
-      const currentTableSelections = prev.filter(v => {
-        const [prevColumn] = v.split(':')
-        return prevColumn === column
-      })
-      
-      // If selecting from a different table, clear all previous selections first
-      if (prev.length > 0 && currentTableSelections.length === 0) {
-        // This is a selection from a different table
-        // Clear all previous selections and start fresh with this selection
-        return [key]
-      }
-      
-      // Same table - allow multiple selections
-      // Toggle selection - if already selected, deselect
-      if (prev.includes(key)) {
-        return prev.filter(v => v !== key)
-      } else {
+        if (prev.includes(key)) return prev.filter(v => v !== key)
         return [...prev, key]
       }
+      // Regular click: keep other tables' selections, set this table's selection to this row only.
+      // So double-click later still has multi-table selection to apply as filter.
+      const otherColumns = (prev || []).filter(v => {
+        const idx = v.indexOf(':')
+        return idx > 0 && v.slice(0, idx) !== column
+      })
+      if (prev.includes(key)) {
+        return prev.filter(v => v !== key)
+      }
+      return [...otherColumns, key]
     })
   }, [selectedRows])
 
@@ -1699,41 +1476,22 @@ const MultiTableSystem = ({
       ? taxonomyTransactions
       : filteredTransactions
 
-    // Get filtered data for this table
-    const tableData = sourceTransactions.filter(row => {
-      // Apply local filters for this table
-      const localFiltersForTable = tableLocalFilters[currentTable.id] || {}
-      return Object.entries(localFiltersForTable).every(([key, value]) => {
-        if (!value) return true
-        if (Array.isArray(value)) {
-          const rowVal = (row[key] || '').toString().trim()
-          return value.some(v => {
-            const filterVal = (v || '').toString().trim()
-            return rowVal === filterVal
-          })
-        }
-        const rowVal = (row[key] || '').toString().trim()
-        const filterVal = (value || '').toString().trim()
-        return rowVal === filterVal
-      })
-    })
-    
     // Group by column value (similar to FilterTable logic)
-    const grouped = tableData.reduce((acc, row) => {
+    const grouped = sourceTransactions.reduce((acc, row) => {
       const rawValue = row[currentTable.column]
       const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '') 
         ? String(rawValue).trim() 
         : 'Unknown'
-      const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
+      const amount = parseFloat(row.spend_amount || 0) || 0
       acc[value] = (acc[value] || 0) + amount
       return acc
     }, {})
-    
+
     return Object.entries(grouped)
       .map(([value, amount]) => ({ value, amount }))
       .filter(item => item.amount > 0)
       .sort((a, b) => b.amount - a.amount)
-  }, [tables, tableNav.tableIndex, filteredTransactions, taxonomyTransactions, tableLocalFilters])
+  }, [tables, tableNav.tableIndex, filteredTransactions, taxonomyTransactions])
 
   // Handle keyboard navigation in tables
   const handleTableKeyboardNav = useCallback((direction) => {
@@ -1781,79 +1539,56 @@ const MultiTableSystem = ({
     })
   }, [keyboardFocus, getCurrentTableData, tables.length, setKeyboardFocus])
 
-  // Handle Enter to select row
+  // Handle Enter to toggle-select row (multi-select across tables)
   const handleTableEnter = useCallback(() => {
     if (keyboardFocus !== 'tables') return
-    
+
     const currentTableData = getCurrentTableData()
     if (currentTableData.length === 0) return
-    
+
     const currentRow = currentTableData[tableNav.rowIndex]
     if (!currentRow) return
-    
+
     const currentTable = tables[tableNav.tableIndex]
     if (!currentTable) return
-    
-    // Select the row
-    handleRowSelect(currentRow.value, currentTable.column)
-    
+
+    // Toggle-select the row (adds to selection without clearing other tables)
+    handleToggleRowSelect(currentRow.value, currentTable.column)
+
     // Move to next row for multi-select
     if (tableNav.rowIndex < currentTableData.length - 1) {
       setTableNav(prev => ({ ...prev, rowIndex: prev.rowIndex + 1 }))
     }
-  }, [keyboardFocus, getCurrentTableData, tableNav, tables, handleRowSelect])
+  }, [keyboardFocus, getCurrentTableData, tableNav, tables, handleToggleRowSelect])
 
-  // Handle Ctrl+F to apply selected rows as filters
+  // Handle Cmd/Ctrl+K — apply ALL selected rows (across all tables) as global filters
   const handleApplyFilters = useCallback(() => {
-    if (keyboardFocus !== 'tables') return
-    
-    const currentTable = tables[tableNav.tableIndex]
-    if (!currentTable) return
-    
-    // Get selected rows from previous table (if any)
-    const selectedRowKeys = selectedRows.filter(key => {
-      const [column] = key.split(':')
-      return column !== currentTable.column // Different column = from different table
-    })
-    
-    if (selectedRowKeys.length === 0) {
-      console.log('No rows selected from other tables')
+    if (selectedRows.length === 0) return
+
+    // If the parent provides onApplySelectionAsFilter, use it (applies as global activeFilters)
+    if (onApplySelectionAsFilter) {
+      onApplySelectionAsFilter()
       return
     }
-    
-    // Extract values from selected row keys
-    const selectedValues = selectedRowKeys.map(key => {
-      const [, ...rest] = key.split(':')
-      return rest.join(':')
-    })
-    
-    // Get the source column from the first selected row
-    const [sourceColumn] = selectedRowKeys[0].split(':')
-    
-    // Apply as local filters to current table
-    if (setTableLocalFilters) {
-      setTableLocalFilters(prev => {
-        const targetFilters = prev[currentTable.id] || {}
-        const existingValues = Array.isArray(targetFilters[sourceColumn]) 
-          ? targetFilters[sourceColumn] 
-          : targetFilters[sourceColumn] 
-            ? [targetFilters[sourceColumn]] 
-            : []
-        
-        const newValues = [...new Set([...existingValues, ...selectedValues])]
-        
-        return {
-          ...prev,
-          [currentTable.id]: {
-            ...targetFilters,
-            [sourceColumn]: newValues
-          }
+
+    // Fallback: apply each selected column:value via onAddFilter
+    if (onAddFilter) {
+      // Group selected rows by column
+      const byColumn: Record<string, string[]> = {}
+      for (const key of selectedRows) {
+        const colonIdx = key.indexOf(':')
+        if (colonIdx > 0) {
+          const col = key.slice(0, colonIdx)
+          const val = key.slice(colonIdx + 1)
+          if (!byColumn[col]) byColumn[col] = []
+          byColumn[col].push(val)
         }
-      })
+      }
+      for (const [col, vals] of Object.entries(byColumn)) {
+        onAddFilter(col, vals)
+      }
     }
-    
-    console.log(`Applied ${selectedValues.length} selected rows as filters to table ${currentTable.id}`)
-  }, [keyboardFocus, tableNav.tableIndex, tables, selectedRows, setTableLocalFilters])
+  }, [selectedRows, onApplySelectionAsFilter, onAddFilter])
 
   useKeyboardShortcuts({
     'ctrl+d': (e) => {
@@ -1948,71 +1683,84 @@ const MultiTableSystem = ({
       }
     },
     'ctrl+k': (e) => {
-      if (keyboardFocus === 'tables') {
-        e.preventDefault()
-        handleApplyFilters()
-      }
+      e.preventDefault()
+      handleApplyFilters()
     },
     'cmd+k': (e) => {
-      if (keyboardFocus === 'tables') {
-        e.preventDefault()
-        handleApplyFilters()
-      }
+      e.preventDefault()
+      handleApplyFilters()
+    },
+    // Apply all selected rows (across tables) as global filter
+    'ctrl+shift+k': (e) => {
+      e.preventDefault()
+      if (onApplySelectionAsFilter && selectedRows.length > 0) onApplySelectionAsFilter()
+    },
+    'cmd+shift+k': (e) => {
+      e.preventDefault()
+      if (onApplySelectionAsFilter && selectedRows.length > 0) onApplySelectionAsFilter()
     }
   })
 
   return (
     <>
-      {/* Kanban Board - Horizontally Scrollable */}
+      {/* Kanban Board - Tables grid + fixed filters sidebar */}
       <div className="kanban-board">
-        <div className="kanban-container">
-          {tables.map((table, index) => (
-              <FilterTable
-              key={table.id}
-              tableId={table.id}
-              title={table.title}
-              column={table.column}
-              data={table.column === 'classification_path' ? taxonomyTransactions : filteredTransactions}
-              activeFilters={activeFilters}
-              localFilters={tableLocalFilters[table.id] || {}}
-              onClose={table.column === 'classification_path' ? undefined : removeTable}
-              onDropFilter={handleDropFilter}
-              onClearLocalFilters={() => clearTableLocalFilters(table.id)}
-              selectedRows={selectedRows}
-              onSelectRow={(val) => handleRowSelect(val, table.column)}
-              onToggleRowSelect={handleToggleRowSelect}
-              isHierarchical={table.isHierarchical}
-              collapsed={table.collapsed}
-              onToggleCollapse={() => toggleTableCollapse(table.id)}
-              keyboardFocus={keyboardFocus}
-              tableNav={tableNav}
-              tableIndex={index}
-              focusedClassificationPath={null}
-              filterSearchTerm={filterSearchByTableId[table.id] ?? ''}
-              onFilterSearchChange={(term) => setTableFilterSearch(table.id, term)}
-              onFiltersChange={(tableId, hasFilters) => {
-                // Update filter state tracking
-                if (hasFilters) {
-                  tableFilterStates.current.set(tableId, true)
-                } else {
-                  tableFilterStates.current.delete(tableId)
-                }
-                
-                // Check if any table has filters
-                const anyHasFilters = tableFilterStates.current.size > 0
-                if (onTableFiltersChange) {
-                  onTableFiltersChange(anyHasFilters)
-                }
-              }}
-              clearFiltersRef={(clearFn) => {
-                if (clearFn) {
-                  clearFiltersCallbacks.current.set(table.id, clearFn)
-                } else {
-                  clearFiltersCallbacks.current.delete(table.id)
-                }
-              }}
-            />
-          ))}
+        <div className="kanban-layout">
+          {/* Tables grid: max 3 columns per row, wraps to new rows */}
+          <div className="kanban-tables-grid">
+            {tables.map((table, index) => {
+              const isTaxonomy = table.column === 'classification_path'
+              return (
+                <DraggableTableCard
+                  key={table.id}
+                  tableId={table.id}
+                  index={index}
+                  isDraggable={!isTaxonomy}
+                  moveTable={moveTable}
+                >
+                  <FilterTable
+                    tableId={table.id}
+                    title={table.title}
+                    column={table.column}
+                    data={isTaxonomy ? taxonomyTransactions : filteredTransactions}
+                    activeFilters={activeFilters}
+                    onClose={removeTable}
+                    selectedRows={selectedRows}
+                    onSelectRow={(val) => handleRowSelect(val, table.column)}
+                    onToggleRowSelect={handleToggleRowSelect}
+                    isHierarchical={table.isHierarchical}
+                    collapsed={table.collapsed}
+                    onToggleCollapse={() => toggleTableCollapse(table.id)}
+                    keyboardFocus={keyboardFocus}
+                    tableNav={tableNav}
+                    tableIndex={index}
+                    focusedClassificationPath={null}
+                    onDoubleClickFilter={effectiveOnDoubleClickFilter}
+                  />
+                </DraggableTableCard>
+              )
+            })}
+          </div>
+
+          {/* Fixed rightmost panel: Current Filters */}
+          <CurrentFiltersPanel
+            activeFilters={activeFilters}
+            filterState={filterState}
+            tableLocalFilters={{}}
+            tables={tables}
+            filterCombinator={filterCombinator}
+            filterConnectors={filterConnectors}
+            filterGroupOperators={filterGroupOperators}
+            onSetFilterCombinator={onSetFilterCombinator}
+            onSetFilterConnector={onSetFilterConnector}
+            onSetFilterOperator={onSetFilterOperator}
+            onRemoveFilter={onRemoveFilter}
+            onRemoveLocalFilter={onRemoveLocalFilter}
+            onClearAll={onClearAll}
+            onAddFilter={onAddFilter}
+            transactions={transactions}
+            allTransactions={allTransactions}
+          />
         </div>
       </div>
     </>

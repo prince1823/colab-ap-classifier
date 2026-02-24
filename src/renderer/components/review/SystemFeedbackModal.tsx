@@ -72,7 +72,7 @@ const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onR
       return 0
     }
     return suggestion.affectedRows.reduce((total, row) => {
-      const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
+      const amount = parseFloat(row.spend_amount || 0) || 0
       return total + amount
     }, 0)
   }

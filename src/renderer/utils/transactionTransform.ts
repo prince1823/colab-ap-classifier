@@ -4,9 +4,24 @@ import type { Transaction } from '../../shared/types/transactions'
  * Transforms a backend Transaction into the shape the Dashboard component expects.
  * This avoids refactoring the entire Dashboard component tree.
  */
+function parseDateFields(dateValue: unknown): { year?: string; quarter?: string; month?: string } {
+  if (!dateValue) return {}
+  const d = new Date(String(dateValue))
+  if (Number.isNaN(d.getTime())) return {}
+  const y = d.getFullYear()
+  const m = d.getMonth() + 1
+  const q = Math.ceil(m / 3)
+  return {
+    year: String(y),
+    quarter: `Q${q}`,
+    month: String(m),
+  }
+}
+
 export function transactionToDashboardRow(t: Transaction, index: number): Record<string, unknown> {
   const fields = t.canonicalFields as Record<string, unknown>
   const pathParts = t.classificationPath ? t.classificationPath.split('|') : []
+  const dateFields = parseDateFields(fields.invoice_date)
 
   return {
     // Spread all canonical fields as raw values
@@ -19,6 +34,15 @@ export function transactionToDashboardRow(t: Transaction, index: number): Record
     amount: fields.spend_amount || 0,
     invoice_amount: fields.spend_amount || 0,
     spend_amount: fields.spend_amount || 0,
+
+    // Date-derived fields (from canonical invoice_date)
+    year: fields.year || dateFields.year || '',
+    quarter: fields.quarter || dateFields.quarter || '',
+    month: fields.month || dateFields.month || '',
+
+    // Ensure canonical category fields are explicit
+    country: fields.country || '',
+    cost_center: fields.cost_center || '',
 
     // Classification fields
     classification_path: t.classificationPath || '',

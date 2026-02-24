@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useDrop } from 'react-dnd'
-import { ChevronRight, ChevronDown, Plus, Minus, Edit2, Trash2 } from 'lucide-react'
+import { Plus, Minus, Edit2, Trash2 } from 'lucide-react'
 import { TABLE_ROW_TYPE, ITEM_TYPE } from './MultiTableSystem'
 import { buildTaxonomyTree, populateTreeWithTransactions } from '../../utils/taxonomyLoader'
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
@@ -130,7 +130,6 @@ const ClassificationTree = ({
   const [drillSelection, setDrillSelection] = useState([])
   const [taxonomyPaths, setTaxonomyPaths] = useState([])
   const [loadingTaxonomy, setLoadingTaxonomy] = useState(true)
-  const [collapsed, setCollapsed] = useState(false)
   const [zoomLevel, setZoomLevel] = useState(100) // Zoom level in percentage (50% to 200%)
   const [localSuccess, setLocalSuccess] = useState(null)
   const [keyboardNav, setKeyboardNav] = useState({ columnIndex: 0, nodeIndex: 0 }) // Keyboard navigation state
@@ -407,8 +406,6 @@ const ClassificationTree = ({
     setDrillSelection(newDrillSelection)
     setSelectedPath(targetPath)
     
-    // Ensure tree is expanded
-    setCollapsed(false)
   }, [pathMap])
 
   const handleZoomIn = () => {
@@ -845,7 +842,7 @@ const ClassificationTree = ({
   useKeyboardShortcuts({
     'arrowup': (e) => {
       // Only handle if tree is focused or visible
-      if (!collapsed && keyboardFocus === 'tree') {
+      if (keyboardFocus === 'tree') {
         const { columnIndex } = keyboardNav
         // If at L1 (columnIndex 0) and at first row, switch to tables
         if (columnIndex === 0 && keyboardNav.nodeIndex === 0) {
@@ -858,26 +855,26 @@ const ClassificationTree = ({
       }
     },
     'arrowdown': (e) => {
-      if (!collapsed && keyboardFocus === 'tree') {
+      if (keyboardFocus === 'tree') {
         e.preventDefault()
         handleKeyboardNavigation('down')
       }
     },
     'arrowleft': (e) => {
-      if (!collapsed) {
+      if (keyboardFocus === 'tree') {
         e.preventDefault()
         handleKeyboardNavigation('left')
       }
     },
     'arrowright': (e) => {
-      if (!collapsed) {
+      if (keyboardFocus === 'tree') {
         e.preventDefault()
         handleKeyboardNavigation('right')
       }
     },
     'enter': (e) => {
       // Only trigger if tree is visible and we're not in an input field
-      if (!collapsed && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+      if (keyboardFocus === 'tree' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
         e.preventDefault()
         handleReclassifyWithKeyboard()
       }
@@ -974,69 +971,45 @@ const ClassificationTree = ({
           </div>
         </div>
       )}
-      <div 
-        className="tree-header"
-        onClick={() => setCollapsed(!collapsed)}
-        style={{ cursor: 'pointer' }}
-      >
+      <div className="tree-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button 
-            className="collapse-btn"
-            onClick={(e) => {
-              e.stopPropagation()
-              setCollapsed(!collapsed)
-            }}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }}
-          >
-            {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-          </button>
           <h3>Classification Taxonomy</h3>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {!collapsed && (
-            <span className="tree-info" title="Use arrow keys to navigate, Enter to reclassify selected rows">
-              Drag rows here to reclassify • Arrow keys + Enter
-            </span>
-          )}
-          {!collapsed && (
-            <div className="zoom-controls" onClick={(e) => e.stopPropagation()}>
-              <button
-                className="zoom-btn"
-                onClick={handleZoomOut}
-                disabled={zoomLevel <= 50}
-                title="Zoom out"
-              >
-                <Minus size={14} />
-              </button>
-              <span className="zoom-percentage">{zoomLevel}%</span>
-              <button
-                className="zoom-btn"
-                onClick={handleZoomIn}
-                disabled={zoomLevel >= 200}
-                title="Zoom in"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
-          )}
-          {!collapsed && (
+          <span className="tree-info" title="Use arrow keys to navigate, Enter to reclassify selected rows">
+            Drag rows here to reclassify • Arrow keys + Enter
+          </span>
+          <div className="zoom-controls">
             <button
-              className="add-node-btn"
-              onClick={(e) => {
-                e.stopPropagation()
-                handleOpenAddNodeModal()
-              }}
-              title="Create a new taxonomy node"
+              className="zoom-btn"
+              onClick={handleZoomOut}
+              disabled={zoomLevel <= 50}
+              title="Zoom out"
             >
-              <Plus size={14} style={{ marginRight: 4 }} />
-              Add node
+              <Minus size={14} />
             </button>
-          )}
+            <span className="zoom-percentage">{zoomLevel}%</span>
+            <button
+              className="zoom-btn"
+              onClick={handleZoomIn}
+              disabled={zoomLevel >= 200}
+              title="Zoom in"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+          <button
+            className="add-node-btn"
+            onClick={handleOpenAddNodeModal}
+            title="Create a new taxonomy node"
+          >
+            <Plus size={14} style={{ marginRight: 4 }} />
+            Add node
+          </button>
         </div>
       </div>
-      {!collapsed && (
-        <div 
-          className="tree-content"
+      <div 
+        className="tree-content"
           style={{
             transform: `scale(${zoomLevel / 100})`,
             transformOrigin: 'top left',
@@ -1084,7 +1057,6 @@ const ClassificationTree = ({
             </div>
           )}
         </div>
-      )}
 
       {showAddNodeModal && (
         <div

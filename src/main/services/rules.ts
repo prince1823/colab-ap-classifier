@@ -144,17 +144,28 @@ export async function evaluateRules(
 
   for (const rule of activeRules) {
     const whereClauses: string[] = [];
+    const connectors: string[] = [];
     const params: unknown[] = [];
 
-    // Build condition SQL
+    // Build condition SQL with per-condition AND/OR connectors
     for (const condition of rule.conditions) {
       const clause = conditionToSQL(condition, params);
-      if (clause) whereClauses.push(clause);
+      if (clause) {
+        whereClauses.push(clause);
+        connectors.push(condition.connector || 'AND');
+      }
     }
 
     if (whereClauses.length === 0) continue;
 
-    let sql = `SELECT id FROM transactions WHERE ${whereClauses.join(' AND ')}`;
+    // Assemble WHERE clause using per-condition connectors
+    // SQL precedence: AND binds tighter than OR, so A AND B OR C = (A AND B) OR C
+    let combinedWhere = whereClauses[0];
+    for (let i = 1; i < whereClauses.length; i++) {
+      combinedWhere += ` ${connectors[i - 1]} ${whereClauses[i]}`;
+    }
+
+    let sql = `SELECT id FROM transactions WHERE (${combinedWhere})`;
 
     // Only check specific transactions if provided
     if (transactionIds && transactionIds.length > 0) {

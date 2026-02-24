@@ -60,7 +60,7 @@ export const populateTreeWithTransactions = (tree, transactions) => {
     const parts = path.split('|').filter(p => p.trim())
     if (parts.length === 0) return
     
-    const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
+    const amount = parseFloat(row.spend_amount || 0) || 0
     
     let current = tree
     current.count++

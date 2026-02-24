@@ -16,8 +16,8 @@ export function registerSettingsHandlers(): void {
     updateSettings(input as SettingsUpdateInput);
   });
 
-  registerHandler('settings:getModels', async () => {
-    return getModels();
+  registerHandler('settings:getModels', async (_event, provider?: unknown) => {
+    return getModels(typeof provider === 'string' ? provider : undefined);
   });
 
   registerHandler('settings:getProviders', async () => {

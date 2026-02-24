@@ -23,25 +23,15 @@ const formatCurrencyShort = (amount) => {
 const formatNumber = (num) => new Intl.NumberFormat('en-US').format(num || 0)
 
 function getMonthKey(row) {
-  const year =
-    row['Accounting Date-Year'] ??
-    row.accounting_year ??
-    row.year ??
-    row.Year ??
-    null
-  const month =
-    row['Accounting Date-Month'] ??
-    row.accounting_month ??
-    row.month ??
-    row.Month ??
-    null
+  const year = row.year ?? null
+  const month = row.month ?? null
 
   if (year && month) {
     const m = String(month).padStart(2, '0')
     return `${year}-${m}`
   }
 
-  const dateStr = row['Accounting Date'] || row.accounting_date || row.date || row.Date || null
+  const dateStr = row.invoice_date || null
   if (dateStr) {
     const d = new Date(dateStr)
     if (!Number.isNaN(d.getTime())) {
@@ -55,21 +45,22 @@ function getMonthKey(row) {
 }
 
 function getAmount(row) {
-  return parseFloat(row.amount || row['Amount USD'] || row.invoice_amount || row['Ledger Debit Amount'] || 0) || 0
+  return parseFloat(row.spend_amount || 0) || 0
 }
 
 function getSupplier(row) {
-  return row.supplier_name || row.vendor_name || row.Supplier || 'Unknown'
+  return row.supplier_name || 'Unknown'
 }
 
 function isLowConfidence(row) {
-  const conf = (row.confidence || row.classification_confidence || 'high').toLowerCase()
-  return conf === 'low' || conf === 'l'
+  const score = typeof row.review_score === 'number' ? row.review_score : null
+  if (score !== null) return score < 50
+  return false
 }
 
 const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) => {
   const [selectedBenchmark, setSelectedBenchmark] = useState('overall') // overall | topSupplier
-  const [particularDimension, setParticularDimension] = useState('company') // company | cost_center | gl | gl_account_desc | invoice_desc | country | supplier_category
+  const [particularDimension, setParticularDimension] = useState('company') // company | cost_center | gl | gl_account_desc | invoice_desc | country
   const [animateIn, setAnimateIn] = useState(false)
 
   useEffect(() => {
@@ -102,13 +93,12 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
 
     const getDimensionKey = (row, dim) => {
       switch (dim) {
-        case 'company': return row.company || row.Entity || 'Unknown'
-        case 'cost_center': return row['Cost Center Name'] || 'Unknown'
-        case 'gl': return row.gl_description || row['GL Description'] || 'Unknown'
-        case 'gl_account_desc': return row['GL Account Description'] || row.gl_account_description || row.gl_account_desc || row.gl_description || 'Unknown'
-        case 'invoice_desc': return row.invoice_line_item_description || row.InvoiceLineItemDescription || row['Invoice Line Item Description'] || row.invoice_line_description || 'Unknown'
-        case 'country': return row.Country || 'Unknown'
-        case 'supplier_category': return row['Supplier Category'] || 'Unknown'
+        case 'company': return row.company || 'Unknown'
+        case 'cost_center': return row.cost_center || 'Unknown'
+        case 'gl': return row.gl_description || 'Unknown'
+        case 'gl_account_desc': return row.gl_description || 'Unknown'
+        case 'invoice_desc': return row.line_description || 'Unknown'
+        case 'country': return row.country || 'Unknown'
         default: return 'Unknown'
       }
     }
@@ -235,7 +225,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     } else {
       result.push({
         type: 'info',
-        text: 'Not enough time-series data to show month-over-month trends. Add Accounting Date (year/month) to enable richer time insights.',
+        text: 'Not enough time-series data to show month-over-month trends. Add invoice_date to enable richer time insights.',
       })
     }
 
@@ -404,9 +394,6 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
         break
       case 'country':
         key = 'country'
-        break
-      case 'supplier_category':
-        key = 'supplierCategory'
         break
       default:
         break
@@ -593,7 +580,6 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
               <option value="gl_account_desc">By GL Account Description</option>
               <option value="invoice_desc">By Invoice Line Item Description</option>
               <option value="country">By Country</option>
-              <option value="supplier_category">By Supplier Category</option>
             </select>
           </div>
           <div className="metrics-card-body">

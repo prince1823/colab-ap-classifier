@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Maximize2, Minimize2 } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
 import type { TaxonomyNode, TaxonomyInfo } from '../../shared/types/taxonomy'
@@ -138,9 +139,9 @@ export default function TaxonomyPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl p-6">
+    <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="mb-5 flex items-start justify-between">
+      <div className="flex items-start justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Taxonomy</h2>
           <div className="mt-1 flex items-center gap-3 text-xs text-gray-400">
@@ -153,33 +154,43 @@ export default function TaxonomyPage() {
             <span>{l3Count} L3</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {taxonomies.length > 0 && (
-            <select
-              onChange={(e) => e.target.value && handleImport(e.target.value)}
-              disabled={importing}
-              defaultValue=""
-              className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 focus:border-blue-500 focus:outline-none"
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            {taxonomies.length > 0 && (
+              <select
+                onChange={(e) => e.target.value && handleImport(e.target.value)}
+                disabled={importing}
+                defaultValue=""
+                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 focus:border-blue-500 focus:outline-none"
+              >
+                <option value="" disabled>{importing ? 'Importing...' : 'Import from ColabIP...'}</option>
+                {taxonomies.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name} ({t.nodeCount})
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={() => setShowAdd(true)}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
             >
-              <option value="" disabled>{importing ? 'Importing...' : 'Import from ColabIP...'}</option>
-              {taxonomies.map((t) => (
-                <option key={t.name} value={t.name}>
-                  {t.name} ({t.nodeCount})
-                </option>
-              ))}
-            </select>
-          )}
-          <button
-            onClick={() => setShowAdd(true)}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
-          >
-            + Add Node
-          </button>
+              + Add Node
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={expandAll} title="Expand all" className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors">
+              <Maximize2 size={14} />
+            </button>
+            <button onClick={collapseAll} title="Collapse all" className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors">
+              <Minimize2 size={14} />
+            </button>
+          </div>
         </div>
       </div>
 
       {error && (
-        <div className="mb-4 flex items-center justify-between rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+        <div className="flex items-center justify-between rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600">&times;</button>
         </div>
@@ -187,7 +198,7 @@ export default function TaxonomyPage() {
 
       {/* Add Node Form */}
       {showAdd && (
-        <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/30 p-4">
+        <div className="rounded-lg border border-blue-100 bg-blue-50/30 p-4">
           <div className="flex items-end gap-3">
             <div className="flex-1">
               <label className="mb-1 block text-xs font-medium text-gray-500">Path</label>
@@ -236,16 +247,6 @@ export default function TaxonomyPage() {
           </div>
         ) : (
           <>
-            {/* Toolbar */}
-            <div className="flex items-center justify-end gap-1 border-b border-gray-100 px-3 py-1.5">
-              <button onClick={expandAll} className="rounded px-2 py-0.5 text-[11px] text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors">
-                Expand All
-              </button>
-              <button onClick={collapseAll} className="rounded px-2 py-0.5 text-[11px] text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors">
-                Collapse All
-              </button>
-            </div>
-
             {/* L1 nodes */}
             <div>
               {tree.map((l1, i) => {

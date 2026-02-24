@@ -9,6 +9,7 @@ import {
   getMetadata,
   updateMetadata,
 } from '../services/project';
+import { addRecent } from '../services/recent-projects';
 import type { ProjectMetadataUpdate } from '../../shared/types';
 
 export function registerProjectHandlers(): void {
@@ -26,19 +27,13 @@ export function registerProjectHandlers(): void {
 
   registerHandler('project:new', async (_event, projectName: unknown) => {
     const result = await createProject(projectName as string);
-
-    // TODO: call addRecent from recent-projects service when it exists
-    // e.g. addRecent({ path: result.filePath, name: result.name, lastOpened: new Date().toISOString() });
-
+    await addRecent(result.filePath, result.name);
     return result;
   });
 
   registerHandler('project:open', async (_event, filePath: unknown) => {
     const result = await openProject(filePath as string);
-
-    // TODO: call addRecent from recent-projects service when it exists
-    // e.g. addRecent({ path: result.filePath, name: result.name, lastOpened: new Date().toISOString() });
-
+    await addRecent(result.filePath, result.name);
     return result;
   });
 

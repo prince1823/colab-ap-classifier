@@ -28,15 +28,55 @@
   background: var(--text-secondary);
 }
 
-.kanban-container {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr); /* All tables have equal width */
+/* Two-panel layout: scrollable tables grid on the left, fixed filters panel on the right */
+.kanban-layout {
+  display: flex;
   gap: 16px;
   padding: 0 16px;
-  align-items: stretch; /* Ensure all tables stretch to same height */
   width: 100%;
-  min-height: auto;
-  grid-auto-rows: 1fr; /* Equal row height */
+  align-items: flex-start;
+}
+
+/* Tables grid: max 3 columns per row, wraps to additional rows */
+.kanban-tables-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Filters panel: fixed width sidebar within the kanban layout */
+.kanban-layout > .current-filters-panel {
+  width: 280px;
+  min-width: 280px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+}
+
+/* Draggable table card wrapper */
+.draggable-table-card {
+  position: relative;
+  transition: opacity 0.2s ease;
+}
+
+.draggable-table-card.table-dragging {
+  opacity: 0.4;
+}
+
+.draggable-table-card.table-drop-target > .filter-table {
+  border-color: var(--accent-color, #6366f1);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
+/* Draggable header bar — grab cursor on hover */
+.table-header-bar.draggable {
+  cursor: grab;
+}
+
+.table-header-bar.draggable:active {
+  cursor: grabbing;
 }
 
 .filter-table {
@@ -125,8 +165,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.3;
-  pointer-events: auto;
-  cursor: help;
+  cursor: inherit;
 }
 
 .table-total-badge {

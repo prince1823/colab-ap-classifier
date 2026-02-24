@@ -91,10 +91,11 @@ export function updateSettings(input: SettingsUpdateInput): void {
 }
 
 /**
- * Return supported models for the current provider.
+ * Return supported models for a given provider (defaults to current provider).
  */
-export function getModels(): ModelInfo[] {
-  return PROVIDER_MODELS[currentProvider] || [];
+export function getModels(provider?: string): ModelInfo[] {
+  const target = provider || currentProvider;
+  return PROVIDER_MODELS[target] || [];
 }
 
 /**

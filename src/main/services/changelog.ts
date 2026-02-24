@@ -78,7 +78,7 @@ export async function logChange(
  * 3. Create a NEW changelog entry documenting the revert
  * 4. Never delete existing changelog entries
  */
-export async function revertChange(changeId: string): Promise<void> {
+export async function revertChange(changeId: string): Promise<string> {
   const row = await databaseService.get<ChangeLogRow>(
     'SELECT * FROM change_log WHERE id = ?',
     changeId
@@ -109,8 +109,8 @@ export async function revertChange(changeId: string): Promise<void> {
     );
   }
 
-  // Create a new changelog entry documenting the revert
-  await logChange({
+  // Create a new changelog entry documenting the revert and return its ID
+  const revertId = await logChange({
     source: 'manual',
     affectedTable: change.affectedTable,
     affectedIds: change.affectedIds,
@@ -119,4 +119,6 @@ export async function revertChange(changeId: string): Promise<void> {
     newValues: change.oldValues,
     description: `Reverted: ${(change.description ?? change.id).replace(/^(Reverted:\s*)+/, '')}`,
   });
+
+  return revertId;
 }

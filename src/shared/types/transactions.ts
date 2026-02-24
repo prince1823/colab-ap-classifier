@@ -35,3 +35,13 @@ export interface TransactionStats {
   classifiedRows: number;
   flaggedForReviewRows: number;
 }
+
+/**
+ * Paginated response for large dataset queries.
+ */
+export interface PaginatedTransactions {
+  rows: Transaction[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}

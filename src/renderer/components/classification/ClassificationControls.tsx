@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { useWorkflowStore } from '../../stores/workflowStore'
 import type { ClassificationScope } from '../../../shared/types/classification'
 
 interface Props {
@@ -7,9 +8,10 @@ interface Props {
   runId: string | null
   onStarted: () => void
   onError: (msg: string) => void
+  onCancelled: () => void
 }
 
-export default function ClassificationControls({ isRunning, runId, onStarted, onError }: Props) {
+export default function ClassificationControls({ isRunning, runId, onStarted, onError, onCancelled }: Props) {
   const [scope, setScope] = useState<ClassificationScope>('all')
   const [starting, setStarting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -33,6 +35,18 @@ export default function ClassificationControls({ isRunning, runId, onStarted, on
     setCancelling(true)
     try {
       await ipc.classification.cancel(runId)
+      // Force the cancelled state into the store immediately so the UI updates
+      // even if the backend progress event gets lost or overwritten by stale events
+      useWorkflowStore.getState().setClassificationProgress({
+        runId,
+        status: 'cancelled',
+        phase: 'researching',
+        total: 0,
+        processed: 0,
+        percentage: 0,
+        currentStep: 'Cancelled',
+      })
+      onCancelled()
     } catch (e) {
       console.error('Failed to cancel classification:', e)
     } finally {

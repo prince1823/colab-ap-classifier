@@ -1,17 +1,20 @@
-import { useState, useMemo } from 'react'
-import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { useCallback, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTransactions } from '../hooks/useTransactions'
 import { transactionToDashboardRow } from '../utils/transactionTransform'
-import { usePivotData } from '../hooks/usePivotData'
-import PivotView from '../components/review/PivotView'
-import PivotFilterBar, {
+import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
+import {
   INITIAL_PIVOT_FILTER_STATE,
   applyPivotFilters,
   type PivotFilterState,
 } from '../components/review/PivotFilterBar'
-import { exportPivotExcel } from '../utils/exportPivotToExcel'
+import { exportHierarchicalPivotExcel } from '../utils/exportPivotToExcel'
+import { useHierarchicalPivotData, type Aggregation } from '../hooks/useHierarchicalPivotData'
+import { useWorkflowStore } from '../stores/workflowStore'
+import { convertPivotFiltersToReview } from '../utils/pivotToReviewFilters'
 
 export default function PivotPage() {
+  const navigate = useNavigate()
   const { data: transactions, loading, error } = useTransactions()
 
   // --- Transform rows ---
@@ -34,24 +37,56 @@ export default function PivotPage() {
     return [...keys].filter((k) => !exclude.has(k)).sort()
   }, [rows])
 
-  // --- Filters ---
-  const [filterState, setFilterState] = useState<PivotFilterState>(INITIAL_PIVOT_FILTER_STATE)
+  // --- Pivot settings from store (persists across tab switches) ---
+  const pivotSettings = useWorkflowStore((s) => s.pivotSettings)
+  const setPivotSettings = useWorkflowStore((s) => s.setPivotSettings)
 
+  const { rowDimensions, valueDimension, aggregation, filterState } = pivotSettings
+
+  const setRowDimensions = useCallback((v: string[]) => setPivotSettings({ rowDimensions: v }), [setPivotSettings])
+  const setValueDimension = useCallback((v: string) => setPivotSettings({ valueDimension: v }), [setPivotSettings])
+  const setAggregation = useCallback((v: Aggregation) => setPivotSettings({ aggregation: v }), [setPivotSettings])
+  const setFilterState = useCallback((v: PivotFilterState) => setPivotSettings({ filterState: v }), [setPivotSettings])
+
+  // --- Open in Review ---
+  const setReviewFilters = useWorkflowStore((s) => s.setReviewFilters)
+  const hasClassifiedData = useWorkflowStore((s) => s.hasClassifiedData)
+
+  const activeFilterCount = useMemo(
+    () => Object.values(filterState).reduce((sum, arr) => sum + arr.length, 0),
+    [filterState]
+  )
+
+  const handleOpenInReview = useCallback(() => {
+    const { filterState: reviewFS, activeFilters } = convertPivotFiltersToReview(filterState)
+    setReviewFilters({
+      filterState: reviewFS,
+      activeFilters,
+      filterGroupOperators: {},
+      filterConnectors: {},
+      filterCombinator: 'AND',
+      showFilterPanel: false,
+    })
+    navigate('/workflow/review')
+  }, [filterState, setReviewFilters, navigate])
+
+  const openInReviewDisabled = activeFilterCount === 0 || !hasClassifiedData
+
+  // --- Filters ---
   const filteredRows = useMemo(() => applyPivotFilters(rows, filterState), [rows, filterState])
 
-  const activeFilterCount = Object.values(filterState).reduce((sum, arr) => sum + arr.length, 0)
-
-  // --- Dimension state (lifted from PivotView) ---
-  const [rowDimension, setRowDimension] = useState('gl_description')
-  const [colDimension, setColDimension] = useState('supplier_name')
-
-  // --- Pivot data (shared with export) ---
-  const pivotData = usePivotData(filteredRows, rowDimension, colDimension)
+  // --- Pivot data (for export) ---
+  const pivotData = useHierarchicalPivotData(
+    filteredRows,
+    rowDimensions,
+    valueDimension,
+    aggregation
+  )
 
   // --- Export handler ---
   const handleExportExcel = () => {
     if (!pivotData) return
-    exportPivotExcel({ pivotData, rowDimension, colDimension })
+    exportHierarchicalPivotExcel({ data: pivotData })
   }
 
   // --- Loading / Error states ---
@@ -79,41 +114,26 @@ export default function PivotPage() {
 
   return (
     <div className="flex flex-col h-full p-5">
-      {/* Filter chips + export button in one row */}
-      <div className="flex items-center gap-2 mb-3 flex-shrink-0">
-        <div className="flex-1 min-w-0">
-          <PivotFilterBar
-            rows={rows}
-            filterState={filterState}
-            onFilterStateChange={setFilterState}
-            onClearAll={() => setFilterState(INITIAL_PIVOT_FILTER_STATE)}
-          />
-        </div>
-        {activeFilterCount > 0 && (
-          <span className="text-[10px] text-blue-600 bg-blue-50 rounded-full px-2 py-0.5 font-medium whitespace-nowrap flex-shrink-0">
-            {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()}
-          </span>
-        )}
-        <button
-          onClick={handleExportExcel}
-          disabled={!pivotData}
-          className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-          title="Export as Excel"
-        >
-          <ArrowDownTrayIcon className="h-3 w-3" />
-          <span>.xlsx</span>
-        </button>
-      </div>
-
-      {/* Pivot table (takes remaining space) */}
+      {/* Hierarchical pivot table (takes all space — toolbar is inside) */}
       <div className="flex-1 min-h-0">
-        <PivotView
+        <HierarchicalPivotView
+          pivotData={pivotData}
           transactions={filteredRows}
           availableColumns={availableColumns}
-          rowDimension={rowDimension}
-          colDimension={colDimension}
-          onRowDimensionChange={setRowDimension}
-          onColDimensionChange={setColDimension}
+          rowDimensions={rowDimensions}
+          valueDimension={valueDimension}
+          aggregation={aggregation}
+          onRowDimensionsChange={setRowDimensions}
+          onValueDimensionChange={setValueDimension}
+          onAggregationChange={setAggregation}
+          allRows={rows}
+          filterState={filterState}
+          onFilterStateChange={setFilterState}
+          onClearAllFilters={() => setPivotSettings({ filterState: INITIAL_PIVOT_FILTER_STATE })}
+          onExport={handleExportExcel}
+          exportDisabled={!pivotData}
+          onOpenInReview={handleOpenInReview}
+          openInReviewDisabled={openInReviewDisabled}
         />
       </div>
     </div>

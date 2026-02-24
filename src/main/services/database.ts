@@ -112,6 +112,14 @@ class DatabaseService {
       await db.run('ALTER TABLE project_suppliers ADD COLUMN aliases JSON');
     }
 
+    // Add parent_name column to project_suppliers if missing
+    const parentNameCols = await db.all(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'parent_name'"
+    );
+    if (parentNameCols.length === 0) {
+      await db.run('ALTER TABLE project_suppliers ADD COLUMN parent_name VARCHAR');
+    }
+
     // Add supplier_name index if the column exists but index is missing
     const supplierCol = await db.all(
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'supplier_name'"

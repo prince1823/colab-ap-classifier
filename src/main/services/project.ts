@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { dialog, BrowserWindow } from 'electron';
 import { databaseService } from './database';
-import { invalidateColumnCache } from './transactions';
+import { ensureIndexes, invalidateColumnCache } from './transactions';
 import type {
   ProjectMetadata,
   ProjectMetadataUpdate,
@@ -116,6 +116,11 @@ export async function openProject(
 
   currentProjectName = name;
 
+  // Ensure performance indexes exist (non-blocking — errors are silently ignored)
+  ensureIndexes().catch((err) =>
+    console.warn('[Project] Failed to ensure indexes:', err)
+  );
+
   return { filePath, name };
 }
 
@@ -123,6 +128,7 @@ export async function openProject(
  * Close the currently-open project (database connection + in-memory state).
  */
 export async function closeProject(): Promise<void> {
+  invalidateColumnCache();
   await databaseService.closeDatabase();
   currentProjectName = null;
 }

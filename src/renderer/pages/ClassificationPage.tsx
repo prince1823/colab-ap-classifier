@@ -16,10 +16,18 @@ export default function ClassificationPage() {
   const [error, setError] = useState<string | null>(null)
   const prevStatusRef = useRef<string | null>(storeProgress?.status ?? null)
 
+  // Track dismissed runIds so stale store updates don't re-populate the UI after cancel
+  const dismissedRunRef = useRef<string | null>(null)
+
   // AppShell already subscribes to progress events globally.
   // Sync local state from the store.
   useEffect(() => {
     if (storeProgress) {
+      // If user already cancelled/dismissed this run, ignore stale store updates for it
+      if (dismissedRunRef.current && storeProgress.runId === dismissedRunRef.current) {
+        return
+      }
+
       setLocalProgress(storeProgress)
       if (storeProgress.runId) {
         setRunId(storeProgress.runId)
@@ -71,14 +79,34 @@ export default function ClassificationPage() {
       localProgress.status === 'classifying')
 
   const isCompleted = localProgress?.status === 'completed'
+  const isCancelled = localProgress?.status === 'cancelled'
+  const isFailed = localProgress?.status === 'failed'
 
   const handleStarted = () => {
+    dismissedRunRef.current = null // Allow new run's events through
     setLocalProgress(null)
     setError(null)
   }
 
   const handleError = (msg: string) => {
     setError(msg || null)
+  }
+
+  const handleCancelled = () => {
+    // Mark this runId as dismissed so the store sync useEffect ignores stale events
+    if (runId) {
+      dismissedRunRef.current = runId
+    }
+    // Reset to initial view immediately after cancel
+    setLocalProgress(null)
+    setRunId(null)
+    setError(null)
+  }
+
+  const handleDismiss = () => {
+    setLocalProgress(null)
+    setRunId(null)
+    setError(null)
   }
 
   return (
@@ -99,6 +127,7 @@ export default function ClassificationPage() {
         runId={runId}
         onStarted={handleStarted}
         onError={handleError}
+        onCancelled={handleCancelled}
       />
 
       {localProgress && <ProgressDisplay progress={localProgress} />}

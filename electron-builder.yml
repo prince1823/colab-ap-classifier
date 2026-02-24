@@ -9,7 +9,7 @@ files:
   - "!dist/**/*.map"
 
 asarUnpack:
-  - "node_modules/@duckdb/node-bindings/**/*.node"
+  - "node_modules/@duckdb/node-bindings*/**"
 
 extraMetadata:
   main: dist/main/main/index.js

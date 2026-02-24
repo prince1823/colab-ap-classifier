@@ -3,7 +3,7 @@ name: Build Release
 on:
   push:
     branches:
-      - claude/elastic-proskuriakova
+      - claude/fix-windows-duckdb-build-*
   workflow_dispatch:
     inputs:
       version:
@@ -38,6 +38,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify DuckDB native bindings
+        shell: bash
+        run: |
+          echo "=== Installed @duckdb packages ==="
+          ls node_modules/@duckdb/
+          echo "=== Platform-specific bindings ==="
+          find node_modules/@duckdb/ -name "*.node" -o -name "*.dll" -o -name "*.so" -o -name "*.dylib" 2>/dev/null || true
+
       - name: Build app
         run: npm run build
 
@@ -45,6 +53,14 @@ jobs:
         run: npx electron-builder ${{ matrix.args }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify unpacked native bindings
+        shell: bash
+        run: |
+          echo "=== Checking for unpacked native modules ==="
+          find release/ -name "*.node" -o -name "*.dll" -o -name "*.so" -o -name "*.dylib" 2>/dev/null || true
+          echo "=== app-unpacked contents (if exists) ==="
+          ls -la release/*/unpacked/node_modules/@duckdb/ 2>/dev/null || ls -la release/*-unpacked/resources/app.asar.unpacked/node_modules/@duckdb/ 2>/dev/null || echo "No unpacked dir found at expected paths"
 
       - name: Upload macOS DMG
         if: matrix.platform == 'mac'

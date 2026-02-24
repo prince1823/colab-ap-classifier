@@ -3,7 +3,7 @@ name: Build Release
 on:
   push:
     branches:
-      - claude/fix-windows-duckdb-build-*
+      - main
   workflow_dispatch:
     inputs:
       version:
@@ -24,6 +24,9 @@ jobs:
             args: --win --x64
 
     runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -49,8 +52,8 @@ jobs:
       - name: Build app
         run: npm run build
 
-      - name: Package with electron-builder
-        run: npx electron-builder ${{ matrix.args }}
+      - name: Package and publish with electron-builder
+        run: npx electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

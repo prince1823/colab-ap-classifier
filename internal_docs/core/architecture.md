@@ -14,14 +14,14 @@ Main Process (Node.js + TypeScript)
     ├── Services           → business logic, DB access
     ├── Agents             → LLM prompt construction + response parsing
     ├── DuckDB             → per-project .c91 files
-    └── ColabIP (fs read)  → shared taxonomies, rules, supplier universe
+    └── ColabIP (fs read)  → shared taxonomies, supplier universe
 ```
 
 ---
 
 ## Database Schema
 
-Each project is a single `.c91` DuckDB file. Tables below.
+Each project is a single `.c91` DuckDB file. The supplier universe lives in a separate shared `supplier_universe.db` (see Supplier section). Tables below.
 
 ### project (key-value)
 
@@ -70,7 +70,6 @@ Dynamic schema. Base columns are fixed; canonical columns added via ALTER TABLE 
 | `taxonomy_node_id` | VARCHAR | FK → taxonomy.id |
 | `classification_status` | VARCHAR | `unclassified`, `classified_by_rule`, `classified_by_ai`, `human_reviewed` |
 | `classification_reasoning` | TEXT | LLM reasoning or rule name |
-| `review_score` | INTEGER | 0 = no review needed |
 | `created_at` | TIMESTAMP | |
 | `updated_at` | TIMESTAMP | |
 
@@ -101,7 +100,6 @@ Dynamic schema. Base columns are fixed; canonical columns added via ALTER TABLE 
 |--------|------|-------|
 | `id` | VARCHAR PK | UUID |
 | `name` | VARCHAR | Human-readable name |
-| `rule_type` | VARCHAR | `supplier`, `gl`, `mixed`, etc. — derived from which columns the conditions reference |
 | `conditions` | JSON | Array of `{field, operator, value, connector}` |
 | `target_taxonomy_node_id` | VARCHAR | FK → taxonomy.id |
 | `priority_score` | INTEGER | Unique, positive. User-reorderable |
@@ -142,8 +140,8 @@ Services are the business logic layer. Each service owns one concern. Services c
 
 | Service | Responsibility |
 |---------|---------------|
-| `upload` | File selection dialog, CSV parsing (encoding/delimiter detection), preview with LLM mapping suggestion |
-| `canonicalization` | Save confirmed column mappings, invoice grouping columns |
+| `upload` | File selection dialog, CSV parsing (encoding/delimiter detection), preview with LLM mapping suggestion, save confirmed column mappings and invoice grouping columns, import CSV rows |
+| `taxonomy` | Taxonomy CRUD (import, get nodes, set, update descriptions), path resolution helpers |
 | `transactions` | Query/filter/paginate transactions, column discovery, stats |
 | `export` | CSV export with classification paths |
 
@@ -151,7 +149,7 @@ Services are the business logic layer. Each service owns one concern. Services c
 
 | Service | Responsibility |
 |---------|---------------|
-| `classification-pipeline` | Orchestrate full pipeline: identify rows → research → rules → AI classify. Emits progress events. Handles cancellation |
+| `classification-pipeline` | Orchestrate full pipeline: identify rows → apply rules → AI classify. Emits progress events. Handles cancellation |
 | `rules` | Override rules CRUD, condition-to-SQL conversion, rule evaluation against transactions, priority management |
 | `reclassification` | Manual reclassification: update transactions, log to changelog |
 
@@ -163,7 +161,7 @@ Services are the business logic layer. Each service owns one concern. Services c
 | `supplier-research` | Orchestrate supplier research: check universe → Exa search → LLM research → store results |
 | `supplier-matcher` | Build in-memory index from supplier universe for O(1) name/alias matching |
 | `exa-search` | Web search via Exa API for supplier information |
-| `colabip` | Read ColabIP filesystem: taxonomies, rule packs, supplier universe CSV |
+| `colabip` | Read ColabIP filesystem: taxonomies, supplier universe CSV |
 
 ### Audit
 
@@ -177,7 +175,6 @@ Services are the business logic layer. Each service owns one concern. Services c
 |---------|---------------|
 | `llm-client` | LLM API calls (provider-agnostic, supports Anthropic/OpenAI/OpenRouter) |
 | `rate-limiter` | Adaptive concurrency control for batch operations (halves on 429, recovers on success streaks) |
-| `taxonomy-utils` | Taxonomy path resolution helpers |
 
 ---
 
@@ -211,14 +208,14 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 | `project:selectSavePath` | invoke | Save dialog for new project |
 | `project:selectOpenPath` | invoke | Open dialog for existing project |
 
-### Upload + Canonicalization
+### Upload
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
 | `upload:selectFile` | invoke | File picker for CSV |
 | `upload:parsePreview` | invoke | Parse CSV + LLM mapping suggestion |
 | `upload:csv` | invoke | Import CSV with confirmed mappings |
-| `canonicalization:save` | invoke | Save confirmed mappings |
+| `upload:saveMapping` | invoke | Save confirmed column mappings + grouping columns |
 
 ### Classification
 
@@ -263,7 +260,6 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 | `rules:create` | invoke | Create rule |
 | `rules:update` | invoke | Update rule |
 | `rules:delete` | invoke | Delete rule |
-| `rules:importFromColabip` | invoke | Import rule pack |
 
 ### Audit
 
@@ -288,7 +284,6 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
 | `colabip:listTaxonomies` | invoke | Available taxonomies |
-| `colabip:listRulePacks` | invoke | Available rule packs |
 
 ### Recent Projects
 

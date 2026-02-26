@@ -98,7 +98,6 @@ Per supplier:
   - Parent (if exists)
   - Supplier context:
     - Supplier info (type, industry, products/services, etc.)
-    - Previous mappings
 - **Supplier universe rules** (Category A rules — deterministic supplier-to-taxonomy mappings)
 
 ### 6.3 Supplier Review Page
@@ -133,8 +132,7 @@ For every batch sent to classification, show results in a review pane. Allow vie
 
 User selects one or more rows and either:
 1. **Mark correct** — set `classification_status = "human_reviewed"`
-2. **Reclassify based on filters** — calls `update_transaction()`
-   - (TODO: UI details for reclassification need to be specified — this is complex)
+2. **Reclassify** — select rows via filters, assign a new taxonomy node. Backend handles filtering via SQL queries.
 
 ### 8.3 update_transaction()
 
@@ -145,8 +143,9 @@ User selects one or more rows and either:
 
 Manually add/edit/delete taxonomy nodes.
 
-- In **pivot table mode**: no reclassification, viewing only
-- In **review mode**: changes can trigger reclassification
+- On delete: transactions classified under the deleted node are surfaced for manual reclassification.
+- In **pivot table mode**: viewing only.
+- In **review mode**: editing allowed.
 
 ## 10. View / Revert Changes
 

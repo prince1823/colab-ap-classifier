@@ -140,7 +140,6 @@ User selects one or more rows and either:
 
 1. Update the `transactions` table
 2. Every change is recorded in `change_log`
-3. Changes streamed to `feedback_agent`
 
 ## 9. Taxonomy Editing
 

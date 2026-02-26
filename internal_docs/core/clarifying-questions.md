@@ -143,38 +143,9 @@ Decisions that go beyond execution — need product/design input before implemen
 
 ---
 
-## Feedback Agent
-
-### Q11: Feedback agent — background or interactive?
-
-**Current state:** Feedback agent runs synchronously when a user reclassifies with feedback text. The suggestion is stored in `system_feedback` for later review on the FeedbackDashboardPage.
-
-**Project flow says:** "Changes streamed to feedback_agent" (step 8.3).
-
-**Options:**
-- **Streaming/background:** Every `update_transaction()` call fires off feedback analysis in the background. User doesn't wait. Results accumulate in the feedback dashboard.
-- **On-demand:** Feedback agent only runs when user explicitly provides feedback text during reclassification (current behavior).
-
-**Decision needed:** Always-on background analysis, or only when user provides feedback?
-
-### Q12: Is the FeedbackDashboardPage part of the core flow?
-
-**Project flow** does not list a "feedback dashboard" as a numbered step. It mentions changes streaming to the feedback agent, but there's no explicit step for reviewing/acting on feedback suggestions.
-
-**Current state:** FeedbackDashboardPage exists and lets users approve/reject suggestions.
-
-**Options:**
-- Keep as an auxiliary/settings page (not in the main flow, accessible from sidebar)
-- Remove from the flow entirely (feedback agent runs but results are never surfaced)
-- Integrate feedback actions into the ReviewPage itself
-
-**Decision needed:** Where does the user interact with feedback suggestions?
-
----
-
 ## Pruning Candidates
 
-### Q13: Tables that could be pruned
+### Q11: Tables that could be pruned
 
 | Table | Current | Proposal | Rationale |
 |-------|---------|----------|-----------|
@@ -182,29 +153,32 @@ Decisions that go beyond execution — need product/design input before implemen
 | `company_context` | Single-row company info | Merge into `project` | See Q1 |
 | `column_mappings` | Mapping rows | JSON in `project` | See Q3 |
 | `invoice_grouping_columns` | Grouping rows | JSON in `project` | See Q3 |
-| `system_feedback` | Keep or prune | Keep if Q12 says yes | Depends on feedback agent decision |
+| `system_feedback` | Feedback agent table | Remove | Feedback agent removed from flow |
 
-Net effect: 10 tables → 7 tables (or 6 if system_feedback is removed).
+Net effect: 10 tables → 5 tables.
 
-### Q14: Services that could be pruned or merged
+### Q12: Services that could be pruned or merged
 
 | Service | Proposal | Rationale |
 |---------|----------|-----------|
 | `canonicalization` | Merge into `upload` | `saveMappings` + `getMappings` are small; only called by the upload flow |
 | `taxonomy-utils` | Merge into `taxonomy` | Single helper function (`resolveTaxonomyPath`) |
+| `feedback` | Remove | Feedback agent removed from flow |
 | `supplier-matcher` | Keep | Used by both `upload` (import) and `supplier-research` |
 | `exa-search` | Keep | Clean external API wrapper |
 | `rate-limiter` | Keep | Used by both research and classification |
 
-### Q15: Pages — FeedbackDashboardPage
+### Q13: Pages to remove
 
-If Q12 decides feedback is not part of the core flow, this page could be removed or merged into a settings area.
+| Page | Proposal | Rationale |
+|------|----------|-----------|
+| `FeedbackDashboardPage` | Remove | Feedback agent removed from flow |
 
 ---
 
 ## Export
 
-### Q16: Export format — CSV only?
+### Q14: Export format — CSV only?
 
 **Project flow says:** "Download dataset as csv, with all the canonicalized columns and taxonomy classifications."
 
@@ -218,7 +192,7 @@ If Q12 decides feedback is not part of the core flow, this page could be removed
 
 ## Taxonomy Editing
 
-### Q17: Taxonomy editing in two modes — what triggers reclassification?
+### Q15: Taxonomy editing in two modes — what triggers reclassification?
 
 **Project flow says:**
 - "Pivot table mode" = no reclassification, viewing only

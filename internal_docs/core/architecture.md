@@ -113,24 +113,13 @@ Dynamic schema. Base columns are fixed; canonical columns added via ALTER TABLE 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | VARCHAR PK | UUID |
-| `source` | VARCHAR | `manual`, `pipeline`, `rule`, `feedback` |
+| `source` | VARCHAR | `manual`, `pipeline`, `rule` |
 | `affected_table` | VARCHAR | |
 | `affected_ids` | JSON | Array of affected row IDs |
 | `affected_count` | INTEGER | |
 | `old_values` | JSON | Pre-change values |
 | `new_values` | JSON | Post-change values |
 | `description` | TEXT | |
-| `created_at` | TIMESTAMP | |
-
-### system_feedback
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | VARCHAR PK | UUID |
-| `feedback_type` | VARCHAR | `company_context`, `taxonomy_description`, `supplier_rule`, `uncategorized_feedback` |
-| `affected_transaction_ids` | JSON | |
-| `suggestion` | JSON | Action-specific payload |
-| `status` | VARCHAR | `pending`, `approved`, `rejected` |
 | `created_at` | TIMESTAMP | |
 
 ---
@@ -164,7 +153,7 @@ Services are the business logic layer. Each service owns one concern. Services c
 |---------|---------------|
 | `classification-pipeline` | Orchestrate full pipeline: identify rows → research → rules → AI classify. Emits progress events. Handles cancellation |
 | `rules` | Override rules CRUD, condition-to-SQL conversion, rule evaluation against transactions, priority management |
-| `reclassification` | Manual reclassification: update transactions, log to changelog, trigger feedback agent |
+| `reclassification` | Manual reclassification: update transactions, log to changelog |
 
 ### Supplier
 
@@ -176,12 +165,11 @@ Services are the business logic layer. Each service owns one concern. Services c
 | `exa-search` | Web search via Exa API for supplier information |
 | `colabip` | Read ColabIP filesystem: taxonomies, rule packs, supplier universe CSV |
 
-### Audit + Feedback
+### Audit
 
 | Service | Responsibility |
 |---------|---------------|
 | `changelog` | Immutable audit log: record changes, revert by applying old values + appending new log entry |
-| `feedback` | System feedback CRUD, approve (auto-execute action), reject |
 
 ### Infrastructure
 
@@ -202,7 +190,6 @@ Each agent owns: system prompt, user prompt construction, response parsing + val
 | `canonicalization-agent` | Step 3.1 | Suggest CSV→canonical column mappings from headers + sample data |
 | `research-agent` | Step 6 | Research supplier: extract type, industry, products, NAICS codes, business model |
 | `classification-agent` | Step 7.2 | Classify transaction group into taxonomy. Validates L1, depth, closest match |
-| `feedback-agent` | Step 8.3 | Analyze reclassification, suggest systemic improvement (context/taxonomy/rule/uncategorized) |
 
 ---
 
@@ -278,15 +265,12 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 | `rules:delete` | invoke | Delete rule |
 | `rules:importFromColabip` | invoke | Import rule pack |
 
-### Audit + Feedback
+### Audit
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
 | `changelog:list` | invoke | List change log entries |
 | `changelog:revert` | invoke | Revert a change |
-| `feedback:list` | invoke | List feedback suggestions |
-| `feedback:approve` | invoke | Approve + execute feedback |
-| `feedback:reject` | invoke | Reject feedback |
 
 ### Export + Settings
 
@@ -334,7 +318,6 @@ Pages map to project flow steps. Each page uses IPC hooks to call the backend.
 | `PivotPage` | 9 | Pivot table view (view-only mode) |
 | `VersionHistoryPage` | 10 | Change log, revert |
 | `OutputPage` | 11 | CSV export |
-| `FeedbackDashboardPage` | (auxiliary) | Review/approve/reject feedback suggestions |
 
 ---
 

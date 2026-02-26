@@ -1,13 +1,14 @@
 import { v4 as uuidv4 } from 'uuid';
-import { databaseService } from './database';
+import { databaseService, supplierUniverseService } from './database';
 import type {
-  ProjectSupplier,
+  Supplier,
+  ProjectSupplierView,
   SupplierUpdateInput,
   SupplierInfo,
-} from '../../shared/types/suppliers';
+} from '../../shared/types';
 
 /**
- * Raw DB row shape for project_suppliers (snake_case columns).
+ * Raw DB row shape from supplier_universe.db (snake_case columns).
  */
 interface SupplierRow {
   id: string;
@@ -18,80 +19,92 @@ interface SupplierRow {
   supplier_info: string | null;
   category_a: boolean;
   category_a_taxonomy_node_id: string | null;
-  transaction_count: number;
-  total_spend: number;
   created_at: string;
   updated_at: string;
 }
 
-/**
- * Convert a snake_case DB row to a camelCase ProjectSupplier object.
- * Parses the supplier_info JSON field.
- */
-function rowToSupplier(row: SupplierRow): ProjectSupplier {
-  let supplierInfo: SupplierInfo | null = null;
-  if (row.supplier_info) {
-    try {
-      supplierInfo = JSON.parse(row.supplier_info);
-    } catch {
-      supplierInfo = null;
-    }
+function parseJSON<T>(json: string | null): T | null {
+  if (!json) return null;
+  try {
+    return typeof json === 'string' ? JSON.parse(json) : json;
+  } catch {
+    return null;
   }
+}
 
-  let aliases: string[] | null = null;
-  if (row.aliases) {
-    try {
-      aliases = JSON.parse(row.aliases);
-    } catch {
-      aliases = null;
-    }
-  }
-
+function rowToSupplier(row: SupplierRow): Supplier {
   return {
     id: row.id,
     supplierName: row.supplier_name,
-    aliases,
+    aliases: parseJSON<string[]>(row.aliases),
     parentSupplierId: row.parent_supplier_id,
     parentName: row.parent_name,
-    supplierInfo,
+    supplierInfo: parseJSON<SupplierInfo>(row.supplier_info),
     categoryA: Boolean(row.category_a),
     categoryATaxonomyNodeId: row.category_a_taxonomy_node_id,
-    transactionCount: Number(row.transaction_count),
-    totalSpend: Number(row.total_spend),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
 }
 
-/**
- * List all suppliers from the project_suppliers table.
- */
-export async function listSuppliers(): Promise<ProjectSupplier[]> {
-  const rows = await databaseService.all<SupplierRow>(
-    'SELECT id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers ORDER BY supplier_name'
-  );
-  return rows.map(rowToSupplier);
-}
+// ---------------------------------------------------------------------------
+// Project Suppliers (derived from transactions + supplier_universe.db)
+// ---------------------------------------------------------------------------
 
 /**
- * Get a single supplier by name.
+ * List all project suppliers.
+ * Derived from `SELECT DISTINCT supplier_name FROM transactions`,
+ * joined with supplier_universe.db for enriched data.
  */
-export async function getSupplierByName(name: string): Promise<ProjectSupplier | null> {
-  const row = await databaseService.get<SupplierRow>(
-    'SELECT id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE supplier_name = ?',
+export async function listProjectSuppliers(): Promise<ProjectSupplierView[]> {
+  // Get distinct suppliers with transaction counts/spend from the project DB
+  const projectSuppliers = await databaseService.all<{
+    supplier_name: string;
+    transaction_count: number | bigint;
+    total_spend: number | bigint;
+  }>(
+    `SELECT
+      supplier_name,
+      COUNT(*) as transaction_count,
+      COALESCE(SUM(TRY_CAST(spend_amount AS DOUBLE)), 0) as total_spend
+    FROM transactions
+    WHERE supplier_name IS NOT NULL
+    GROUP BY supplier_name
+    ORDER BY supplier_name`
+  );
+
+  if (projectSuppliers.length === 0) return [];
+
+  // Fetch matching supplier universe data
+  const names = projectSuppliers.map((s) => s.supplier_name);
+  const universeMap = await getSuppliersByNames(names);
+
+  return projectSuppliers.map((ps) => {
+    const universe = universeMap.get(ps.supplier_name);
+    return {
+      supplierName: ps.supplier_name,
+      transactionCount: Number(ps.transaction_count),
+      totalSpend: Number(ps.total_spend),
+      supplierInfo: universe?.supplierInfo ?? null,
+      parentName: universe?.parentName ?? null,
+      categoryA: universe?.categoryA ?? false,
+      categoryATaxonomyNodeId: universe?.categoryATaxonomyNodeId ?? null,
+      isResearched: universe !== undefined,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Supplier Universe CRUD
+// ---------------------------------------------------------------------------
+
+/**
+ * Get a supplier from the universe by exact name.
+ */
+export async function getSupplierByName(name: string): Promise<Supplier | null> {
+  const row = await supplierUniverseService.get<SupplierRow>(
+    'SELECT * FROM suppliers WHERE supplier_name = ?',
     name
-  );
-  return row ? rowToSupplier(row) : null;
-}
-
-/**
- * Find a project supplier whose aliases array contains the given name.
- * Uses json_contains on the JSON-encoded aliases column.
- */
-export async function getSupplierByAlias(alias: string): Promise<ProjectSupplier | null> {
-  const row = await databaseService.get<SupplierRow>(
-    "SELECT id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE aliases IS NOT NULL AND json_contains(aliases, ?)",
-    JSON.stringify(alias)
   );
   return row ? rowToSupplier(row) : null;
 }
@@ -99,16 +112,16 @@ export async function getSupplierByAlias(alias: string): Promise<ProjectSupplier
 /**
  * Get multiple suppliers by name in a single query.
  */
-export async function getSuppliersByNames(names: string[]): Promise<Map<string, ProjectSupplier>> {
+export async function getSuppliersByNames(names: string[]): Promise<Map<string, Supplier>> {
   if (names.length === 0) return new Map();
 
   const placeholders = names.map(() => '?').join(',');
-  const rows = await databaseService.all<SupplierRow>(
-    `SELECT id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend, created_at, updated_at FROM project_suppliers WHERE supplier_name IN (${placeholders})`,
+  const rows = await supplierUniverseService.all<SupplierRow>(
+    `SELECT * FROM suppliers WHERE supplier_name IN (${placeholders})`,
     ...names
   );
 
-  const result = new Map<string, ProjectSupplier>();
+  const result = new Map<string, Supplier>();
   for (const row of rows) {
     result.set(row.supplier_name, rowToSupplier(row));
   }
@@ -116,7 +129,7 @@ export async function getSuppliersByNames(names: string[]): Promise<Map<string, 
 }
 
 /**
- * Update specific fields of a supplier identified by name.
+ * Update specific fields of a supplier in supplier_universe.db.
  */
 export async function updateSupplier(
   supplierName: string,
@@ -129,124 +142,70 @@ export async function updateSupplier(
     setClauses.push('parent_supplier_id = ?');
     params.push(updates.parentSupplierId);
   }
-
   if (updates.parentName !== undefined) {
     setClauses.push('parent_name = ?');
     params.push(updates.parentName);
   }
-
   if (updates.categoryA !== undefined) {
     setClauses.push('category_a = ?');
     params.push(updates.categoryA);
   }
-
   if (updates.categoryATaxonomyNodeId !== undefined) {
     setClauses.push('category_a_taxonomy_node_id = ?');
     params.push(updates.categoryATaxonomyNodeId);
   }
-
   if (updates.supplierInfo !== undefined) {
     setClauses.push('supplier_info = ?');
     params.push(JSON.stringify(updates.supplierInfo));
   }
-
   if (updates.aliases !== undefined) {
     setClauses.push('aliases = ?');
     params.push(updates.aliases ? JSON.stringify(updates.aliases) : null);
   }
 
-  if (setClauses.length === 0) {
-    return;
-  }
+  if (setClauses.length === 0) return;
 
   setClauses.push('updated_at = CURRENT_TIMESTAMP');
   params.push(supplierName);
 
-  await databaseService.run(
-    `UPDATE project_suppliers SET ${setClauses.join(', ')} WHERE supplier_name = ?`,
+  await supplierUniverseService.run(
+    `UPDATE suppliers SET ${setClauses.join(', ')} WHERE supplier_name = ?`,
     ...params
   );
 }
 
 /**
- * Insert a new supplier or update an existing one by supplier_name.
+ * Insert or update a supplier in supplier_universe.db.
+ * Upserts by supplier_name.
  */
 export async function upsertSupplier(
-  supplier: Partial<ProjectSupplier> & { supplierName: string }
+  supplierName: string,
+  data: Partial<Omit<Supplier, 'id' | 'supplierName' | 'createdAt' | 'updatedAt'>>
 ): Promise<void> {
-  const existing = await getSupplierByName(supplier.supplierName);
+  const existing = await getSupplierByName(supplierName);
 
   if (existing) {
-    // Build update input from the partial supplier fields
     const updates: SupplierUpdateInput = {};
-
-    if (supplier.parentSupplierId !== undefined) {
-      updates.parentSupplierId = supplier.parentSupplierId;
-    }
-    if (supplier.parentName !== undefined) {
-      updates.parentName = supplier.parentName;
-    }
-    if (supplier.categoryA !== undefined) {
-      updates.categoryA = supplier.categoryA;
-    }
-    if (supplier.categoryATaxonomyNodeId !== undefined) {
-      updates.categoryATaxonomyNodeId = supplier.categoryATaxonomyNodeId;
-    }
-    if (supplier.supplierInfo !== undefined) {
-      updates.supplierInfo = supplier.supplierInfo ?? undefined;
-    }
-    if (supplier.aliases !== undefined) {
-      updates.aliases = supplier.aliases;
-    }
-
-    // Also handle transactionCount and totalSpend if provided
-    const extraClauses: string[] = [];
-    const extraParams: unknown[] = [];
-
-    if (supplier.transactionCount !== undefined) {
-      extraClauses.push('transaction_count = ?');
-      extraParams.push(supplier.transactionCount);
-    }
-    if (supplier.totalSpend !== undefined) {
-      extraClauses.push('total_spend = ?');
-      extraParams.push(supplier.totalSpend);
-    }
-
-    // Use updateSupplier for the standard fields
-    await updateSupplier(supplier.supplierName, updates);
-
-    // Handle extra fields (transactionCount, totalSpend) separately
-    if (extraClauses.length > 0) {
-      extraClauses.push('updated_at = CURRENT_TIMESTAMP');
-      extraParams.push(supplier.supplierName);
-
-      await databaseService.run(
-        `UPDATE project_suppliers SET ${extraClauses.join(', ')} WHERE supplier_name = ?`,
-        ...extraParams
-      );
-    }
+    if (data.parentSupplierId !== undefined) updates.parentSupplierId = data.parentSupplierId;
+    if (data.parentName !== undefined) updates.parentName = data.parentName;
+    if (data.categoryA !== undefined) updates.categoryA = data.categoryA;
+    if (data.categoryATaxonomyNodeId !== undefined) updates.categoryATaxonomyNodeId = data.categoryATaxonomyNodeId;
+    if (data.supplierInfo !== undefined) updates.supplierInfo = data.supplierInfo ?? undefined;
+    if (data.aliases !== undefined) updates.aliases = data.aliases;
+    await updateSupplier(supplierName, updates);
   } else {
-    const id = supplier.id ?? uuidv4();
-    const supplierInfoJson = supplier.supplierInfo
-      ? JSON.stringify(supplier.supplierInfo)
-      : null;
-    const aliasesJson = supplier.aliases
-      ? JSON.stringify(supplier.aliases)
-      : null;
-
-    await databaseService.run(
-      `INSERT INTO project_suppliers (id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id, transaction_count, total_spend)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    const id = uuidv4();
+    await supplierUniverseService.run(
+      `INSERT INTO suppliers (id, supplier_name, aliases, parent_supplier_id, parent_name, supplier_info, category_a, category_a_taxonomy_node_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
-      supplier.supplierName,
-      aliasesJson,
-      supplier.parentSupplierId ?? null,
-      supplier.parentName ?? null,
-      supplierInfoJson,
-      supplier.categoryA ?? false,
-      supplier.categoryATaxonomyNodeId ?? null,
-      supplier.transactionCount ?? 0,
-      supplier.totalSpend ?? 0
+      supplierName,
+      data.aliases ? JSON.stringify(data.aliases) : null,
+      data.parentSupplierId ?? null,
+      data.parentName ?? null,
+      data.supplierInfo ? JSON.stringify(data.supplierInfo) : null,
+      data.categoryA ?? false,
+      data.categoryATaxonomyNodeId ?? null
     );
   }
 }

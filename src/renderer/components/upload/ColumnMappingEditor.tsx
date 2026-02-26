@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import type { CanonicalColumnMapping, CanonicalizationResult } from '../../../shared/types/canonicalization'
+import type { ColumnMapping, ColumnMappingResult } from '../../../shared/types/column-mapping'
 import { CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
 
 interface Props {
-  suggestion: CanonicalizationResult
+  suggestion: ColumnMappingResult
   csvColumns: string[]
-  onMappingChange: (mapping: CanonicalColumnMapping) => void
+  onMappingChange: (mapping: ColumnMapping) => void
   groupingColumns: string[]
   onGroupingChange: (columns: string[]) => void
 }
@@ -29,7 +29,7 @@ const DESCRIPTION_MAP: Record<string, string> = Object.fromEntries(
   CANONICAL_COLUMNS.map((col) => [col.name, col.description])
 )
 
-function autoMap(llmMappings: CanonicalColumnMapping, unmappedCanonical: string[], csvColumns: string[]): CanonicalColumnMapping {
+function autoMap(llmMappings: ColumnMapping, unmappedCanonical: string[], csvColumns: string[]): ColumnMapping {
   const result = { ...llmMappings }
   const usedCsvCols = new Set(Object.values(result).map((v) => v.toLowerCase()))
 
@@ -67,7 +67,7 @@ export default function ColumnMappingEditor({
   groupingColumns,
   onGroupingChange,
 }: Props) {
-  const [mapping, setMapping] = useState<CanonicalColumnMapping>(() =>
+  const [mapping, setMapping] = useState<ColumnMapping>(() =>
     autoMap(suggestion.mappings, suggestion.unmappedCanonicalColumns, csvColumns)
   )
 

@@ -1,10 +1,20 @@
 import { databaseService } from './database';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions } from '../../shared/types';
+import { logChange } from './changelog';
+import type {
+  Transaction,
+  TransactionFilter,
+  TransactionStats,
+  PaginatedTransactions,
+  TransactionUpdate,
+  FilterCondition,
+  ClassificationStatus,
+} from '../../shared/types';
 
-// Base columns that always exist on the transactions table
+// Base columns that always exist on the transactions table (v2 schema)
 const BASE_COLUMNS = [
-  'id', 'row_index', 'invoice_group_key', 'taxonomy_node_id',
-  'review_score', 'classification_reasoning', 'created_at', 'updated_at',
+  'id', 'row_index', 'taxonomy_node_id',
+  'classification_status', 'classification_reasoning',
+  'created_at', 'updated_at',
 ];
 
 // In-memory cache for transaction columns (avoids information_schema query per page load)
@@ -17,6 +27,103 @@ let cachedColumns: string[] | null = null;
 export function invalidateColumnCache(): void {
   cachedColumns = null;
 }
+
+// ---------------------------------------------------------------------------
+// Shared Filter Engine — used by both UI queries and override rule evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a single FilterCondition to a SQL clause.
+ * Pushes bind-parameter values to `params` array.
+ * Returns the SQL fragment, or null if operator is unknown.
+ */
+export function conditionToSQL(condition: FilterCondition, params: unknown[]): string | null {
+  const { field, operator, value } = condition;
+  const col = field; // canonical column name
+
+  switch (operator) {
+    case 'equals':
+      params.push(value);
+      return `${col} = ?`;
+    case 'not_equals':
+      params.push(value);
+      return `${col} != ?`;
+    case 'contains':
+      params.push(`%${value}%`);
+      return `${col} LIKE ?`;
+    case 'not_contains':
+      params.push(`%${value}%`);
+      return `${col} NOT LIKE ?`;
+    case 'starts_with':
+      params.push(`${value}%`);
+      return `${col} LIKE ?`;
+    case 'ends_with':
+      params.push(`%${value}`);
+      return `${col} LIKE ?`;
+    case 'regex':
+      return `regexp_matches(${col}, '${String(value).replace(/'/g, "''")}')`;
+    case 'in_list': {
+      const listValues = Array.isArray(value)
+        ? value
+        : String(value).split(',').map((v: string) => v.trim());
+      const placeholders = listValues.map(() => '?').join(',');
+      params.push(...listValues);
+      return `${col} IN (${placeholders})`;
+    }
+    case 'greater_than':
+      params.push(typeof value === 'number' ? value : parseFloat(String(value)));
+      return `CAST(${col} AS DOUBLE) > ?`;
+    case 'less_than':
+      params.push(typeof value === 'number' ? value : parseFloat(String(value)));
+      return `CAST(${col} AS DOUBLE) < ?`;
+    case 'greater_than_or_equal':
+      params.push(typeof value === 'number' ? value : parseFloat(String(value)));
+      return `CAST(${col} AS DOUBLE) >= ?`;
+    case 'less_than_or_equal':
+      params.push(typeof value === 'number' ? value : parseFloat(String(value)));
+      return `CAST(${col} AS DOUBLE) <= ?`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Build a SQL WHERE clause from an array of FilterConditions.
+ * Supports per-condition AND/OR connectors.
+ * Returns { sql, params } where sql is the WHERE fragment (without the "WHERE" keyword),
+ * or null if no conditions produce SQL.
+ *
+ * This is the shared filter engine — imported by rules.ts for rule evaluation.
+ */
+export function buildWhereClause(
+  conditions: FilterCondition[]
+): { sql: string; params: unknown[] } | null {
+  const clauses: string[] = [];
+  const connectors: string[] = [];
+  const params: unknown[] = [];
+
+  for (const condition of conditions) {
+    const clause = conditionToSQL(condition, params);
+    if (clause) {
+      clauses.push(clause);
+      connectors.push(condition.connector || 'AND');
+    }
+  }
+
+  if (clauses.length === 0) return null;
+
+  // Assemble using per-condition connectors
+  let combined = clauses[0];
+  for (let i = 1; i < clauses.length; i++) {
+    combined += ` ${connectors[i - 1]} ${clauses[i]}`;
+  }
+
+  return { sql: combined, params };
+}
+
+// ---------------------------------------------------------------------------
+// Query
+// ---------------------------------------------------------------------------
 
 /**
  * Query transactions with dynamic filters, pagination, sorting.
@@ -35,13 +142,9 @@ export async function queryTransactions(
     whereClauses.push('t.taxonomy_node_id = ?');
     params.push(filters.taxonomyNodeId);
   }
-  if (filters?.reviewScoreMin !== undefined) {
-    whereClauses.push('t.review_score >= ?');
-    params.push(filters.reviewScoreMin);
-  }
-  if (filters?.reviewScoreMax !== undefined) {
-    whereClauses.push('t.review_score <= ?');
-    params.push(filters.reviewScoreMax);
+  if (filters?.classificationStatus) {
+    whereClauses.push('t.classification_status = ?');
+    params.push(filters.classificationStatus);
   }
   if (filters?.spendMin !== undefined) {
     whereClauses.push('t.spend_amount >= ?');
@@ -51,10 +154,14 @@ export async function queryTransactions(
     whereClauses.push('t.spend_amount <= ?');
     params.push(filters.spendMax);
   }
-  if (filters?.excludeTailSpend) {
-    const threshold = await getTailSpendThreshold();
-    whereClauses.push('t.spend_amount >= ?');
-    params.push(threshold);
+
+  // Apply generic filter conditions
+  if (filters?.conditions && filters.conditions.length > 0) {
+    const built = buildWhereClause(filters.conditions);
+    if (built) {
+      whereClauses.push(`(${built.sql})`);
+      params.push(...built.params);
+    }
   }
 
   const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -91,26 +198,19 @@ export async function queryTransactions(
     const canonicalFields: Record<string, unknown> = {};
     for (const col of dynamicCols) {
       if (row[col] !== undefined) {
-        canonicalFields[col] = row[col];
+        // Convert BigInt values to Number for JSON serialization
+        canonicalFields[col] = typeof row[col] === 'bigint' ? Number(row[col]) : row[col];
       }
-    }
-
-    // Convert any BigInt values to Number for JSON serialization safety.
-    // DuckDB may return BigInt for INTEGER columns depending on the driver version.
-    const safeCanonicFields: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(canonicalFields)) {
-      safeCanonicFields[k] = typeof v === 'bigint' ? Number(v) : v;
     }
 
     return {
       id: String(row.id),
       rowIndex: Number(row.row_index ?? 0),
-      invoiceGroupKey: row.invoice_group_key ? String(row.invoice_group_key) : null,
       taxonomyNodeId: row.taxonomy_node_id ? String(row.taxonomy_node_id) : null,
       classificationPath: row.classification_path ? String(row.classification_path) : null,
-      reviewScore: row.review_score != null ? Number(row.review_score) : null,
+      classificationStatus: (row.classification_status as ClassificationStatus) || 'unclassified',
       classificationReasoning: row.classification_reasoning ? String(row.classification_reasoning) : null,
-      canonicalFields: safeCanonicFields,
+      canonicalFields,
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     };
@@ -119,7 +219,6 @@ export async function queryTransactions(
 
 /**
  * Get aggregate stats for all transactions.
- * Uses a single query with conditional aggregates instead of 5 separate queries.
  */
 export async function getStats(): Promise<TransactionStats> {
   const columns = await getColumns();
@@ -138,14 +237,14 @@ export async function getStats(): Promise<TransactionStats> {
     total_spend: number | bigint;
     unique_suppliers: number | bigint;
     classified_rows: number | bigint;
-    flagged_rows: number | bigint;
+    unclassified_rows: number | bigint;
   }>(
     `SELECT
       COUNT(*) as total_rows,
       ${spendExpr} as total_spend,
       ${supplierExpr} as unique_suppliers,
-      COUNT(CASE WHEN taxonomy_node_id IS NOT NULL THEN 1 END) as classified_rows,
-      COUNT(CASE WHEN review_score > 0 THEN 1 END) as flagged_rows
+      COUNT(CASE WHEN classification_status != 'unclassified' THEN 1 END) as classified_rows,
+      COUNT(CASE WHEN classification_status = 'unclassified' THEN 1 END) as unclassified_rows
     FROM transactions`
   );
 
@@ -154,7 +253,7 @@ export async function getStats(): Promise<TransactionStats> {
     totalSpend: Number(result?.total_spend ?? 0),
     uniqueSuppliers: Number(result?.unique_suppliers ?? 0),
     classifiedRows: Number(result?.classified_rows ?? 0),
-    flaggedForReviewRows: Number(result?.flagged_rows ?? 0),
+    unclassifiedRows: Number(result?.unclassified_rows ?? 0),
   };
 }
 
@@ -187,13 +286,9 @@ export async function getCount(filters?: TransactionFilter): Promise<number> {
     whereClauses.push('t.taxonomy_node_id = ?');
     params.push(filters.taxonomyNodeId);
   }
-  if (filters?.reviewScoreMin !== undefined) {
-    whereClauses.push('t.review_score >= ?');
-    params.push(filters.reviewScoreMin);
-  }
-  if (filters?.reviewScoreMax !== undefined) {
-    whereClauses.push('t.review_score <= ?');
-    params.push(filters.reviewScoreMax);
+  if (filters?.classificationStatus) {
+    whereClauses.push('t.classification_status = ?');
+    params.push(filters.classificationStatus);
   }
   if (filters?.spendMin !== undefined) {
     whereClauses.push('t.spend_amount >= ?');
@@ -203,10 +298,12 @@ export async function getCount(filters?: TransactionFilter): Promise<number> {
     whereClauses.push('t.spend_amount <= ?');
     params.push(filters.spendMax);
   }
-  if (filters?.excludeTailSpend) {
-    const threshold = await getTailSpendThreshold();
-    whereClauses.push('t.spend_amount >= ?');
-    params.push(threshold);
+  if (filters?.conditions && filters.conditions.length > 0) {
+    const built = buildWhereClause(filters.conditions);
+    if (built) {
+      whereClauses.push(`(${built.sql})`);
+      params.push(...built.params);
+    }
   }
 
   const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -240,40 +337,73 @@ export async function queryTransactionsPaginated(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------
+
 /**
- * Ensure performance indexes exist on the transactions table.
- * Called once when a project is opened. DuckDB ignores IF NOT EXISTS
- * so we catch errors from duplicate index names.
+ * Update transaction fields and log the change.
+ * Used by: manual review edits, rule application, AI classification results.
  */
-export async function ensureIndexes(): Promise<void> {
-  const indexDefs = [
-    'CREATE INDEX IF NOT EXISTS idx_transactions_review_score ON transactions(review_score)',
-    'CREATE INDEX IF NOT EXISTS idx_transactions_row_index ON transactions(row_index)',
-  ];
+export async function updateTransactions(
+  update: TransactionUpdate,
+  source: 'manual' | 'pipeline' | 'rule' = 'manual'
+): Promise<void> {
+  if (!update.ids || update.ids.length === 0) return;
 
-  // For dynamic canonical columns, only index well-known ones if they exist
-  const cols = await getColumns();
-  const optionalIndexCols = ['supplier_name', 'gl_description', 'spend_amount', 'line_description'];
-  for (const col of optionalIndexCols) {
-    if (cols.includes(col)) {
-      indexDefs.push(
-        `CREATE INDEX IF NOT EXISTS idx_transactions_${col} ON transactions(${col})`
-      );
-    }
-  }
-
-  for (const sql of indexDefs) {
-    try {
-      await databaseService.run(sql);
-    } catch {
-      // Index may already exist — safe to ignore
-    }
-  }
-}
-
-async function getTailSpendThreshold(): Promise<number> {
-  const result = await databaseService.get<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
+  // Capture old values for changelog
+  const placeholders = update.ids.map(() => '?').join(',');
+  const oldRows = await databaseService.all<Record<string, unknown>>(
+    `SELECT id, taxonomy_node_id, classification_status, classification_reasoning FROM transactions WHERE id IN (${placeholders})`,
+    ...update.ids
   );
-  return result ? parseFloat(result.value) : 10000;
+
+  const oldValues: Record<string, unknown> = {};
+  if (oldRows.length > 0) {
+    oldValues.taxonomy_node_id = oldRows[0].taxonomy_node_id;
+    oldValues.classification_status = oldRows[0].classification_status;
+    oldValues.classification_reasoning = oldRows[0].classification_reasoning;
+  }
+
+  // Build SET clause
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+  const newValues: Record<string, unknown> = {};
+
+  if (update.taxonomyNodeId !== undefined) {
+    setClauses.push('taxonomy_node_id = ?');
+    params.push(update.taxonomyNodeId);
+    newValues.taxonomy_node_id = update.taxonomyNodeId;
+  }
+  if (update.classificationStatus !== undefined) {
+    setClauses.push('classification_status = ?');
+    params.push(update.classificationStatus);
+    newValues.classification_status = update.classificationStatus;
+  }
+  if (update.classificationReasoning !== undefined) {
+    setClauses.push('classification_reasoning = ?');
+    params.push(update.classificationReasoning);
+    newValues.classification_reasoning = update.classificationReasoning;
+  }
+
+  if (setClauses.length === 0) return;
+
+  setClauses.push('updated_at = CURRENT_TIMESTAMP');
+
+  await databaseService.run(
+    `UPDATE transactions SET ${setClauses.join(', ')} WHERE id IN (${placeholders})`,
+    ...params,
+    ...update.ids
+  );
+
+  // Log to changelog
+  await logChange({
+    source,
+    affectedTable: 'transactions',
+    affectedIds: update.ids,
+    affectedCount: update.ids.length,
+    oldValues,
+    newValues,
+    description: `Updated ${update.ids.length} transaction(s)`,
+  });
 }

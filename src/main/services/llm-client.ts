@@ -1,5 +1,3 @@
-import * as settingsService from './settings';
-
 /**
  * Options for LLM chat calls.
  */
@@ -8,6 +6,33 @@ export interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   provider?: string;
+}
+
+/**
+ * Read LLM configuration from environment variables.
+ * No settings service — .env is the single source of truth.
+ */
+function getEnvSettings(): { provider: string; model: string } {
+  return {
+    provider: process.env.CLASSIFIER_LLM_PROVIDER || 'openrouter',
+    model: process.env.CLASSIFIER_MODEL || 'claude-3-5-haiku-latest',
+  };
+}
+
+/**
+ * Get API key for the given provider from environment variables.
+ */
+function getApiKeyForProvider(provider: string): string | undefined {
+  switch (provider) {
+    case 'anthropic':
+      return process.env.ANTHROPIC_API_KEY;
+    case 'openai':
+      return process.env.OPENAI_API_KEY;
+    case 'openrouter':
+      return process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -226,8 +251,8 @@ export async function chat(
   userPrompt: string,
   options?: ChatOptions
 ): Promise<string> {
-  const settings = settingsService.getSettings();
-  const provider = options?.provider ?? settings.provider;
+  const envSettings = getEnvSettings();
+  const provider = options?.provider ?? envSettings.provider;
   const config = PROVIDER_CONFIGS[provider];
 
   if (!config) {
@@ -237,15 +262,15 @@ export async function chat(
     );
   }
 
-  const apiKey = settingsService.getApiKey(provider);
+  const apiKey = getApiKeyForProvider(provider);
   if (!apiKey) {
     throw new LLMClientError(
-      `No API key configured for provider "${provider}". Set it in Settings or via environment variable.`,
+      `No API key configured for provider "${provider}". Set the appropriate environment variable in .env.`,
       'MISSING_API_KEY'
     );
   }
 
-  const model = options?.model ?? settings.model ?? config.defaultModel;
+  const model = options?.model ?? envSettings.model ?? config.defaultModel;
   const maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
   const temperature = options?.temperature ?? DEFAULT_TEMPERATURE;
 

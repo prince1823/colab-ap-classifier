@@ -1,7 +1,8 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { parse } from 'csv-parse/sync';
-import type { TaxonomyInfo, RulePackInfo, RuleCondition } from '../../shared/types';
+import type { TaxonomyInfo } from '../../shared/types';
+import type { FilterCondition } from '../../shared/types/transactions';
 
 // Configurable base path — defaults to colabip/ in project root
 let basePath = path.join(process.cwd(), 'colabip');
@@ -52,39 +53,7 @@ export async function listTaxonomies(): Promise<TaxonomyInfo[]> {
   }
 }
 
-/**
- * List available rule packs from colabip/taxonomies/{industry}/rules.csv.
- * Returns industry names with rule counts.
- */
-export async function listRulePacks(): Promise<RulePackInfo[]> {
-  const taxonomiesDir = path.join(basePath, 'taxonomies');
-  try {
-    const entries = await fs.readdir(taxonomiesDir, { withFileTypes: true });
-    const results: RulePackInfo[] = [];
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const rulesPath = path.join(taxonomiesDir, entry.name, 'rules.csv');
-        try {
-          const content = await fs.readFile(rulesPath, 'utf-8');
-          const cleaned = stripBOM(content);
-          const records = parse(cleaned, {
-            columns: true,
-            skip_empty_lines: true,
-          });
-          results.push({ name: entry.name, ruleCount: records.length });
-        } catch {
-          // No rules.csv in this directory — skip
-        }
-      }
-    }
-    return results;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
-}
+// listRulePacks removed in v2 — rule import happens via readRulePack() directly.
 
 /**
  * Read all taxonomy nodes from colabip/taxonomies/{industryName}/taxonomy.txt.
@@ -161,7 +130,7 @@ export async function readRulePack(
 ): Promise<
   Array<{
     name: string;
-    conditions: RuleCondition[];
+    conditions: FilterCondition[];
     targetPath: string;
     priorityScore: number;
   }>
@@ -183,7 +152,7 @@ export async function readRulePack(
 
     const results: Array<{
       name: string;
-      conditions: RuleCondition[];
+      conditions: FilterCondition[];
       targetPath: string;
       priorityScore: number;
     }> = [];
@@ -192,7 +161,7 @@ export async function readRulePack(
       try {
         results.push({
           name: record.name || '',
-          conditions: JSON.parse(record.conditions || '[]') as RuleCondition[],
+          conditions: JSON.parse(record.conditions || '[]') as FilterCondition[],
           targetPath: record.target_taxonomy_path || '',
           priorityScore: parseInt(record.priority_score, 10) || 0,
         });

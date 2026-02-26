@@ -61,14 +61,14 @@ export default function UploadPage() {
             <div>
               <p className="text-sm font-medium text-gray-900">Data already imported</p>
               <p className="mt-1 text-sm text-gray-500">
-                {metadata?.columnMappings
-                  ? `${Object.keys(metadata.columnMappings).length} columns mapped`
+                {metadata?.columnMapping
+                  ? `${Object.keys(metadata.columnMapping).length} columns mapped`
                   : 'Column mappings configured'}
               </p>
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => navigate('/workflow/canonicalization')}
+                onClick={() => navigate('/workflow/data-review')}
                 className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 Edit Mappings
@@ -127,7 +127,7 @@ export default function UploadPage() {
               Choose Different File
             </button>
             <button
-              onClick={() => navigate('/workflow/canonicalization')}
+              onClick={() => navigate('/workflow/data-review')}
               className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700"
             >
               Next: Configure Mappings →

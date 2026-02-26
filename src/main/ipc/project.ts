@@ -1,6 +1,5 @@
 import { registerHandler } from './register';
 import {
-  isProjectOpen,
   selectSavePath,
   selectOpenPath,
   createProject,
@@ -9,32 +8,29 @@ import {
   getMetadata,
   updateMetadata,
 } from '../services/project';
-import { addRecent } from '../services/recent-projects';
 import type { ProjectMetadataUpdate } from '../../shared/types';
 
 export function registerProjectHandlers(): void {
-  registerHandler('project:isOpen', () => {
-    return isProjectOpen();
+  registerHandler('project:new', async (_event, projectName: unknown, filePath?: unknown) => {
+    // If no filePath, prompt user with save dialog
+    let targetPath = filePath as string | undefined;
+    if (!targetPath) {
+      const selected = await selectSavePath();
+      if (!selected) return null; // user cancelled
+      targetPath = selected;
+    }
+    return createProject(projectName as string, targetPath);
   });
 
-  registerHandler('project:selectSavePath', async () => {
-    return selectSavePath();
-  });
-
-  registerHandler('project:selectOpenPath', async () => {
-    return selectOpenPath();
-  });
-
-  registerHandler('project:new', async (_event, projectName: unknown) => {
-    const result = await createProject(projectName as string);
-    await addRecent(result.filePath, result.name);
-    return result;
-  });
-
-  registerHandler('project:open', async (_event, filePath: unknown) => {
-    const result = await openProject(filePath as string);
-    await addRecent(result.filePath, result.name);
-    return result;
+  registerHandler('project:open', async (_event, filePath?: unknown) => {
+    // If no filePath, prompt user with open dialog
+    let targetPath = filePath as string | undefined;
+    if (!targetPath) {
+      const selected = await selectOpenPath();
+      if (!selected) return null; // user cancelled
+      targetPath = selected;
+    }
+    return openProject(targetPath);
   });
 
   registerHandler('project:close', async () => {

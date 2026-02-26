@@ -18,8 +18,4 @@ export function registerRulesHandlers(): void {
   registerHandler('rules:delete', async (_event, ruleId: unknown) => {
     return rulesService.deleteRule(ruleId as string);
   });
-
-  registerHandler('rules:importFromColabip', async (_event, rulePack: unknown) => {
-    return rulesService.importFromColabip(rulePack as string);
-  });
 }

@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { databaseService } from './database';
 import { readTaxonomy } from './colabip';
-import type { TaxonomyNode, TaxonomyMetadata, TaxonomySetInput } from '../../shared/types';
+import * as projectService from './project';
+import type { TaxonomyNode } from '../../shared/types';
 
 interface TaxonomyRow {
   id: string;
@@ -31,7 +32,6 @@ function toTaxonomyNode(row: TaxonomyRow): TaxonomyNode {
 
 /**
  * Parse a pipe-delimited path into its l1, l2, l3 components.
- * E.g., "Corporate Services|IT|Software" → { l1: "Corporate Services", l2: "IT", l3: "Software", depth: 3 }
  */
 function parsePath(fullPath: string): {
   l1: string;
@@ -63,27 +63,9 @@ function parsePath(fullPath: string): {
   return { l1, l2, l3, depth, parentPath };
 }
 
-/**
- * Get taxonomy metadata: name from settings + node count.
- */
-export async function getTaxonomyMetadata(): Promise<TaxonomyMetadata | null> {
-  const nameSetting = await databaseService.get<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'taxonomy_name'"
-  );
-
-  if (!nameSetting) {
-    return null;
-  }
-
-  const countResult = await databaseService.get<{ cnt: number }>(
-    'SELECT COUNT(*) AS cnt FROM taxonomy'
-  );
-
-  return {
-    name: nameSetting.value,
-    nodeCount: Number(countResult?.cnt ?? 0),
-  };
-}
+// ---------------------------------------------------------------------------
+// Read
+// ---------------------------------------------------------------------------
 
 /**
  * Get all taxonomy nodes from the database.
@@ -96,16 +78,141 @@ export async function getNodes(): Promise<TaxonomyNode[]> {
   return rows.map(toTaxonomyNode);
 }
 
+// ---------------------------------------------------------------------------
+// CRUD — step 9 node operations
+// ---------------------------------------------------------------------------
+
 /**
- * Replace the entire taxonomy with new nodes.
- *
- * 1. Clear existing taxonomy table
- * 2. Parse each node path, validate, and insert
- * 3. Update taxonomy_name in settings
+ * Add a single taxonomy node.
+ * Validates depth and checks for duplicate full_path.
  */
-export async function setTaxonomy(input: TaxonomySetInput): Promise<void> {
-  // Pre-validate all nodes before making any DB changes
-  const parsed = input.nodes.map((node) => {
+export async function addNode(
+  fullPath: string,
+  description?: string
+): Promise<TaxonomyNode> {
+  const { l1, l2, l3, depth, parentPath } = parsePath(fullPath);
+
+  // Check for duplicate
+  const existing = await databaseService.get<{ id: string }>(
+    'SELECT id FROM taxonomy WHERE full_path = ?',
+    fullPath
+  );
+  if (existing) {
+    throw new Error(`Taxonomy node already exists: "${fullPath}"`);
+  }
+
+  // Validate parent exists (if depth > 1)
+  if (parentPath) {
+    const parent = await databaseService.get<{ id: string }>(
+      'SELECT id FROM taxonomy WHERE full_path = ?',
+      parentPath
+    );
+    if (!parent) {
+      throw new Error(`Parent path "${parentPath}" not found for node "${fullPath}"`);
+    }
+  }
+
+  const id = uuidv4();
+  await databaseService.run(
+    'INSERT INTO taxonomy (id, full_path, l1, l2, l3, depth, description, parent_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    id,
+    fullPath,
+    l1,
+    l2,
+    l3,
+    depth,
+    description ?? null,
+    parentPath
+  );
+
+  return {
+    id,
+    fullPath,
+    l1,
+    l2,
+    l3,
+    depth,
+    description: description ?? null,
+    parentPath,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Update a taxonomy node's description.
+ * Path changes are not supported (would require cascading updates to children + transactions).
+ */
+export async function updateNode(
+  nodeId: string,
+  updates: { description?: string }
+): Promise<void> {
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (updates.description !== undefined) {
+    setClauses.push('description = ?');
+    params.push(updates.description);
+  }
+
+  if (setClauses.length === 0) return;
+
+  params.push(nodeId);
+  await databaseService.run(
+    `UPDATE taxonomy SET ${setClauses.join(', ')} WHERE id = ?`,
+    ...params
+  );
+}
+
+/**
+ * Delete a taxonomy node.
+ * Fails if any transactions reference this node or if child nodes exist.
+ */
+export async function deleteNode(nodeId: string): Promise<void> {
+  // Check if node exists
+  const node = await databaseService.get<TaxonomyRow>(
+    'SELECT * FROM taxonomy WHERE id = ?',
+    nodeId
+  );
+  if (!node) {
+    throw new Error(`Taxonomy node not found: ${nodeId}`);
+  }
+
+  // Check for child nodes
+  const children = await databaseService.all<{ id: string }>(
+    'SELECT id FROM taxonomy WHERE parent_path = ?',
+    node.full_path
+  );
+  if (children.length > 0) {
+    throw new Error(`Cannot delete node "${node.full_path}": has ${children.length} child node(s)`);
+  }
+
+  // Check for transactions referencing this node
+  const txns = await databaseService.get<{ cnt: number | bigint }>(
+    'SELECT COUNT(*) as cnt FROM transactions WHERE taxonomy_node_id = ?',
+    nodeId
+  );
+  if (Number(txns?.cnt ?? 0) > 0) {
+    throw new Error(
+      `Cannot delete node "${node.full_path}": ${txns!.cnt} transaction(s) reference it`
+    );
+  }
+
+  await databaseService.run('DELETE FROM taxonomy WHERE id = ?', nodeId);
+}
+
+// ---------------------------------------------------------------------------
+// Import from ColabIP
+// ---------------------------------------------------------------------------
+
+/**
+ * Import taxonomy from ColabIP by industry name.
+ * Replaces the project taxonomy and updates taxonomy_name in project metadata.
+ */
+export async function importFromColabip(industryName: string): Promise<void> {
+  const { nodes } = await readTaxonomy(industryName);
+
+  // Pre-validate all nodes
+  const parsed = nodes.map((node) => {
     const { l1, l2, l3, depth, parentPath } = parsePath(node.path);
     return {
       id: uuidv4(),
@@ -155,34 +262,6 @@ export async function setTaxonomy(input: TaxonomySetInput): Promise<void> {
     );
   }
 
-  // Update taxonomy_name in settings (upsert)
-  const existing = await databaseService.get<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'taxonomy_name'"
-  );
-
-  if (existing) {
-    await databaseService.run(
-      "UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'taxonomy_name'",
-      input.name
-    );
-  } else {
-    await databaseService.run(
-      'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-      'taxonomy_name',
-      input.name
-    );
-  }
-}
-
-/**
- * Import taxonomy from ColabIP service by industry name.
- * Reads taxonomy nodes from the ColabIP file system and stores them in the database.
- */
-export async function importFromColabip(industryName: string): Promise<void> {
-  const { nodes } = await readTaxonomy(industryName);
-
-  await setTaxonomy({
-    name: industryName,
-    nodes,
-  });
+  // Update taxonomy_name in project metadata
+  await projectService.updateMetadata({ taxonomyName: industryName });
 }

@@ -3,8 +3,8 @@ export type ConfidenceLevel = 'high' | 'medium' | 'low';
 export type CanonicalColumnRelevance = 'critical' | 'high' | 'medium' | 'low';
 export type CanonicalColumnType = 'text' | 'log_text' | 'number' | 'category' | 'date';
 
-// Maps canonical column name → original CSV column name
-export interface CanonicalColumnMapping {
+/** Maps canonical column name → original CSV column name */
+export interface ColumnMapping {
   [canonicalName: string]: string;
 }
 
@@ -23,15 +23,15 @@ export interface CSVPreview {
 }
 
 /**
- * Extended preview that includes LLM-suggested column mappings (LLM-first flow).
+ * Extended preview that includes LLM-suggested column mappings.
  * Returned by `upload:parsePreview`.
  */
 export interface CSVPreviewWithMappings extends CSVPreview {
-  mappingSuggestion: CanonicalizationResult;
+  mappingSuggestion: ColumnMappingResult;
 }
 
-export interface CanonicalizationResult {
-  mappings: CanonicalColumnMapping;
+export interface ColumnMappingResult {
+  mappings: ColumnMapping;
   confidence: ConfidenceLevel;
   unmappedClientColumns: string[];
   importantUnmappedColumns: string[];

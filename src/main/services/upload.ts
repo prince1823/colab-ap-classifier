@@ -1,9 +1,13 @@
 import fs from 'fs';
 import { dialog, BrowserWindow } from 'electron';
 import { parse } from 'csv-parse/sync';
-import type { CSVPreview, CSVPreviewWithMappings, CanonicalizationResult } from '../../shared/types/canonicalization';
+import { randomUUID } from 'crypto';
+import type { CSVPreview, CSVPreviewWithMappings, ColumnMapping, ColumnMappingResult } from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
-import { suggestMappings } from '../agents/canonicalization-agent';
+import { suggestMappings } from '../agents/column-mapping-agent';
+import { databaseService } from './database';
+import * as projectService from './project';
+import { invalidateColumnCache } from './transactions';
 
 const SAMPLE_ROW_LIMIT = 10;
 
@@ -42,18 +46,13 @@ function detectEncoding(buffer: Buffer): BufferEncoding {
     return 'utf-8';
   }
 
-  // Try to detect invalid UTF-8 sequences.
-  // Valid UTF-8 multi-byte sequences follow strict patterns.
-  // If we find invalid sequences, assume latin1.
   for (let i = 0; i < buffer.length; i++) {
     const byte = buffer[i];
 
     if (byte <= 0x7f) {
-      // ASCII — always valid
       continue;
     }
 
-    // Multi-byte sequence start
     let expectedContinuationBytes = 0;
     if ((byte & 0xe0) === 0xc0) {
       expectedContinuationBytes = 1;
@@ -62,11 +61,9 @@ function detectEncoding(buffer: Buffer): BufferEncoding {
     } else if ((byte & 0xf8) === 0xf0) {
       expectedContinuationBytes = 3;
     } else {
-      // Invalid leading byte for UTF-8 — treat as latin1
       return 'latin1';
     }
 
-    // Validate continuation bytes
     for (let j = 1; j <= expectedContinuationBytes; j++) {
       if (i + j >= buffer.length || (buffer[i + j] & 0xc0) !== 0x80) {
         return 'latin1';
@@ -91,8 +88,6 @@ function stripBom(content: string): string {
 
 /**
  * Try to parse CSV content with a specific delimiter.
- * Returns parsed records if successful, or null if the delimiter
- * does not produce a valid multi-column result.
  */
 function tryParseWithDelimiter(
   content: string,
@@ -111,9 +106,6 @@ function tryParseWithDelimiter(
       return null;
     }
 
-    // A valid parse should produce multiple columns for multi-column files.
-    // If only 1 column is produced, the delimiter might be wrong —
-    // but we still return it as a fallback.
     return records;
   } catch {
     return null;
@@ -144,11 +136,6 @@ function detectDelimiter(content: string): string {
 
 /**
  * Parse a CSV file and return a preview with columns, sample rows, and total row count.
- * This is the synchronous CSV-only parsing step (no LLM call).
- *
- * - Automatically detects delimiter (comma, semicolon, tab)
- * - Handles quoted fields and newlines within quotes
- * - Detects encoding (UTF-8, Latin-1)
  */
 export function parseCSVPreview(filePath: string): CSVPreview {
   if (!filePath || filePath.trim().length === 0) {
@@ -190,9 +177,9 @@ export function parseCSVPreview(filePath: string): CSVPreview {
 }
 
 /**
- * Build a fallback empty CanonicalizationResult for when the LLM call fails.
+ * Build a fallback empty mapping result for when the LLM call fails.
  */
-function emptyMappingSuggestion(columns: string[]): CanonicalizationResult {
+function emptyMappingSuggestion(columns: string[]): ColumnMappingResult {
   return {
     mappings: {},
     confidence: 'low',
@@ -205,7 +192,7 @@ function emptyMappingSuggestion(columns: string[]): CanonicalizationResult {
 
 /**
  * Parse a CSV file, return a preview, and automatically suggest column mappings
- * via the CanonicalizationAgent (LLM-first flow).
+ * via the column-mapping agent (LLM-first flow).
  *
  * If the LLM call fails, the preview is still returned with empty mappings
  * so the user can map manually.
@@ -213,7 +200,7 @@ function emptyMappingSuggestion(columns: string[]): CanonicalizationResult {
 export async function parsePreview(filePath: string): Promise<CSVPreviewWithMappings> {
   const preview = parseCSVPreview(filePath);
 
-  let mappingSuggestion: CanonicalizationResult;
+  let mappingSuggestion: ColumnMappingResult;
   try {
     mappingSuggestion = await suggestMappings(preview.columns, preview.sampleRows);
   } catch (err) {
@@ -222,4 +209,172 @@ export async function parsePreview(filePath: string): Promise<CSVPreviewWithMapp
   }
 
   return { ...preview, mappingSuggestion };
+}
+
+/**
+ * Import a CSV file into the transactions table.
+ * Uses the column mapping from the most recent parsePreview call (stored in the upload draft).
+ *
+ * Steps:
+ * 1. Parse the CSV file
+ * 2. ALTER TABLE to add canonical columns
+ * 3. INSERT rows with canonical + raw values
+ * 4. Save column mapping to the project table
+ */
+export async function importCSV(
+  filePath: string,
+  columnMapping?: ColumnMapping
+): Promise<{ rowsInserted: number }> {
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error(`CSV file not found: ${filePath}`);
+  }
+
+  // Parse the full CSV
+  const buffer = fs.readFileSync(filePath);
+  const encoding = detectEncoding(buffer);
+  const rawContent = buffer.toString(encoding);
+  const content = stripBom(rawContent);
+  const delimiter = detectDelimiter(content);
+
+  const allRecords = parse(content, {
+    columns: true,
+    delimiter,
+    skip_empty_lines: true,
+    relax_column_count: true,
+    trim: true,
+  }) as Record<string, string>[];
+
+  if (allRecords.length === 0) {
+    throw new Error('CSV file contains no data rows');
+  }
+
+  // Determine the mapping to use
+  const mapping = columnMapping || {};
+
+  // Get canonical column names that are actually mapped
+  const canonicalNames = Object.keys(mapping);
+
+  // All original CSV column names
+  const csvColumns = Object.keys(allRecords[0]);
+
+  // ALTER TABLE to add canonical columns (if they don't already exist)
+  const existingColumns = await databaseService.all<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = 'transactions'"
+  );
+  const existingSet = new Set(existingColumns.map((c) => c.column_name));
+
+  // Add canonical columns
+  for (const canonical of canonicalNames) {
+    if (!existingSet.has(canonical)) {
+      await databaseService.run(`ALTER TABLE transactions ADD COLUMN "${canonical}" VARCHAR`);
+    }
+  }
+
+  // Also add any unmapped CSV columns as-is
+  for (const csvCol of csvColumns) {
+    const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    if (!existingSet.has(snakeCol) && !canonicalNames.includes(snakeCol)) {
+      await databaseService.run(`ALTER TABLE transactions ADD COLUMN "${snakeCol}" VARCHAR`);
+    }
+  }
+
+  // Invalidate cached columns so queries pick up new columns
+  invalidateColumnCache();
+
+  // Build and execute INSERT statements in batches
+  let rowsInserted = 0;
+  const BATCH_SIZE = 500;
+
+  for (let batchStart = 0; batchStart < allRecords.length; batchStart += BATCH_SIZE) {
+    const batch = allRecords.slice(batchStart, batchStart + BATCH_SIZE);
+
+    const inserts: string[] = [];
+    for (let i = 0; i < batch.length; i++) {
+      const record = batch[i];
+      const rowIndex = batchStart + i;
+      const id = randomUUID();
+
+      const colNames: string[] = ['id', 'row_index'];
+      const values: string[] = [`'${id}'`, `${rowIndex}`];
+
+      // Add canonical columns
+      for (const [canonical, csvCol] of Object.entries(mapping)) {
+        const rawValue = record[csvCol];
+        if (rawValue !== undefined && rawValue !== null) {
+          colNames.push(`"${canonical}"`);
+          values.push(`'${String(rawValue).replace(/'/g, "''")}'`);
+        }
+      }
+
+      // Add unmapped raw columns
+      for (const csvCol of csvColumns) {
+        const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+        // Skip if this CSV column is already mapped as a canonical column
+        const isMappedValue = Object.values(mapping).includes(csvCol);
+        if (!isMappedValue && record[csvCol] !== undefined) {
+          colNames.push(`"${snakeCol}"`);
+          values.push(`'${String(record[csvCol]).replace(/'/g, "''")}'`);
+        }
+      }
+
+      inserts.push(`(${values.join(', ')})`);
+      // Build matching column list for first row only
+      if (i === 0 && batchStart === 0) {
+        // We'll use the colNames from the first row for all rows
+        // This is safe because all rows have the same CSV columns
+      }
+    }
+
+    // Build the INSERT using the first record's column list
+    const record = batch[0];
+    const colNames: string[] = ['id', 'row_index'];
+    for (const canonical of Object.keys(mapping)) {
+      if (record[mapping[canonical]] !== undefined) {
+        colNames.push(`"${canonical}"`);
+      }
+    }
+    for (const csvCol of csvColumns) {
+      const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      const isMappedValue = Object.values(mapping).includes(csvCol);
+      if (!isMappedValue) {
+        colNames.push(`"${snakeCol}"`);
+      }
+    }
+
+    // Re-build values with consistent columns
+    const valueRows: string[] = [];
+    for (let i = 0; i < batch.length; i++) {
+      const rec = batch[i];
+      const rowIndex = batchStart + i;
+      const id = randomUUID();
+      const vals: string[] = [`'${id}'`, `${rowIndex}`];
+
+      for (const canonical of Object.keys(mapping)) {
+        const rawValue = rec[mapping[canonical]];
+        vals.push(rawValue !== undefined && rawValue !== null
+          ? `'${String(rawValue).replace(/'/g, "''")}'`
+          : 'NULL');
+      }
+      for (const csvCol of csvColumns) {
+        const isMappedValue = Object.values(mapping).includes(csvCol);
+        if (!isMappedValue) {
+          const rawValue = rec[csvCol];
+          vals.push(rawValue !== undefined && rawValue !== null
+            ? `'${String(rawValue).replace(/'/g, "''")}'`
+            : 'NULL');
+        }
+      }
+
+      valueRows.push(`(${vals.join(', ')})`);
+    }
+
+    const sql = `INSERT INTO transactions (${colNames.join(', ')}) VALUES ${valueRows.join(',\n')}`;
+    await databaseService.exec(sql);
+    rowsInserted += batch.length;
+  }
+
+  // Save column mapping to project metadata
+  await projectService.updateMetadata({ columnMapping: mapping as Record<string, unknown> });
+
+  return { rowsInserted };
 }

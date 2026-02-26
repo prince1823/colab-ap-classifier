@@ -1,51 +1,54 @@
+import { databaseService } from './database';
 import { researchSupplier } from '../agents/research-agent';
-import { readSupplierUniverse } from './colabip';
-import { buildMatcherIndex, type SupplierMatcherIndex } from './supplier-matcher';
-import * as exaSearch from './exa-search';
 import * as supplierService from './suppliers';
 import * as projectService from './project';
-import { AdaptiveRateLimiter, executeWithRateLimiter } from './rate-limiter';
-import type { SupplierResearchResult, SupplierInfo } from '../../shared/types';
+import { searchSupplier, type ExaSearchResult } from './exa-search';
+import type { SupplierInfo } from '../../shared/types';
 
 /**
- * Research a single supplier and store results.
- * Optionally accepts a pre-built matcher index to avoid rebuilding per call.
+ * Research result returned by the research agent.
+ * Extends SupplierInfo with confidence and sources.
  */
-export async function researchSingle(
-  supplierName: string,
-  matcher?: SupplierMatcherIndex
-): Promise<SupplierResearchResult> {
-  // Check supplier universe first (exact normalized name + alias match)
-  if (!matcher) {
-    const universe = await readSupplierUniverse();
-    matcher = buildMatcherIndex(universe);
-  }
-  const knownSupplier = matcher.match(supplierName);
+export interface SupplierResearchResult extends SupplierInfo {
+  confidence: 'high' | 'medium' | 'low';
+  sources: string[];
+}
 
-  if (knownSupplier) {
-    const universeInfo = (knownSupplier.supplierInfo ?? {}) as SupplierInfo;
-    const hasSubstantiveInfo = !!(universeInfo.industry || universeInfo.description);
+// ---------------------------------------------------------------------------
+// State (for progress streaming)
+// ---------------------------------------------------------------------------
 
+let mainWindowRef: { webContents: { send: (channel: string, ...args: unknown[]) => void } } | null = null;
+let isCancelled = false;
+
+export function setMainWindow(win: { webContents: { send: (channel: string, ...args: unknown[]) => void } } | null): void {
+  mainWindowRef = win;
+}
+
+export function cancel(): void {
+  isCancelled = true;
+}
+
+// ---------------------------------------------------------------------------
+// Single supplier research
+// ---------------------------------------------------------------------------
+
+/**
+ * Research a single supplier and store results in supplier_universe.db.
+ */
+export async function researchSingle(supplierName: string): Promise<SupplierResearchResult> {
+  // Check if already researched with substantive info
+  const existing = await supplierService.getSupplierByName(supplierName);
+  if (existing?.supplierInfo) {
+    const info = existing.supplierInfo;
+    const hasSubstantiveInfo = !!(info.industry || info.description);
     if (hasSubstantiveInfo) {
-      // Universe has real data — use it directly, skip LLM research
-      const result: SupplierResearchResult = {
-        ...universeInfo,
-        officialBusinessName: universeInfo.officialBusinessName ?? knownSupplier.supplierName,
-        confidence: 'high' as const,
-        sources: ['ColabIP Supplier Universe'],
+      return {
+        ...info,
+        confidence: info.confidence ?? 'high',
+        sources: info.sources ?? ['Existing research'],
       };
-
-      await supplierService.updateSupplier(supplierName, {
-        supplierInfo: result,
-        aliases: knownSupplier.aliases.length > 0 ? knownSupplier.aliases : undefined,
-        categoryA: knownSupplier.categoryA || undefined,
-      });
-
-      return result;
     }
-
-    // Universe match but sparse info — fall through to Exa + LLM research.
-    // Universe metadata (aliases, type, categoryA) was already stored at import time.
   }
 
   // Get company context for research
@@ -58,13 +61,12 @@ export async function researchSingle(
   }
 
   // Get supplier address if available
-  const existing = await supplierService.getSupplierByName(supplierName);
   const address = existing?.supplierInfo?.supplierAddress;
 
   // Search Exa for web data (gracefully returns [] if unavailable)
-  let searchResults: exaSearch.ExaSearchResult[] = [];
+  let searchResults: ExaSearchResult[] = [];
   try {
-    searchResults = await exaSearch.searchSupplier(supplierName, address);
+    searchResults = await searchSupplier(supplierName, address);
   } catch (error) {
     console.error(`[SupplierResearch] Exa search failed for ${supplierName}, falling back to LLM-only:`, error);
   }
@@ -83,33 +85,40 @@ export async function researchSingle(
     if (heuristicType) result.supplierType = heuristicType;
   }
 
-  // Store results
-  await supplierService.updateSupplier(supplierName, {
+  // Store results in supplier_universe.db
+  await supplierService.upsertSupplier(supplierName, {
     supplierInfo: result,
   });
 
   return result;
 }
 
-/**
- * Research multiple suppliers in parallel batches.
- * Accepts an optional `shouldCancel` callback to abort between batches.
- */
-export async function researchBatch(
-  supplierNames: string[],
-  onProgress?: (done: number, total: number) => void,
-  shouldCancel?: () => boolean
-): Promise<void> {
-  const BATCH_SIZE = 10;
-  let done = 0;
-  const total = supplierNames.length;
+// ---------------------------------------------------------------------------
+// Batch research (step 6)
+// ---------------------------------------------------------------------------
 
-  // Filter out already-researched suppliers (1 bulk query instead of N sequential)
-  const supplierMap = await supplierService.getSuppliersByNames(supplierNames);
+/**
+ * Research all project suppliers.
+ * Streams results as each supplier completes.
+ * Skips already-researched suppliers.
+ */
+export async function researchAllProjectSuppliers(): Promise<void> {
+  isCancelled = false;
+
+  // Get distinct supplier names from transactions
+  const supplierRows = await databaseService.all<{ supplier_name: string }>(
+    `SELECT DISTINCT supplier_name FROM transactions WHERE supplier_name IS NOT NULL ORDER BY supplier_name`
+  );
+
+  const supplierNames = supplierRows.map((r) => r.supplier_name);
+  const total = supplierNames.length;
+  let done = 0;
+
+  // Filter out already-researched suppliers
   const toResearch: string[] = [];
   for (const name of supplierNames) {
-    const supplier = supplierMap.get(name);
-    const info = supplier?.supplierInfo;
+    const existing = await supplierService.getSupplierByName(name);
+    const info = existing?.supplierInfo;
     const hasSubstantiveInfo = !!(info?.industry || info?.description);
     if (!hasSubstantiveInfo) {
       toResearch.push(name);
@@ -118,39 +127,54 @@ export async function researchBatch(
     }
   }
 
-  if (onProgress) onProgress(done, total);
+  emitProgress(done, total, null, 'Starting research');
 
-  // Build matcher index once for the entire batch
-  const universe = await readSupplierUniverse();
-  const matcher = buildMatcherIndex(universe);
+  // Research sequentially (simple, predictable — avoids rate limit complexity)
+  for (const name of toResearch) {
+    if (isCancelled) break;
 
-  // Process with adaptive rate limiting (starts at 10, reduces on 429)
-  const limiter = new AdaptiveRateLimiter({
-    initialConcurrency: BATCH_SIZE,
-    minConcurrency: 1,
-    maxConcurrency: BATCH_SIZE,
-    recoveryThreshold: 5,
-  });
+    emitProgress(done, total, name, `Researching: ${name}`);
 
-  await executeWithRateLimiter(
-    toResearch,
-    limiter,
-    async (name) => {
-      if (shouldCancel?.()) throw new Error('Cancelled');
-      try {
-        await researchSingle(name, matcher);
-      } catch (error) {
-        console.error(`[SupplierResearch] Failed to research ${name}:`, error);
-      }
-      done++;
-      if (onProgress) onProgress(done, total);
+    try {
+      await researchSingle(name);
+    } catch (error) {
+      console.error(`[SupplierResearch] Failed to research ${name}:`, error);
+      // Still insert a thin row so we don't block classification entirely
+      await supplierService.upsertSupplier(name, {
+        supplierInfo: {
+          confidence: 'low',
+          sources: ['Research failed'],
+        },
+      });
     }
-  );
+
+    done++;
+    emitProgress(done, total, name, `Completed: ${name}`);
+  }
+
+  if (!isCancelled) {
+    emitProgress(total, total, null, 'Research complete');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function emitProgress(done: number, total: number, currentSupplier: string | null, step: string): void {
+  if (mainWindowRef) {
+    mainWindowRef.webContents.send('suppliers:research:progress', {
+      done,
+      total,
+      percentage: total > 0 ? Math.round((done / total) * 100) : 0,
+      currentSupplier,
+      step,
+    });
+  }
 }
 
 /**
- * Heuristic fallback for determining supplier type from research results.
- * Used only when the LLM doesn't return an explicit supplierType.
+ * Heuristic fallback for determining supplier type.
  */
 function determineSupplierType(result: SupplierResearchResult): 'company' | 'individual' | 'government' | null {
   const desc = (result.description || '').toLowerCase();
@@ -162,7 +186,6 @@ function determineSupplierType(result: SupplierResearchResult): 'company' | 'ind
     desc.includes('municipality') ||
     desc.includes('government agency')
   ) {
-    // Government utilities exception
     if (
       desc.includes('electricity') ||
       desc.includes('water utility') ||

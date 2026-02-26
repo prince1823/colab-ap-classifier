@@ -1,8 +1,8 @@
-import type { CanonicalColumnDefinition } from './types/canonicalization';
+import type { CanonicalColumnDefinition } from './types/column-mapping';
 
 /**
  * The 14 canonical columns used for AP classification.
- * Shared between backend (canonicalization agent) and frontend (ColumnMappingEditor).
+ * Shared between backend (column-mapping agent) and frontend (ColumnMappingEditor).
  */
 export const CANONICAL_COLUMNS: CanonicalColumnDefinition[] = [
   {

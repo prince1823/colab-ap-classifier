@@ -1,19 +1,16 @@
 import { registerHandler } from './register';
-import * as classificationPipeline from '../services/classification-pipeline';
-import type { ClassificationStartOptions } from '../../shared/types';
+import * as classificationService from '../services/classification';
 
 export function registerClassificationHandlers(): void {
-  registerHandler('classification:start', async (_event, options: unknown) => {
-    return classificationPipeline.startClassification(
-      options as ClassificationStartOptions
-    );
+  registerHandler('classification:start', async () => {
+    // Fire-and-forget — progress is streamed via events
+    classificationService.startClassification().catch((err) => {
+      console.error('[IPC] Classification failed:', err);
+    });
+    return { started: true };
   });
 
-  registerHandler('classification:getStatus', async () => {
-    return classificationPipeline.getStatus();
-  });
-
-  registerHandler('classification:cancel', async (_event, runId: unknown) => {
-    return classificationPipeline.cancelClassification(runId as string);
+  registerHandler('classification:cancel', async () => {
+    await classificationService.cancel();
   });
 }

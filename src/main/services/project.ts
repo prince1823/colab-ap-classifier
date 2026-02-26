@@ -1,9 +1,9 @@
 import path from 'path';
 import fs from 'fs';
 import { dialog, BrowserWindow } from 'electron';
-import { databaseService } from './database';
-import { ensureIndexes, invalidateColumnCache } from './transactions';
-import { getProjectsDir } from './app-paths';
+import { v4 as uuidv4 } from 'uuid';
+import { databaseService, supplierUniverseService } from './database';
+import { invalidateColumnCache } from './transactions';
 import type {
   ProjectMetadata,
   ProjectMetadataUpdate,
@@ -11,19 +11,6 @@ import type {
 } from '../../shared/types';
 
 const C91_EXTENSION = '.c91';
-
-const EXPECTED_TABLES = [
-  'settings',
-  'company_context',
-  'column_mappings',
-  'invoice_grouping_columns',
-  'taxonomy',
-  'transactions',
-  'project_suppliers',
-  'override_rules',
-  'change_log',
-  'system_feedback',
-];
 
 /** In-memory state tracking the currently-open project name. */
 let currentProjectName: string | null = null;
@@ -35,25 +22,27 @@ let currentProjectName: string | null = null;
 /**
  * Create a new .c91 project file.
  *
- * 1. Ensures the `./projects/` directory exists.
- * 2. Creates the DuckDB-backed .c91 file at `./projects/{name}.c91`.
- * 3. Schema + seed data are initialised by `databaseService.openDatabase`.
+ * 1. Creates the DuckDB-backed .c91 file at the given path.
+ * 2. Schema + seed data are initialised by `databaseService.openDatabase`.
+ * 3. Inserts the single `project` row.
  */
 export async function createProject(
-  name: string
+  name: string,
+  filePath: string
 ): Promise<{ filePath: string; name: string }> {
   if (!name || name.trim().length === 0) {
     throw new Error('Project name must not be empty');
   }
 
-  const projectsDir = getProjectsDir();
-
-  // Ensure the projects directory exists
-  if (!fs.existsSync(projectsDir)) {
-    fs.mkdirSync(projectsDir, { recursive: true });
+  if (!filePath || filePath.trim().length === 0) {
+    throw new Error('File path must not be empty');
   }
 
-  const filePath = path.join(projectsDir, `${name}${C91_EXTENSION}`);
+  // Ensure parent directory exists
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 
   if (fs.existsSync(filePath)) {
     throw new Error(`Project file already exists: ${filePath}`);
@@ -62,12 +51,17 @@ export async function createProject(
   await databaseService.openDatabase(filePath);
   invalidateColumnCache();
 
-  // Store the project name in settings
+  // Insert the single project row
+  const id = uuidv4();
   await databaseService.run(
-    "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-    'project_name',
+    `INSERT INTO project (id, project_name, created_at, tail_spend_threshold)
+     VALUES (?, ?, CURRENT_TIMESTAMP, 10000)`,
+    id,
     name
   );
+
+  // Open supplier universe alongside
+  await supplierUniverseService.open();
 
   currentProjectName = name;
 
@@ -77,7 +71,7 @@ export async function createProject(
 /**
  * Open an existing .c91 project file.
  *
- * Validates that the file exists and contains the expected schema tables.
+ * Validates that the file exists and contains the expected v2 schema tables.
  */
 export async function openProject(
   filePath: string
@@ -99,25 +93,27 @@ export async function openProject(
   );
   const tableNames = tables.map((t) => t.table_name);
 
-  for (const expected of EXPECTED_TABLES) {
+  for (const expected of databaseService.getExpectedTables()) {
     if (!tableNames.includes(expected)) {
       await databaseService.closeDatabase();
       throw new Error(
-        `Invalid project file: missing table "${expected}". This file may not be a valid .c91 project.`
+        `Invalid project file: missing table "${expected}". This file may not be a valid v2 .c91 project.`
       );
     }
   }
 
-  // Derive the project name — prefer stored setting, fall back to filename
-  const nameSetting = await databaseService.get<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'project_name'"
+  // Get project name from the single project row
+  const projectRow = await databaseService.get<{ project_name: string }>(
+    'SELECT project_name FROM project LIMIT 1'
   );
-  const name =
-    nameSetting?.value ?? path.basename(filePath, C91_EXTENSION);
+  const name = projectRow?.project_name ?? path.basename(filePath, C91_EXTENSION);
 
   currentProjectName = name;
 
-  // Ensure performance indexes exist (non-blocking — errors are silently ignored)
+  // Open supplier universe alongside
+  await supplierUniverseService.open();
+
+  // Ensure performance indexes exist (non-blocking)
   ensureIndexes().catch((err) =>
     console.warn('[Project] Failed to ensure indexes:', err)
   );
@@ -131,6 +127,7 @@ export async function openProject(
 export async function closeProject(): Promise<void> {
   invalidateColumnCache();
   await databaseService.closeDatabase();
+  await supplierUniverseService.close();
   currentProjectName = null;
 }
 
@@ -146,89 +143,63 @@ export function isProjectOpen(): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Read full project metadata from the open database.
+ * Read full project metadata from the single `project` row.
  */
 export async function getMetadata(): Promise<ProjectMetadata> {
   if (!isProjectOpen()) {
     throw new Error('No project is currently open');
   }
 
-  const filePath = databaseService.getFilePath()!;
+  const row = await databaseService.get<{
+    id: string;
+    project_name: string;
+    created_at: string;
+    company_context: string | null;
+    taxonomy_name: string | null;
+    tail_spend_threshold: number;
+    column_mapping: string | null;
+  }>('SELECT id, project_name, created_at, company_context, taxonomy_name, tail_spend_threshold, column_mapping FROM project LIMIT 1');
 
-  // ---- company_context -------------------------------------------------
-  const ccRow = await databaseService.get<{
-    company_name: string | null;
-    industry: string | null;
-    sector: string | null;
-    description: string | null;
-    business_focus: string | null;
-    procurement_nuances: string | null;
-  }>('SELECT company_name, industry, sector, description, business_focus, procurement_nuances FROM company_context WHERE id = 1');
-
-  let companyContext: CompanyContext | null = null;
-  if (ccRow && ccRow.industry) {
-    companyContext = {
-      companyName: ccRow.company_name ?? undefined,
-      industry: ccRow.industry,
-      sector: ccRow.sector ?? undefined,
-      description: ccRow.description ?? undefined,
-      businessFocus: ccRow.business_focus ?? undefined,
-      procurementNuances: ccRow.procurement_nuances ?? undefined,
-    };
+  if (!row) {
+    throw new Error('Project row not found — database may be corrupted');
   }
 
-  // ---- column_mappings -------------------------------------------------
-  const mappingRows = await databaseService.all<{
-    canonical_name: string;
-    csv_column_name: string;
-  }>('SELECT canonical_name, csv_column_name FROM column_mappings');
+  let companyContext: CompanyContext | null = null;
+  if (row.company_context) {
+    try {
+      companyContext = typeof row.company_context === 'string'
+        ? JSON.parse(row.company_context)
+        : row.company_context;
+    } catch {
+      companyContext = null;
+    }
+  }
 
-  const columnMappings =
-    mappingRows.length > 0
-      ? Object.fromEntries(mappingRows.map((r) => [r.canonical_name, r.csv_column_name]))
-      : null;
-
-  // ---- invoice_grouping_columns ----------------------------------------
-  const groupingRows = await databaseService.all<{
-    canonical_name: string;
-    position: number;
-  }>('SELECT canonical_name, position FROM invoice_grouping_columns ORDER BY position');
-
-  const invoiceGroupingColumns =
-    groupingRows.length > 0 ? groupingRows.map((r) => r.canonical_name) : null;
-
-  // ---- settings --------------------------------------------------------
-  const thresholdRow = await databaseService.get<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
-  );
-  const tailSpendThreshold = thresholdRow ? Number(thresholdRow.value) : 10000;
-
-  const taxonomyRow = await databaseService.get<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'taxonomy_name'"
-  );
-  const taxonomyName = taxonomyRow?.value ?? null;
-
-  const createdAtRow = await databaseService.get<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'created_at'"
-  );
-  const createdAt = createdAtRow?.value ?? null;
+  let columnMapping: Record<string, unknown> | null = null;
+  if (row.column_mapping) {
+    try {
+      columnMapping = typeof row.column_mapping === 'string'
+        ? JSON.parse(row.column_mapping)
+        : row.column_mapping;
+    } catch {
+      columnMapping = null;
+    }
+  }
 
   return {
-    name: currentProjectName!,
-    filePath,
+    id: row.id,
+    projectName: row.project_name,
+    createdAt: String(row.created_at),
     companyContext,
-    columnMappings,
-    invoiceGroupingColumns,
-    tailSpendThreshold,
-    taxonomyName,
-    createdAt,
+    taxonomyName: row.taxonomy_name ?? null,
+    tailSpendThreshold: Number(row.tail_spend_threshold ?? 10000),
+    columnMapping,
   };
 }
 
 /**
  * Update mutable project metadata fields.
- *
- * Currently supports updating `companyContext` and `tailSpendThreshold`.
+ * Builds a dynamic UPDATE targeting only provided fields.
  */
 export async function updateMetadata(
   updates: ProjectMetadataUpdate
@@ -237,35 +208,35 @@ export async function updateMetadata(
     throw new Error('No project is currently open');
   }
 
-  if (updates.companyContext) {
-    const cc = updates.companyContext;
-    await databaseService.run(
-      `UPDATE company_context
-       SET company_name = ?,
-           industry = ?,
-           sector = ?,
-           description = ?,
-           business_focus = ?,
-           procurement_nuances = ?,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = 1`,
-      cc.companyName ?? null,
-      cc.industry,
-      cc.sector ?? null,
-      cc.description ?? null,
-      cc.businessFocus ?? null,
-      cc.procurementNuances ?? null
-    );
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (updates.companyContext !== undefined) {
+    setClauses.push('company_context = ?');
+    params.push(JSON.stringify(updates.companyContext));
   }
 
   if (updates.tailSpendThreshold !== undefined) {
-    await databaseService.run(
-      `UPDATE settings
-       SET value = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE key = 'tail_spend_threshold'`,
-      String(updates.tailSpendThreshold)
-    );
+    setClauses.push('tail_spend_threshold = ?');
+    params.push(updates.tailSpendThreshold);
   }
+
+  if (updates.taxonomyName !== undefined) {
+    setClauses.push('taxonomy_name = ?');
+    params.push(updates.taxonomyName);
+  }
+
+  if (updates.columnMapping !== undefined) {
+    setClauses.push('column_mapping = ?');
+    params.push(JSON.stringify(updates.columnMapping));
+  }
+
+  if (setClauses.length === 0) return;
+
+  await databaseService.run(
+    `UPDATE project SET ${setClauses.join(', ')}`,
+    ...params
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +251,7 @@ export async function selectSavePath(): Promise<string | null> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   const result = await dialog.showSaveDialog(win!, {
     title: 'Create New Project',
-    defaultPath: path.join(getProjectsDir(), 'Untitled.c91'),
+    defaultPath: 'Untitled.c91',
     filters: [{ name: 'C91 Project', extensions: ['c91'] }],
   });
 
@@ -308,4 +279,39 @@ export async function selectOpenPath(): Promise<string | null> {
   }
 
   return result.filePaths[0];
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Ensure performance indexes exist on the transactions table.
+ * Called once when a project is opened.
+ */
+async function ensureIndexes(): Promise<void> {
+  const { getColumns } = await import('./transactions');
+  const cols = await getColumns();
+
+  const indexDefs = [
+    'CREATE INDEX IF NOT EXISTS idx_transactions_row_index ON transactions(row_index)',
+    'CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(classification_status)',
+  ];
+
+  const optionalIndexCols = ['supplier_name', 'gl_description', 'spend_amount', 'line_description'];
+  for (const col of optionalIndexCols) {
+    if (cols.includes(col)) {
+      indexDefs.push(
+        `CREATE INDEX IF NOT EXISTS idx_transactions_${col} ON transactions(${col})`
+      );
+    }
+  }
+
+  for (const sql of indexDefs) {
+    try {
+      await databaseService.run(sql);
+    } catch {
+      // Index may already exist — safe to ignore
+    }
+  }
 }

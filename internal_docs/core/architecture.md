@@ -1,6 +1,6 @@
 # Architecture
 
-Technical architecture for the AP Classifier, organized by the project flow. Each section maps flow steps to tables, services, IPC channels, agents, and pages.
+Technical architecture for the AP Classifier, organized by the project flow.
 
 ---
 
@@ -21,26 +21,21 @@ Main Process (Node.js + TypeScript)
 
 ## Database Schema
 
-Each project is a single `.c91` DuckDB file. The supplier universe lives in a separate shared `supplier_universe.db` (see Supplier section). Tables below.
+Each project is a single `.c91` DuckDB file. Supplier data lives in a separate shared `supplier_universe.db`.
 
-### project (key-value)
+### project (single row)
 
-Stores all project-level metadata as key-value pairs. Replaces the current split between `settings` and `company_context` tables.
+One row per project. Company context is stored as a single JSON blob since it's always read/written together (e.g. for LLM prompts).
 
-| Key | Value | Set At |
-|-----|-------|--------|
-| `project_name` | string | creation |
-| `created_at` | timestamp | creation |
-| `company_name` | string | step 2 |
-| `industry` | string | step 2 |
-| `sector` | string | step 2 |
-| `description` | text | step 2 |
-| `business_focus` | text | step 2 |
-| `procurement_nuances` | text | step 2 |
-| `taxonomy_name` | string | step 2 |
-| `tail_spend_threshold` | number | step 2 |
-| `column_mapping_json` | JSON | step 3 |
-| `invoice_grouping_columns` | JSON array | step 3 |
+| Column | Type | Set At | Notes |
+|--------|------|--------|-------|
+| `id` | VARCHAR PK | creation | UUID |
+| `project_name` | VARCHAR | creation | |
+| `created_at` | TIMESTAMP | creation | |
+| `company_context` | JSON | step 2 | `{ company_name, industry, sector, description, business_focus, procurement_nuances }` |
+| `taxonomy_name` | VARCHAR | step 2 | |
+| `tail_spend_threshold` | DECIMAL | step 2 | |
+| `column_mapping` | JSON | step 3 | All column mappings (canonical→CSV, invoice grouping, etc.) |
 
 ### taxonomy
 
@@ -66,7 +61,6 @@ Dynamic schema. Base columns are fixed; canonical columns added via ALTER TABLE 
 |--------|------|-------|
 | `id` | VARCHAR PK | UUID |
 | `row_index` | INTEGER | Original CSV row number |
-| `invoice_group_key` | VARCHAR | Derived from grouping columns |
 | `taxonomy_node_id` | VARCHAR | FK → taxonomy.id |
 | `classification_status` | VARCHAR | `unclassified`, `classified_by_rule`, `classified_by_ai`, `human_reviewed` |
 | `classification_reasoning` | TEXT | LLM reasoning or rule name |
@@ -76,23 +70,6 @@ Dynamic schema. Base columns are fixed; canonical columns added via ALTER TABLE 
 **Canonical columns** (added dynamically based on column mapping):
 
 `supplier_name`, `line_description`, `gl_description`, `spend_amount`, `gl_code`, `department`, `invoice_date`, `creation_date`, `company`, `cost_center`, `po_number`, `supplier_address`, `currency`, `memo`
-
-### project_suppliers
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | VARCHAR PK | UUID (or supplier universe UID) |
-| `supplier_name` | VARCHAR UNIQUE | Normalised name |
-| `aliases` | JSON | Array of alternative names |
-| `parent_supplier_id` | VARCHAR | FK → project_suppliers.id |
-| `parent_name` | VARCHAR | Denormalized for display |
-| `supplier_info` | JSON | Research results (type, industry, etc.) |
-| `category_a` | BOOLEAN | Has deterministic taxonomy mapping |
-| `category_a_taxonomy_node_id` | VARCHAR | FK → taxonomy.id |
-| `transaction_count` | INTEGER | |
-| `total_spend` | DECIMAL | |
-| `created_at` | TIMESTAMP | |
-| `updated_at` | TIMESTAMP | |
 
 ### override_rules
 
@@ -120,61 +97,79 @@ Dynamic schema. Base columns are fixed; canonical columns added via ALTER TABLE 
 | `description` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
+### supplier_universe.db (shared, separate file)
+
+Not in the project `.c91`. Shared across projects. Single source of truth for all supplier data.
+
+**There is no project_suppliers table.** All per-project supplier state is derived:
+- **Supplier list**: `SELECT DISTINCT supplier_name FROM transactions`
+- **Research status**: join against supplier_universe.db — if row exists, supplier is researched
+- **Classification status per supplier**: `GROUP BY supplier_name` on `classification_status`
+- **Review status per supplier**: same query, check for `human_reviewed`
+
+This eliminates sync risk between project and supplier data.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | VARCHAR PK | UID from supplier service |
+| `supplier_name` | VARCHAR UNIQUE | Normalised name |
+| `aliases` | JSON | Array of alternative names |
+| `parent_supplier_id` | VARCHAR | FK → self |
+| `parent_name` | VARCHAR | Denormalized for display |
+| `supplier_info` | JSON | Research results (type, industry, etc.) |
+| `category_a` | BOOLEAN | Has deterministic taxonomy mapping |
+| `category_a_taxonomy_node_id` | VARCHAR | FK → taxonomy.id |
+| `created_at` | TIMESTAMP | |
+| `updated_at` | TIMESTAMP | |
+
 ---
 
 ## Services
 
-Services are the business logic layer. Each service owns one concern. Services call the database directly; IPC handlers call services.
+Services are the business logic layer. Each service owns one concern. IPC handlers call services.
 
 ### Core
 
 | Service | Responsibility |
 |---------|---------------|
-| `database` | DuckDB connection management, query execution, schema init, migrations |
-| `project` | Create/open/close project, read/write project metadata |
-| `settings` | App-level settings (LLM provider, model, API keys). Persisted to filesystem, not project DB |
-| `recent-projects` | Track recently-opened project files |
-| `app-paths` | Resolve cross-platform directories |
+| `database` | DuckDB connection management, query execution, schema init |
+| `project` | Create/open/close project, read/write project metadata (company context, settings, column mapping) |
 
 ### Data Pipeline
 
 | Service | Responsibility |
 |---------|---------------|
-| `upload` | File selection dialog, CSV parsing (encoding/delimiter detection), preview with LLM mapping suggestion, save confirmed column mappings and invoice grouping columns, import CSV rows |
-| `taxonomy` | Taxonomy CRUD (import, get nodes, set, update descriptions), path resolution helpers |
-| `transactions` | Query/filter/paginate transactions, column discovery, stats |
-| `export` | CSV export with classification paths |
+| `upload` | CSV parsing, LLM mapping suggestion, confirmed mapping save, import rows into transactions table |
+| `taxonomy` | Taxonomy CRUD (import from ColabIP, get nodes, add/edit/delete nodes) |
+| `transactions` | Query/filter/paginate transactions, column discovery, stats (time period, top suppliers) |
+| `export` | CSV export with canonicalized columns and taxonomy classifications |
 
 ### Classification
 
 | Service | Responsibility |
 |---------|---------------|
-| `classification-pipeline` | Orchestrate full pipeline: identify rows → apply rules → AI classify. Emits progress events. Handles cancellation |
-| `rules` | Override rules CRUD, condition-to-SQL conversion, rule evaluation against transactions, priority management |
-| `reclassification` | Manual reclassification: update transactions, log to changelog |
+| `classification` | Per supplier: apply override rules → AI classify remaining unclassified rows. Requires supplier to exist in supplier_universe.db. User can pause/resume. Resumable (skips already-classified suppliers). Emits progress per supplier |
+| `rules` | Override rules CRUD, condition-to-SQL conversion, rule evaluation, priority management |
 
 ### Supplier
 
 | Service | Responsibility |
 |---------|---------------|
-| `suppliers` | Project supplier CRUD (list, get, update, upsert) |
-| `supplier-research` | Orchestrate supplier research: check universe → Exa search → LLM research → store results |
-| `supplier-matcher` | Build in-memory index from supplier universe for O(1) name/alias matching |
-| `exa-search` | Web search via Exa API for supplier information |
-| `colabip` | Read ColabIP filesystem: taxonomies, supplier universe CSV |
+| `suppliers` | Derive project suppliers from transactions (`DISTINCT supplier_name`), join with supplier_universe.db for enriched data, update supplier_universe.db fields |
+| `supplier-research` | Independent step (step 6). Research all project suppliers: get normalised info, context, category A rules → store in supplier_universe.db. Streams results as each supplier completes |
+| `colabip` | Read ColabIP filesystem: available taxonomies, supplier universe CSV |
 
 ### Audit
 
 | Service | Responsibility |
 |---------|---------------|
-| `changelog` | Immutable audit log: record changes, revert by applying old values + appending new log entry |
+| `changelog` | Append-only audit log: record changes, revert by applying old values + appending new log entry |
 
 ### Infrastructure
 
 | Service | Responsibility |
 |---------|---------------|
-| `llm-client` | LLM API calls (provider-agnostic, supports Anthropic/OpenAI/OpenRouter) |
-| `rate-limiter` | Adaptive concurrency control for batch operations (halves on 429, recovers on success streaks) |
+| `llm-client` | LLM API calls (provider-agnostic) |
 
 ---
 
@@ -184,9 +179,9 @@ Each agent owns: system prompt, user prompt construction, response parsing + val
 
 | Agent | Used In | Purpose |
 |-------|---------|---------|
-| `canonicalization-agent` | Step 3.1 | Suggest CSV→canonical column mappings from headers + sample data |
-| `research-agent` | Step 6 | Research supplier: extract type, industry, products, NAICS codes, business model |
-| `classification-agent` | Step 7.2 | Classify transaction group into taxonomy. Validates L1, depth, closest match |
+| `column-mapping-agent` | Step 3.1 | Suggest CSV→canonical column mappings from headers + sample data |
+| `research-agent` | Step 6 | Research supplier: extract supplier info |
+| `classification-agent` | Step 7.2 | Classify transaction batch into taxonomy node |
 
 ---
 
@@ -202,11 +197,8 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 | `project:new` | invoke | Create new .c91 file |
 | `project:open` | invoke | Open existing .c91 file |
 | `project:close` | invoke | Close current project |
-| `project:isOpen` | invoke | Check if a project is open |
 | `project:getMetadata` | invoke | Read project metadata |
 | `project:updateMetadata` | invoke | Update company context, settings |
-| `project:selectSavePath` | invoke | Save dialog for new project |
-| `project:selectOpenPath` | invoke | Open dialog for existing project |
 
 ### Upload
 
@@ -215,33 +207,32 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 | `upload:selectFile` | invoke | File picker for CSV |
 | `upload:parsePreview` | invoke | Parse CSV + LLM mapping suggestion |
 | `upload:csv` | invoke | Import CSV with confirmed mappings |
-| `upload:saveMapping` | invoke | Save confirmed column mappings + grouping columns |
 
 ### Classification
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
-| `classification:start` | invoke | Start pipeline (returns runId) |
-| `classification:getStatus` | invoke | Poll current run status |
+| `classification:start` | invoke | Start pipeline |
 | `classification:cancel` | invoke | Cancel running pipeline |
 | `classification:progress` | event | Progress updates (main→renderer) |
 
-### Data Access
+### Transactions
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
 | `transactions:query` | invoke | Filter/paginate/sort transactions |
-| `transactions:stats` | invoke | Aggregate stats |
+| `transactions:stats` | invoke | Aggregate stats (time period, top suppliers) |
 | `transactions:getColumns` | invoke | Discover dynamic columns |
-| `transactions:reclassify` | invoke | Manual reclassification |
+| `transactions:update` | invoke | update_Transaction: update rows + log to change_log |
 
 ### Taxonomy
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
-| `taxonomy:get` | invoke | Taxonomy metadata |
 | `taxonomy:getNodes` | invoke | All taxonomy nodes |
-| `taxonomy:set` | invoke | Replace entire taxonomy |
+| `taxonomy:addNode` | invoke | Add taxonomy node |
+| `taxonomy:updateNode` | invoke | Edit taxonomy node |
+| `taxonomy:deleteNode` | invoke | Delete taxonomy node |
 | `taxonomy:importFromColabip` | invoke | Import from ColabIP |
 
 ### Suppliers
@@ -249,16 +240,16 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
 | `suppliers:list` | invoke | List project suppliers |
-| `suppliers:update` | invoke | Update supplier fields |
+| `suppliers:update` | invoke | Update supplier fields in supplier_universe.db |
 | `suppliers:research` | invoke | Trigger supplier research |
 
 ### Rules
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
-| `rules:list` | invoke | List all rules |
+| `rules:list` | invoke | List all rules, grouped by type |
 | `rules:create` | invoke | Create rule |
-| `rules:update` | invoke | Update rule |
+| `rules:update` | invoke | Update rule (including priority reorder) |
 | `rules:delete` | invoke | Delete rule |
 
 ### Audit
@@ -268,51 +259,37 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 | `changelog:list` | invoke | List change log entries |
 | `changelog:revert` | invoke | Revert a change |
 
-### Export + Settings
+### Export
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
-| `export:selectPath` | invoke | Save dialog for CSV |
-| `export:export` | invoke | Write CSV |
-| `settings:get` | invoke | Current app settings |
-| `settings:update` | invoke | Update provider/model/keys |
-| `settings:getModels` | invoke | Available models for provider |
-| `settings:getProviders` | invoke | Available LLM providers |
+| `export:csv` | invoke | Download dataset as CSV |
 
 ### ColabIP
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
-| `colabip:listTaxonomies` | invoke | Available taxonomies |
-
-### Recent Projects
-
-| Channel | Direction | Purpose |
-|---------|-----------|---------|
-| `recentProjects:list` | invoke | List recent projects |
-| `recentProjects:clear` | invoke | Clear recent list |
-| `recentProjects:remove` | invoke | Remove one entry |
+| `colabip:listTaxonomies` | invoke | Available taxonomies for step 2.2 |
 
 ---
 
 ## Pages
 
-Pages map to project flow steps. Each page uses IPC hooks to call the backend.
+Pages map to project flow steps.
 
 | Page | Flow Step | Purpose |
 |------|-----------|---------|
-| (Project landing) | 1 | New / Open / Recent projects |
-| `CompanyContextPage` | 2.1 | Company context text fields |
-| `TaxonomyPage` | 2.2, 9 | Choose taxonomy + edit nodes |
-| `UploadPage` | 3.1–3.2 | CSV upload, column mapping review |
-| `DataReviewPage` | 4 | Time period + spend shape |
-| `OverrideRulesPage` | 5 | Rules grouped by type, priority reorder, CRUD |
-| `SuppliersPage` | 6 | Supplier review, edit fields |
-| `ClassificationPage` | 7 | Start pipeline, progress display |
-| `ReviewPage` | 8 | Review classified data, mark correct, reclassify |
-| `PivotPage` | 9 | Pivot table view (view-only mode) |
-| `VersionHistoryPage` | 10 | Change log, revert |
-| `OutputPage` | 11 | CSV export |
+| Project Landing | 1 | New / Open project |
+| Project Details | 2 | Company context, choose taxonomy, settings |
+| Upload | 3 | CSV upload, column mapping (LLM suggest → human confirm) |
+| Data Review | 4 | Time period check, top suppliers, spend shape |
+| Override Rules | 5 | Rules grouped by type, priority reorder, CRUD |
+| Supplier Review | 6 | Review/edit supplier research results |
+| Classification | 7 | Start pipeline, progress display |
+| Review | 8 | Review results, mark correct, reclassify |
+| Taxonomy | 9 | Add/edit/delete nodes. Pivot table mode (view) + review mode (edit) |
+| Version History | 10 | Change log, revert |
+| Export | 11 | CSV download |
 
 ---
 
@@ -325,11 +302,11 @@ Events (main→renderer) are unwrapped.
 
 ### Taxonomy Paths
 
-Pipe-delimited, 3 levels: `"Corporate Services|IT|Software"`. Always depth 3 for classification output.
+Pipe-delimited, 3 levels: `"Corporate Services|IT|Software"`.
 
 ### Column Mapping
 
-Stored as JSON: `{ canonical_name: csv_column_name }`. LLM suggests, human confirms. Canonical columns are snake_case.
+Stored as JSON in project table. LLM suggests, human confirms. Canonical columns are snake_case.
 
 ### Classification Status
 

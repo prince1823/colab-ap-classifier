@@ -1,9 +1,9 @@
-import type { ConfidenceLevel } from '../../shared/types/canonicalization';
+import type { ConfidenceLevel } from '../../shared/types/column-mapping';
 import type { CompanyContext } from '../../shared/types/project';
-import type { SupplierResearchResult, SupplierType } from '../../shared/types/suppliers';
+import type { SupplierInfo } from '../../shared/types/suppliers';
 import type { ExaSearchResult } from '../services/exa-search';
+import type { SupplierResearchResult } from '../services/supplier-research';
 import * as llmClient from '../services/llm-client';
-import * as settingsService from '../services/settings';
 
 /**
  * Build the system prompt for the supplier research agent.
@@ -13,7 +13,7 @@ export function buildSystemPrompt(): string {
 
 CONTEXT: This agent runs as the first step of the classification pipeline. It researches
 suppliers that don't already have data before classification proceeds. Results (including
-supplierType) are stored in the project_suppliers.supplier_info JSON column.
+supplierType) are stored in the supplier_universe.suppliers.supplier_info JSON column.
 
 STRATEGY: Use supplier address if available. Prioritize first result (official website).
 Check "Services"/"About Us" for L1. Extract address if found. Select most relevant result if multiple.
@@ -214,7 +214,7 @@ export function parseResponse(responseText: string): ResearchParseResult {
   if (targetMarket) result.targetMarket = targetMarket;
 
   const supplierType = optStr('supplierType');
-  if (supplierType) result.supplierType = supplierType as SupplierType;
+  if (supplierType) result.supplierType = supplierType;
 
   return { result };
 }
@@ -244,10 +244,7 @@ export async function researchSupplier(
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(supplierName, companyContext, supplierAddress, searchResults);
 
-  // Use model from settings (configured via .env or runtime)
-  const settings = settingsService.getSettings();
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
-    model: settings.model,
     temperature: 0,
     maxTokens: 1024,
   });

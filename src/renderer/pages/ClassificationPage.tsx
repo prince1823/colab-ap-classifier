@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import ClassificationControls from '../components/classification/ClassificationControls'
 import ProgressDisplay from '../components/classification/ProgressDisplay'
-import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
 import type { ClassificationProgress } from '../../shared/types/classification'
 
@@ -48,29 +47,8 @@ export default function ClassificationPage() {
     // Don't clear localProgress when store clears — keeps the success/failed banner visible
   }, [storeProgress, refreshStats])
 
-  // Check for an in-flight run on mount
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const run = await ipc.classification.getStatus()
-        if (run && (run.status === 'pending' || run.status === 'researching' || run.status === 'classifying')) {
-          setRunId(run.id)
-          setLocalProgress({
-            runId: run.id,
-            status: run.status,
-            phase: run.status === 'researching' ? 'researching' : 'classifying',
-            total: run.progressTotal,
-            processed: run.progressProcessed,
-            percentage: run.progressPercentage,
-            currentStep: '',
-          })
-        }
-      } catch {
-        // No active run
-      }
-    }
-    check()
-  }, [])
+  // In v2, classification state is entirely event-driven via the store.
+  // No mount-time status check needed.
 
   const isRunning =
     localProgress !== null &&

@@ -53,11 +53,10 @@ export function transactionToDashboardRow(t: Transaction, index: number): Record
     L4: pathParts[3] || null,
 
     // Metadata
-    review_score: t.reviewScore ?? 0,
+    classification_status: t.classificationStatus ?? 'unclassified',
     row_index: t.rowIndex ?? index,
     id: t.id,
     taxonomy_node_id: t.taxonomyNodeId,
     classification_reasoning: t.classificationReasoning,
-    invoice_group_key: t.invoiceGroupKey,
   }
 }

@@ -1,8 +1,6 @@
-import type { CanonicalColumnMapping } from './canonicalization';
-
 export interface CompanyContext {
   companyName?: string;
-  industry: string;
+  industry?: string;
   sector?: string;
   description?: string;
   businessFocus?: string;
@@ -10,23 +8,18 @@ export interface CompanyContext {
 }
 
 export interface ProjectMetadata {
-  name: string;
-  filePath: string;
+  id: string;
+  projectName: string;
+  createdAt: string;
   companyContext: CompanyContext | null;
-  columnMappings: CanonicalColumnMapping | null;
-  invoiceGroupingColumns: string[] | null;
-  tailSpendThreshold: number;
   taxonomyName: string | null;
-  createdAt: string | null;
+  tailSpendThreshold: number;
+  columnMapping: Record<string, unknown> | null;
 }
 
 export interface ProjectMetadataUpdate {
   companyContext?: CompanyContext;
   tailSpendThreshold?: number;
-}
-
-export interface RecentProject {
-  path: string;
-  name: string;
-  lastOpened: string;
+  taxonomyName?: string;
+  columnMapping?: Record<string, unknown>;
 }

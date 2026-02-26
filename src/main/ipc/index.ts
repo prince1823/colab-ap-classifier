@@ -1,19 +1,14 @@
 import { registerHandler } from './register';
 import { registerColabipHandlers } from './colabip';
 import { registerProjectHandlers } from './project';
-import { registerRecentProjectsHandlers } from './recent-projects';
-import { registerSettingsHandlers } from './settings';
 import { registerChangelogHandlers } from './changelog';
 import { registerTaxonomyHandlers } from './taxonomy';
 import { registerUploadHandlers } from './upload';
 import { registerSuppliersHandlers } from './suppliers';
-import { registerCanonicalizationHandlers } from './canonicalization';
 import { registerSupplierResearchHandlers } from './supplier-research';
 import { registerRulesHandlers } from './rules';
 import { registerTransactionsHandlers } from './transactions';
 import { registerClassificationHandlers } from './classification';
-import { registerReclassificationHandlers } from './reclassification';
-import { registerFeedbackHandlers } from './feedback';
 import { registerExportHandlers } from './export';
 
 export function registerAllHandlers(): void {
@@ -23,18 +18,13 @@ export function registerAllHandlers(): void {
   // Namespace handlers
   registerColabipHandlers();
   registerProjectHandlers();
-  registerRecentProjectsHandlers();
-  registerSettingsHandlers();
   registerChangelogHandlers();
   registerTaxonomyHandlers();
   registerUploadHandlers();
   registerSuppliersHandlers();
-  registerCanonicalizationHandlers();
   registerSupplierResearchHandlers();
   registerRulesHandlers();
   registerTransactionsHandlers();
   registerClassificationHandlers();
-  registerReclassificationHandlers();
-  registerFeedbackHandlers();
   registerExportHandlers();
 }

@@ -2,7 +2,6 @@ import type { TaxonomyNode } from '../../shared/types/taxonomy';
 import type { CompanyContext } from '../../shared/types/project';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import * as llmClient from '../services/llm-client';
-import * as settingsService from '../services/settings';
 
 /**
  * Input data required to classify an invoice group.
@@ -216,8 +215,7 @@ const EXCLUDED_FIELDS = new Set([
   'updated_at',
   'taxonomy_node_id',
   'classification_reasoning',
-  'invoice_group_key',
-  'review_score',
+  'classification_status',
 ]);
 
 /**
@@ -543,10 +541,7 @@ export async function classifyInvoiceGroup(
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(input);
 
-  // Use model from settings (configured via .env or runtime)
-  const settings = settingsService.getSettings();
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
-    model: settings.model,
     temperature: 0,
     maxTokens: 512,
   });

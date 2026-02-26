@@ -18,7 +18,7 @@ export default function DataReviewPage() {
   const markDataReviewed = useWorkflowStore((s) => s.markDataReviewed)
   const ws = useWorkflowState()
 
-  const canProceedToClassification = ws.hasCanonicalizedData && ws.hasTaxonomy
+  const canProceedToClassification = ws.hasUploadedData && ws.hasTaxonomy
 
   const handleNext = () => {
     markDataReviewed()

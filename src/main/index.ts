@@ -1,12 +1,12 @@
-// Load .env before any service imports (settings.ts reads process.env at import time)
+// Load .env before any service imports
 import { loadEnv } from './load-env';
 loadEnv();
 
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import { registerAllHandlers } from './ipc';
-import { setMainWindow } from './services/classification-pipeline';
-import { ensureAppDirectories, getColabipDir } from './services/app-paths';
+import { setMainWindow as setClassificationMainWindow } from './services/classification';
+import { setMainWindow as setResearchMainWindow } from './services/supplier-research';
 import { setColabipBasePath } from './services/colabip';
 
 // Prevent unhandled errors from crashing the entire Electron app
@@ -50,13 +50,21 @@ function createWindow(): void {
   });
 }
 
+function getColabipDir(): string {
+  const isDev = !app.isPackaged;
+  if (isDev) {
+    return path.join(process.cwd(), 'colabip');
+  }
+  return path.join(process.resourcesPath, 'colabip');
+}
+
 app.whenReady().then(() => {
-  ensureAppDirectories();
   setColabipBasePath(getColabipDir());
   registerAllHandlers();
   createWindow();
   if (mainWindow) {
-    setMainWindow(mainWindow);
+    setClassificationMainWindow(mainWindow);
+    setResearchMainWindow(mainWindow);
   }
 });
 
@@ -70,7 +78,8 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
     if (mainWindow) {
-      setMainWindow(mainWindow);
+      setClassificationMainWindow(mainWindow);
+      setResearchMainWindow(mainWindow);
     }
   }
 });

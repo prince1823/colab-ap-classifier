@@ -90,8 +90,8 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     while (stack.length > MAX_UNDO_SIZE) stack.shift()
   }
 
-  // Review score filter
-  const [reviewScoreFilter, setReviewScoreFilter] = useState<{ min: string; max: string; active: boolean }>({ min: '', max: '100', active: false })
+  // Classification status filter (v2 — replaces review score filter)
+  const [_classificationStatusFilter] = useState<string | null>(null)
 
   // Keyboard navigation state - coordinates between tree and tables
   const [keyboardFocus, setKeyboardFocus] = useState('tree') // 'tree' or 'tables'
@@ -868,33 +868,21 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       const passesFilters = evaluateFilterConditions(conditionEntries, filterConnectors, filterCombinator)
       if (!passesFilters) return false
 
-      // Review score filter (always AND — independent of combinator)
-      if (reviewScoreFilter.active) {
-        const score = typeof row.review_score === 'number' ? row.review_score : 0
-        const parsedMin = parseInt(reviewScoreFilter.min)
-        const parsedMax = parseInt(reviewScoreFilter.max)
-        const min = !isNaN(parsedMin) ? parsedMin : 0
-        const max = !isNaN(parsedMax) ? parsedMax : 100
-        if (score < min || score > max) return false
-      }
-
       return true
     })
 
     return filtered
-  }, [transactions, activeFilters, filterState, reviewScoreFilter, filterCombinator, filterConnectors, filterGroupOperators, fsKeyToBackendKey])
+  }, [transactions, activeFilters, filterState, filterCombinator, filterConnectors, filterGroupOperators, fsKeyToBackendKey])
 
   // Defer filtered result so React keeps UI responsive while filtering runs.
-  // This is the single biggest performance win for large datasets — clicks,
-  // scrolls, and typing stay fluid while the heavy filter runs in background.
   const deferredFilteredTransactions = useDeferredValue(filteredTransactions)
 
-  // Check if there are low-confidence rows (for enabling system feedback toggle)
+  // Check if there are unclassified rows
   const hasLowConfidenceRows = useMemo(() => {
     if (!transactions || transactions.length === 0) return false
     return transactions.some(row => {
-      const score = typeof row.review_score === 'number' ? row.review_score : null
-      return score !== null && score < 50
+      const status = row.classification_status as string
+      return !status || status === 'unclassified'
     })
   }, [txnLength])
 
@@ -1351,65 +1339,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                 )}
               </div>
               <div className="review-toolbar-actions">
-                <div className="review-score-filter-inline">
-                  <button
-                    type="button"
-                    className={`review-score-toggle ${reviewScoreFilter.active ? 'active' : ''}`}
-                    onClick={() => setReviewScoreFilter(prev => ({ ...prev, active: !prev.active }))}
-                    title="Filter by review score"
-                  >
-                    Review Score
-                  </button>
-                  {reviewScoreFilter.active && (
-                    <div className="review-score-inputs">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        className="review-score-input"
-                        placeholder="0"
-                        value={reviewScoreFilter.min}
-                        onChange={(e) => {
-                          const raw = e.target.value.replace(/[^0-9]/g, '')
-                          setReviewScoreFilter(prev => ({ ...prev, min: raw }))
-                        }}
-                        onBlur={(e) => {
-                          const val = parseInt(e.target.value)
-                          if (!isNaN(val)) {
-                            setReviewScoreFilter(prev => ({ ...prev, min: String(Math.min(Math.max(val, 0), 100)) }))
-                          }
-                        }}
-                      />
-                      <span className="review-score-separator">–</span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        className="review-score-input"
-                        placeholder="100"
-                        value={reviewScoreFilter.max}
-                        onChange={(e) => {
-                          const raw = e.target.value.replace(/[^0-9]/g, '')
-                          setReviewScoreFilter(prev => ({ ...prev, max: raw }))
-                        }}
-                        onBlur={(e) => {
-                          const val = parseInt(e.target.value)
-                          if (!isNaN(val)) {
-                            setReviewScoreFilter(prev => ({ ...prev, max: String(Math.min(Math.max(val, 0), 100)) }))
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="review-score-clear"
-                        onClick={() => setReviewScoreFilter({ min: '', max: '100', active: false })}
-                        title="Clear review score filter"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  )}
-                </div>
+                {/* Classification status filter placeholder — TODO: add dropdown for status filtering */}
                 <button
                   type="button"
                   className="compact-control dashboard-btn"

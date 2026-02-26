@@ -1,9 +1,5 @@
-import type { ConfidenceLevel } from './canonicalization';
-
-export type SupplierType = 'company' | 'individual' | 'government';
-
 export interface SupplierInfo {
-  supplierType?: SupplierType;
+  supplierType?: string;
   officialBusinessName?: string;
   description?: string;
   websiteUrl?: string;
@@ -18,17 +14,12 @@ export interface SupplierInfo {
   primaryRevenueStreams?: string;
   serviceCategories?: string;
   targetMarket?: string;
-  confidence?: ConfidenceLevel;
+  confidence?: 'high' | 'medium' | 'low';
   sources?: string[];
 }
 
-/**
- * SupplierResearchResult is SupplierInfo with required confidence and sources.
- */
-export type SupplierResearchResult = SupplierInfo &
-  Required<Pick<SupplierInfo, 'confidence' | 'sources'>>;
-
-export interface ProjectSupplier {
+/** A supplier from the shared supplier_universe.db */
+export interface Supplier {
   id: string;
   supplierName: string;
   aliases: string[] | null;
@@ -37,10 +28,21 @@ export interface ProjectSupplier {
   supplierInfo: SupplierInfo | null;
   categoryA: boolean;
   categoryATaxonomyNodeId: string | null;
-  transactionCount: number;
-  totalSpend: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A project supplier = derived from transactions + enriched from supplier_universe.db */
+export interface ProjectSupplierView {
+  supplierName: string;
+  transactionCount: number;
+  totalSpend: number;
+  /** null if not yet researched (no row in supplier_universe.db) */
+  supplierInfo: SupplierInfo | null;
+  parentName: string | null;
+  categoryA: boolean;
+  categoryATaxonomyNodeId: string | null;
+  isResearched: boolean;
 }
 
 export interface SupplierUpdateInput {

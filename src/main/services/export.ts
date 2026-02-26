@@ -3,9 +3,11 @@ import fs from 'fs';
 import { databaseService } from './database';
 
 /**
- * Show a save dialog for CSV export.
+ * Export all transactions to a CSV file.
+ * Prompts user with a save dialog, then writes the file.
  */
-export async function selectExportPath(): Promise<string | null> {
+export async function exportCSV(): Promise<{ rowsExported: number } | null> {
+  // Show save dialog
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   const result = await dialog.showSaveDialog(win!, {
     title: 'Export Classified Transactions',
@@ -17,15 +19,8 @@ export async function selectExportPath(): Promise<string | null> {
     return null;
   }
 
-  return result.filePath;
-}
+  const filePath = result.filePath;
 
-/**
- * Export all transactions to a CSV file.
- */
-export async function exportCSV(
-  filePath: string
-): Promise<{ rowsExported: number }> {
   // Get all dynamic columns
   const colRows = await databaseService.all<{ column_name: string }>(
     "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' ORDER BY ordinal_position"
@@ -33,8 +28,8 @@ export async function exportCSV(
   const allColumns = colRows.map((r) => r.column_name);
 
   // Base columns to exclude from canonical columns output
-  const metaColumns = ['id', 'row_index', 'invoice_group_key', 'taxonomy_node_id',
-    'review_score', 'classification_reasoning', 'created_at', 'updated_at'];
+  const metaColumns = ['id', 'row_index', 'taxonomy_node_id',
+    'classification_status', 'classification_reasoning', 'created_at', 'updated_at'];
 
   const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
 
@@ -53,7 +48,7 @@ export async function exportCSV(
     'classification_l1',
     'classification_l2',
     'classification_l3',
-    'review_score',
+    'classification_status',
     'classification_reasoning',
   ];
 
@@ -73,7 +68,7 @@ export async function exportCSV(
       l1,
       l2,
       l3,
-      row.review_score ?? '',
+      row.classification_status ?? 'unclassified',
       row.classification_reasoning ?? '',
     ];
 

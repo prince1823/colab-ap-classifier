@@ -1,10 +1,9 @@
 import type {
-  CanonicalizationResult,
+  ColumnMappingResult,
   ConfidenceLevel,
-} from '../../shared/types/canonicalization';
+} from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import * as llmClient from '../services/llm-client';
-import * as settingsService from '../services/settings';
 
 const MAX_SAMPLE_ROWS = 5;
 
@@ -120,9 +119,9 @@ Please map these CSV columns to the canonical columns and respond with JSON only
 }
 
 /**
- * Parse and validate the JSON response from the LLM into a CanonicalizationResult.
+ * Parse and validate the JSON response from the LLM into a ColumnMappingResult.
  */
-export function parseResponse(responseText: string): CanonicalizationResult {
+export function parseResponse(responseText: string): ColumnMappingResult {
   // Strip markdown code fences if present
   let cleaned = responseText.trim();
   if (cleaned.startsWith('```')) {
@@ -209,12 +208,12 @@ export function parseResponse(responseText: string): CanonicalizationResult {
  *
  * @param columns - Array of CSV column header names
  * @param sampleData - Array of sample row objects (column name -> value)
- * @returns A CanonicalizationResult with suggested mappings
+ * @returns A ColumnMappingResult with suggested mappings
  */
 export async function suggestMappings(
   columns: string[],
   sampleData: Record<string, string>[]
-): Promise<CanonicalizationResult> {
+): Promise<ColumnMappingResult> {
   if (columns.length === 0) {
     return {
       mappings: {},
@@ -229,10 +228,7 @@ export async function suggestMappings(
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(columns, sampleData);
 
-  // Use model from settings (configured via .env or runtime)
-  const settings = settingsService.getSettings();
   const responseText = await llmClient.chat(systemPrompt, userPrompt, {
-    model: settings.model,
     temperature: 0,
     maxTokens: 1024,
   });

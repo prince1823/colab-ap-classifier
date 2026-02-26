@@ -1,23 +1,27 @@
 import { registerHandler } from './register';
 import {
-  getTaxonomyMetadata,
   getNodes,
-  setTaxonomy,
+  addNode,
+  updateNode,
+  deleteNode,
   importFromColabip,
 } from '../services/taxonomy';
-import type { TaxonomySetInput } from '../../shared/types';
 
 export function registerTaxonomyHandlers(): void {
-  registerHandler('taxonomy:get', async () => {
-    return getTaxonomyMetadata();
-  });
-
   registerHandler('taxonomy:getNodes', async () => {
     return getNodes();
   });
 
-  registerHandler('taxonomy:set', async (_event, input: unknown) => {
-    await setTaxonomy(input as TaxonomySetInput);
+  registerHandler('taxonomy:addNode', async (_event, fullPath: unknown, description?: unknown) => {
+    return addNode(fullPath as string, description as string | undefined);
+  });
+
+  registerHandler('taxonomy:updateNode', async (_event, nodeId: unknown, updates: unknown) => {
+    await updateNode(nodeId as string, updates as { description?: string });
+  });
+
+  registerHandler('taxonomy:deleteNode', async (_event, nodeId: unknown) => {
+    await deleteNode(nodeId as string);
   });
 
   registerHandler('taxonomy:importFromColabip', async (_event, industryName: unknown) => {

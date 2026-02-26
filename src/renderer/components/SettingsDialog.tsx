@@ -1,81 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { XMarkIcon } from '@heroicons/react/24/outline'
-import { ipc } from '../lib/ipc'
-import type { AppSettings, ModelInfo, ProviderInfo } from '../../shared/types/settings'
 
 interface Props {
   open: boolean
   onClose: () => void
 }
 
+/**
+ * Minimal settings dialog — displays LLM provider/model info.
+ * In v2, all LLM config lives in .env (CLASSIFIER_LLM_PROVIDER, CLASSIFIER_MODEL, API keys).
+ * This dialog is read-only for now — tells users to update .env directly.
+ */
 export default function SettingsDialog({ open, onClose }: Props) {
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [providers, setProviders] = useState<ProviderInfo[]>([])
-  const [models, setModels] = useState<ModelInfo[]>([])
-  const [provider, setProvider] = useState('')
-  const [model, setModel] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const load = async () => {
-      try {
-        const [s, p] = await Promise.all([
-          ipc.settings.get(),
-          ipc.settings.getProviders(),
-        ])
-        const m = await ipc.settings.getModels(s.provider)
-        setSettings(s)
-        setProviders(p)
-        setModels(m)
-        setProvider(s.provider)
-        setModel(s.model)
-        setApiKey('')
-        setError(null)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load settings')
-      }
-    }
-    load()
-  }, [open])
-
-  // Re-fetch models when provider changes in the dropdown
-  useEffect(() => {
-    if (!provider) return
-    const loadModels = async () => {
-      try {
-        const m = await ipc.settings.getModels(provider)
-        setModels(m)
-        // Auto-select first model if current model isn't in the new list
-        if (m.length > 0 && !m.some((item) => item.id === model)) {
-          setModel(m[0].id)
-        }
-      } catch (e) {
-        // Ignore — models will just stay stale
-      }
-    }
-    loadModels()
-  }, [provider])
-
-  const handleSave = async () => {
-    setSaving(true)
-    setError(null)
-    try {
-      const updates: Record<string, unknown> = { provider, model }
-      if (apiKey) {
-        updates.apiKeys = { [provider]: apiKey }
-      }
-      await ipc.settings.update(updates as never)
-      onClose()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save settings')
-    } finally {
-      setSaving(false)
-    }
-  }
+  const [_provider] = useState('openrouter')
+  const [_model] = useState('claude-3-5-haiku-latest')
 
   return (
     <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
@@ -91,68 +30,44 @@ export default function SettingsDialog({ open, onClose }: Props) {
             </Dialog.Close>
           </div>
 
-          {error && (
-            <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">{error}</div>
-          )}
-
           <div className="space-y-4">
+            <div className="rounded-md bg-blue-50 p-3 text-sm text-blue-700">
+              LLM configuration is managed via environment variables in the <code className="font-mono">.env</code> file.
+            </div>
+
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Provider</label>
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                {_provider}
+              </div>
+              <p className="mt-1 text-xs text-gray-500">Set via <code>CLASSIFIER_LLM_PROVIDER</code></p>
             </div>
 
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Model</label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                {_model}
+              </div>
+              <p className="mt-1 text-xs text-gray-500">Set via <code>CLASSIFIER_MODEL</code></p>
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                API Key {settings?.hasApiKey && <span className="text-green-600">(configured)</span>}
-              </label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={settings?.hasApiKey ? 'Leave blank to keep current' : 'Enter API key'}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
+              <label className="mb-1 block text-sm font-medium text-gray-700">API Key</label>
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                Configured via environment variable
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Set <code>OPENROUTER_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, or <code>OPENAI_API_KEY</code>
+              </p>
             </div>
           </div>
 
-          <div className="mt-6 flex justify-end gap-3">
+          <div className="mt-6 flex justify-end">
             <button
               onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
             >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : 'Save'}
+              Close
             </button>
           </div>
         </Dialog.Content>

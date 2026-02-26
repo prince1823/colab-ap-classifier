@@ -35,11 +35,6 @@ Renderer (React) <-- IPC --> Main Process (Node.js)
 colab-ap-classifier/
 ├── CLAUDE.md
 ├── .gitignore
-├── internal_docs/          # Specs & dev docs — dev branch only
-│   ├── core/               # Authoritative spec documents
-│   ├── daily_logs/         # Session logs captured by /close-session
-│   ├── practices.md        # Development workflow conventions
-│   └── sprint_docs/        # Sprint feature checklists
 ├── .claude/                # Claude Code skills
 │   └── skills/             # Slash command skills (/implement-issue)
 ├── .github/                # GitHub config
@@ -62,19 +57,6 @@ colab-ap-classifier/
 ├── package.json
 └── tsconfig.json
 ```
-
-## Spec Documents
-
-Authoritative specs live in `internal_docs/core/` (dev branch only). Read before implementing.
-
-| File | Covers |
-|------|--------|
-| `internal_docs/core/features.md` | Product spec — business rules, feature definitions (the "what" and "why") |
-| `internal_docs/core/backend_spec.md` | Backend architecture, classification pipeline, LLM config |
-| `internal_docs/core/frontend_spec.md` | UI layouts, interactions, workflow constraints |
-| `internal_docs/core/ipc_contract.md` | Full IPC API contract with TypeScript types (50+ channels) |
-| `internal_docs/core/schema.md` | DuckDB schema — 10 tables with SQL and field descriptions |
-| `internal_docs/sprint_docs/` | Sprint feature checklists (v1 in-progress, v2 planned) |
 
 ## Key Conventions
 
@@ -108,11 +90,11 @@ Authoritative specs live in `internal_docs/core/` (dev branch only). Read before
 ### Branches
 - `dev` — active development (feature PRs target here)
 - `main` — stable (release PRs from dev)
-- Feature/fix/docs branches: see `internal_docs/practices.md` for naming conventions
+- Feature/fix/docs branches: follow naming conventions in skill files
 
 ### Development Workflow
 
-Skills-based, issue-driven development. Full workflow documented in `internal_docs/practices.md`.
+Skills-based, issue-driven development.
 
 ```
 /create-issue  →  /implement-issue  →  /close-session  →  /update-docs  →  /merge-pr
@@ -137,4 +119,4 @@ GH_TOKEN=ghp_your_token bash .github/setup-gh-auth.sh
 ## Current Status
 
 - Sprint 1 (v1): **complete** — 25 backend + 17 frontend issues closed. Artifacts archived in `.github/issues/archive/sprint-1/`.
-- Sprint 2 (v2): **in progress** — see `internal_docs/sprint_docs/sprint_2.md`
+- Sprint 2 (v2): **in progress**

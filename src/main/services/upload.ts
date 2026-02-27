@@ -5,8 +5,6 @@ import type { CSVPreview, CSVPreviewWithMappings, CanonicalizationResult } from 
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import { suggestMappings } from '../agents/canonicalization-agent';
 
-const SAMPLE_ROW_LIMIT = 10;
-
 /**
  * Supported delimiters in order of detection priority.
  */
@@ -127,6 +125,7 @@ function tryParseWithDelimiter(
       delimiter,
       skip_empty_lines: true,
       relax_column_count: true,
+      relax_quotes: true,
       trim: true,
     }) as Record<string, string>[];
 
@@ -236,10 +235,21 @@ export async function parseCSVPreview(filePath: string): Promise<CSVPreview> {
   }
 
   const encoding = detectEncoding(sampleBuffer);
-  const sampleContent = stripBom(sampleBuffer.toString(encoding));
+  let sampleContent = stripBom(sampleBuffer.toString(encoding));
 
   if (sampleContent.trim().length === 0) {
     throw new Error('File is empty');
+  }
+
+  // If the sample buffer is smaller than the file, truncate to the last
+  // complete line to avoid cutting mid-field (which causes "Quote Not Closed"
+  // errors when a quoted field spans the buffer boundary).
+  const fileSize = fs.statSync(filePath).size;
+  if (sampleBuffer.length < fileSize) {
+    const lastNewline = sampleContent.lastIndexOf('\n');
+    if (lastNewline > 0) {
+      sampleContent = sampleContent.slice(0, lastNewline);
+    }
   }
 
   const delimiter = detectDelimiter(sampleContent);
@@ -250,6 +260,7 @@ export async function parseCSVPreview(filePath: string): Promise<CSVPreview> {
     delimiter,
     skip_empty_lines: true,
     relax_column_count: true,
+    relax_quotes: true,
     trim: true,
   }) as Record<string, string>[];
 
@@ -258,7 +269,7 @@ export async function parseCSVPreview(filePath: string): Promise<CSVPreview> {
   }
 
   const columns = Object.keys(sampleRecords[0]);
-  const sampleRows = sampleRecords.slice(0, SAMPLE_ROW_LIMIT);
+  const sampleRows = sampleRecords;
 
   // Estimate total rows from file size instead of streaming the whole file
   const totalRows = estimateRowCount(filePath);

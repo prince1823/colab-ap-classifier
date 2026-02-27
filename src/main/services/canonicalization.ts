@@ -157,6 +157,7 @@ function detectDelimiter(content: string): string {
         delimiter,
         skip_empty_lines: true,
         relax_column_count: true,
+        relax_quotes: true,
         trim: true,
       }) as Record<string, string>[];
 
@@ -223,6 +224,15 @@ export async function importCSV(
 
   if (sampleContent.trim().length === 0) {
     throw new Error('File is empty');
+  }
+
+  // Truncate to the last complete line to avoid cutting mid-field
+  // (which causes "Quote Not Closed" errors for quoted fields at the boundary)
+  if (stats.size > SAMPLE_SIZE) {
+    const lastNewline = sampleContent.lastIndexOf('\n');
+    if (lastNewline > 0) {
+      sampleContent = sampleContent.slice(0, lastNewline);
+    }
   }
 
   const delimiter = detectDelimiter(sampleContent);

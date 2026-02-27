@@ -29,6 +29,9 @@ projects/
 .DS_Store
 Thumbs.db
 
+# Large CSV test data
+full_dump_1M.csv
+
 # Logs
 *.log
 npm-debug.log*

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs';
+import { dialog, BrowserWindow } from 'electron';
 
 const mockRun = vi.fn();
 const mockAll = vi.fn();
@@ -17,6 +18,10 @@ vi.mock('electron', () => ({
   dialog: {
     showSaveDialog: vi.fn(),
   },
+  BrowserWindow: {
+    getFocusedWindow: vi.fn(() => ({})),
+    getAllWindows: vi.fn(() => [{}]),
+  },
 }));
 
 import { exportCSV } from '../../../src/main/services/export';
@@ -28,15 +33,22 @@ describe('ExportService', () => {
 
   describe('exportCSV', () => {
     it('should export transactions to CSV', async () => {
+      const tmpPath = `/tmp/test-export-${Date.now()}.csv`;
+
+      // Mock save dialog to return the temp path
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+        canceled: false,
+        filePath: tmpPath,
+      });
+
       // Mock column discovery
       mockAll.mockImplementation(async (sql: string) => {
         if (sql.includes('information_schema.columns')) {
           return [
             { column_name: 'id' },
             { column_name: 'row_index' },
-            { column_name: 'invoice_group_key' },
             { column_name: 'taxonomy_node_id' },
-            { column_name: 'review_score' },
+            { column_name: 'classification_status' },
             { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
@@ -50,9 +62,8 @@ describe('ExportService', () => {
           {
             id: 'tx1',
             row_index: 0,
-            invoice_group_key: 'g1',
             taxonomy_node_id: 'tid1',
-            review_score: 10,
+            classification_status: 'classified',
             classification_reasoning: 'Matched by supplier',
             created_at: '2026-01-01',
             updated_at: '2026-01-01',
@@ -64,9 +75,8 @@ describe('ExportService', () => {
           {
             id: 'tx2',
             row_index: 1,
-            invoice_group_key: null,
             taxonomy_node_id: null,
-            review_score: null,
+            classification_status: null,
             classification_reasoning: null,
             created_at: '2026-01-01',
             updated_at: '2026-01-01',
@@ -78,11 +88,10 @@ describe('ExportService', () => {
         ];
       });
 
-      const tmpPath = `/tmp/test-export-${Date.now()}.csv`;
-
       try {
-        const result = await exportCSV(tmpPath);
-        expect(result.rowsExported).toBe(2);
+        const result = await exportCSV();
+        expect(result).not.toBeNull();
+        expect(result!.rowsExported).toBe(2);
 
         // Read and verify CSV
         const csvContent = fs.readFileSync(tmpPath, 'utf-8');
@@ -94,7 +103,7 @@ describe('ExportService', () => {
         expect(lines[0]).toContain('classification_l1');
         expect(lines[0]).toContain('classification_l2');
         expect(lines[0]).toContain('classification_l3');
-        expect(lines[0]).toContain('review_score');
+        expect(lines[0]).toContain('classification_status');
 
         // First data row
         expect(lines[1]).toContain('Acme Corp');
@@ -110,14 +119,20 @@ describe('ExportService', () => {
     });
 
     it('should handle CSV escaping for values with commas', async () => {
+      const tmpPath = `/tmp/test-export-escape-${Date.now()}.csv`;
+
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+        canceled: false,
+        filePath: tmpPath,
+      });
+
       mockAll.mockImplementation(async (sql: string) => {
         if (sql.includes('information_schema.columns')) {
           return [
             { column_name: 'id' },
             { column_name: 'row_index' },
-            { column_name: 'invoice_group_key' },
             { column_name: 'taxonomy_node_id' },
-            { column_name: 'review_score' },
+            { column_name: 'classification_status' },
             { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
@@ -128,9 +143,8 @@ describe('ExportService', () => {
           {
             id: 'tx1',
             row_index: 0,
-            invoice_group_key: null,
             taxonomy_node_id: null,
-            review_score: null,
+            classification_status: null,
             classification_reasoning: null,
             created_at: '',
             updated_at: '',
@@ -140,11 +154,10 @@ describe('ExportService', () => {
         ];
       });
 
-      const tmpPath = `/tmp/test-export-escape-${Date.now()}.csv`;
-
       try {
-        const result = await exportCSV(tmpPath);
-        expect(result.rowsExported).toBe(1);
+        const result = await exportCSV();
+        expect(result).not.toBeNull();
+        expect(result!.rowsExported).toBe(1);
 
         const csvContent = fs.readFileSync(tmpPath, 'utf-8');
         expect(csvContent).toContain('"Acme, Inc."');
@@ -156,13 +169,20 @@ describe('ExportService', () => {
     });
 
     it('should handle empty dataset', async () => {
+      const tmpPath = `/tmp/test-export-empty-${Date.now()}.csv`;
+
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+        canceled: false,
+        filePath: tmpPath,
+      });
+
       mockAll.mockImplementation(async (sql: string) => {
         if (sql.includes('information_schema.columns')) {
           return [
             { column_name: 'id' },
             { column_name: 'row_index' },
             { column_name: 'taxonomy_node_id' },
-            { column_name: 'review_score' },
+            { column_name: 'classification_status' },
             { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
@@ -171,11 +191,10 @@ describe('ExportService', () => {
         return [];
       });
 
-      const tmpPath = `/tmp/test-export-empty-${Date.now()}.csv`;
-
       try {
-        const result = await exportCSV(tmpPath);
-        expect(result.rowsExported).toBe(0);
+        const result = await exportCSV();
+        expect(result).not.toBeNull();
+        expect(result!.rowsExported).toBe(0);
 
         const csvContent = fs.readFileSync(tmpPath, 'utf-8');
         const lines = csvContent.trimEnd().split(/\r?\n/);

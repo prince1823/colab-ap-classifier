@@ -309,9 +309,9 @@ export async function importCSV(
       // Add unmapped raw columns
       for (const csvCol of csvColumns) {
         const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-        // Skip if this CSV column is already mapped as a canonical column
+        // Skip if this CSV column is mapped OR if its snake_case name collides with a canonical key
         const isMappedValue = Object.values(mapping).includes(csvCol);
-        if (!isMappedValue && record[csvCol] !== undefined) {
+        if (!isMappedValue && !canonicalNames.includes(snakeCol) && record[csvCol] !== undefined) {
           colNames.push(`"${snakeCol}"`);
           values.push(`'${String(record[csvCol]).replace(/'/g, "''")}'`);
         }
@@ -336,7 +336,8 @@ export async function importCSV(
     for (const csvCol of csvColumns) {
       const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
       const isMappedValue = Object.values(mapping).includes(csvCol);
-      if (!isMappedValue) {
+      // Skip if this CSV column is mapped OR if its snake_case name collides with a canonical key
+      if (!isMappedValue && !canonicalNames.includes(snakeCol)) {
         colNames.push(`"${snakeCol}"`);
       }
     }
@@ -356,8 +357,10 @@ export async function importCSV(
           : 'NULL');
       }
       for (const csvCol of csvColumns) {
+        const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
         const isMappedValue = Object.values(mapping).includes(csvCol);
-        if (!isMappedValue) {
+        // Skip if this CSV column is mapped OR if its snake_case name collides with a canonical key
+        if (!isMappedValue && !canonicalNames.includes(snakeCol)) {
           const rawValue = rec[csvCol];
           vals.push(rawValue !== undefined && rawValue !== null
             ? `'${String(rawValue).replace(/'/g, "''")}'`

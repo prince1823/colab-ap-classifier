@@ -13,7 +13,30 @@ vi.mock('electron', () => ({
     handle: vi.fn(),
     removeHandler: vi.fn(),
   },
-  BrowserWindow: vi.fn(),
+  BrowserWindow: {
+    getFocusedWindow: vi.fn(() => null),
+    getAllWindows: vi.fn(() => [{}]),
+  },
+}));
+
+// Mock supplierUniverseService to avoid real DB side-effects
+vi.mock('../../../src/main/services/database', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/main/services/database')>();
+  return {
+    ...actual,
+    supplierUniverseService: {
+      open: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      isOpen: vi.fn(() => false),
+    },
+  };
+});
+
+// Mock transactions module to avoid importing the full module.
+// getColumns must return an array of strings for ensureIndexes.
+vi.mock('../../../src/main/services/transactions', () => ({
+  invalidateColumnCache: vi.fn(),
+  getColumns: vi.fn().mockResolvedValue(['row_index', 'classification_status']),
 }));
 
 import { dialog } from 'electron';
@@ -56,62 +79,50 @@ describe('ProjectService', () => {
   // -----------------------------------------------------------------------
   describe('createProject', () => {
     it('should create a .c91 file and initialise schema', async () => {
-      // Override cwd so the projects dir is created under our temp dir
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'TestProject.c91');
 
-      const result = await createProject('TestProject');
+      const result = await createProject('TestProject', filePath);
 
-      const expectedPath = path.join(testDir, 'projects', 'TestProject.c91');
-      expect(result.filePath).toBe(expectedPath);
+      expect(result.filePath).toBe(filePath);
       expect(result.name).toBe('TestProject');
-      expect(fs.existsSync(expectedPath)).toBe(true);
+      expect(fs.existsSync(filePath)).toBe(true);
       expect(isProjectOpen()).toBe(true);
 
-      // Verify schema was initialised (settings table exists with seeded data)
-      const threshold = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
-      );
-      expect(threshold?.value).toBe('10000');
-
-      // Verify project_name was stored
-      const nameSetting = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'project_name'"
-      );
-      expect(nameSetting?.value).toBe('TestProject');
-
-      cwdSpy.mockRestore();
+      // Verify schema was initialised (project table exists with seeded data)
+      const row = await databaseService.get<{
+        project_name: string;
+        tail_spend_threshold: number;
+      }>('SELECT project_name, tail_spend_threshold FROM project LIMIT 1');
+      expect(row?.project_name).toBe('TestProject');
+      expect(Number(row?.tail_spend_threshold)).toBe(10000);
     });
 
-    it('should create the projects directory if it does not exist', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
-
+    it('should create the parent directory if it does not exist', async () => {
       const projectsDir = path.join(testDir, 'projects');
       expect(fs.existsSync(projectsDir)).toBe(false);
 
-      await createProject('NewProject');
+      const filePath = path.join(projectsDir, 'NewProject.c91');
+      await createProject('NewProject', filePath);
 
       expect(fs.existsSync(projectsDir)).toBe(true);
-
-      cwdSpy.mockRestore();
     });
 
     it('should throw if project name is empty', async () => {
-      await expect(createProject('')).rejects.toThrow(
+      const filePath = path.join(testDir, 'Empty.c91');
+      await expect(createProject('', filePath)).rejects.toThrow(
         'Project name must not be empty'
       );
     });
 
     it('should throw if project file already exists', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'Duplicate.c91');
 
-      await createProject('Duplicate');
+      await createProject('Duplicate', filePath);
       await closeProject();
 
-      await expect(createProject('Duplicate')).rejects.toThrow(
+      await expect(createProject('Duplicate', filePath)).rejects.toThrow(
         'Project file already exists'
       );
-
-      cwdSpy.mockRestore();
     });
   });
 
@@ -120,10 +131,10 @@ describe('ProjectService', () => {
   // -----------------------------------------------------------------------
   describe('openProject', () => {
     it('should open an existing .c91 file and return name', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'OpenMe.c91');
 
       // Create a project first, then close and re-open
-      const created = await createProject('OpenMe');
+      const created = await createProject('OpenMe', filePath);
       await closeProject();
 
       const opened = await openProject(created.filePath);
@@ -131,25 +142,19 @@ describe('ProjectService', () => {
       expect(opened.filePath).toBe(created.filePath);
       expect(opened.name).toBe('OpenMe');
       expect(isProjectOpen()).toBe(true);
-
-      cwdSpy.mockRestore();
     });
 
     it('should read metadata after opening', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'MetaTest.c91');
 
-      await createProject('MetaTest');
+      await createProject('MetaTest', filePath);
       await closeProject();
 
-      const filePath = path.join(testDir, 'projects', 'MetaTest.c91');
       await openProject(filePath);
 
       const metadata = await getMetadata();
-      expect(metadata.name).toBe('MetaTest');
-      expect(metadata.filePath).toBe(filePath);
+      expect(metadata.projectName).toBe('MetaTest');
       expect(metadata.tailSpendThreshold).toBe(10000);
-
-      cwdSpy.mockRestore();
     });
 
     it('should throw if file does not exist', async () => {
@@ -165,11 +170,11 @@ describe('ProjectService', () => {
       );
     });
 
-    it('should derive name from filename when project_name setting is missing', async () => {
-      // Create a raw DuckDB file with schema but no project_name setting
+    it('should derive name from filename when project row is missing', async () => {
+      // Create a raw DuckDB file with schema but no project row at all.
+      // openDatabase initializes the schema tables but does not insert a project row.
       const rawPath = path.join(testDir, 'RawProject.c91');
       await databaseService.openDatabase(rawPath);
-      // databaseService.openDatabase already initialises schema & seeds
       await databaseService.closeDatabase();
 
       const opened = await openProject(rawPath);
@@ -182,21 +187,19 @@ describe('ProjectService', () => {
   // -----------------------------------------------------------------------
   describe('closeProject', () => {
     it('should close the database and clear state', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'CloseMe.c91');
 
-      await createProject('CloseMe');
+      await createProject('CloseMe', filePath);
       expect(isProjectOpen()).toBe(true);
 
       await closeProject();
       expect(isProjectOpen()).toBe(false);
-
-      cwdSpy.mockRestore();
     });
 
     it('should cause operations to throw after close', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'ThrowAfterClose.c91');
 
-      await createProject('ThrowAfterClose');
+      await createProject('ThrowAfterClose', filePath);
       await closeProject();
 
       await expect(getMetadata()).rejects.toThrow(
@@ -206,8 +209,6 @@ describe('ProjectService', () => {
       await expect(
         updateMetadata({ tailSpendThreshold: 5000 })
       ).rejects.toThrow('No project is currently open');
-
-      cwdSpy.mockRestore();
     });
   });
 
@@ -220,12 +221,10 @@ describe('ProjectService', () => {
     });
 
     it('should return true when a project is open', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'IsOpenTest.c91');
 
-      await createProject('IsOpenTest');
+      await createProject('IsOpenTest', filePath);
       expect(isProjectOpen()).toBe(true);
-
-      cwdSpy.mockRestore();
     });
   });
 
@@ -233,19 +232,19 @@ describe('ProjectService', () => {
   // getMetadata / updateMetadata roundtrip
   // -----------------------------------------------------------------------
   describe('Metadata roundtrip', () => {
+    let projectFilePath: string;
+
     beforeEach(async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
-      await createProject('MetaRoundtrip');
-      cwdSpy.mockRestore();
+      projectFilePath = path.join(testDir, 'projects', 'MetaRoundtrip.c91');
+      await createProject('MetaRoundtrip', projectFilePath);
     });
 
     it('should return default metadata for a new project', async () => {
       const metadata = await getMetadata();
 
-      expect(metadata.name).toBe('MetaRoundtrip');
+      expect(metadata.projectName).toBe('MetaRoundtrip');
       expect(metadata.companyContext).toBeNull();
-      expect(metadata.columnMappings).toBeNull();
-      expect(metadata.invoiceGroupingColumns).toBeNull();
+      expect(metadata.columnMapping).toBeNull();
       expect(metadata.tailSpendThreshold).toBe(10000);
       expect(metadata.taxonomyName).toBeNull();
       expect(metadata.createdAt).toBeTruthy();

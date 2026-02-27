@@ -599,11 +599,9 @@ describe('classifyInvoiceGroup', () => {
     await classifyInvoiceGroup(makeInput());
 
     const [, , options] = mockChat.mock.calls[0];
-    // Model comes from settings (defaults to Haiku in settings.ts)
     expect(options).toEqual({
-      model: 'claude-3-5-haiku-latest',
       temperature: 0,
-      maxTokens: 4096,
+      maxTokens: 512,
     });
   });
 

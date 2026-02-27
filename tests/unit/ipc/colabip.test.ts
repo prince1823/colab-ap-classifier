@@ -36,10 +36,7 @@ describe('ColabIP IPC handlers', () => {
     expect(handlers.has('colabip:listTaxonomies')).toBe(true);
   });
 
-  it('should register colabip:listRulePacks handler', () => {
-    registerColabipHandlers();
-    expect(handlers.has('colabip:listRulePacks')).toBe(true);
-  });
+  // listRulePacks handler was removed in v2 — rule import happens via readRulePack() directly.
 
   it('should return taxonomy list wrapped in IPCResponse', async () => {
     registerColabipHandlers();
@@ -52,20 +49,6 @@ describe('ColabIP IPC handlers', () => {
       expect.arrayContaining([
         expect.objectContaining({ name: 'healthcare' }),
         expect.objectContaining({ name: 'general' }),
-      ])
-    );
-  });
-
-  it('should return rule packs wrapped in IPCResponse', async () => {
-    registerColabipHandlers();
-
-    const handler = handlers.get('colabip:listRulePacks')!;
-    const result = await handler({});
-
-    expect(result.success).toBe(true);
-    expect(result.data).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'healthcare', ruleCount: 2 }),
       ])
     );
   });

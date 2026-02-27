@@ -192,7 +192,7 @@ Sources analyzed:
 
 Found {N} areas where docs are out of sync:
 
-1. **internal_docs/core/backend_spec.md** (Section: Classification Pipeline)
+1. **internal_docs/core/backend_spec.md** (Section: Classification)
    - Current: describes Phase 4 override rules
    - Code reality: Phase 4 removed, pipeline is pure LLM
    - Proposed: remove Phase 4 description, update flow
@@ -250,7 +250,7 @@ Use the Edit tool for targeted changes. Do NOT rewrite entire sections.
 After each edit:
 
 ```
-Updated internal_docs/core/backend_spec.md (Section: Classification Pipeline) — removed Phase 4 description
+Updated internal_docs/core/backend_spec.md (Section: Classification) — removed Phase 4 description
 ```
 
 ### 5.3 Final Summary & Commit

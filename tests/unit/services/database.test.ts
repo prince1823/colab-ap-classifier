@@ -67,7 +67,7 @@ describe('DatabaseService', () => {
   });
 
   describe('Schema Initialization', () => {
-    it('should create all 10 tables', async () => {
+    it('should create all 5 tables', async () => {
       await databaseService.openDatabase(dbPath);
 
       const tables = await databaseService.all<{ table_name: string }>(
@@ -76,16 +76,23 @@ describe('DatabaseService', () => {
 
       const tableNames = tables.map((t) => t.table_name);
 
-      expect(tableNames).toContain('settings');
-      expect(tableNames).toContain('company_context');
-      expect(tableNames).toContain('column_mappings');
-      expect(tableNames).toContain('invoice_grouping_columns');
+      expect(tableNames).toContain('project');
       expect(tableNames).toContain('taxonomy');
       expect(tableNames).toContain('transactions');
-      expect(tableNames).toContain('project_suppliers');
       expect(tableNames).toContain('override_rules');
       expect(tableNames).toContain('change_log');
-      expect(tableNames).toContain('system_feedback');
+      expect(tableNames).toHaveLength(5);
+    });
+
+    it('should match EXPECTED_TABLES constant', async () => {
+      await databaseService.openDatabase(dbPath);
+
+      const tables = await databaseService.all<{ table_name: string }>(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name"
+      );
+
+      const tableNames = tables.map((t) => t.table_name).sort();
+      expect(tableNames).toEqual([...databaseService.getExpectedTables()].sort());
     });
 
     it('should create the taxonomy_node_id index on transactions', async () => {
@@ -99,51 +106,28 @@ describe('DatabaseService', () => {
       expect(indexNames).toContain('idx_transactions_taxonomy');
     });
 
-    it('should seed default settings', async () => {
-      await databaseService.openDatabase(dbPath);
-
-      const threshold = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
-      );
-      expect(threshold?.value).toBe('10000');
-
-      const createdAt = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'created_at'"
-      );
-      expect(createdAt?.value).toBeTruthy();
-    });
-
-    it('should seed empty company_context row with id=1', async () => {
-      await databaseService.openDatabase(dbPath);
-
-      const row = await databaseService.get<{ id: number }>(
-        'SELECT id FROM company_context'
-      );
-      expect(row?.id).toBe(1);
-    });
-
     it('should not reinitialize schema on reopen', async () => {
       await databaseService.openDatabase(dbPath);
       await databaseService.run(
-        "INSERT INTO settings (key, value) VALUES (?, ?)",
-        'test_key',
-        'test_value'
+        "INSERT INTO project (id, project_name) VALUES (?, ?)",
+        'test-id',
+        'Test Project'
       );
       await databaseService.closeDatabase();
 
       // Reopen
       await databaseService.openDatabase(dbPath);
 
-      const result = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'test_key'"
+      const result = await databaseService.get<{ project_name: string }>(
+        "SELECT project_name FROM project WHERE id = 'test-id'"
       );
-      expect(result?.value).toBe('test_value');
+      expect(result?.project_name).toBe('Test Project');
 
-      // Seed data should still be there too
-      const threshold = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
+      // Tables should still be intact
+      const tables = await databaseService.all<{ table_name: string }>(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name"
       );
-      expect(threshold?.value).toBe('10000');
+      expect(tables).toHaveLength(5);
     });
   });
 
@@ -154,51 +138,61 @@ describe('DatabaseService', () => {
 
     it('should execute run() for INSERT', async () => {
       await databaseService.run(
-        "INSERT INTO settings (key, value) VALUES (?, ?)",
-        'test_key',
-        'test_value'
+        "INSERT INTO project (id, project_name) VALUES (?, ?)",
+        'test-id',
+        'Test Project'
       );
 
-      const result = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'test_key'"
+      const result = await databaseService.get<{ project_name: string }>(
+        "SELECT project_name FROM project WHERE id = 'test-id'"
       );
-      expect(result?.value).toBe('test_value');
+      expect(result?.project_name).toBe('Test Project');
     });
 
     it('should execute all() and return multiple rows', async () => {
       await databaseService.run(
-        "INSERT INTO settings (key, value) VALUES (?, ?)",
-        'key1',
-        'val1'
+        "INSERT INTO taxonomy (id, full_path, l1, depth) VALUES (?, ?, ?, ?)",
+        'node-1',
+        'Corporate Services',
+        'Corporate Services',
+        1
       );
       await databaseService.run(
-        "INSERT INTO settings (key, value) VALUES (?, ?)",
-        'key2',
-        'val2'
+        "INSERT INTO taxonomy (id, full_path, l1, depth) VALUES (?, ?, ?, ?)",
+        'node-2',
+        'Facilities',
+        'Facilities',
+        1
       );
 
-      const results = await databaseService.all<{ key: string; value: string }>(
-        "SELECT key, value FROM settings WHERE key IN ('key1', 'key2') ORDER BY key"
+      const results = await databaseService.all<{ id: string; full_path: string }>(
+        "SELECT id, full_path FROM taxonomy WHERE id IN ('node-1', 'node-2') ORDER BY id"
       );
 
       expect(results).toHaveLength(2);
-      expect(results[0].key).toBe('key1');
-      expect(results[0].value).toBe('val1');
-      expect(results[1].key).toBe('key2');
-      expect(results[1].value).toBe('val2');
+      expect(results[0].id).toBe('node-1');
+      expect(results[0].full_path).toBe('Corporate Services');
+      expect(results[1].id).toBe('node-2');
+      expect(results[1].full_path).toBe('Facilities');
     });
 
     it('should execute get() and return a single row', async () => {
-      const result = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
+      await databaseService.run(
+        "INSERT INTO project (id, project_name) VALUES (?, ?)",
+        'proj-1',
+        'My Project'
       );
 
-      expect(result?.value).toBe('10000');
+      const result = await databaseService.get<{ project_name: string }>(
+        "SELECT project_name FROM project WHERE id = 'proj-1'"
+      );
+
+      expect(result?.project_name).toBe('My Project');
     });
 
     it('should return undefined from get() when no match', async () => {
-      const result = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'nonexistent'"
+      const result = await databaseService.get<{ id: string }>(
+        "SELECT id FROM project WHERE id = 'nonexistent'"
       );
 
       expect(result).toBeUndefined();
@@ -218,28 +212,16 @@ describe('DatabaseService', () => {
       await databaseService.openDatabase(dbPath);
     });
 
-    it('should have correct columns in settings table', async () => {
+    it('should have correct columns in project table', async () => {
       const columns = await databaseService.all<{ column_name: string }>(
-        "SELECT column_name FROM information_schema.columns WHERE table_name = 'settings' ORDER BY ordinal_position"
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'project' ORDER BY ordinal_position"
       );
 
       const names = columns.map((c) => c.column_name);
-      expect(names).toEqual(['key', 'value', 'updated_at']);
-    });
-
-    it('should have correct columns in company_context table', async () => {
-      const columns = await databaseService.all<{ column_name: string }>(
-        "SELECT column_name FROM information_schema.columns WHERE table_name = 'company_context' ORDER BY ordinal_position"
-      );
-
-      const names = columns.map((c) => c.column_name);
-      expect(names).toContain('id');
-      expect(names).toContain('industry');
-      expect(names).toContain('sector');
-      expect(names).toContain('description');
-      expect(names).toContain('business_focus');
-      expect(names).toContain('procurement_nuances');
-      expect(names).toContain('updated_at');
+      expect(names).toEqual([
+        'id', 'project_name', 'created_at', 'company_context',
+        'taxonomy_name', 'tail_spend_threshold', 'column_mapping'
+      ]);
     });
 
     it('should have correct columns in taxonomy table', async () => {
@@ -260,8 +242,8 @@ describe('DatabaseService', () => {
 
       const names = columns.map((c) => c.column_name);
       expect(names).toEqual([
-        'id', 'row_index', 'invoice_group_key', 'taxonomy_node_id',
-        'review_score', 'classification_reasoning', 'created_at', 'updated_at'
+        'id', 'row_index', 'taxonomy_node_id', 'classification_status',
+        'classification_reasoning', 'created_at', 'updated_at'
       ]);
     });
 
@@ -272,25 +254,21 @@ describe('DatabaseService', () => {
 
       const names = columns.map((c) => c.column_name);
       expect(names).toEqual([
-        'id', 'name', 'source', 'conditions', 'target_taxonomy_node_id',
-        'priority_score', 'is_active', 'imported_at', 'created_at'
+        'id', 'name', 'conditions', 'target_taxonomy_node_id',
+        'priority_score', 'is_active', 'created_at'
       ]);
     });
 
-    it('should have correct columns in project_suppliers table', async () => {
+    it('should have correct columns in change_log table', async () => {
       const columns = await databaseService.all<{ column_name: string }>(
-        "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' ORDER BY ordinal_position"
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'change_log' ORDER BY ordinal_position"
       );
 
       const names = columns.map((c) => c.column_name);
-      expect(names).toContain('id');
-      expect(names).toContain('supplier_name');
-      expect(names).toContain('parent_supplier_id');
-      expect(names).toContain('supplier_info');
-      expect(names).toContain('category_a');
-      expect(names).toContain('category_a_taxonomy_node_id');
-      expect(names).toContain('transaction_count');
-      expect(names).toContain('total_spend');
+      expect(names).toEqual([
+        'id', 'source', 'affected_table', 'affected_ids', 'affected_count',
+        'old_values', 'new_values', 'description', 'created_at'
+      ]);
     });
   });
 });

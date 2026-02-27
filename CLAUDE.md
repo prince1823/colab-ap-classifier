@@ -1,6 +1,6 @@
 # Colab91 AP Classifier
 
-Electron desktop app for automated classification of accounts payable transactions using LLMs. Users import CSV transaction data, configure taxonomy and company context, run an AI classification pipeline, then review and correct results.
+Electron desktop app for automated classification of accounts payable transactions using LLMs. Users import CSV transaction data, configure taxonomy and company context, run AI classification, then review and correct results.
 
 ## Tech Stack
 
@@ -17,14 +17,14 @@ Electron desktop app for automated classification of accounts payable transactio
 ```
 Renderer (React) <-- IPC --> Main Process (Node.js)
                                  ├── IPC Handlers
-                                 ├── Classification Pipeline
+                                 ├── Classification
                                  ├── LLM Agents --> OpenRouter
                                  ├── DuckDB (.c91 files)
                                  └── Git Sync --> ColabIP (GitHub)
 ```
 
 - **Renderer:** React UI with workflow tabs — Upload → Canonicalization → Data Review → Classification → Review → Output
-- **Main process:** IPC handlers, classification pipeline, git sync, DB access
+- **Main process:** IPC handlers, classification, git sync, DB access
 - **4 LLM agents:** ClassificationAgent, CanonicalizationAgent, ResearchAgent, FeedbackAgent
 - **Storage:** each project is a single `.c91` DuckDB file (portable, self-contained). Default location: `./projects/` (gitignored). Recent projects tracked in `~/.config/Colab91 Classifier/recent-projects.json`
 - **ColabIP:** shared GitHub repo with master taxonomies, override rules, and supplier universe. Data is copied into projects at import time — projects don't reference ColabIP at runtime.
@@ -45,7 +45,7 @@ colab-ap-classifier/
 ├── src/
 │   ├── main/               # Electron main process
 │   │   ├── ipc/            # IPC handler registrations
-│   │   ├── services/       # DB, git-sync, classification pipeline
+│   │   ├── services/       # DB, git-sync, classification
 │   │   └── agents/         # LLM agent implementations
 │   ├── renderer/           # React frontend
 │   │   ├── components/

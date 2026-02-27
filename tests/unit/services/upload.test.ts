@@ -12,11 +12,19 @@ vi.mock('electron', () => ({
     handle: vi.fn(),
     removeHandler: vi.fn(),
   },
-  BrowserWindow: vi.fn(),
+  BrowserWindow: {
+    getFocusedWindow: vi.fn(() => ({})),
+    getAllWindows: vi.fn(() => [{}]),
+  },
 }));
 
-// Mock the canonicalization agent
-vi.mock('../../../src/main/agents/canonicalization-agent', () => ({
+// Mock the column-mapping agent
+vi.mock('../../../src/main/agents/column-mapping-agent', () => ({
+  suggestMappings: vi.fn(),
+}));
+
+// Mock canonical-columns (now a shared module, no longer exported from the agent)
+vi.mock('../../../src/shared/canonical-columns', () => ({
   CANONICAL_COLUMNS: [
     { name: 'supplier_name', relevance: 'critical', type: 'text', aliases: ['Vendor', 'Supplier'], description: 'Supplier name' },
     { name: 'spend_amount', relevance: 'critical', type: 'number', aliases: ['Amount', 'Cost'], description: 'Amount' },
@@ -33,19 +41,18 @@ vi.mock('../../../src/main/agents/canonicalization-agent', () => ({
     { name: 'currency', relevance: 'low', type: 'category', aliases: ['Currency Code'], description: 'Currency' },
     { name: 'memo', relevance: 'low', type: 'log_text', aliases: ['Notes'], description: 'Memo' },
   ],
-  suggestMappings: vi.fn(),
 }));
 
 import { dialog } from 'electron';
 import { selectFile, parsePreview, parseCSVPreview } from '../../../src/main/services/upload';
-import * as canonicalizationAgent from '../../../src/main/agents/canonicalization-agent';
-import type { CanonicalizationResult } from '../../../src/shared/types/canonicalization';
+import * as columnMappingAgent from '../../../src/main/agents/column-mapping-agent';
+import type { ColumnMappingResult } from '../../../src/shared/types/column-mapping';
 
-const mockedAgent = vi.mocked(canonicalizationAgent);
+const mockedAgent = vi.mocked(columnMappingAgent);
 
 const FIXTURES_DIR = path.resolve(__dirname, '../../fixtures/csv');
 
-const MOCK_MAPPING_RESULT: CanonicalizationResult = {
+const MOCK_MAPPING_RESULT: ColumnMappingResult = {
   mappings: {
     supplier_name: 'Supplier',
     spend_amount: 'Amount',
@@ -102,6 +109,7 @@ describe('Upload Service', () => {
       await selectFile();
 
       expect(dialog.showOpenDialog).toHaveBeenCalledWith(
+        expect.anything(), // BrowserWindow reference
         expect.objectContaining({
           filters: expect.arrayContaining([
             expect.objectContaining({
@@ -387,7 +395,7 @@ describe('Upload Service', () => {
       expect(result.mappingSuggestion).toEqual(MOCK_MAPPING_RESULT);
     });
 
-    it('should call canonicalization agent with columns and sample rows', async () => {
+    it('should call column-mapping agent with columns and sample rows', async () => {
       await parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
 
       expect(mockedAgent.suggestMappings).toHaveBeenCalledOnce();

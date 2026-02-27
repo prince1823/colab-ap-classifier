@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import {
   listTaxonomies,
-  listRulePacks,
   readTaxonomy,
   readRulePack,
   readSupplierUniverse,
@@ -46,31 +45,7 @@ describe('listTaxonomies', () => {
   });
 });
 
-describe('listRulePacks', () => {
-  it('should return correct rule pack names and counts', async () => {
-    const packs = await listRulePacks();
-
-    const healthcare = packs.find((p) => p.name === 'healthcare');
-    const general = packs.find((p) => p.name === 'general');
-    const manufacturing = packs.find((p) => p.name === 'manufacturing');
-
-    expect(healthcare).toEqual({ name: 'healthcare', ruleCount: 2 });
-    expect(general).toEqual({ name: 'general', ruleCount: 0 });
-    expect(manufacturing).toEqual({ name: 'manufacturing', ruleCount: 0 });
-  });
-
-  it('should return all directories with rules.csv', async () => {
-    const packs = await listRulePacks();
-    expect(packs.length).toBe(3);
-  });
-
-  it('should return empty array when colabip directory does not exist', async () => {
-    setColabipBasePath(NONEXISTENT_PATH);
-    const packs = await listRulePacks();
-    expect(packs).toEqual([]);
-    setColabipBasePath(FIXTURE_PATH);
-  });
-});
+// listRulePacks was removed in v2 — rule import happens via readRulePack() directly.
 
 describe('readTaxonomy', () => {
   it('should parse taxonomy.txt and auto-generate parent nodes', async () => {

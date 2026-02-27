@@ -57,6 +57,12 @@ function rowToSupplier(row: SupplierRow): Supplier {
  * joined with supplier_universe.db for enriched data.
  */
 export async function listProjectSuppliers(): Promise<ProjectSupplierView[]> {
+  // supplier_name is a dynamic column added at CSV import — may not exist yet
+  const cols = await databaseService.all<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'supplier_name'"
+  );
+  if (cols.length === 0) return [];
+
   // Get distinct suppliers with transaction counts/spend from the project DB
   const projectSuppliers = await databaseService.all<{
     supplier_name: string;

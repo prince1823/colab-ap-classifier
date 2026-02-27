@@ -11,7 +11,7 @@ import * as llmClient from '../services/llm-client';
 export function buildSystemPrompt(): string {
   return `You are a supplier research analyst. Extract structured supplier information for spend classification.
 
-CONTEXT: This agent runs as the first step of the classification pipeline. It researches
+CONTEXT: This agent runs as the first step of classification. It researches
 suppliers that don't already have data before classification proceeds. Results (including
 supplierType) are stored in the supplier_universe.suppliers.supplier_info JSON column.
 

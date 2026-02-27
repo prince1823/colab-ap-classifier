@@ -12,11 +12,16 @@ vi.mock('../../../src/main/services/database', () => ({
   },
 }));
 
-import { queryTransactions, getStats, getColumns } from '../../../src/main/services/transactions';
+vi.mock('../../../src/main/services/changelog', () => ({
+  logChange: vi.fn(),
+}));
+
+import { queryTransactions, getStats, getColumns, invalidateColumnCache } from '../../../src/main/services/transactions';
 
 describe('TransactionsService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateColumnCache();
   });
 
   describe('getColumns', () => {
@@ -44,22 +49,24 @@ describe('TransactionsService', () => {
         { column_name: 'spend_amount' },
         { column_name: 'supplier_name' },
         { column_name: 'taxonomy_node_id' },
-        { column_name: 'review_score' },
+        { column_name: 'classification_status' },
       ]);
 
-      mockGet
-        .mockResolvedValueOnce({ cnt: 100 })   // total rows
-        .mockResolvedValueOnce({ total: 50000 }) // total spend
-        .mockResolvedValueOnce({ cnt: 25 })      // unique suppliers
-        .mockResolvedValueOnce({ cnt: 80 })      // classified
-        .mockResolvedValueOnce({ cnt: 5 });      // flagged
+      // v2: single aggregation query
+      mockGet.mockResolvedValueOnce({
+        total_rows: 100,
+        total_spend: 50000,
+        unique_suppliers: 25,
+        classified_rows: 80,
+        unclassified_rows: 20,
+      });
 
       const stats = await getStats();
       expect(stats.totalRows).toBe(100);
       expect(stats.totalSpend).toBe(50000);
       expect(stats.uniqueSuppliers).toBe(25);
       expect(stats.classifiedRows).toBe(80);
-      expect(stats.flaggedForReviewRows).toBe(5);
+      expect(stats.unclassifiedRows).toBe(20);
     });
 
     it('should handle missing spend and supplier columns', async () => {
@@ -68,10 +75,14 @@ describe('TransactionsService', () => {
         { column_name: 'row_index' },
       ]);
 
-      mockGet
-        .mockResolvedValueOnce({ cnt: 10 })  // total
-        .mockResolvedValueOnce({ cnt: 0 })   // classified
-        .mockResolvedValueOnce({ cnt: 0 });  // flagged
+      // v2: single aggregation query with 0 expressions for missing columns
+      mockGet.mockResolvedValueOnce({
+        total_rows: 10,
+        total_spend: 0,
+        unique_suppliers: 0,
+        classified_rows: 0,
+        unclassified_rows: 10,
+      });
 
       const stats = await getStats();
       expect(stats.totalRows).toBe(10);
@@ -88,9 +99,8 @@ describe('TransactionsService', () => {
           return [
             { column_name: 'id' },
             { column_name: 'row_index' },
-            { column_name: 'invoice_group_key' },
             { column_name: 'taxonomy_node_id' },
-            { column_name: 'review_score' },
+            { column_name: 'classification_status' },
             { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
@@ -103,10 +113,9 @@ describe('TransactionsService', () => {
           {
             id: 'tx1',
             row_index: 0,
-            invoice_group_key: 'g1',
             taxonomy_node_id: 'tid1',
             classification_path: 'Indirect|IT|Software',
-            review_score: null,
+            classification_status: 'classified_by_ai',
             classification_reasoning: null,
             supplier_name: 'Acme',
             spend_amount: 1000,
@@ -124,6 +133,7 @@ describe('TransactionsService', () => {
       expect(result[0].rowIndex).toBe(0);
       expect(result[0].taxonomyNodeId).toBe('tid1');
       expect(result[0].classificationPath).toBe('Indirect|IT|Software');
+      expect(result[0].classificationStatus).toBe('classified_by_ai');
       expect(result[0].canonicalFields).toEqual({
         supplier_name: 'Acme',
         spend_amount: 1000,
@@ -149,16 +159,6 @@ describe('TransactionsService', () => {
       expect(String(selectCall![0])).toContain('taxonomy_node_id = ?');
     });
 
-    it('should apply review score range filter', async () => {
-      await queryTransactions({ reviewScoreMin: 3, reviewScoreMax: 8 });
-
-      const selectCall = mockAll.mock.calls.find((c) =>
-        String(c[0]).includes('FROM transactions')
-      );
-      expect(String(selectCall![0])).toContain('review_score >= ?');
-      expect(String(selectCall![0])).toContain('review_score <= ?');
-    });
-
     it('should apply spend range filter', async () => {
       await queryTransactions({ spendMin: 100, spendMax: 5000 });
 
@@ -169,13 +169,14 @@ describe('TransactionsService', () => {
       expect(String(selectCall![0])).toContain('spend_amount <= ?');
     });
 
-    it('should apply pagination defaults', async () => {
+    it('should return all rows when no pageSize specified', async () => {
       await queryTransactions();
 
       const selectCall = mockAll.mock.calls.find((c) =>
         String(c[0]).includes('FROM transactions')
       );
-      expect(String(selectCall![0])).toContain('LIMIT 50 OFFSET 0');
+      expect(String(selectCall![0])).not.toContain('LIMIT');
+      expect(String(selectCall![0])).not.toContain('OFFSET');
     });
 
     it('should apply custom pagination', async () => {
@@ -185,17 +186,6 @@ describe('TransactionsService', () => {
         String(c[0]).includes('FROM transactions')
       );
       expect(String(selectCall![0])).toContain('LIMIT 25 OFFSET 50');
-    });
-
-    it('should handle exclude tail spend filter', async () => {
-      mockGet.mockResolvedValue({ value: '5000' });
-
-      await queryTransactions({ excludeTailSpend: true });
-
-      const selectCall = mockAll.mock.calls.find((c) =>
-        String(c[0]).includes('FROM transactions')
-      );
-      expect(String(selectCall![0])).toContain('spend_amount >= ?');
     });
   });
 });

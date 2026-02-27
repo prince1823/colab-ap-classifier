@@ -484,7 +484,7 @@ export default function PivotFilterBar({
 }
 
 /* ------------------------------------------------------------------ */
-/* Filter application (pure function, used by PivotPage)               */
+/* Filter application (pure function, used by Dashboard / ReviewPage)   */
 /* ------------------------------------------------------------------ */
 
 export function applyPivotFilters(

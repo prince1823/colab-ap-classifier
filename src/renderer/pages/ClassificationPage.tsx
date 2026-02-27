@@ -92,7 +92,7 @@ export default function ClassificationPage() {
       <div>
         <h2 className="text-lg font-semibold text-gray-900">Classification</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Start the AI classification pipeline. Transactions will be classified against your taxonomy.
+          Start AI classification. Transactions will be classified against your taxonomy.
         </p>
       </div>
 

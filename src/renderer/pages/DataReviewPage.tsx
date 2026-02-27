@@ -7,11 +7,11 @@ import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useWorkflowState } from '../contexts/WorkflowStateContext'
 import type { TransactionStats } from '../../shared/types/transactions'
-import type { ProjectSupplier } from '../../shared/types/suppliers'
+import type { ProjectSupplierView } from '../../shared/types/suppliers'
 
 export default function DataReviewPage() {
   const [stats, setStats] = useState<TransactionStats | null>(null)
-  const [suppliers, setSuppliers] = useState<ProjectSupplier[]>([])
+  const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()

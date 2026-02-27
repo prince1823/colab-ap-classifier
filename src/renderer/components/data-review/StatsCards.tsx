@@ -13,7 +13,7 @@ export default function StatsCards({ stats }: Props) {
     },
     { label: 'Unique Suppliers', value: stats.uniqueSuppliers.toLocaleString() },
     { label: 'Classified', value: stats.classifiedRows.toLocaleString() },
-    { label: 'Flagged for Review', value: stats.flaggedForReviewRows.toLocaleString() },
+    { label: 'Unclassified', value: stats.unclassifiedRows.toLocaleString() },
   ]
 
   return (

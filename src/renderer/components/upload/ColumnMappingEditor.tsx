@@ -6,8 +6,6 @@ interface Props {
   suggestion: ColumnMappingResult
   csvColumns: string[]
   onMappingChange: (mapping: ColumnMapping) => void
-  groupingColumns: string[]
-  onGroupingChange: (columns: string[]) => void
 }
 
 const UNMAPPED = '__unmapped__'
@@ -64,8 +62,6 @@ export default function ColumnMappingEditor({
   suggestion,
   csvColumns,
   onMappingChange,
-  groupingColumns,
-  onGroupingChange,
 }: Props) {
   const [mapping, setMapping] = useState<ColumnMapping>(() =>
     autoMap(suggestion.mappings, suggestion.unmappedCanonicalColumns, csvColumns)
@@ -93,14 +89,6 @@ export default function ColumnMappingEditor({
     }
     setMapping(updated)
     onMappingChange(updated)
-  }
-
-  const toggleGroupingColumn = (col: string) => {
-    if (groupingColumns.includes(col)) {
-      onGroupingChange(groupingColumns.filter((c) => c !== col))
-    } else {
-      onGroupingChange([...groupingColumns, col])
-    }
   }
 
   // Use all 14 canonical columns from shared definition, ordered by relevance
@@ -175,27 +163,6 @@ export default function ColumnMappingEditor({
         </div>
       )}
 
-      <div>
-        <h3 className="mb-2 text-sm font-medium text-gray-700">Invoice Grouping Columns</h3>
-        <p className="mb-2 text-xs text-gray-500">
-          Select columns that together identify a unique invoice for grouping.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {csvColumns.map((col) => (
-            <button
-              key={col}
-              onClick={() => toggleGroupingColumn(col)}
-              className={`rounded-md border px-3 py-1 text-xs transition-colors ${
-                groupingColumns.includes(col)
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {col}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }

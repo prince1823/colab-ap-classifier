@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { ipc } from '../../lib/ipc'
-import type { ProjectSupplier } from '../../../shared/types/suppliers'
+import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 
 interface Props {
-  suppliers: ProjectSupplier[]
+  suppliers: ProjectSupplierView[]
   onUpdated: () => void
 }
 
@@ -15,17 +15,17 @@ export default function SupplierTable({ suppliers: initialSuppliers, onUpdated }
     setSuppliers(initialSuppliers)
   }, [initialSuppliers])
 
-  const toggleCatA = async (s: ProjectSupplier) => {
+  const toggleCatA = async (s: ProjectSupplierView) => {
     // Optimistic update — no page refresh
     setSuppliers(prev => prev.map(sup =>
-      sup.id === s.id ? { ...sup, categoryA: !sup.categoryA } : sup
+      sup.supplierName === s.supplierName ? { ...sup, categoryA: !sup.categoryA } : sup
     ))
     try {
       await ipc.suppliers.update(s.supplierName, { categoryA: !s.categoryA })
     } catch (e) {
       // Revert on failure
       setSuppliers(prev => prev.map(sup =>
-        sup.id === s.id ? { ...sup, categoryA: s.categoryA } : sup
+        sup.supplierName === s.supplierName ? { ...sup, categoryA: s.categoryA } : sup
       ))
       console.error('Failed to update supplier:', e)
     }
@@ -46,7 +46,7 @@ export default function SupplierTable({ suppliers: initialSuppliers, onUpdated }
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
           {sorted.map((s) => (
-            <tr key={s.id} className="hover:bg-gray-50">
+            <tr key={s.supplierName} className="hover:bg-gray-50">
               <td className="whitespace-nowrap px-4 py-2 font-medium text-gray-900">{s.supplierName}</td>
               <td className="px-4 py-2 text-right text-gray-600">{s.transactionCount}</td>
               <td className="px-4 py-2 text-right text-gray-600">

@@ -1,24 +1,19 @@
 /**
- * Pipeline Mock Test — Integration smoke test with minimal mock data
+ * Pipeline Mock Test — v2 integration smoke test with mocked LLM
  *
- * Purpose: Fast integration test that validates the full pipeline flow works
- * correctly without requiring LLM API calls or extensive real data. Uses
- * mocked LLM responses and minimal test data.
- *
- * Goal: Catch integration issues quickly during development (sub-1 minute runtime)
+ * Purpose: Validates the full v2 pipeline flow works correctly without
+ * requiring LLM API calls. Uses mocked LLM responses and minimal test data.
  *
  * Covers:
- *   - Project creation and setup
- *   - Taxonomy import from fixtures
- *   - CSV upload and canonicalization with minimal data
- *   - Classification pipeline with mocked LLM responses
- *   - Results verification
- *   - Export functionality
+ *   - Project creation via createProject() + company context via updateMetadata()
+ *   - Taxonomy import from ColabIP fixtures
+ *   - CSV upload with column mapping via importCSV()
+ *   - Supplier universe seeding (real DuckDB)
+ *   - Classification with mocked LLM (startClassification)
+ *   - Results verification (classification_status != 'unclassified')
+ *   - Export functionality (exportCSV)
  *
- * Does NOT cover:
- *   - Real LLM behavior (use pipeline-run.test.ts for that)
- *   - Data quality with real-world complexity
- *   - Performance at scale
+ * v2 schema: 5 tables (project, taxonomy, transactions, override_rules, change_log)
  *
  * Run with: npx vitest run tests/integration/pipeline-mock.test.ts
  */
@@ -27,54 +22,56 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
-// --- Mock electron ---
-vi.mock('electron', () => ({
-  dialog: {
-    showSaveDialog: vi.fn().mockResolvedValue({ canceled: false, filePath: '/tmp/test.csv' }),
-    showOpenDialog: vi.fn().mockResolvedValue({ canceled: false, filePaths: ['/tmp/test.csv'] }),
-  },
-  ipcMain: { handle: vi.fn(), removeHandler: vi.fn() },
-  BrowserWindow: vi.fn(),
+// vi.hoisted runs before vi.mock hoisting — safe for shared refs
+const { mockSend, exportState } = vi.hoisted(() => ({
+  mockSend: vi.fn(),
+  exportState: { filePath: null as string | null },
 }));
 
-// --- Mock LLM client to avoid real API calls ---
-// Agents call llmClient.chat(systemPrompt, userPrompt, options)
+// --- Mock electron ---
+vi.mock('electron', () => {
+  const _win = { webContents: { send: () => {} } };
+  const BW = Object.assign(vi.fn(() => _win), {
+    getFocusedWindow: vi.fn(() => _win),
+    getAllWindows: vi.fn(() => [_win]),
+  });
+  return {
+    dialog: {
+      showSaveDialog: vi.fn(),
+      showOpenDialog: vi.fn().mockResolvedValue({ canceled: false, filePaths: [] }),
+    },
+    ipcMain: { handle: vi.fn(), removeHandler: vi.fn() },
+    BrowserWindow: BW,
+  };
+});
+
+// --- Mock LLM client ---
 vi.mock('../../src/main/services/llm-client', () => ({
   chat: vi.fn().mockImplementation(async (systemPrompt: string) => {
-    // Mock canonicalization agent
-    if (systemPrompt.includes('column mapping')) {
+    // Mock column-mapping agent
+    if (systemPrompt.includes('data mapping assistant')) {
       return JSON.stringify({
         mappings: {
           supplier_name: 'Supplier',
           spend_amount: 'Amount',
           invoice_date: 'Date',
+          line_description: 'Description',
         },
-        confidence: 0.95,
+        confidence: 'high',
+        unmappedClientColumns: ['Invoice Number'],
+        importantUnmappedColumns: [],
+        unmappedCanonicalColumns: [],
+        reasoning: 'Mock mapping',
       });
     }
-
-    // Mock classification agent — match before research since both mention "supplier"
+    // Mock classification agent
     if (systemPrompt.includes('AP transaction classifier')) {
       return JSON.stringify({
         classificationPath: 'Direct|IT|Software',
-        reasoning: 'Mock classification reasoning',
-        confidence: 0.85,
+        reasoning: 'Mock classification — supplier provides software/IT services',
         descriptionSupplierAligned: true,
       });
     }
-
-    // Mock supplier research agent
-    if (systemPrompt.includes('supplier research analyst')) {
-      return JSON.stringify({
-        officialBusinessName: 'Mock Supplier',
-        industry: 'Technology',
-        description: 'Mock supplier description',
-        confidence: 'high',
-        sources: [],
-      });
-    }
-
-    // Default mock response
     return JSON.stringify({ result: 'mock response' });
   }),
   LLMClientError: class LLMClientError extends Error {
@@ -86,232 +83,243 @@ vi.mock('../../src/main/services/llm-client', () => ({
   },
 }));
 
-// --- Imports ---
-import { databaseService } from '../../src/main/services/database';
+// --- Imports (after mocks) ---
+import { dialog } from 'electron';
+import { databaseService, supplierUniverseService } from '../../src/main/services/database';
+import * as projectService from '../../src/main/services/project';
 import * as taxonomyService from '../../src/main/services/taxonomy';
-import * as canonicalizationService from '../../src/main/services/canonicalization';
 import * as uploadService from '../../src/main/services/upload';
-import * as supplierService from '../../src/main/services/suppliers';
-import * as classificationPipeline from '../../src/main/services/classification-pipeline';
+import * as classificationService from '../../src/main/services/classification';
 import * as exportService from '../../src/main/services/export';
 import * as colabipService from '../../src/main/services/colabip';
-import * as llmClient from '../../src/main/services/llm-client';
+import * as transactionService from '../../src/main/services/transactions';
 
-const mockChat = vi.mocked(llmClient.chat);
+// Wire up the save dialog mock to write to a real temp path
+vi.mocked(dialog.showSaveDialog).mockImplementation(async () => {
+  exportState.filePath = path.join(os.tmpdir(), `pipeline-mock-export-${Date.now()}.csv`);
+  return { canceled: false, filePath: exportState.filePath };
+});
 
 // --- Paths ---
 const FIXTURES_DIR = path.resolve(__dirname, '..', 'fixtures');
 const COLABIP_DIR = path.join(FIXTURES_DIR, 'colabip');
-const MOCK_DATA_DIR = path.join(__dirname, '..', 'fixtures', 'mock-data');
+const STANDARD_CSV = path.join(FIXTURES_DIR, 'csv', 'standard.csv');
 
-// Create mock CSV data for testing
-// Includes "GE Healthcare" which matches the supplier universe fixture
-// (has parent_name "general electric" with no parent_id)
-function createMockCSV(): string {
-  const csvPath = path.join(os.tmpdir(), `mock-test-${Date.now()}.csv`);
-  const content = `Supplier,Amount,Date,Description
-Acme Corp,1000.50,2024-01-15,Software licenses
-Tech Solutions Inc,2500.00,2024-01-20,Consulting services
-GE Healthcare,4500.00,2024-01-22,Medical imaging equipment`;
-
-  fs.writeFileSync(csvPath, content, 'utf-8');
-  return csvPath;
+function tempPath(suffix: string): string {
+  return path.join(
+    os.tmpdir(),
+    `pipeline-mock-${Date.now()}-${Math.random().toString(36).slice(2)}${suffix}`
+  );
 }
 
-function tempDbPath(): string {
-  return path.join(os.tmpdir(), `pipeline-mock-${Date.now()}-${Math.random().toString(36).slice(2)}.c91`);
-}
-
-describe('Pipeline Mock Integration Test', () => {
+describe('Pipeline Mock Integration Test (v2)', () => {
   let dbPath: string;
-  let csvPath: string;
-  let exportPath: string;
-  let taxonomyName: string;
+  let supplierDbPath: string;
 
-  beforeAll(async () => {
-    // Set ColabIP base path to fixtures
+  beforeAll(() => {
     colabipService.setColabipBasePath(COLABIP_DIR);
-
-    // Discover the first available taxonomy
-    const taxonomies = await colabipService.listTaxonomies();
-    expect(taxonomies.length).toBeGreaterThan(0);
-    taxonomyName = taxonomies[0].name;
-
-    // Create mock CSV
-    csvPath = createMockCSV();
+    // Each integration test uses its own supplier universe path
+    // to avoid DuckDB file lock conflicts when tests run in parallel.
+    supplierDbPath = tempPath('.db');
+    supplierUniverseService.setDefaultPath(supplierDbPath);
   });
 
   afterAll(async () => {
-    if (databaseService.isOpen()) {
-      await databaseService.closeDatabase();
-    }
-    // Clean up temp files
-    if (dbPath && fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-    if (csvPath && fs.existsSync(csvPath)) fs.unlinkSync(csvPath);
-    if (exportPath && fs.existsSync(exportPath)) {
-      try { fs.unlinkSync(exportPath); } catch { /* ignore */ }
+    try { await projectService.closeProject(); } catch { /* already closed */ }
+
+    // Clean up temp files (db, supplier db, export csv + WAL files)
+    for (const p of [dbPath, supplierDbPath, exportState.filePath]) {
+      if (!p) continue;
+      for (const suffix of ['', '.wal']) {
+        const fp = p + suffix;
+        if (fs.existsSync(fp)) {
+          try { fs.unlinkSync(fp); } catch { /* ignore */ }
+        }
+      }
     }
   });
 
   // ────────────────────────────────────────────────────────────────
-  // Phase 1: Project Setup
+  // Phase 1: Create project + set company context
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 1: Create project and set company context', async () => {
-    dbPath = tempDbPath();
-    await databaseService.openDatabase(dbPath);
+    dbPath = tempPath('.c91');
 
-    await databaseService.run(
-      "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-      'project_name',
-      'Mock Integration Test'
-    );
-
-    await databaseService.run(
-      `UPDATE company_context
-       SET industry = ?,
-           sector = ?,
-           description = ?,
-           business_focus = ?,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = 1`,
-      'Technology',
-      'Software',
-      'Mock company for testing',
-      'Software development'
-    );
-
+    const result = await projectService.createProject('Mock Integration Test', dbPath);
+    expect(result.name).toBe('Mock Integration Test');
     expect(databaseService.isOpen()).toBe(true);
-    console.log('  ✓ Mock project created');
+    expect(supplierUniverseService.isOpen()).toBe(true);
+
+    // Set company context via updateMetadata (v2 stores as JSON on project table)
+    await projectService.updateMetadata({
+      companyContext: {
+        industry: 'Technology',
+        sector: 'Software',
+        description: 'Mock company for integration testing',
+        businessFocus: 'Enterprise software development',
+      },
+    });
+
+    const metadata = await projectService.getMetadata();
+    expect(metadata.companyContext?.industry).toBe('Technology');
+    expect(metadata.projectName).toBe('Mock Integration Test');
   });
 
   // ────────────────────────────────────────────────────────────────
-  // Phase 2: Taxonomy Setup
+  // Phase 2: Import taxonomy from ColabIP fixtures
   // ────────────────────────────────────────────────────────────────
 
-  it('Phase 2: Import taxonomy', async () => {
-    await taxonomyService.importFromColabip(taxonomyName);
+  it('Phase 2: Import taxonomy from ColabIP fixtures', async () => {
+    await taxonomyService.importFromColabip('general');
 
     const nodes = await taxonomyService.getNodes();
     expect(nodes.length).toBeGreaterThan(0);
 
-    console.log(`  ✓ Taxonomy imported: ${nodes.length} nodes`);
+    // Verify the expected L3 node exists
+    const softwareNode = nodes.find((n) => n.fullPath === 'Direct|IT|Software');
+    expect(softwareNode).toBeDefined();
+    expect(softwareNode!.depth).toBe(3);
+
+    // Verify project metadata updated with taxonomy name
+    const metadata = await projectService.getMetadata();
+    expect(metadata.taxonomyName).toBe('general');
   });
 
   // ────────────────────────────────────────────────────────────────
-  // Phase 3: CSV Upload & Import
+  // Phase 3: Upload CSV with column mapping
   // ────────────────────────────────────────────────────────────────
 
-  it('Phase 3: Preview, map, and import mock CSV', async () => {
-    const preview = await uploadService.parsePreview(csvPath);
-    expect(preview.totalRows).toBe(3);
-    expect(preview.columns).toContain('Supplier');
-
-    // Use simple manual mapping (no LLM)
-    const mapping = {
+  it('Phase 3: Import CSV with column mapping', async () => {
+    // standard.csv: Supplier, Invoice Number, Amount, Date, Description (5 rows)
+    const columnMapping = {
       supplier_name: 'Supplier',
       spend_amount: 'Amount',
       invoice_date: 'Date',
+      line_description: 'Description',
     };
 
-    await canonicalizationService.saveMappings(mapping, ['supplier_name']);
-    const result = await canonicalizationService.importCSV(csvPath);
+    const result = await uploadService.importCSV(STANDARD_CSV, columnMapping);
+    expect(result.rowsInserted).toBe(5);
 
-    expect(result.rowsInserted).toBe(3);
+    const stats = await transactionService.getStats();
+    expect(stats.totalRows).toBe(5);
+    expect(stats.unclassifiedRows).toBe(5);
+    expect(stats.uniqueSuppliers).toBe(5);
 
-    const suppliers = await supplierService.listSuppliers();
-    expect(suppliers.length).toBe(3);
-
-    // Verify GE Healthcare was matched to universe and parent_name stored without parent_id
-    const geSupplier = suppliers.find((s) => s.supplierName === 'ge healthcare');
-    expect(geSupplier).toBeDefined();
-    expect(geSupplier!.parentName).toBe('general electric');
-    expect(geSupplier!.parentSupplierId).toBeNull();
-
-    console.log(`  ✓ Imported ${result.rowsInserted} mock transactions`);
+    // Verify canonical columns were added
+    const columns = await transactionService.getColumns();
+    expect(columns).toContain('supplier_name');
+    expect(columns).toContain('spend_amount');
+    expect(columns).toContain('invoice_date');
+    expect(columns).toContain('line_description');
   });
 
   // ────────────────────────────────────────────────────────────────
-  // Phase 4: Classification Pipeline (Mocked)
+  // Phase 4: Seed supplier universe
   // ────────────────────────────────────────────────────────────────
 
-  it('Phase 4: Run classification with mocked LLM', async () => {
-    // Set up mock main window
-    classificationPipeline.setMainWindow({
-      webContents: {
-        send: vi.fn(),
-      },
-    });
+  it('Phase 4: Seed supplier_universe.db with test suppliers', async () => {
+    // Classification requires suppliers in supplier_universe.db (research gate)
+    const supplierNames = [
+      'Acme Corp', 'Globex Inc', 'Initech', 'Wayne Enterprises', 'Stark Industries',
+    ];
 
-    // Start classification (all transactions)
-    const { runId } = await classificationPipeline.startClassification({
-      scope: 'all',
-    });
-    expect(runId).toBeTruthy();
-
-    // Wait for completion with shorter timeout (mocked LLM is fast)
-    let status = classificationPipeline.getStatus();
-    const maxWait = 30000; // 30s timeout
-    const startTime = Date.now();
-
-    while (
-      status &&
-      !['completed', 'failed', 'cancelled'].includes(status.status) &&
-      Date.now() - startTime < maxWait
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      status = classificationPipeline.getStatus();
+    for (const name of supplierNames) {
+      await supplierUniverseService.run(
+        `INSERT INTO suppliers (id, supplier_name, supplier_info, created_at, updated_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        `sup-${name.toLowerCase().replace(/\s+/g, '-')}`,
+        name,
+        JSON.stringify({
+          supplierType: 'company',
+          description: `Test supplier: ${name}`,
+          industry: 'Technology',
+        })
+      );
     }
 
-    expect(status).toBeDefined();
-    expect(status!.status).toBe('completed');
-
-    // Verify the classification LLM call for GE Healthcare included parent company in prompt
-    const classificationCalls = mockChat.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('AP transaction classifier')
+    const count = await supplierUniverseService.get<{ cnt: number | bigint }>(
+      'SELECT COUNT(*) as cnt FROM suppliers'
     );
-    const geCall = classificationCalls.find(
-      (call) => typeof call[1] === 'string' && call[1].includes('ge healthcare')
-    );
-    expect(geCall).toBeDefined();
-    expect(geCall![1]).toContain('Parent Company: general electric');
-
-    console.log(`  ✓ Mock pipeline completed in ${Date.now() - startTime}ms`);
-  }, 40000);
-
-  // ────────────────────────────────────────────────────────────────
-  // Phase 5: Verify Results
-  // ────────────────────────────────────────────────────────────────
-
-  it('Phase 5: Verify mock classification results', async () => {
-    const txns = await databaseService.all<{
-      id: string;
-      taxonomy_node_id: string | null;
-    }>('SELECT id, taxonomy_node_id FROM transactions');
-
-    expect(txns.length).toBe(3);
-
-    // With mocked LLM, all should be "classified" (even if to a mock node)
-    const classified = txns.filter((t) => t.taxonomy_node_id !== null);
-
-    console.log(`  ✓ ${classified.length}/${txns.length} transactions classified (mock)`);
+    expect(Number(count?.cnt)).toBe(5);
   });
 
   // ────────────────────────────────────────────────────────────────
-  // Phase 6: Export
+  // Phase 5: Run classification with mocked LLM
   // ────────────────────────────────────────────────────────────────
 
-  it('Phase 6: Export mock results to CSV', async () => {
-    exportPath = path.join(os.tmpdir(), `pipeline-mock-export-${Date.now()}.csv`);
+  it('Phase 5: Run classification (mocked LLM)', async () => {
+    // Set up main window ref for progress events
+    classificationService.setMainWindow({
+      webContents: { send: mockSend },
+    });
 
-    const result = await exportService.exportCSV(exportPath);
-    expect(result.rowsExported).toBe(3);
-    expect(fs.existsSync(exportPath)).toBe(true);
+    // startClassification() takes no params in v2 — classifies all unclassified
+    await classificationService.startClassification();
 
-    const csvContent = fs.readFileSync(exportPath, 'utf-8');
-    const lines = csvContent.trim().split('\n');
-    expect(lines.length).toBe(4); // Header + 3 data rows
+    expect(classificationService.getIsRunning()).toBe(false);
 
-    console.log(`  ✓ Exported ${result.rowsExported} mock rows to CSV`);
+    // Verify progress events were emitted
+    const progressCalls = mockSend.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'classification:progress'
+    );
+    expect(progressCalls.length).toBeGreaterThan(0);
+
+    // Last progress event should be 'completed'
+    const lastProgress = progressCalls[progressCalls.length - 1][1];
+    expect(lastProgress.status).toBe('completed');
+  }, 30000);
+
+  // ────────────────────────────────────────────────────────────────
+  // Phase 6: Verify classification results
+  // ────────────────────────────────────────────────────────────────
+
+  it('Phase 6: Verify transactions got classified', async () => {
+    const stats = await transactionService.getStats();
+    expect(stats.classifiedRows).toBe(5);
+    expect(stats.unclassifiedRows).toBe(0);
+
+    const txns = await transactionService.queryTransactions();
+    expect(txns.length).toBe(5);
+
+    for (const txn of txns) {
+      expect(txn.classificationStatus).toBe('classified_by_ai');
+      expect(txn.taxonomyNodeId).toBeTruthy();
+      expect(txn.classificationPath).toBe('Direct|IT|Software');
+    }
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // Phase 7: Export CSV and verify output
+  // ────────────────────────────────────────────────────────────────
+
+  it('Phase 7: Export classified results to CSV', async () => {
+    const result = await exportService.exportCSV();
+    expect(result).not.toBeNull();
+    expect(result!.rowsExported).toBe(5);
+
+    // Verify the exported file exists and has correct structure
+    expect(exportState.filePath).not.toBeNull();
+    expect(fs.existsSync(exportState.filePath!)).toBe(true);
+
+    const csvContent = fs.readFileSync(exportState.filePath!, 'utf-8');
+    const lines = csvContent.trim().split(/\r?\n/);
+
+    // Header + 5 data rows
+    expect(lines.length).toBe(6);
+
+    // Verify header contains classification columns
+    const header = lines[0];
+    expect(header).toContain('classification_path');
+    expect(header).toContain('classification_status');
+    expect(header).toContain('classification_l1');
+    expect(header).toContain('classification_l2');
+    expect(header).toContain('classification_l3');
+
+    // Verify data rows contain the mock classification path
+    for (let i = 1; i < lines.length; i++) {
+      expect(lines[i]).toContain('Direct|IT|Software');
+    }
   });
 });

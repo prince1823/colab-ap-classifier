@@ -236,8 +236,10 @@ describe('ChangelogService', () => {
       const allChanges = await listChanges();
       expect(allChanges).toHaveLength(3);
 
-      // The latest should be the revert of revert
-      expect(allChanges[0].description).toBe('Reverted: Reverted: Original change');
+      // The latest should be the revert of revert.
+      // v2 strips existing "Reverted: " prefixes before re-prepending, so the
+      // description is always "Reverted: <original description>".
+      expect(allChanges[0].description).toBe('Reverted: Original change');
       expect(allChanges[0].newValues).toEqual({ taxonomy_node_id: 'node-b' });
     });
 

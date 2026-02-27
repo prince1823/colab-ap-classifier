@@ -10,7 +10,7 @@ export function registerUploadHandlers(): void {
     return parsePreview(filePath as string);
   });
 
-  registerHandler('upload:csv', async (_event, filePath: unknown) => {
-    return importCSV(filePath as string);
+  registerHandler('upload:csv', async (_event, filePath: unknown, mapping: unknown) => {
+    return importCSV(filePath as string, mapping as Record<string, string> | undefined);
   });
 }

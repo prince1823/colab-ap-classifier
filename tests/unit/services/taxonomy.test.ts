@@ -9,15 +9,23 @@ vi.mock('../../../src/main/services/colabip', () => ({
   readTaxonomy: vi.fn(),
 }));
 
+// Mock the project service for importFromColabip (calls updateMetadata)
+vi.mock('../../../src/main/services/project', () => ({
+  updateMetadata: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
-  getTaxonomyMetadata,
   getNodes,
-  setTaxonomy,
+  addNode,
+  updateNode,
+  deleteNode,
   importFromColabip,
 } from '../../../src/main/services/taxonomy';
 import { readTaxonomy } from '../../../src/main/services/colabip';
+import * as projectService from '../../../src/main/services/project';
 
 const mockedReadTaxonomy = vi.mocked(readTaxonomy);
+const mockedUpdateMetadata = vi.mocked(projectService.updateMetadata);
 
 function tempDbPath(): string {
   return path.join(
@@ -32,6 +40,7 @@ describe('TaxonomyService', () => {
   beforeEach(async () => {
     dbPath = tempDbPath();
     await databaseService.openDatabase(dbPath);
+    vi.clearAllMocks();
   });
 
   afterEach(async () => {
@@ -43,19 +52,14 @@ describe('TaxonomyService', () => {
     }
   });
 
-  describe('setTaxonomy', () => {
+  describe('addNode', () => {
     it('should insert all nodes with correct depth and parent_path', async () => {
-      await setTaxonomy({
-        name: 'test-taxonomy',
-        nodes: [
-          { path: 'Direct', description: 'Direct spend' },
-          { path: 'Direct|IT', description: 'IT spend' },
-          { path: 'Direct|IT|Software', description: 'Software spend' },
-          { path: 'Indirect', description: 'Indirect spend' },
-          { path: 'Indirect|Facilities', description: 'Facilities' },
-          { path: 'Exempt', description: 'Exempt spend' },
-        ],
-      });
+      await addNode('Direct', 'Direct spend');
+      await addNode('Direct|IT', 'IT spend');
+      await addNode('Direct|IT|Software', 'Software spend');
+      await addNode('Indirect', 'Indirect spend');
+      await addNode('Indirect|Facilities', 'Facilities');
+      await addNode('Exempt', 'Exempt spend');
 
       const nodes = await getNodes();
       expect(nodes).toHaveLength(6);
@@ -104,14 +108,9 @@ describe('TaxonomyService', () => {
     });
 
     it('should generate unique UUIDs for each node', async () => {
-      await setTaxonomy({
-        name: 'test-taxonomy',
-        nodes: [
-          { path: 'Direct' },
-          { path: 'Indirect' },
-          { path: 'Exempt' },
-        ],
-      });
+      await addNode('Direct');
+      await addNode('Indirect');
+      await addNode('Exempt');
 
       const nodes = await getNodes();
       const ids = nodes.map((n) => n.id);
@@ -126,10 +125,7 @@ describe('TaxonomyService', () => {
     });
 
     it('should handle nodes with no description', async () => {
-      await setTaxonomy({
-        name: 'test-taxonomy',
-        nodes: [{ path: 'Direct' }],
-      });
+      await addNode('Direct');
 
       const nodes = await getNodes();
       expect(nodes).toHaveLength(1);
@@ -137,8 +133,56 @@ describe('TaxonomyService', () => {
     });
   });
 
+  describe('updateNode', () => {
+    it('should update the description of an existing node', async () => {
+      const node = await addNode('Direct', 'Original');
+
+      await updateNode(node.id, { description: 'Updated' });
+
+      const nodes = await getNodes();
+      const updated = nodes.find((n) => n.id === node.id);
+      expect(updated).toBeDefined();
+      expect(updated!.description).toBe('Updated');
+    });
+
+    it('should no-op when no updates are provided', async () => {
+      const node = await addNode('Direct', 'Original');
+
+      await updateNode(node.id, {});
+
+      const nodes = await getNodes();
+      const same = nodes.find((n) => n.id === node.id);
+      expect(same).toBeDefined();
+      expect(same!.description).toBe('Original');
+    });
+  });
+
+  describe('deleteNode', () => {
+    it('should delete a leaf node', async () => {
+      await addNode('Direct');
+      const child = await addNode('Direct|IT');
+
+      await deleteNode(child.id);
+
+      const nodes = await getNodes();
+      expect(nodes).toHaveLength(1);
+      expect(nodes[0].fullPath).toBe('Direct');
+    });
+
+    it('should throw when deleting a node with children', async () => {
+      const parent = await addNode('Direct');
+      await addNode('Direct|IT');
+
+      await expect(deleteNode(parent.id)).rejects.toThrow('has 1 child node(s)');
+    });
+
+    it('should throw when node does not exist', async () => {
+      await expect(deleteNode('nonexistent-id')).rejects.toThrow('Taxonomy node not found');
+    });
+  });
+
   describe('importFromColabip', () => {
-    it('should import nodes from ColabIP service via setTaxonomy', async () => {
+    it('should import nodes from ColabIP and update project metadata', async () => {
       mockedReadTaxonomy.mockResolvedValue({
         nodes: [
           { path: 'Direct', description: 'Direct spend' },
@@ -161,33 +205,22 @@ describe('TaxonomyService', () => {
       expect(paths).toContain('Direct|IT|Software');
       expect(paths).toContain('Indirect');
 
-      // Verify metadata uses industry name
-      const metadata = await getTaxonomyMetadata();
-      expect(metadata).not.toBeNull();
-      expect(metadata!.name).toBe('test-industry');
-      expect(metadata!.nodeCount).toBe(4);
+      // Verify project metadata was updated with the industry name
+      expect(mockedUpdateMetadata).toHaveBeenCalledWith({ taxonomyName: 'test-industry' });
     });
   });
 
   describe('depth validation', () => {
     it('should reject paths with depth greater than 3', async () => {
       await expect(
-        setTaxonomy({
-          name: 'bad-taxonomy',
-          nodes: [{ path: 'Direct|IT|Software|Extra' }],
-        })
+        addNode('Direct|IT|Software|Extra')
       ).rejects.toThrow('depth must be 1, 2, or 3');
     });
 
     it('should accept any L1 value (no L1 constraint)', async () => {
-      await setTaxonomy({
-        name: 'healthcare-taxonomy',
-        nodes: [
-          { path: 'Clinical', description: 'Clinical costs' },
-          { path: 'Non Clinical', description: 'Non-clinical costs' },
-          { path: 'Non-Sourceable', description: 'Non-procurement items' },
-        ],
-      });
+      await addNode('Clinical', 'Clinical costs');
+      await addNode('Non Clinical', 'Non-clinical costs');
+      await addNode('Non-Sourceable', 'Non-procurement items');
 
       const nodes = await getNodes();
       expect(nodes).toHaveLength(3);
@@ -195,77 +228,41 @@ describe('TaxonomyService', () => {
     });
 
     it('should not modify database when validation fails', async () => {
-      // First set a valid taxonomy
-      await setTaxonomy({
-        name: 'valid-taxonomy',
-        nodes: [{ path: 'Direct', description: 'Valid' }],
-      });
+      // First add a valid node
+      await addNode('Direct', 'Valid');
 
-      // Attempt to set a taxonomy with depth > 3
+      // Attempt to add a node with depth > 3
       await expect(
-        setTaxonomy({
-          name: 'invalid-taxonomy',
-          nodes: [{ path: 'A|B|C|D' }],
-        })
+        addNode('A|B|C|D')
       ).rejects.toThrow('depth must be 1, 2, or 3');
 
-      // The previous valid taxonomy should still be intact
+      // The previous valid node should still be intact
       const nodes = await getNodes();
       expect(nodes).toHaveLength(1);
       expect(nodes[0].fullPath).toBe('Direct');
-
-      const metadata = await getTaxonomyMetadata();
-      expect(metadata!.name).toBe('valid-taxonomy');
     });
   });
 
-  describe('getTaxonomyMetadata', () => {
-    it('should return null when no taxonomy has been set', async () => {
-      const metadata = await getTaxonomyMetadata();
-      expect(metadata).toBeNull();
-    });
-
-    it('should return correct name and count after setting taxonomy', async () => {
-      await setTaxonomy({
-        name: 'my-taxonomy',
-        nodes: [
-          { path: 'Direct', description: 'Direct' },
-          { path: 'Direct|IT', description: 'IT' },
-          { path: 'Indirect', description: 'Indirect' },
-        ],
-      });
-
-      const metadata = await getTaxonomyMetadata();
-      expect(metadata).not.toBeNull();
-      expect(metadata!.name).toBe('my-taxonomy');
-      expect(metadata!.nodeCount).toBe(3);
-    });
-  });
-
-  describe('replace taxonomy', () => {
-    it('should remove old nodes when setting a new taxonomy', async () => {
-      // Set first taxonomy
-      await setTaxonomy({
-        name: 'taxonomy-v1',
-        nodes: [
-          { path: 'Direct', description: 'Direct v1' },
-          { path: 'Direct|IT', description: 'IT v1' },
-          { path: 'Direct|IT|Software', description: 'Software v1' },
-          { path: 'Indirect', description: 'Indirect v1' },
-        ],
-      });
+  describe('replace taxonomy via importFromColabip', () => {
+    it('should remove old nodes when importing a new taxonomy', async () => {
+      // Seed initial nodes
+      await addNode('Direct', 'Direct v1');
+      await addNode('Direct|IT', 'IT v1');
+      await addNode('Direct|IT|Software', 'Software v1');
+      await addNode('Indirect', 'Indirect v1');
 
       let nodes = await getNodes();
       expect(nodes).toHaveLength(4);
 
-      // Replace with different taxonomy
-      await setTaxonomy({
-        name: 'taxonomy-v2',
+      // Replace via importFromColabip
+      mockedReadTaxonomy.mockResolvedValue({
         nodes: [
           { path: 'Exempt', description: 'Exempt v2' },
           { path: 'Exempt|Tax', description: 'Tax v2' },
         ],
       });
+
+      await importFromColabip('taxonomy-v2');
 
       nodes = await getNodes();
       expect(nodes).toHaveLength(2);
@@ -282,46 +279,55 @@ describe('TaxonomyService', () => {
       expect(paths).toContain('Exempt|Tax');
 
       // Metadata should reflect the new taxonomy
-      const metadata = await getTaxonomyMetadata();
-      expect(metadata!.name).toBe('taxonomy-v2');
-      expect(metadata!.nodeCount).toBe(2);
+      expect(mockedUpdateMetadata).toHaveBeenCalledWith({ taxonomyName: 'taxonomy-v2' });
     });
   });
 
   describe('duplicate path validation', () => {
-    it('should reject duplicate paths in the input', async () => {
+    it('should reject duplicate paths', async () => {
+      await addNode('Direct', 'First');
+
       await expect(
-        setTaxonomy({
-          name: 'dups',
-          nodes: [
-            { path: 'Direct', description: 'First' },
-            { path: 'Direct', description: 'Duplicate' },
-          ],
-        })
+        addNode('Direct', 'Duplicate')
+      ).rejects.toThrow('Taxonomy node already exists: "Direct"');
+    });
+
+    it('should reject duplicate paths in importFromColabip input', async () => {
+      mockedReadTaxonomy.mockResolvedValue({
+        nodes: [
+          { path: 'Direct', description: 'First' },
+          { path: 'Direct', description: 'Duplicate' },
+        ],
+      });
+
+      await expect(
+        importFromColabip('dups')
       ).rejects.toThrow('Duplicate taxonomy path: "Direct"');
     });
   });
 
   describe('parent path validation', () => {
-    it('should reject nodes whose parent path does not exist in the set', async () => {
+    it('should reject nodes whose parent path does not exist in the database', async () => {
       await expect(
-        setTaxonomy({
-          name: 'missing-parent',
-          nodes: [
-            { path: 'Direct|IT|Software', description: 'No parent' },
-          ],
-        })
+        addNode('Direct|IT|Software', 'No parent')
+      ).rejects.toThrow('Parent path "Direct|IT" not found');
+    });
+
+    it('should reject nodes in importFromColabip whose parent path does not exist in the set', async () => {
+      mockedReadTaxonomy.mockResolvedValue({
+        nodes: [
+          { path: 'Direct|IT|Software', description: 'No parent' },
+        ],
+      });
+
+      await expect(
+        importFromColabip('missing-parent')
       ).rejects.toThrow('Parent path "Direct|IT" not found');
     });
 
     it('should accept depth-2 node when depth-1 parent exists', async () => {
-      await setTaxonomy({
-        name: 'valid-parents',
-        nodes: [
-          { path: 'Direct', description: 'L1' },
-          { path: 'Direct|IT', description: 'L2' },
-        ],
-      });
+      await addNode('Direct', 'L1');
+      await addNode('Direct|IT', 'L2');
 
       const nodes = await getNodes();
       expect(nodes).toHaveLength(2);
@@ -335,15 +341,10 @@ describe('TaxonomyService', () => {
     });
 
     it('should return nodes ordered by full_path', async () => {
-      await setTaxonomy({
-        name: 'ordered',
-        nodes: [
-          { path: 'Indirect', description: 'Indirect' },
-          { path: 'Direct', description: 'Direct' },
-          { path: 'Direct|IT', description: 'IT' },
-          { path: 'Exempt', description: 'Exempt' },
-        ],
-      });
+      await addNode('Indirect', 'Indirect');
+      await addNode('Direct', 'Direct');
+      await addNode('Direct|IT', 'IT');
+      await addNode('Exempt', 'Exempt');
 
       const nodes = await getNodes();
       const paths = nodes.map((n) => n.fullPath);
@@ -351,10 +352,7 @@ describe('TaxonomyService', () => {
     });
 
     it('should include createdAt timestamp on each node', async () => {
-      await setTaxonomy({
-        name: 'timestamps',
-        nodes: [{ path: 'Direct' }],
-      });
+      await addNode('Direct');
 
       const nodes = await getNodes();
       expect(nodes[0].createdAt).toBeDefined();

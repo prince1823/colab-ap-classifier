@@ -4,63 +4,78 @@ vi.mock('../../../src/main/agents/research-agent', () => ({
   researchSupplier: vi.fn(),
 }));
 
-vi.mock('../../../src/main/services/colabip', () => ({
-  readSupplierUniverse: vi.fn(),
-}));
-
 vi.mock('../../../src/main/services/exa-search', () => ({
   searchSupplier: vi.fn(),
 }));
 
 vi.mock('../../../src/main/services/suppliers', () => ({
   getSupplierByName: vi.fn(),
-  updateSupplier: vi.fn(),
-  listSuppliers: vi.fn(),
+  upsertSupplier: vi.fn(),
 }));
 
 vi.mock('../../../src/main/services/project', () => ({
   getMetadata: vi.fn(),
 }));
 
-import { researchSingle, researchBatch } from '../../../src/main/services/supplier-research';
+vi.mock('../../../src/main/services/database', () => ({
+  databaseService: {
+    all: vi.fn(),
+  },
+}));
+
+import { researchSingle, researchAllProjectSuppliers } from '../../../src/main/services/supplier-research';
 import { researchSupplier } from '../../../src/main/agents/research-agent';
-import { readSupplierUniverse } from '../../../src/main/services/colabip';
 import * as exaSearch from '../../../src/main/services/exa-search';
 import * as supplierService from '../../../src/main/services/suppliers';
 import * as projectService from '../../../src/main/services/project';
+import { databaseService } from '../../../src/main/services/database';
 
 describe('SupplierResearchService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(readSupplierUniverse).mockResolvedValue([]);
     vi.mocked(exaSearch.searchSupplier).mockResolvedValue([]);
     vi.mocked(projectService.getMetadata).mockResolvedValue({
-      name: 'Test', filePath: '/test.c91', companyContext: null,
-      columnMappings: null, invoiceGroupingColumns: null,
-      tailSpendThreshold: 10000, taxonomyName: null, createdAt: null,
+      id: 'test-id',
+      projectName: 'Test',
+      createdAt: '2024-01-01',
+      companyContext: null,
+      columnMapping: null,
+      taxonomyName: null,
+      tailSpendThreshold: 10000,
     });
   });
 
   describe('researchSingle', () => {
-    it('should check supplier universe first', async () => {
-      vi.mocked(readSupplierUniverse).mockResolvedValue([
-        {
-          id: 'sup-acme-001', supplierName: 'Acme Corp', aliases: [], parentId: null,
-          parentName: 'Acme Inc', categoryA: false, categoryATaxonomyPath: null,
-          supplierInfo: { supplierType: 'company', websiteUrl: 'acme.com', industry: 'Manufacturing' },
+    it('should return existing research when supplier has substantive info', async () => {
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue({
+        id: '1',
+        supplierName: 'Acme Corp',
+        aliases: null,
+        parentSupplierId: null,
+        parentName: null,
+        supplierInfo: {
+          supplierType: 'company',
+          industry: 'Manufacturing',
+          description: 'Industrial supplier',
+          confidence: 'high',
+          sources: ['Existing research'],
         },
-      ]);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+        categoryA: false,
+        categoryATaxonomyNodeId: null,
+        createdAt: '2024-01-01',
+        updatedAt: '2024-01-01',
+      });
 
       const result = await researchSingle('Acme Corp');
 
-      expect(result.officialBusinessName).toBe('Acme Corp');
+      expect(result.industry).toBe('Manufacturing');
       expect(result.confidence).toBe('high');
-      expect(result.sources).toContain('ColabIP Supplier Universe');
+      expect(result.sources).toContain('Existing research');
       expect(researchSupplier).not.toHaveBeenCalled();
     });
 
-    it('should fall back to LLM research when not in universe', async () => {
+    it('should fall back to LLM research when supplier has no existing info', async () => {
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
       vi.mocked(researchSupplier).mockResolvedValue({
         result: {
           officialBusinessName: 'Test Co',
@@ -70,8 +85,7 @@ describe('SupplierResearchService', () => {
           sources: ['LLM'],
         },
       });
-      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
 
       const result = await researchSingle('Test Co');
 
@@ -93,7 +107,7 @@ describe('SupplierResearchService', () => {
         },
       });
       vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
 
       const result = await researchSingle('Test Co');
 
@@ -112,7 +126,7 @@ describe('SupplierResearchService', () => {
         },
       });
       vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
 
       const result = await researchSingle('Test Co');
 
@@ -132,125 +146,169 @@ describe('SupplierResearchService', () => {
         },
       });
       vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
 
       const result = await researchSingle('Test Co');
       expect(result.sources).not.toContain('Exa Web Search');
     });
 
-    it('should not skip Exa search for ColabIP-matched suppliers', async () => {
-      vi.mocked(readSupplierUniverse).mockResolvedValue([
-        {
-          id: 'sup-known-001', supplierName: 'Known Corp', aliases: [], parentId: null,
-          parentName: '', categoryA: false, categoryATaxonomyPath: null,
-          supplierInfo: { supplierType: 'company', websiteUrl: 'known.com', industry: 'Tech' },
-        },
-      ]);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
-
-      await researchSingle('Known Corp');
-
-      // When found in ColabIP, should not call Exa at all
-      expect(exaSearch.searchSupplier).not.toHaveBeenCalled();
-      expect(researchSupplier).not.toHaveBeenCalled();
-    });
-
-    it('should fall through to LLM when universe match has null supplier info', async () => {
-      vi.mocked(readSupplierUniverse).mockResolvedValue([
-        {
-          id: 'sup-sparse-001', supplierName: 'Sparse Corp', aliases: [], parentId: null,
-          parentName: '', categoryA: false, categoryATaxonomyPath: null,
-          supplierInfo: null,
-        },
-      ]);
+    it('should fall through to LLM when existing supplier has no substantive info', async () => {
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue({
+        id: '1',
+        supplierName: 'Sparse Corp',
+        aliases: null,
+        parentSupplierId: null,
+        parentName: null,
+        supplierInfo: { websiteUrl: 'sparse.com' },
+        categoryA: false,
+        categoryATaxonomyNodeId: null,
+        createdAt: '2024-01-01',
+        updatedAt: '2024-01-01',
+      });
       vi.mocked(researchSupplier).mockResolvedValue({
         result: {
           officialBusinessName: 'Sparse Corp',
-          description: 'A sparse company',
-          industry: 'Technology',
-          confidence: 'medium' as const,
-          sources: ['LLM'],
-        },
-      });
-      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
-
-      const result = await researchSingle('Sparse Corp');
-
-      // Should have called LLM research since universe has no substantive info
-      expect(researchSupplier).toHaveBeenCalled();
-      expect(exaSearch.searchSupplier).toHaveBeenCalled();
-      expect(result.industry).toBe('Technology');
-      expect(result.description).toBe('A sparse company');
-    });
-
-    it('should fall through to LLM when universe match has empty supplier info', async () => {
-      vi.mocked(readSupplierUniverse).mockResolvedValue([
-        {
-          id: 'sup-empty-001', supplierName: 'Empty Info Corp', aliases: [], parentId: null,
-          parentName: '', categoryA: false, categoryATaxonomyPath: null,
-          supplierInfo: { websiteUrl: 'empty.com' },
-        },
-      ]);
-      vi.mocked(researchSupplier).mockResolvedValue({
-        result: {
-          officialBusinessName: 'Empty Info Corp',
           description: 'Now enriched',
           industry: 'Finance',
           confidence: 'high' as const,
           sources: ['LLM'],
         },
       });
-      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
 
-      const result = await researchSingle('Empty Info Corp');
+      const result = await researchSingle('Sparse Corp');
 
       // Has websiteUrl but no industry or description — should trigger LLM
       expect(researchSupplier).toHaveBeenCalled();
       expect(result.industry).toBe('Finance');
     });
 
-    it('should use universe data when match has description but no industry', async () => {
-      vi.mocked(readSupplierUniverse).mockResolvedValue([
-        {
-          id: 'sup-desc-001', supplierName: 'Desc Corp', aliases: [], parentId: null,
-          parentName: '', categoryA: false, categoryATaxonomyPath: null,
-          supplierInfo: { description: 'A company with a description' },
-        },
-      ]);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+    it('should skip LLM when existing supplier has description', async () => {
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue({
+        id: '1',
+        supplierName: 'Desc Corp',
+        aliases: null,
+        parentSupplierId: null,
+        parentName: null,
+        supplierInfo: { description: 'A company with a description', confidence: 'high', sources: ['Previous'] },
+        categoryA: false,
+        categoryATaxonomyNodeId: null,
+        createdAt: '2024-01-01',
+        updatedAt: '2024-01-01',
+      });
 
       const result = await researchSingle('Desc Corp');
 
       // Has description — substantive info exists, skip LLM
       expect(researchSupplier).not.toHaveBeenCalled();
       expect(result.confidence).toBe('high');
-      expect(result.sources).toContain('ColabIP Supplier Universe');
     });
 
-    it('should store results in supplier service', async () => {
+    it('should store results via upsertSupplier', async () => {
       vi.mocked(researchSupplier).mockResolvedValue({
         result: { officialBusinessName: 'Test', supplierType: 'company', confidence: 'high' as const, sources: ['LLM'] },
       });
       vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
 
       await researchSingle('Test');
 
-      expect(supplierService.updateSupplier).toHaveBeenCalled();
+      expect(supplierService.upsertSupplier).toHaveBeenCalledWith('Test', {
+        supplierInfo: expect.objectContaining({
+          officialBusinessName: 'Test',
+          supplierType: 'company',
+        }),
+      });
+    });
+
+    it('should pass company context from project metadata to research agent', async () => {
+      vi.mocked(projectService.getMetadata).mockResolvedValue({
+        id: 'test-id',
+        projectName: 'Test',
+        createdAt: '2024-01-01',
+        companyContext: { industry: 'Manufacturing', sector: 'Industrial' },
+        columnMapping: null,
+        taxonomyName: null,
+        tailSpendThreshold: 10000,
+      });
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(researchSupplier).mockResolvedValue({
+        result: { officialBusinessName: 'Test', confidence: 'medium' as const, sources: [] },
+      });
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
+
+      await researchSingle('Test');
+
+      expect(researchSupplier).toHaveBeenCalledWith(
+        'Test',
+        { industry: 'Manufacturing', sector: 'Industrial' },
+        undefined,
+        [],
+      );
+    });
+
+    it('should pass existing supplier address to Exa search and research agent', async () => {
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue({
+        id: '1',
+        supplierName: 'Addr Corp',
+        aliases: null,
+        parentSupplierId: null,
+        parentName: null,
+        supplierInfo: { supplierAddress: '123 Main St' },
+        categoryA: false,
+        categoryATaxonomyNodeId: null,
+        createdAt: '2024-01-01',
+        updatedAt: '2024-01-01',
+      });
+      vi.mocked(researchSupplier).mockResolvedValue({
+        result: { officialBusinessName: 'Addr Corp', confidence: 'medium' as const, sources: [] },
+      });
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
+
+      await researchSingle('Addr Corp');
+
+      expect(exaSearch.searchSupplier).toHaveBeenCalledWith('Addr Corp', '123 Main St');
+      expect(researchSupplier).toHaveBeenCalledWith(
+        'Addr Corp',
+        undefined,
+        '123 Main St',
+        [],
+      );
+    });
+
+    it('should apply heuristic supplierType fallback when LLM does not return one', async () => {
+      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
+      vi.mocked(researchSupplier).mockResolvedValue({
+        result: {
+          officialBusinessName: 'Some Corp',
+          description: 'A regular company',
+          confidence: 'medium' as const,
+          sources: ['LLM'],
+        },
+      });
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
+
+      const result = await researchSingle('Some Corp');
+
+      // Heuristic should default to 'company' when nothing indicates otherwise
+      expect(result.supplierType).toBe('company');
     });
   });
 
-  describe('researchBatch', () => {
+  describe('researchAllProjectSuppliers', () => {
     it('should skip already-researched suppliers', async () => {
+      vi.mocked(databaseService.all).mockResolvedValue([
+        { supplier_name: 'Already' },
+        { supplier_name: 'New' },
+      ]);
       vi.mocked(supplierService.getSupplierByName).mockImplementation(async (name) => {
         if (name === 'Already') {
           return {
             id: '1', supplierName: 'Already', aliases: null, parentSupplierId: null,
-            supplierInfo: { description: 'Known' },
+            parentName: null,
+            supplierInfo: { description: 'Known', industry: 'Tech' },
             categoryA: false, categoryATaxonomyNodeId: null,
-            transactionCount: 0, totalSpend: 0, createdAt: '', updatedAt: '',
+            createdAt: '', updatedAt: '',
           };
         }
         return null;
@@ -258,31 +316,19 @@ describe('SupplierResearchService', () => {
       vi.mocked(researchSupplier).mockResolvedValue({
         result: { officialBusinessName: 'New', confidence: 'medium' as const, sources: [] },
       });
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
 
-      const progress: Array<[number, number]> = [];
-      await researchBatch(['Already', 'New'], (done, total) => progress.push([done, total]));
+      await researchAllProjectSuppliers();
 
+      // Only 'New' should trigger LLM research; 'Already' has substantive info
       expect(researchSupplier).toHaveBeenCalledTimes(1);
     });
 
-    it('should report progress', async () => {
-      vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
-      vi.mocked(researchSupplier).mockResolvedValue({
-        result: { officialBusinessName: 'Test', confidence: 'medium' as const, sources: [] },
-      });
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
-
-      const progress: Array<[number, number]> = [];
-      await researchBatch(['A', 'B'], (done, total) => progress.push([done, total]));
-
-      expect(progress.length).toBeGreaterThan(0);
-      const lastProgress = progress[progress.length - 1];
-      expect(lastProgress[0]).toBe(2);
-      expect(lastProgress[1]).toBe(2);
-    });
-
     it('should not abort batch on individual failure', async () => {
+      vi.mocked(databaseService.all).mockResolvedValue([
+        { supplier_name: 'A' },
+        { supplier_name: 'B' },
+      ]);
       vi.mocked(supplierService.getSupplierByName).mockResolvedValue(null);
       let callCount = 0;
       vi.mocked(researchSupplier).mockImplementation(async () => {
@@ -290,9 +336,12 @@ describe('SupplierResearchService', () => {
         if (callCount === 1) throw new Error('API Error');
         return { result: { officialBusinessName: 'B', confidence: 'medium' as const, sources: [] } };
       });
-      vi.mocked(supplierService.updateSupplier).mockResolvedValue();
+      vi.mocked(supplierService.upsertSupplier).mockResolvedValue();
 
-      await expect(researchBatch(['A', 'B'])).resolves.toBeUndefined();
+      await expect(researchAllProjectSuppliers()).resolves.toBeUndefined();
+
+      // Both should be attempted; failure of A should not block B
+      expect(supplierService.upsertSupplier).toHaveBeenCalledTimes(2);
     });
   });
 });

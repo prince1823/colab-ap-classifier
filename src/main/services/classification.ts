@@ -97,13 +97,20 @@ export async function startClassification(): Promise<void> {
   currentRunId = randomUUID();
 
   try {
-    // Get all distinct suppliers with unclassified transactions
-    const supplierRows = await databaseService.all<{ supplier_name: string }>(
-      `SELECT DISTINCT supplier_name
-       FROM transactions
-       WHERE supplier_name IS NOT NULL AND classification_status = 'unclassified'
-       ORDER BY supplier_name`
+    // supplier_name is a dynamic column — guard against being called before CSV import
+    const hasCol = await databaseService.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'supplier_name'"
     );
+
+    // Get all distinct suppliers with unclassified transactions
+    const supplierRows = hasCol.length === 0
+      ? []
+      : await databaseService.all<{ supplier_name: string }>(
+          `SELECT DISTINCT supplier_name
+           FROM transactions
+           WHERE supplier_name IS NOT NULL AND classification_status = 'unclassified'
+           ORDER BY supplier_name`
+        );
 
     if (supplierRows.length === 0) {
       emitProgress({

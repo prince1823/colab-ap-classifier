@@ -234,17 +234,26 @@ class SupplierUniverseService {
   private instance: DuckDBInstance | null = null;
   private connection: DuckDBConnection | null = null;
   private filePath: string | null = null;
+  private defaultPath: string | null = null;
+
+  /**
+   * Override the default supplier_universe.db location.
+   * Useful for tests to avoid DuckDB file lock conflicts.
+   */
+  setDefaultPath(p: string): void {
+    this.defaultPath = p;
+  }
 
   /**
    * Open (or create) the shared supplier_universe.db.
-   * Default location: colabip/supplier_universe.db
+   * Default location: colabip/supplier_universe.db (or overridden via setDefaultPath)
    */
   async open(filePath?: string): Promise<void> {
     if (this.instance) {
       await this.close();
     }
 
-    const dbPath = filePath || path.join(process.cwd(), 'colabip', 'supplier_universe.db');
+    const dbPath = filePath || this.defaultPath || path.join(process.cwd(), 'colabip', 'supplier_universe.db');
 
     try {
       this.instance = await DuckDBInstance.create(dbPath);

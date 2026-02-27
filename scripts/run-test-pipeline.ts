@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Script to run the full classification pipeline with test data
+ * Script to run the full classification with test data
  * and document every step in pipeline-runs/
  *
  * Usage: npm run script:pipeline
@@ -17,7 +17,7 @@ import * as uploadService from '../src/main/services/upload';
 import * as supplierService from '../src/main/services/suppliers';
 import * as transactionsService from '../src/main/services/transactions';
 import * as rulesService from '../src/main/services/rules';
-import * as classificationPipeline from '../src/main/services/classification-pipeline';
+import * as classificationService from '../src/main/services/classification';
 import * as exportService from '../src/main/services/export';
 import * as colabipService from '../src/main/services/colabip';
 import * as settingsService from '../src/main/services/settings';
@@ -55,7 +55,7 @@ async function saveDoc(filename: string) {
 }
 
 async function main() {
-  log(`Classification Pipeline Test Run`);
+  log(`Classification Test Run`);
   log(`Started at: ${new Date().toISOString()}`);
   log('');
 
@@ -219,11 +219,11 @@ async function main() {
       });
 
     // ====================================================================
-    // Phase 5: Classification Pipeline
+    // Phase 5: Classification
     // ====================================================================
-    section('PHASE 5: CLASSIFICATION PIPELINE');
+    section('PHASE 5: CLASSIFICATION');
 
-    log('Starting classification pipeline...');
+    log('Starting classification...');
     log('  Scope: all transactions');
 
     // Set LLM provider to OpenAI (runtime settings)
@@ -237,13 +237,13 @@ async function main() {
     log('');
 
     const startTime = Date.now();
-    const { runId } = await classificationPipeline.startClassification({
+    const { runId } = await classificationService.startClassification({
       scope: 'all',
     });
     log(`✓ Pipeline run started: ${runId}`);
 
     // Wait for completion
-    let status = classificationPipeline.getStatus();
+    let status = classificationService.getStatus();
     const maxWait = 300000; // 5 minutes
 
     const progressSteps: string[] = [];
@@ -257,7 +257,7 @@ async function main() {
         progressSteps.push(status.currentStep);
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
-      status = classificationPipeline.getStatus();
+      status = classificationService.getStatus();
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

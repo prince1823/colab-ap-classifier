@@ -48,8 +48,8 @@ export const ipc = {
     selectFile: () => invoke<string | null>('upload:selectFile'),
     parsePreview: (filePath: string) =>
       invoke<CSVPreviewWithMappings>('upload:parsePreview', filePath),
-    csv: (filePath: string) =>
-      invoke<{ rowsInserted: number }>('upload:csv', filePath),
+    csv: (filePath: string, mapping?: Record<string, string>) =>
+      invoke<{ rowsInserted: number }>('upload:csv', filePath, mapping),
   },
 
   // ── Classification (2 channels + 1 event) ──

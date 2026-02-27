@@ -105,10 +105,15 @@ export async function researchSingle(supplierName: string): Promise<SupplierRese
 export async function researchAllProjectSuppliers(): Promise<void> {
   isCancelled = false;
 
-  // Get distinct supplier names from transactions
-  const supplierRows = await databaseService.all<{ supplier_name: string }>(
-    `SELECT DISTINCT supplier_name FROM transactions WHERE supplier_name IS NOT NULL ORDER BY supplier_name`
+  // supplier_name is a dynamic column — guard against being called before CSV import
+  const hasCol = await databaseService.all<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'supplier_name'"
   );
+  const supplierRows = hasCol.length === 0
+    ? []
+    : await databaseService.all<{ supplier_name: string }>(
+        `SELECT DISTINCT supplier_name FROM transactions WHERE supplier_name IS NOT NULL ORDER BY supplier_name`
+      );
 
   const supplierNames = supplierRows.map((r) => r.supplier_name);
   const total = supplierNames.length;

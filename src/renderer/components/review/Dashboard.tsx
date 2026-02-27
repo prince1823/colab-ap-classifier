@@ -11,6 +11,8 @@ import { ipc } from '../../lib/ipc'
 import MetricsTab from './MetricsTab'
 import { evaluateFilterConditions } from '../../utils/filterEvaluation'
 import { useWorkflowStore } from '../../stores/workflowStore'
+import { useGroupedTransactions } from '../../hooks/useGroupedTransactions'
+import type { TransactionFilter, ColumnFilter } from '../../../shared/types/transactions'
 import '../../styles/Dashboard.css'
 import '../../styles/Tabs.css'
 
@@ -343,6 +345,68 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   const [tableLocalFilters, setTableLocalFilters] = useState({})
   useEffect(() => { tableLocalFiltersRef.current = tableLocalFilters }, [tableLocalFilters])
 
+
+  // ── Server-side grouped data (replaces client-side grouping for 4M+ rows) ──
+  // Map filterState keys to backend column names
+  const fsKeyToCol = useMemo(() => ({
+    supplier: 'supplier_name',
+    classificationL1: 'classification_l1',
+    classificationL2: 'classification_l2',
+    classificationL3: 'classification_l3',
+    classificationL4: 'classification_l4',
+    glDescription: 'gl_description',
+    lineDescription: 'line_description',
+    company: 'company',
+    year: 'year',
+    quarter: 'quarter',
+    month: 'month',
+    costCenter: 'cost_center',
+    country: 'country',
+  }), [])
+
+  // Convert activeFilters + filterState to TransactionFilter.columnFilters for server-side WHERE
+  // Passes per-pair filterConnectors to the backend for SQL-like AND/OR precedence
+  const serverSideFilter = useMemo<TransactionFilter | undefined>(() => {
+    const columnFilters: ColumnFilter[] = []
+    const seenColumns = new Set<string>()
+
+    // filterState entries (dropdown filters)
+    Object.entries(filterState).forEach(([fsKey, fsValues]) => {
+      if (!Array.isArray(fsValues) || fsValues.length === 0) return
+      const col = fsKeyToCol[fsKey] || fsKey
+      const op = filterGroupOperators[col] || 'is'
+      columnFilters.push({ column: col, operator: op as ColumnFilter['operator'], values: fsValues.map(String) })
+      seenColumns.add(col)
+    })
+
+    // activeFilters: { supplier_name: ["A", "B"], gl_description: ["X"] }
+    Object.entries(activeFilters).forEach(([key, value]) => {
+      if (!value || (Array.isArray(value) && value.length === 0)) return
+      if (seenColumns.has(key)) return // already covered by filterState
+      const values = Array.isArray(value) ? value : [value]
+      const op = filterGroupOperators[key] || 'is'
+      columnFilters.push({ column: key, operator: op as ColumnFilter['operator'], values: values.map(String) })
+    })
+
+    if (columnFilters.length === 0) return undefined
+
+    // Pass per-pair connectors directly — backend builds SQL with AND/OR precedence
+    return {
+      columnFilters,
+      filterCombinator: (filterCombinator as 'AND' | 'OR') || 'AND',
+      filterConnectors: filterConnectors as Record<string, 'AND' | 'OR'>,
+    }
+  }, [activeFilters, filterState, filterGroupOperators, filterCombinator, filterConnectors, fsKeyToCol])
+
+  // Columns to fetch grouped data for (all non-taxonomy table columns)
+  const groupedColumns = useMemo(() => {
+    return tables
+      .filter(t => t.column !== 'classification_path')
+      .map(t => t.column)
+  }, [tables])
+
+  // Server-side GROUP BY — re-runs when filters or tables change
+  const { data: groupedData, refetch: refetchGrouped } = useGroupedTransactions(groupedColumns, serverSideFilter)
 
   const tabs = [
     { id: 'tables', label: 'Review', icon: Table },
@@ -1111,7 +1175,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
         console.error('[Reclassify] Failed to persist to backend:', persistErr)
       }
 
-      // Refresh transactions from backend to get updated classification paths
+      // Refresh transactions + grouped data from backend to get updated classification paths
       if (refreshTransactions) {
         try {
           await refreshTransactions()
@@ -1119,6 +1183,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
           console.error('[Reclassify] Failed to refresh transactions:', refreshErr)
         }
       }
+      refetchGrouped()
 
       // Refresh feedback suggestions from backend if enabled
       // The backend now awaits the feedback agent, so suggestions are ready immediately
@@ -1150,7 +1215,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       setIsReclassifying(false)
       setReclassificationProgress({ current: 0, total: 0 })
     }
-  }, [setTransactions, refreshTransactions, systemFeedbackEnabled, refreshFeedbackSuggestions])
+  }, [setTransactions, refreshTransactions, systemFeedbackEnabled, refreshFeedbackSuggestions, refetchGrouped])
 
   // Handle reclassification confirmation from the feedback modal
   const handleConfirmReclassify = useCallback(async (feedbackText?: string) => {
@@ -1474,6 +1539,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                   <MultiTableSystem
                     transactions={deferredFilteredTransactions}
                     allTransactions={transactions}
+                    groupedData={groupedData}
                     activeFilters={activeFilters}
                     setActiveFilters={setActiveFiltersWithUndo}
                     selectedRows={selectedRows}

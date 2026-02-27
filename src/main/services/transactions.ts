@@ -1,5 +1,5 @@
 import { databaseService } from './database';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions } from '../../shared/types';
+import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, GroupedRow, GroupedTransactionsResult } from '../../shared/types';
 
 // Base columns that always exist on the transactions table
 const BASE_COLUMNS = [
@@ -19,45 +19,185 @@ export function invalidateColumnCache(): void {
 }
 
 /**
+ * Build WHERE clauses + params from a TransactionFilter.
+ * Shared by queryTransactions, getCount, queryGroupedByColumn, etc.
+ * Table alias defaults to 't'.
+ */
+async function buildFilterClauses(
+  filters?: TransactionFilter,
+  alias = 't'
+): Promise<{ whereSQL: string; params: unknown[] }> {
+  const whereClauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters?.supplierName) {
+    whereClauses.push(`${alias}.supplier_name = ?`);
+    params.push(filters.supplierName);
+  }
+  if (filters?.taxonomyNodeId) {
+    whereClauses.push(`${alias}.taxonomy_node_id = ?`);
+    params.push(filters.taxonomyNodeId);
+  }
+  if (filters?.reviewScoreMin !== undefined) {
+    whereClauses.push(`${alias}.review_score >= ?`);
+    params.push(filters.reviewScoreMin);
+  }
+  if (filters?.reviewScoreMax !== undefined) {
+    whereClauses.push(`${alias}.review_score <= ?`);
+    params.push(filters.reviewScoreMax);
+  }
+  if (filters?.spendMin !== undefined) {
+    whereClauses.push(`${alias}.spend_amount >= ?`);
+    params.push(filters.spendMin);
+  }
+  if (filters?.spendMax !== undefined) {
+    whereClauses.push(`${alias}.spend_amount <= ?`);
+    params.push(filters.spendMax);
+  }
+  if (filters?.excludeTailSpend) {
+    const threshold = await getTailSpendThreshold();
+    whereClauses.push(`${alias}.spend_amount >= ?`);
+    params.push(threshold);
+  }
+
+  // Arbitrary column-value filters with per-pair AND/OR connectors
+  if (filters?.columnFilters?.length) {
+    const validCols = await getColumns();
+    const globalCombinator = filters.filterCombinator || 'AND';
+    const connectors = filters.filterConnectors || {};
+
+    // Build one SQL clause per ColumnFilter (grouping multi-value operators)
+    const perFilterClauses: { column: string; sql: string }[] = [];
+    const perFilterParams: unknown[][] = [];
+
+    for (const cf of filters.columnFilters) {
+      if (!validCols.includes(cf.column)) continue;
+      const col = `${alias}.${cf.column}`;
+      const cfParams: unknown[] = [];
+      let clause: string;
+
+      switch (cf.operator) {
+        case 'is':
+          if (cf.values.length === 1) {
+            clause = `${col} = ?`;
+            cfParams.push(cf.values[0]);
+          } else {
+            clause = `${col} IN (${cf.values.map(() => '?').join(', ')})`;
+            cfParams.push(...cf.values);
+          }
+          break;
+        case 'is_not':
+          if (cf.values.length === 1) {
+            clause = `${col} != ?`;
+            cfParams.push(cf.values[0]);
+          } else {
+            clause = `${col} NOT IN (${cf.values.map(() => '?').join(', ')})`;
+            cfParams.push(...cf.values);
+          }
+          break;
+        case 'contains':
+          if (cf.values.length === 1) {
+            clause = `${col} ILIKE ?`;
+            cfParams.push(`%${cf.values[0]}%`);
+          } else {
+            // Multiple contains values: any match → OR them
+            clause = `(${cf.values.map(() => `${col} ILIKE ?`).join(' OR ')})`;
+            cfParams.push(...cf.values.map(v => `%${v}%`));
+          }
+          break;
+        case 'not_contains':
+          if (cf.values.length === 1) {
+            clause = `${col} NOT ILIKE ?`;
+            cfParams.push(`%${cf.values[0]}%`);
+          } else {
+            // Multiple not_contains values: none match → AND them
+            clause = `(${cf.values.map(() => `${col} NOT ILIKE ?`).join(' AND ')})`;
+            cfParams.push(...cf.values.map(v => `%${v}%`));
+          }
+          break;
+        case 'starts_with':
+          if (cf.values.length === 1) {
+            clause = `${col} ILIKE ?`;
+            cfParams.push(`${cf.values[0]}%`);
+          } else {
+            clause = `(${cf.values.map(() => `${col} ILIKE ?`).join(' OR ')})`;
+            cfParams.push(...cf.values.map(v => `${v}%`));
+          }
+          break;
+        case 'ends_with':
+          if (cf.values.length === 1) {
+            clause = `${col} ILIKE ?`;
+            cfParams.push(`%${cf.values[0]}`);
+          } else {
+            clause = `(${cf.values.map(() => `${col} ILIKE ?`).join(' OR ')})`;
+            cfParams.push(...cf.values.map(v => `%${v}`));
+          }
+          break;
+        default:
+          continue;
+      }
+
+      perFilterClauses.push({ column: cf.column, sql: clause });
+      perFilterParams.push(cfParams);
+    }
+
+    if (perFilterClauses.length > 0) {
+      // Apply SQL-like AND/OR precedence: AND binds tighter than OR.
+      // Group consecutive AND-connected filters, then OR the groups.
+      const hasConnectors = Object.keys(connectors).length > 0;
+
+      if (!hasConnectors || perFilterClauses.length === 1) {
+        // Simple case: use global combinator
+        const combined = perFilterClauses.map(c => c.sql).join(` ${globalCombinator} `);
+        whereClauses.push(`(${combined})`);
+        for (const p of perFilterParams) params.push(...p);
+      } else {
+        // Build AND groups (same algorithm as client-side evaluateFilterConditions)
+        const andGroups: { sqls: string[]; params: unknown[][] }[] = [
+          { sqls: [perFilterClauses[0].sql], params: [perFilterParams[0]] }
+        ];
+
+        for (let i = 1; i < perFilterClauses.length; i++) {
+          const prevColumn = perFilterClauses[i - 1].column;
+          const connector = connectors[prevColumn] || 'AND';
+
+          if (connector === 'OR') {
+            andGroups.push({ sqls: [perFilterClauses[i].sql], params: [perFilterParams[i]] });
+          } else {
+            andGroups[andGroups.length - 1].sqls.push(perFilterClauses[i].sql);
+            andGroups[andGroups.length - 1].params.push(perFilterParams[i]);
+          }
+        }
+
+        // Each AND group: join with AND. Then OR the groups.
+        const groupSqls = andGroups.map(g => {
+          if (g.sqls.length === 1) return g.sqls[0];
+          return `(${g.sqls.join(' AND ')})`;
+        });
+
+        const combined = groupSqls.length === 1
+          ? groupSqls[0]
+          : `(${groupSqls.join(' OR ')})`;
+
+        whereClauses.push(combined);
+        for (const g of andGroups) {
+          for (const p of g.params) params.push(...p);
+        }
+      }
+    }
+  }
+
+  const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  return { whereSQL, params };
+}
+
+/**
  * Query transactions with dynamic filters, pagination, sorting.
  */
 export async function queryTransactions(
   filters?: TransactionFilter
 ): Promise<Transaction[]> {
-  const whereClauses: string[] = [];
-  const params: unknown[] = [];
-
-  if (filters?.supplierName) {
-    whereClauses.push('t.supplier_name = ?');
-    params.push(filters.supplierName);
-  }
-  if (filters?.taxonomyNodeId) {
-    whereClauses.push('t.taxonomy_node_id = ?');
-    params.push(filters.taxonomyNodeId);
-  }
-  if (filters?.reviewScoreMin !== undefined) {
-    whereClauses.push('t.review_score >= ?');
-    params.push(filters.reviewScoreMin);
-  }
-  if (filters?.reviewScoreMax !== undefined) {
-    whereClauses.push('t.review_score <= ?');
-    params.push(filters.reviewScoreMax);
-  }
-  if (filters?.spendMin !== undefined) {
-    whereClauses.push('t.spend_amount >= ?');
-    params.push(filters.spendMin);
-  }
-  if (filters?.spendMax !== undefined) {
-    whereClauses.push('t.spend_amount <= ?');
-    params.push(filters.spendMax);
-  }
-  if (filters?.excludeTailSpend) {
-    const threshold = await getTailSpendThreshold();
-    whereClauses.push('t.spend_amount >= ?');
-    params.push(threshold);
-  }
-
-  const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const { whereSQL, params } = await buildFilterClauses(filters);
 
   // Sorting
   const sortBy = filters?.sortBy || 'row_index';
@@ -176,40 +316,7 @@ export async function getColumns(): Promise<string[]> {
  * Get total count of transactions matching the given filters.
  */
 export async function getCount(filters?: TransactionFilter): Promise<number> {
-  const whereClauses: string[] = [];
-  const params: unknown[] = [];
-
-  if (filters?.supplierName) {
-    whereClauses.push('t.supplier_name = ?');
-    params.push(filters.supplierName);
-  }
-  if (filters?.taxonomyNodeId) {
-    whereClauses.push('t.taxonomy_node_id = ?');
-    params.push(filters.taxonomyNodeId);
-  }
-  if (filters?.reviewScoreMin !== undefined) {
-    whereClauses.push('t.review_score >= ?');
-    params.push(filters.reviewScoreMin);
-  }
-  if (filters?.reviewScoreMax !== undefined) {
-    whereClauses.push('t.review_score <= ?');
-    params.push(filters.reviewScoreMax);
-  }
-  if (filters?.spendMin !== undefined) {
-    whereClauses.push('t.spend_amount >= ?');
-    params.push(filters.spendMin);
-  }
-  if (filters?.spendMax !== undefined) {
-    whereClauses.push('t.spend_amount <= ?');
-    params.push(filters.spendMax);
-  }
-  if (filters?.excludeTailSpend) {
-    const threshold = await getTailSpendThreshold();
-    whereClauses.push('t.spend_amount >= ?');
-    params.push(threshold);
-  }
-
-  const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const { whereSQL, params } = await buildFilterClauses(filters);
   const sql = `SELECT COUNT(*) as cnt FROM transactions t ${whereSQL}`;
   const result = await databaseService.get<{ cnt: number | bigint }>(sql, ...params);
   return Number(result?.cnt ?? 0);
@@ -269,6 +376,107 @@ export async function ensureIndexes(): Promise<void> {
       // Index may already exist — safe to ignore
     }
   }
+}
+
+/**
+ * Server-side GROUP BY aggregation for a single column.
+ * Returns grouped rows with SUM(spend_amount) and COUNT(*).
+ * DuckDB handles millions of rows in milliseconds.
+ */
+export async function queryGroupedByColumn(
+  column: string,
+  filters?: TransactionFilter
+): Promise<GroupedTransactionsResult> {
+  const validCols = await getColumns();
+  if (!validCols.includes(column)) {
+    return { column, rows: [], totalAmount: 0, totalCount: 0 };
+  }
+
+  const { whereSQL, params } = await buildFilterClauses(filters);
+  const hasSpend = validCols.includes('spend_amount');
+
+  const amountExpr = hasSpend
+    ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)'
+    : '0';
+
+  const sql = `
+    SELECT
+      COALESCE(CAST(t.${column} AS VARCHAR), '(blank)') as value,
+      ${amountExpr} as amount,
+      COUNT(*) as count
+    FROM transactions t
+    ${whereSQL}
+    GROUP BY t.${column}
+    ORDER BY ${hasSpend ? 'amount DESC' : 'count DESC'}
+  `;
+
+  const rows = await databaseService.all<{
+    value: string;
+    amount: number | bigint;
+    count: number | bigint;
+  }>(sql, ...params);
+
+  const groupedRows: GroupedRow[] = rows.map((r) => ({
+    value: String(r.value),
+    amount: Number(r.amount),
+    count: Number(r.count),
+  }));
+
+  const totalAmount = groupedRows.reduce((sum, r) => sum + r.amount, 0);
+  const totalCount = groupedRows.reduce((sum, r) => sum + r.count, 0);
+
+  return { column, rows: groupedRows, totalAmount, totalCount };
+}
+
+/**
+ * Return distinct values for a column (for filter dropdowns).
+ */
+export async function queryDistinctValues(
+  column: string,
+  limit = 1000
+): Promise<string[]> {
+  const validCols = await getColumns();
+  if (!validCols.includes(column)) return [];
+
+  const sql = `
+    SELECT DISTINCT CAST(t.${column} AS VARCHAR) as value
+    FROM transactions t
+    WHERE t.${column} IS NOT NULL
+    ORDER BY value
+    LIMIT ${limit}
+  `;
+
+  const rows = await databaseService.all<{ value: string }>(sql);
+  return rows.map((r) => String(r.value));
+}
+
+/**
+ * Fetch transaction IDs for a specific column value.
+ * Used for on-demand reclassification when a grouped row is dragged.
+ */
+export async function getTransactionIdsByColumnValue(
+  column: string,
+  value: string,
+  filters?: TransactionFilter
+): Promise<string[]> {
+  const validCols = await getColumns();
+  if (!validCols.includes(column)) return [];
+
+  const { whereSQL, params } = await buildFilterClauses(filters);
+
+  // Add the column=value condition
+  const valueCondition = value === '(blank)'
+    ? `t.${column} IS NULL`
+    : `CAST(t.${column} AS VARCHAR) = ?`;
+  if (value !== '(blank)') params.push(value);
+
+  const fullWhere = whereSQL
+    ? `${whereSQL} AND ${valueCondition}`
+    : `WHERE ${valueCondition}`;
+
+  const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${fullWhere}`;
+  const rows = await databaseService.all<{ id: string }>(sql, ...params);
+  return rows.map((r) => String(r.id));
 }
 
 async function getTailSpendThreshold(): Promise<number> {

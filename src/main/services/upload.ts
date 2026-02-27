@@ -4,6 +4,8 @@ import { parse } from 'csv-parse/sync';
 import type { CSVPreview, CSVPreviewWithMappings, CanonicalizationResult } from '../../shared/types/canonicalization';
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import { suggestMappings } from '../agents/canonicalization-agent';
+import { databaseService } from './database';
+import { invalidateColumnCache } from './transactions';
 
 /**
  * Supported delimiters in order of detection priority.
@@ -310,4 +312,175 @@ export async function parsePreview(filePath: string): Promise<CSVPreviewWithMapp
   }
 
   return { ...preview, mappingSuggestion };
+}
+
+/**
+ * Escape single quotes for SQL string literals.
+ */
+function sqlEsc(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/**
+ * Import a CSV file directly into the transactions table using DuckDB's native
+ * read_csv(). Handles millions of rows efficiently (DuckDB reads in C++).
+ *
+ * Clears existing transactions first, then bulk-loads the CSV.
+ * Maps CSV columns: supplier → supplier_name, gl_code → gl_description,
+ * line_desc → line_description, L1/L2/L3 → classification via taxonomy lookup.
+ *
+ * Returns the count of inserted rows.
+ */
+export async function importCSVForReview(
+  filePath: string
+): Promise<{ rowsInserted: number }> {
+  if (!filePath || filePath.trim().length === 0) {
+    throw new Error('File path must not be empty');
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`File not found: ${filePath}`);
+  }
+
+  const stats = fs.statSync(filePath);
+  if (stats.size === 0) {
+    throw new Error('File is empty');
+  }
+
+  // Detect delimiter from sample
+  const sampleBuffer = readSampleBuffer(filePath);
+  const encoding = detectEncoding(sampleBuffer);
+  let sampleContent = stripBom(sampleBuffer.toString(encoding));
+  if (sampleBuffer.length < stats.size) {
+    const lastNewline = sampleContent.lastIndexOf('\n');
+    if (lastNewline > 0) {
+      sampleContent = sampleContent.slice(0, lastNewline);
+    }
+  }
+  const delimiter = detectDelimiter(sampleContent);
+
+  // Clear existing data
+  await databaseService.run('DELETE FROM transactions');
+
+  // Detect what columns exist in the CSV
+  const firstLine = sampleContent.split('\n')[0] || '';
+  const csvHeaders = firstLine.split(delimiter).map((h) => h.trim().replace(/^"|"$/g, ''));
+
+  // Known column mappings: CSV name → canonical name
+  // If the CSV column already matches the canonical name, no rename needed
+  const KNOWN_MAPPINGS: Record<string, string> = {
+    supplier: 'supplier_name',
+    supplier_name: 'supplier_name',
+    gl_code: 'gl_description',
+    gl_description: 'gl_description',
+    line_desc: 'line_description',
+    line_description: 'line_description',
+    amount: 'spend_amount',
+    spend_amount: 'spend_amount',
+    invoice_amount: 'spend_amount',
+  };
+
+  // Build column mapping for all CSV columns
+  // Mapped columns get renamed; unmapped columns keep their original name (snake_cased)
+  const columnMap: Record<string, string> = {}; // csvHeader → target column name
+  for (const h of csvHeaders) {
+    const lower = h.toLowerCase();
+    if (KNOWN_MAPPINGS[lower]) {
+      // Only add if we haven't already mapped to this canonical name
+      const canonical = KNOWN_MAPPINGS[lower];
+      const alreadyMapped = Object.values(columnMap).includes(canonical);
+      if (!alreadyMapped) {
+        columnMap[h] = canonical;
+      }
+    } else {
+      // Keep as-is (use the original CSV header as column name)
+      columnMap[h] = h;
+    }
+  }
+
+  // Ensure all target columns exist on the transactions table
+  const existingCols = await databaseService.all<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND table_schema = 'main'"
+  );
+  const existingSet = new Set(existingCols.map((c) => c.column_name));
+
+  for (const targetCol of Object.values(columnMap)) {
+    if (!existingSet.has(targetCol)) {
+      await databaseService.run(`ALTER TABLE transactions ADD COLUMN "${sqlEsc(targetCol)}" VARCHAR`);
+    }
+  }
+
+  invalidateColumnCache();
+
+  // Build select expressions — include ALL CSV columns
+  const selectParts = [
+    'uuid()::VARCHAR AS id',
+    'ROW_NUMBER() OVER ()::INTEGER AS row_index',
+  ];
+
+  for (const [csvCol, targetCol] of Object.entries(columnMap)) {
+    selectParts.push(`TRIM("${sqlEsc(csvCol)}")::VARCHAR AS "${sqlEsc(targetCol)}"`);
+  }
+
+  const targetCols = ['id', 'row_index', ...Object.values(columnMap)];
+
+  const escapedPath = sqlEsc(filePath);
+  const escapedDelimiter = sqlEsc(delimiter);
+
+  const insertSQL = `
+    INSERT INTO transactions (${targetCols.map((c) => `"${sqlEsc(c)}"`).join(', ')})
+    SELECT ${selectParts.join(', ')}
+    FROM read_csv('${escapedPath}', header = true, delim = '${escapedDelimiter}', ignore_errors = true, all_varchar = true, null_padding = true)
+  `;
+
+  await databaseService.exec(insertSQL);
+
+  // Check if CSV has L1/L2/L3 columns — try to match against taxonomy
+  const hasL1 = csvHeaders.some((h) => h.toLowerCase() === 'l1');
+  const hasL2 = csvHeaders.some((h) => h.toLowerCase() === 'l2');
+  const hasL3 = csvHeaders.some((h) => h.toLowerCase() === 'l3');
+
+  if (hasL1) {
+    const l1Col = csvHeaders.find((h) => h.toLowerCase() === 'l1') || 'L1';
+    const l2Col = csvHeaders.find((h) => h.toLowerCase() === 'l2') || 'L2';
+    const l3Col = csvHeaders.find((h) => h.toLowerCase() === 'l3') || 'L3';
+
+    // The columns were imported as-is (e.g. "L1", "L2", "L3")
+    // Build pipe-delimited path from them
+    const pathParts = [
+      `COALESCE(TRIM("${sqlEsc(l1Col)}"), '')`,
+      hasL2 ? `COALESCE(TRIM("${sqlEsc(l2Col)}"), '')` : null,
+      hasL3 ? `COALESCE(TRIM("${sqlEsc(l3Col)}"), '')` : null,
+    ].filter(Boolean);
+
+    const concatExpr = pathParts.join(` || '|' || `);
+
+    const updateSQL = `
+      UPDATE transactions t
+      SET taxonomy_node_id = tax.id
+      FROM (
+        SELECT row_index, ${concatExpr} AS built_path
+        FROM transactions
+      ) src
+      JOIN taxonomy tax ON tax.full_path = src.built_path
+      WHERE t.row_index = src.row_index
+    `;
+
+    try {
+      await databaseService.exec(updateSQL);
+    } catch (e) {
+      // Taxonomy matching is best-effort
+      console.warn('[importCSVForReview] Taxonomy matching failed (non-fatal):', e);
+    }
+  }
+
+  const countResult = await databaseService.get<{ cnt: number }>(
+    'SELECT COUNT(*)::INTEGER AS cnt FROM transactions'
+  );
+  const totalRows = countResult?.cnt ?? 0;
+
+  if (totalRows === 0) {
+    throw new Error('CSV file contains no data rows');
+  }
+
+  return { rowsInserted: totalRows };
 }

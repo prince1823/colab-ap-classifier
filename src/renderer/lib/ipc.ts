@@ -2,7 +2,7 @@ import type { IPCResponse } from '../../shared/types/ipc';
 import type { ProjectMetadata, ProjectMetadataUpdate, RecentProject } from '../../shared/types/project';
 import type { CSVPreviewWithMappings, CanonicalColumnMapping } from '../../shared/types/canonicalization';
 import type { ClassificationStartOptions, ClassificationProgress, ProjectRun } from '../../shared/types/classification';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions } from '../../shared/types/transactions';
+import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, GroupedTransactionsResult } from '../../shared/types/transactions';
 import type { TaxonomyNode, TaxonomyMetadata, TaxonomySetInput, TaxonomyInfo, RulePackInfo } from '../../shared/types/taxonomy';
 import type { ProjectSupplier, SupplierUpdateInput, SupplierResearchResult } from '../../shared/types/suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
@@ -52,11 +52,13 @@ export const ipc = {
     remove: (path: string) => invoke<void>('recentProjects:remove', path),
   },
 
-  // ── Upload (3 channels) ──
+  // ── Upload (4 channels) ──
   upload: {
     selectFile: () => invoke<string | null>('upload:selectFile'),
     parsePreview: (filePath: string) => invoke<CSVPreviewWithMappings>('upload:parsePreview', filePath),
     csv: (filePath: string) => invoke<{ rowsInserted: number }>('upload:csv', filePath),
+    loadFullCSV: (filePath: string) =>
+      invoke<{ rowsInserted: number }>('upload:loadFullCSV', filePath),
   },
 
   // ── Canonicalization (1 channel) ──
@@ -84,6 +86,12 @@ export const ipc = {
     getColumns: () => invoke<string[]>('transactions:getColumns'),
     reclassify: (transactionIds: string[], taxonomyNodeId: string, feedback?: string) =>
       invoke<void>('transactions:reclassify', transactionIds, taxonomyNodeId, feedback),
+    queryGrouped: (column: string, filters?: TransactionFilter) =>
+      invoke<GroupedTransactionsResult>('transactions:queryGrouped', column, filters),
+    distinctValues: (column: string, limit?: number) =>
+      invoke<string[]>('transactions:distinctValues', column, limit),
+    getIdsByValue: (column: string, value: string, filters?: TransactionFilter) =>
+      invoke<string[]>('transactions:getIdsByValue', column, value, filters),
   },
 
   // ── Taxonomy (4 channels) ──

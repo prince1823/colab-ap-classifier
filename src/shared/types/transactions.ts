@@ -14,6 +14,12 @@ export interface Transaction {
   updatedAt: string;
 }
 
+export interface ColumnFilter {
+  column: string;
+  operator: 'is' | 'is_not' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with';
+  values: string[];
+}
+
 export interface TransactionFilter {
   supplierName?: string;
   taxonomyNodeId?: string;
@@ -26,6 +32,12 @@ export interface TransactionFilter {
   pageSize?: number;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+  /** Arbitrary column-value filters for server-side filtering */
+  columnFilters?: ColumnFilter[];
+  /** Global combinator for column filters: AND (default) or OR */
+  filterCombinator?: 'AND' | 'OR';
+  /** Per-pair connectors between column filters (keyed by column name, value is connector AFTER that filter) */
+  filterConnectors?: Record<string, 'AND' | 'OR'>;
 }
 
 export interface TransactionStats {
@@ -44,4 +56,23 @@ export interface PaginatedTransactions {
   totalCount: number;
   page: number;
   pageSize: number;
+}
+
+/**
+ * A single grouped row: column value + aggregated amount and count.
+ */
+export interface GroupedRow {
+  value: string;
+  amount: number;
+  count: number;
+}
+
+/**
+ * Result of a server-side GROUP BY query for a column.
+ */
+export interface GroupedTransactionsResult {
+  column: string;
+  rows: GroupedRow[];
+  totalAmount: number;
+  totalCount: number;
 }

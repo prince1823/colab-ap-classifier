@@ -13,11 +13,30 @@ const ColumnNode = ({ node, level, isSelected, isActivePath, onSelect, onDropRow
 
   const [{ isOverShallow, itemType, canDrop }, drop] = useDrop({
     accept: [TABLE_ROW_TYPE, ITEM_TYPE],
-    drop: (item) => {
+    drop: async (item) => {
       if (onDropRow && node.path !== 'root' && isDroppableLevel) {
-        const rowsToReclassify = item.transactionRows || item.rows || []
-        if (rowsToReclassify.length > 0) {
-          onDropRow(rowsToReclassify, node.path)
+        // Server-side mode: fetch transaction IDs on-demand from DuckDB
+        if (item.serverSide && (!item.transactionRows || item.transactionRows.length === 0)) {
+          try {
+            const values = item.selectedValues || [item.value]
+            // Fetch IDs for all selected values in parallel
+            const idArrays = await Promise.all(
+              values.map(v => ipc.transactions.getIdsByValue(item.column, v))
+            )
+            const allIds = idArrays.flat()
+            if (allIds.length > 0) {
+              // Create minimal row objects with just IDs for reclassification
+              const rows = allIds.map(id => ({ id }))
+              onDropRow(rows, node.path)
+            }
+          } catch (err) {
+            console.error('[Drop] Failed to fetch transaction IDs:', err)
+          }
+        } else {
+          const rowsToReclassify = item.transactionRows || item.rows || []
+          if (rowsToReclassify.length > 0) {
+            onDropRow(rowsToReclassify, node.path)
+          }
         }
       }
       return { targetPath: node.path }

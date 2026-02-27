@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { useDrag, useDrop } from 'react-dnd'
 import { Plus, X, ChevronRight, ChevronDown } from 'lucide-react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
 import { ipc } from '../../lib/ipc'
 import CurrentFiltersPanel from './CurrentFiltersPanel'
 import { evaluateFilterConditions } from '../../utils/filterEvaluation'
+import type { GroupedRow } from '../../../shared/types/transactions'
 import '../../styles/MultiTableSystem.css'
 
 export const ITEM_TYPE = 'FILTER_ROW'
@@ -212,36 +214,40 @@ const HierarchicalRow = ({
 }
 
 // Regular draggable row component - can be dragged for filtering or reclassification
-const DraggableTableRow = ({ row, column, amount, onDragEnd, isSelected, isKeyboardFocused = false, onSelect, transactionRows, onToggleSelect, isMultiSelectMode, selectedRowsInTable = [], data, rowRef, onDoubleClickFilter }) => {
+const DraggableTableRow = ({ row, column, amount, count, onDragEnd, isSelected, isKeyboardFocused = false, onSelect, transactionRows, onToggleSelect, isMultiSelectMode, selectedRowsInTable = [], data, rowRef, onDoubleClickFilter, serverSide = false }) => {
   // Collect all selected rows from the same table for multi-drag
   const selectedValues = selectedRowsInTable.length > 0 && isSelected
     ? selectedRowsInTable
     : [row]
-  
-  // Collect all transaction rows for selected values
-  const allTransactionRows = selectedValues.length > 1
-    ? selectedValues.flatMap(val => 
-        (data || []).filter(t => {
-          const tVal = (t[column] || '').toString().trim() || 'Unknown'
-          const itemVal = (val || '').toString().trim() || 'Unknown'
-          return tVal === itemVal
-        })
-      )
-    : (transactionRows || [])
+
+  // Collect all transaction rows for selected values (skip in server-side mode)
+  const allTransactionRows = serverSide
+    ? []
+    : selectedValues.length > 1
+      ? selectedValues.flatMap(val =>
+          (data || []).filter(t => {
+            const tVal = (t[column] || '').toString().trim() || 'Unknown'
+            const itemVal = (val || '').toString().trim() || 'Unknown'
+            return tVal === itemVal
+          })
+        )
+      : (transactionRows || [])
 
   // For filtering between tables - primary drag for filtering
   // If multiple rows are selected, include all selected rows
   const [{ isDragging }, drag] = useDrag({
     type: ITEM_TYPE,
     item: () => {
-      return { 
-        type: 'filter', 
-        column, 
+      return {
+        type: 'filter',
+        column,
         value: row,
         // Include all selected values if multiple are selected
         selectedValues: selectedValues.length > 1 ? selectedValues : [row],
-        // Also include transaction rows for reclassification when dropped on tree
-        transactionRows: allTransactionRows,
+        // In server-side mode, carry column+value for lazy ID fetch on drop
+        // In client-side mode, include transaction rows directly
+        transactionRows: serverSide ? [] : allTransactionRows,
+        serverSide,
         isSelected: isSelected,
         isMultiSelect: selectedValues.length > 1
       }
@@ -251,7 +257,7 @@ const DraggableTableRow = ({ row, column, amount, onDragEnd, isSelected, isKeybo
     }),
   })
 
-  const transactionCount = allTransactionRows?.length || transactionRows?.length || 0
+  const transactionCount = serverSide ? (count || 0) : (allTransactionRows?.length || transactionRows?.length || 0)
   const isMultiDrag = selectedValues.length > 1
   const tooltipText = isMultiDrag
     ? `Dragging ${selectedValues.length} selected rows (${transactionCount} transactions)`
@@ -367,6 +373,67 @@ const DraggableTableRow = ({ row, column, amount, onDragEnd, isSelected, isKeybo
 }
 
 
+// Virtualized flat row renderer — renders only ~50 DOM nodes for thousands of grouped rows
+const VirtualizedFlatRows = ({ tableData, column, selectedRows, tableSelectedRows, keyboardFocus, tableNav, tableIndex, onSelectRow, onToggleRowSelect, transactionsByValue, data, focusedRowRef, onDoubleClickFilter, serverSide, scrollParentRef }) => {
+  const rowVirtualizer = useVirtualizer({
+    count: tableData.length,
+    getScrollElement: () => scrollParentRef.current,
+    estimateSize: () => 32,
+    overscan: 20,
+  })
+
+  return (
+    <div
+      style={{
+        height: `${rowVirtualizer.getTotalSize()}px`,
+        width: '100%',
+        position: 'relative',
+      }}
+    >
+      {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+        const item = tableData[virtualRow.index]
+        const itemVal = (item.value || '').toString().trim() || 'Unknown'
+        const matchingTransactions = serverSide ? [] : (transactionsByValue.get(itemVal) || [])
+        const rowKey = `${column}:${item.value}`
+        const isSelected = selectedRows?.includes(rowKey)
+        const isKeyboardFocused = keyboardFocus === 'tables' && tableNav?.tableIndex === tableIndex && tableNav?.rowIndex === virtualRow.index
+
+        return (
+          <div
+            key={virtualRow.key}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: `${virtualRow.size}px`,
+              transform: `translateY(${virtualRow.start}px)`,
+            }}
+          >
+            <DraggableTableRow
+              row={item.value}
+              column={column}
+              amount={item.amount}
+              count={item.count}
+              isSelected={isSelected}
+              isKeyboardFocused={isKeyboardFocused}
+              onSelect={onSelectRow}
+              onToggleSelect={(val) => onToggleRowSelect && onToggleRowSelect(val, column)}
+              transactionRows={matchingTransactions}
+              isMultiSelectMode={tableSelectedRows.length > 0}
+              selectedRowsInTable={tableSelectedRows}
+              data={serverSide ? null : data}
+              rowRef={isKeyboardFocused ? focusedRowRef : null}
+              onDoubleClickFilter={onDoubleClickFilter}
+              serverSide={serverSide}
+            />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // Table Component — wrapped with React.memo to avoid re-rendering when
 // only sibling tables' selection/filter state changes (props are shallow-compared).
 const FilterTable = React.memo(({
@@ -374,6 +441,7 @@ const FilterTable = React.memo(({
   title,
   column,
   data,
+  groupedRows, // Server-side pre-grouped data — when provided, skips client-side grouping
   activeFilters,
   onClose,
   selectedRows,
@@ -469,8 +537,21 @@ const FilterTable = React.memo(({
     return map
   }, [data, column])
 
+  // When server-side groupedRows are provided for flat tables, use them directly
+  const serverSideMode = !!groupedRows && !effectiveHierarchical
+
   // Build hierarchical or flat table data
   const tableData = useMemo(() => {
+    // Server-side mode: use pre-grouped data directly (skip all client-side grouping)
+    if (serverSideMode && groupedRows) {
+      return groupedRows
+        .filter(r => {
+          const v = (r.value || '').trim()
+          return v && v !== '(blank)' && v.toLowerCase() !== 'unknown' && v.toLowerCase() !== 'blank' && v.toLowerCase() !== '[blank]'
+        })
+        .map(r => ({ value: r.value, amount: r.amount, count: r.count }))
+    }
+
     if (!data || !column) return []
 
     // ── Taxonomy table: build tree from ALL taxonomy nodes, then overlay
@@ -658,7 +739,9 @@ const FilterTable = React.memo(({
     effectiveHierarchical,
     sortColumn,
     sortDirection,
-    taxonomyNodes
+    taxonomyNodes,
+    serverSideMode,
+    groupedRows,
   ])
 
   // Compute the max depth of the taxonomy tree so we only show level tabs that exist
@@ -794,7 +877,7 @@ const FilterTable = React.memo(({
       )}
       
       {/* Table Content */}
-      <div 
+      <div
         ref={tableContentRef}
         className={`table-content ${collapsed ? 'collapsed' : ''}`}
       >
@@ -846,41 +929,23 @@ const FilterTable = React.memo(({
                 })()}
               </>
             ) : (
-              <>
-                {(() => {
-                  return (
-                    <>
-                      {tableData.map((item, idx) => {
-                        // O(1) lookup from pre-built map (was O(n) data.filter per row)
-                        const itemVal = (item.value || '').toString().trim() || 'Unknown'
-                        const matchingTransactions = transactionsByValue.get(itemVal) || []
-
-                        const rowKey = `${column}:${item.value}`
-                        const isSelected = selectedRows?.includes(rowKey)
-                        const isKeyboardFocused = keyboardFocus === 'tables' && tableNav?.tableIndex === tableIndex && tableNav?.rowIndex === idx
-                        return (
-                          <DraggableTableRow
-                            key={idx}
-                            row={item.value}
-                            column={column}
-                            amount={item.amount}
-                            isSelected={isSelected}
-                            isKeyboardFocused={isKeyboardFocused}
-                            onSelect={onSelectRow}
-                            onToggleSelect={(val) => onToggleRowSelect && onToggleRowSelect(val, column)}
-                            transactionRows={matchingTransactions}
-                            isMultiSelectMode={tableSelectedRows.length > 0}
-                            selectedRowsInTable={tableSelectedRows}
-                            data={data}
-                            rowRef={isKeyboardFocused ? focusedRowRef : null}
-                            onDoubleClickFilter={onDoubleClickFilter}
-                          />
-                        )
-                      })}
-                    </>
-                  )
-                })()}
-              </>
+              <VirtualizedFlatRows
+                tableData={tableData}
+                column={column}
+                selectedRows={selectedRows}
+                tableSelectedRows={tableSelectedRows}
+                keyboardFocus={keyboardFocus}
+                tableNav={tableNav}
+                tableIndex={tableIndex}
+                onSelectRow={onSelectRow}
+                onToggleRowSelect={onToggleRowSelect}
+                transactionsByValue={transactionsByValue}
+                data={data}
+                focusedRowRef={focusedRowRef}
+                onDoubleClickFilter={onDoubleClickFilter}
+                serverSide={serverSideMode}
+                scrollParentRef={tableContentRef}
+              />
             )}
           </div>
         )}
@@ -958,6 +1023,7 @@ const DraggableTableCard = ({ tableId, index, isDraggable, moveTable, children }
 const MultiTableSystem = ({
   transactions,
   allTransactions = [],
+  groupedData, // Map<string, GroupedTransactionsResult> from useGroupedTransactions
   activeFilters,
   setActiveFilters,
   selectedRows,
@@ -1723,6 +1789,7 @@ const MultiTableSystem = ({
                     title={table.title}
                     column={table.column}
                     data={isTaxonomy ? taxonomyTransactions : filteredTransactions}
+                    groupedRows={!isTaxonomy && groupedData?.get(table.column)?.rows}
                     activeFilters={activeFilters}
                     onClose={removeTable}
                     selectedRows={selectedRows}

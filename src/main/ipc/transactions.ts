@@ -22,4 +22,26 @@ export function registerTransactionsHandlers(): void {
   registerHandler('transactions:getColumns', async () => {
     return transactionsService.getColumns();
   });
+
+  registerHandler('transactions:queryGrouped', async (_event, column: unknown, filters: unknown) => {
+    return transactionsService.queryGroupedByColumn(
+      column as string,
+      filters as TransactionFilter | undefined
+    );
+  });
+
+  registerHandler('transactions:distinctValues', async (_event, column: unknown, limit: unknown) => {
+    return transactionsService.queryDistinctValues(
+      column as string,
+      limit as number | undefined
+    );
+  });
+
+  registerHandler('transactions:getIdsByValue', async (_event, column: unknown, value: unknown, filters: unknown) => {
+    return transactionsService.getTransactionIdsByColumnValue(
+      column as string,
+      value as string,
+      filters as TransactionFilter | undefined
+    );
+  });
 }

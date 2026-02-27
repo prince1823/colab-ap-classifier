@@ -55,3 +55,5 @@ internal_docs/daily_logs/prince.md
 .claude/skills/close-session/SKILL.md
 .claude/skills/close-session/SKILL.md
 docs/review-pivot-guide.md
+logs/colab91-2026-02-25.ndjson
+.gitignore

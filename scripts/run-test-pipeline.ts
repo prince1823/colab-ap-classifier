@@ -165,7 +165,7 @@ async function main() {
     section('PHASE 3: CSV UPLOAD & CANONICALIZATION');
 
     log('Previewing CSV file...');
-    const preview = uploadService.parsePreview(CSV_PATH);
+    const preview = await uploadService.parsePreview(CSV_PATH);
     log(`✓ CSV preview:`);
     log(`  Total rows: ${preview.totalRows}`);
     log(`  Columns (${preview.columns.length}): ${preview.columns.slice(0, 10).join(', ')}...`);

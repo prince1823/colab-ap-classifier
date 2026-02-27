@@ -1,5 +1,7 @@
 import fs from 'fs';
+import { createReadStream } from 'fs';
 import { parse } from 'csv-parse/sync';
+import { parse as parseStream } from 'csv-parse';
 import { v4 as uuidv4 } from 'uuid';
 import { databaseService } from './database';
 import { invalidateColumnCache } from './transactions';
@@ -176,15 +178,144 @@ function detectDelimiter(content: string): string {
 }
 
 /**
- * Import a full CSV file into the transactions table.
+ * Size of the sample buffer used for encoding and delimiter detection.
+ */
+const SAMPLE_BUFFER_SIZE = 64 * 1024;
+
+/**
+ * Read a small sample from the beginning of a file for encoding/delimiter detection.
+ */
+function readSampleBuffer(filePath: string, size: number = SAMPLE_BUFFER_SIZE): Buffer {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const stats = fs.fstatSync(fd);
+    const readSize = Math.min(size, stats.size);
+    const buffer = Buffer.alloc(readSize);
+    fs.readSync(fd, buffer, 0, readSize, 0);
+    return buffer;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Stream-parse a CSV file and call a callback for each row.
+ * Returns the total number of rows processed.
+ */
+async function streamCSV(
+  filePath: string,
+  encoding: BufferEncoding,
+  delimiter: string,
+  onBatch: (batch: Record<string, string>[], startIndex: number) => Promise<void>,
+  batchSize: number = 500
+): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const parser = parseStream({
+      columns: true,
+      delimiter,
+      skip_empty_lines: true,
+      relax_column_count: true,
+      trim: true,
+    });
+
+    const stream = createReadStream(filePath, { encoding });
+
+    let firstChunk = true;
+    let totalRows = 0;
+    let currentBatch: Record<string, string>[] = [];
+    let batchStartIndex = 0;
+    let processing = false;
+    let streamEnded = false;
+
+    const flushBatch = async () => {
+      if (currentBatch.length === 0) return;
+      const batch = currentBatch;
+      const startIdx = batchStartIndex;
+      currentBatch = [];
+      batchStartIndex = totalRows;
+      await onBatch(batch, startIdx);
+    };
+
+    stream.on('data', (chunk: string | Buffer) => {
+      let data = typeof chunk === 'string' ? chunk : chunk.toString(encoding);
+      if (firstChunk) {
+        if (data.charCodeAt(0) === 0xfeff) {
+          data = data.slice(1);
+        }
+        firstChunk = false;
+      }
+      parser.write(data);
+    });
+
+    stream.on('end', () => {
+      parser.end();
+    });
+
+    stream.on('error', (err) => {
+      parser.destroy();
+      reject(err);
+    });
+
+    parser.on('readable', () => {
+      // If already processing a flush, don't re-enter
+      if (processing) return;
+      processing = true;
+
+      const drain = async () => {
+        try {
+          let record: Record<string, string> | null;
+          while ((record = parser.read() as Record<string, string> | null) !== null) {
+            currentBatch.push(record);
+            totalRows++;
+            if (currentBatch.length >= batchSize) {
+              parser.pause();
+              await flushBatch();
+              parser.resume();
+            }
+          }
+        } catch (err) {
+          reject(err);
+        } finally {
+          processing = false;
+          // If stream ended while we were processing, finalize
+          if (streamEnded) {
+            try {
+              await flushBatch();
+              resolve(totalRows);
+            } catch (err) {
+              reject(err);
+            }
+          }
+        }
+      };
+
+      drain();
+    });
+
+    parser.on('error', (err) => {
+      reject(err);
+    });
+
+    parser.on('end', () => {
+      if (processing) {
+        // drain() will handle finalization
+        streamEnded = true;
+      } else {
+        flushBatch().then(() => resolve(totalRows)).catch(reject);
+      }
+    });
+  });
+}
+
+/**
+ * Import a full CSV file into the transactions table using streaming.
+ * Never loads the entire file into a single string — supports arbitrarily large CSVs.
  *
- * 1. Read and parse the CSV file
+ * 1. Detect encoding/delimiter from a small sample
  * 2. Get saved column_mappings from the database
- * 3. Map CSV columns to canonical names, generate UUIDs
- * 4. ALTER TABLE transactions to add any canonical columns that don't exist
- * 5. Bulk INSERT rows into the transactions table
- * 6. Extract distinct supplier_name values and INSERT INTO project_suppliers
- * 7. Update transaction_count and total_spend on project_suppliers
+ * 3. Stream-parse CSV, inserting rows in batches
+ * 4. Extract distinct supplier_name values and INSERT INTO project_suppliers
+ * 5. Update transaction_count and total_spend on project_suppliers
  */
 export async function importCSV(
   filePath: string
@@ -197,29 +328,20 @@ export async function importCSV(
     throw new Error(`File not found: ${filePath}`);
   }
 
-  // 1. Read and parse the CSV file
-  const buffer = fs.readFileSync(filePath);
-  const encoding = detectEncoding(buffer);
-  const rawContent = buffer.toString(encoding);
-  const content = stripBom(rawContent);
-
-  if (content.trim().length === 0) {
+  // 1. Detect encoding and delimiter from a small sample
+  const sampleBuffer = readSampleBuffer(filePath);
+  if (sampleBuffer.length === 0) {
     throw new Error('File is empty');
   }
 
-  const delimiter = detectDelimiter(content);
+  const encoding = detectEncoding(sampleBuffer);
+  const sampleContent = stripBom(sampleBuffer.toString(encoding));
 
-  const allRecords = parse(content, {
-    columns: true,
-    delimiter,
-    skip_empty_lines: true,
-    relax_column_count: true,
-    trim: true,
-  }) as Record<string, string>[];
-
-  if (allRecords.length === 0) {
-    throw new Error('CSV file contains no data rows');
+  if (sampleContent.trim().length === 0) {
+    throw new Error('File is empty');
   }
+
+  const delimiter = detectDelimiter(sampleContent);
 
   // 2. Get saved column mappings
   const mappings = await getMappings();
@@ -264,54 +386,84 @@ export async function importCSV(
     );
   }
 
-  // 5. Bulk INSERT rows into transactions table (batched for performance)
+  // Prepare INSERT template
   const allColumns = ['id', 'row_index', ...canonicalColumns];
   const columnList = allColumns.map((c) => `"${c}"`).join(', ');
   const singleRowPlaceholders = `(${allColumns.map(() => '?').join(', ')})`;
   const INSERT_BATCH_SIZE = 500;
 
-  for (let batchStart = 0; batchStart < allRecords.length; batchStart += INSERT_BATCH_SIZE) {
-    const batchEnd = Math.min(batchStart + INSERT_BATCH_SIZE, allRecords.length);
-    const batchValues: unknown[] = [];
-    const rowPlaceholders: string[] = [];
+  // Collect supplier names and stats during streaming
+  const supplierCsvCol = mappings['supplier_name'];
+  const spendCsvCol = mappings['spend_amount'];
+  const supplierNames = new Set<string>();
+  const supplierStats = new Map<string, { count: number; spend: number }>();
 
-    for (let i = batchStart; i < batchEnd; i++) {
-      const record = allRecords[i];
-      const id = uuidv4();
-      const rowIndex = i + 1;
+  // 5. Stream-parse CSV and insert rows in batches
+  const totalRows = await streamCSV(
+    filePath,
+    encoding,
+    delimiter,
+    async (batch, startIndex) => {
+      // Insert this batch into transactions
+      const batchValues: unknown[] = [];
+      const rowPlaceholders: string[] = [];
 
-      batchValues.push(id, rowIndex);
-      for (const canonicalCol of canonicalColumns) {
-        const csvCol = mappings[canonicalCol];
-        batchValues.push(record[csvCol] ?? null);
+      for (let i = 0; i < batch.length; i++) {
+        const record = batch[i];
+        const id = uuidv4();
+        const rowIndex = startIndex + i + 1;
+
+        batchValues.push(id, rowIndex);
+        for (const canonicalCol of canonicalColumns) {
+          const csvCol = mappings[canonicalCol];
+          batchValues.push(record[csvCol] ?? null);
+        }
+        rowPlaceholders.push(singleRowPlaceholders);
+
+        // Collect supplier names and stats while streaming
+        if (supplierCsvCol) {
+          const name = record[supplierCsvCol];
+          if (name && name.trim().length > 0) {
+            const trimmedName = name.trim();
+            supplierNames.add(trimmedName);
+
+            const stats = supplierStats.get(trimmedName) || { count: 0, spend: 0 };
+            stats.count += 1;
+
+            if (spendCsvCol) {
+              const rawSpend = record[spendCsvCol];
+              if (rawSpend) {
+                const numericStr = rawSpend.replace(/[^0-9.\-]/g, '');
+                const spend = parseFloat(numericStr);
+                if (!isNaN(spend)) {
+                  stats.spend += spend;
+                }
+              }
+            }
+
+            supplierStats.set(trimmedName, stats);
+          }
+        }
       }
-      rowPlaceholders.push(singleRowPlaceholders);
-    }
 
-    await databaseService.run(
-      `INSERT INTO transactions (${columnList}) VALUES ${rowPlaceholders.join(', ')}`,
-      ...batchValues
-    );
+      await databaseService.run(
+        `INSERT INTO transactions (${columnList}) VALUES ${rowPlaceholders.join(', ')}`,
+        ...batchValues
+      );
+    },
+    INSERT_BATCH_SIZE
+  );
+
+  if (totalRows === 0) {
+    throw new Error('CSV file contains no data rows');
   }
 
   // 6. Extract distinct supplier_name values -> match against universe -> INSERT INTO project_suppliers
-  const supplierCanonicalCol = 'supplier_name';
-  const supplierCsvCol = mappings[supplierCanonicalCol];
-
-  if (supplierCsvCol) {
+  if (supplierCsvCol && supplierNames.size > 0) {
     // Load supplier universe and taxonomy nodes for matching
     const universe = await readSupplierUniverse();
     const matcher = buildMatcherIndex(universe);
     const taxonomyNodes = await getTaxonomyNodes();
-
-    // Collect distinct supplier names from imported data
-    const supplierNames = new Set<string>();
-    for (const record of allRecords) {
-      const name = record[supplierCsvCol];
-      if (name && name.trim().length > 0) {
-        supplierNames.add(name.trim());
-      }
-    }
 
     // Bulk-load all existing supplier names to avoid N+1 existence checks
     const existingRows = await databaseService.all<{ supplier_name: string }>(
@@ -412,44 +564,17 @@ export async function importCSV(
     }
 
     // 7. Update transaction_count and total_spend on project_suppliers
-    const spendCanonicalCol = 'spend_amount';
-    const spendCsvCol = mappings[spendCanonicalCol];
-
-    // Build aggregation using resolved canonical names
-    const supplierStats = new Map<
-      string,
-      { count: number; spend: number }
-    >();
-
-    for (const record of allRecords) {
-      const name = record[supplierCsvCol];
-      if (!name || name.trim().length === 0) continue;
-
-      const trimmedName = name.trim();
-      const canonicalName = nameResolution.get(trimmedName) ?? trimmedName;
-      const stats = supplierStats.get(canonicalName) || {
-        count: 0,
-        spend: 0,
-      };
-      stats.count += 1;
-
-      if (spendCsvCol) {
-        const rawSpend = record[spendCsvCol];
-        if (rawSpend) {
-          // Remove currency symbols, commas, etc. and parse as number
-          const numericStr = rawSpend.replace(/[^0-9.\-]/g, '');
-          const spend = parseFloat(numericStr);
-          if (!isNaN(spend)) {
-            stats.spend += spend;
-          }
-        }
-      }
-
-      supplierStats.set(canonicalName, stats);
+    // Re-aggregate stats using resolved canonical names
+    const resolvedStats = new Map<string, { count: number; spend: number }>();
+    for (const [rawName, stats] of supplierStats) {
+      const canonicalName = nameResolution.get(rawName) ?? rawName;
+      const existing = resolvedStats.get(canonicalName) || { count: 0, spend: 0 };
+      existing.count += stats.count;
+      existing.spend += stats.spend;
+      resolvedStats.set(canonicalName, existing);
     }
 
-    // Batch update supplier stats using CASE expressions
-    const statsEntries = Array.from(supplierStats.entries());
+    const statsEntries = Array.from(resolvedStats.entries());
     const STATS_BATCH_SIZE = 200;
     for (let i = 0; i < statsEntries.length; i += STATS_BATCH_SIZE) {
       const batch = statsEntries.slice(i, i + STATS_BATCH_SIZE);
@@ -474,5 +599,5 @@ export async function importCSV(
     }
   }
 
-  return { rowsInserted: allRecords.length };
+  return { rowsInserted: totalRows };
 }

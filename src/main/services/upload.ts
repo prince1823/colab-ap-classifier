@@ -1,6 +1,8 @@
 import fs from 'fs';
+import { createReadStream } from 'fs';
 import { dialog, BrowserWindow } from 'electron';
 import { parse } from 'csv-parse/sync';
+import { parse as parseStream } from 'csv-parse';
 import type { CSVPreview, CSVPreviewWithMappings, CanonicalizationResult } from '../../shared/types/canonicalization';
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import { suggestMappings } from '../agents/canonicalization-agent';
@@ -11,6 +13,12 @@ const SAMPLE_ROW_LIMIT = 10;
  * Supported delimiters in order of detection priority.
  */
 const DELIMITERS = [',', ';', '\t'] as const;
+
+/**
+ * Size of the sample buffer used for encoding and delimiter detection.
+ * 64 KB is enough to capture headers + several rows for detection.
+ */
+const SAMPLE_BUFFER_SIZE = 64 * 1024;
 
 /**
  * Show an "Open" dialog to select a CSV file.
@@ -90,6 +98,23 @@ function stripBom(content: string): string {
 }
 
 /**
+ * Read a small sample from the beginning of a file for encoding/delimiter detection.
+ * Returns the sample buffer without loading the entire file.
+ */
+function readSampleBuffer(filePath: string, size: number = SAMPLE_BUFFER_SIZE): Buffer {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const stats = fs.fstatSync(fd);
+    const readSize = Math.min(size, stats.size);
+    const buffer = Buffer.alloc(readSize);
+    fs.readSync(fd, buffer, 0, readSize, 0);
+    return buffer;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
  * Try to parse CSV content with a specific delimiter.
  * Returns parsed records if successful, or null if the delimiter
  * does not produce a valid multi-column result.
@@ -123,6 +148,7 @@ function tryParseWithDelimiter(
 /**
  * Detect the best delimiter by trying each in order and picking the one
  * that produces the most columns. Comma is preferred when tied.
+ * Uses only the sample content (not the full file).
  */
 function detectDelimiter(content: string): string {
   let bestDelimiter = ',';
@@ -144,13 +170,13 @@ function detectDelimiter(content: string): string {
 
 /**
  * Parse a CSV file and return a preview with columns, sample rows, and total row count.
- * This is the synchronous CSV-only parsing step (no LLM call).
+ * Uses streaming to avoid loading the entire file into memory.
  *
  * - Automatically detects delimiter (comma, semicolon, tab)
  * - Handles quoted fields and newlines within quotes
  * - Detects encoding (UTF-8, Latin-1)
  */
-export function parseCSVPreview(filePath: string): CSVPreview {
+export async function parseCSVPreview(filePath: string): Promise<CSVPreview> {
   if (!filePath || filePath.trim().length === 0) {
     throw new Error('File path must not be empty');
   }
@@ -159,34 +185,83 @@ export function parseCSVPreview(filePath: string): CSVPreview {
     throw new Error(`File not found: ${filePath}`);
   }
 
-  const buffer = fs.readFileSync(filePath);
-  const encoding = detectEncoding(buffer);
-  const rawContent = buffer.toString(encoding);
-  const content = stripBom(rawContent);
-
-  if (content.trim().length === 0) {
+  // Read a small sample for encoding and delimiter detection
+  const sampleBuffer = readSampleBuffer(filePath);
+  if (sampleBuffer.length === 0) {
     throw new Error('File is empty');
   }
 
-  const delimiter = detectDelimiter(content);
+  const encoding = detectEncoding(sampleBuffer);
+  const sampleContent = stripBom(sampleBuffer.toString(encoding));
 
-  const allRecords = parse(content, {
-    columns: true,
-    delimiter,
-    skip_empty_lines: true,
-    relax_column_count: true,
-    trim: true,
-  }) as Record<string, string>[];
-
-  if (allRecords.length === 0) {
-    throw new Error('CSV file contains no data rows');
+  if (sampleContent.trim().length === 0) {
+    throw new Error('File is empty');
   }
 
-  const columns = Object.keys(allRecords[0]);
-  const sampleRows = allRecords.slice(0, SAMPLE_ROW_LIMIT);
-  const totalRows = allRecords.length;
+  const delimiter = detectDelimiter(sampleContent);
 
-  return { columns, sampleRows, totalRows };
+  // Stream the full file to collect sample rows and count total rows
+  const sampleRows: Record<string, string>[] = [];
+  let columns: string[] = [];
+  let totalRows = 0;
+
+  return new Promise<CSVPreview>((resolve, reject) => {
+    const parser = parseStream({
+      columns: true,
+      delimiter,
+      skip_empty_lines: true,
+      relax_column_count: true,
+      trim: true,
+    });
+
+    const stream = createReadStream(filePath, { encoding });
+
+    // Strip BOM from the stream's first chunk
+    let firstChunk = true;
+
+    stream.on('data', (chunk: string | Buffer) => {
+      let data = typeof chunk === 'string' ? chunk : chunk.toString(encoding);
+      if (firstChunk) {
+        data = stripBom(data);
+        firstChunk = false;
+      }
+      parser.write(data);
+    });
+
+    stream.on('end', () => {
+      parser.end();
+    });
+
+    stream.on('error', (err) => {
+      parser.destroy();
+      reject(err);
+    });
+
+    parser.on('readable', () => {
+      let record: Record<string, string> | null;
+      while ((record = parser.read() as Record<string, string> | null) !== null) {
+        totalRows++;
+        if (columns.length === 0) {
+          columns = Object.keys(record);
+        }
+        if (sampleRows.length < SAMPLE_ROW_LIMIT) {
+          sampleRows.push(record);
+        }
+      }
+    });
+
+    parser.on('error', (err) => {
+      reject(err);
+    });
+
+    parser.on('end', () => {
+      if (totalRows === 0) {
+        reject(new Error('CSV file contains no data rows'));
+        return;
+      }
+      resolve({ columns, sampleRows, totalRows });
+    });
+  });
 }
 
 /**
@@ -211,7 +286,7 @@ function emptyMappingSuggestion(columns: string[]): CanonicalizationResult {
  * so the user can map manually.
  */
 export async function parsePreview(filePath: string): Promise<CSVPreviewWithMappings> {
-  const preview = parseCSVPreview(filePath);
+  const preview = await parseCSVPreview(filePath);
 
   let mappingSuggestion: CanonicalizationResult;
   try {

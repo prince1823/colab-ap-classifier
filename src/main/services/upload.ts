@@ -1,8 +1,6 @@
 import fs from 'fs';
-import { createReadStream } from 'fs';
 import { dialog, BrowserWindow } from 'electron';
 import { parse } from 'csv-parse/sync';
-import { parse as parseStream } from 'csv-parse';
 import type { CSVPreview, CSVPreviewWithMappings, CanonicalizationResult } from '../../shared/types/canonicalization';
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import { suggestMappings } from '../agents/canonicalization-agent';
@@ -169,8 +167,54 @@ function detectDelimiter(content: string): string {
 }
 
 /**
+ * Count newlines in a buffer to estimate row count.
+ */
+function countNewlines(buffer: Buffer): number {
+  let count = 0;
+  for (let i = 0; i < buffer.length; i++) {
+    if (buffer[i] === 0x0a) count++;
+  }
+  return count;
+}
+
+/**
+ * Estimate total row count from file size without reading the entire file.
+ * Reads the first ~64KB, counts lines, computes average bytes per line,
+ * then extrapolates to the full file size (minus 1 for the header).
+ */
+function estimateRowCount(filePath: string): number {
+  const stats = fs.statSync(filePath);
+  const fileSize = stats.size;
+
+  // For small files, just count lines directly from the sample
+  const sampleSize = Math.min(SAMPLE_BUFFER_SIZE, fileSize);
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(sampleSize);
+    fs.readSync(fd, buffer, 0, sampleSize, 0);
+    const newlines = countNewlines(buffer);
+
+    if (sampleSize >= fileSize) {
+      // We read the whole file — exact count (minus 1 for header row)
+      return Math.max(0, newlines > 0 ? newlines - 1 : 0);
+    }
+
+    if (newlines === 0) return 0;
+
+    // Average bytes per line from sample, extrapolate to full file
+    const avgBytesPerLine = sampleSize / newlines;
+    const estimatedLines = Math.round(fileSize / avgBytesPerLine);
+    // Subtract 1 for header row
+    return Math.max(0, estimatedLines - 1);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
  * Parse a CSV file and return a preview with columns, sample rows, and total row count.
- * Uses streaming to avoid loading the entire file into memory.
+ * Only reads a small sample for preview — does not stream the entire file.
+ * Row count is estimated from file size for large files.
  *
  * - Automatically detects delimiter (comma, semicolon, tab)
  * - Handles quoted fields and newlines within quotes
@@ -200,68 +244,26 @@ export async function parseCSVPreview(filePath: string): Promise<CSVPreview> {
 
   const delimiter = detectDelimiter(sampleContent);
 
-  // Stream the full file to collect sample rows and count total rows
-  const sampleRows: Record<string, string>[] = [];
-  let columns: string[] = [];
-  let totalRows = 0;
+  // Parse sample rows from the sample buffer content
+  const sampleRecords = parse(sampleContent, {
+    columns: true,
+    delimiter,
+    skip_empty_lines: true,
+    relax_column_count: true,
+    trim: true,
+  }) as Record<string, string>[];
 
-  return new Promise<CSVPreview>((resolve, reject) => {
-    const parser = parseStream({
-      columns: true,
-      delimiter,
-      skip_empty_lines: true,
-      relax_column_count: true,
-      trim: true,
-    });
+  if (sampleRecords.length === 0) {
+    throw new Error('CSV file contains no data rows');
+  }
 
-    const stream = createReadStream(filePath, { encoding });
+  const columns = Object.keys(sampleRecords[0]);
+  const sampleRows = sampleRecords.slice(0, SAMPLE_ROW_LIMIT);
 
-    // Strip BOM from the stream's first chunk
-    let firstChunk = true;
+  // Estimate total rows from file size instead of streaming the whole file
+  const totalRows = estimateRowCount(filePath);
 
-    stream.on('data', (chunk: string | Buffer) => {
-      let data = typeof chunk === 'string' ? chunk : chunk.toString(encoding);
-      if (firstChunk) {
-        data = stripBom(data);
-        firstChunk = false;
-      }
-      parser.write(data);
-    });
-
-    stream.on('end', () => {
-      parser.end();
-    });
-
-    stream.on('error', (err) => {
-      parser.destroy();
-      reject(err);
-    });
-
-    parser.on('readable', () => {
-      let record: Record<string, string> | null;
-      while ((record = parser.read() as Record<string, string> | null) !== null) {
-        totalRows++;
-        if (columns.length === 0) {
-          columns = Object.keys(record);
-        }
-        if (sampleRows.length < SAMPLE_ROW_LIMIT) {
-          sampleRows.push(record);
-        }
-      }
-    });
-
-    parser.on('error', (err) => {
-      reject(err);
-    });
-
-    parser.on('end', () => {
-      if (totalRows === 0) {
-        reject(new Error('CSV file contains no data rows'));
-        return;
-      }
-      resolve({ columns, sampleRows, totalRows });
-    });
-  });
+  return { columns, sampleRows, totalRows };
 }
 
 /**

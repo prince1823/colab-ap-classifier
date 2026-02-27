@@ -1,7 +1,5 @@
 import fs from 'fs';
-import { createReadStream } from 'fs';
 import { parse } from 'csv-parse/sync';
-import { parse as parseStream } from 'csv-parse';
 import { v4 as uuidv4 } from 'uuid';
 import { databaseService } from './database';
 import { invalidateColumnCache } from './transactions';
@@ -178,142 +176,19 @@ function detectDelimiter(content: string): string {
 }
 
 /**
- * Size of the sample buffer used for encoding and delimiter detection.
+ * Escape a string for use in a DuckDB SQL literal (single quotes).
  */
-const SAMPLE_BUFFER_SIZE = 64 * 1024;
-
-/**
- * Read a small sample from the beginning of a file for encoding/delimiter detection.
- */
-function readSampleBuffer(filePath: string, size: number = SAMPLE_BUFFER_SIZE): Buffer {
-  const fd = fs.openSync(filePath, 'r');
-  try {
-    const stats = fs.fstatSync(fd);
-    const readSize = Math.min(size, stats.size);
-    const buffer = Buffer.alloc(readSize);
-    fs.readSync(fd, buffer, 0, readSize, 0);
-    return buffer;
-  } finally {
-    fs.closeSync(fd);
-  }
+function sqlEscape(value: string): string {
+  return value.replace(/'/g, "''");
 }
 
 /**
- * Stream-parse a CSV file and call a callback for each row.
- * Returns the total number of rows processed.
- */
-async function streamCSV(
-  filePath: string,
-  encoding: BufferEncoding,
-  delimiter: string,
-  onBatch: (batch: Record<string, string>[], startIndex: number) => Promise<void>,
-  batchSize: number = 500
-): Promise<number> {
-  return new Promise<number>((resolve, reject) => {
-    const parser = parseStream({
-      columns: true,
-      delimiter,
-      skip_empty_lines: true,
-      relax_column_count: true,
-      trim: true,
-    });
-
-    const stream = createReadStream(filePath, { encoding });
-
-    let firstChunk = true;
-    let totalRows = 0;
-    let currentBatch: Record<string, string>[] = [];
-    let batchStartIndex = 0;
-    let processing = false;
-    let streamEnded = false;
-
-    const flushBatch = async () => {
-      if (currentBatch.length === 0) return;
-      const batch = currentBatch;
-      const startIdx = batchStartIndex;
-      currentBatch = [];
-      batchStartIndex = totalRows;
-      await onBatch(batch, startIdx);
-    };
-
-    stream.on('data', (chunk: string | Buffer) => {
-      let data = typeof chunk === 'string' ? chunk : chunk.toString(encoding);
-      if (firstChunk) {
-        if (data.charCodeAt(0) === 0xfeff) {
-          data = data.slice(1);
-        }
-        firstChunk = false;
-      }
-      parser.write(data);
-    });
-
-    stream.on('end', () => {
-      parser.end();
-    });
-
-    stream.on('error', (err) => {
-      parser.destroy();
-      reject(err);
-    });
-
-    parser.on('readable', () => {
-      // If already processing a flush, don't re-enter
-      if (processing) return;
-      processing = true;
-
-      const drain = async () => {
-        try {
-          let record: Record<string, string> | null;
-          while ((record = parser.read() as Record<string, string> | null) !== null) {
-            currentBatch.push(record);
-            totalRows++;
-            if (currentBatch.length >= batchSize) {
-              parser.pause();
-              await flushBatch();
-              parser.resume();
-            }
-          }
-        } catch (err) {
-          reject(err);
-        } finally {
-          processing = false;
-          // If stream ended while we were processing, finalize
-          if (streamEnded) {
-            try {
-              await flushBatch();
-              resolve(totalRows);
-            } catch (err) {
-              reject(err);
-            }
-          }
-        }
-      };
-
-      drain();
-    });
-
-    parser.on('error', (err) => {
-      reject(err);
-    });
-
-    parser.on('end', () => {
-      if (processing) {
-        // drain() will handle finalization
-        streamEnded = true;
-      } else {
-        flushBatch().then(() => resolve(totalRows)).catch(reject);
-      }
-    });
-  });
-}
-
-/**
- * Import a full CSV file into the transactions table using streaming.
- * Never loads the entire file into a single string — supports arbitrarily large CSVs.
+ * Import a full CSV file into the transactions table using DuckDB's native CSV reader.
+ * DuckDB reads the file directly in C++ — no Node.js string limit, no row-by-row overhead.
  *
- * 1. Detect encoding/delimiter from a small sample
+ * 1. Detect delimiter from a small sample
  * 2. Get saved column_mappings from the database
- * 3. Stream-parse CSV, inserting rows in batches
+ * 3. Use DuckDB read_csv to bulk-load and map columns in a single SQL statement
  * 4. Extract distinct supplier_name values and INSERT INTO project_suppliers
  * 5. Update transaction_count and total_spend on project_suppliers
  */
@@ -328,14 +203,23 @@ export async function importCSV(
     throw new Error(`File not found: ${filePath}`);
   }
 
-  // 1. Detect encoding and delimiter from a small sample
-  const sampleBuffer = readSampleBuffer(filePath);
-  if (sampleBuffer.length === 0) {
+  const stats = fs.statSync(filePath);
+  if (stats.size === 0) {
     throw new Error('File is empty');
   }
 
-  const encoding = detectEncoding(sampleBuffer);
-  const sampleContent = stripBom(sampleBuffer.toString(encoding));
+  // 1. Detect delimiter from a small sample
+  const SAMPLE_SIZE = 64 * 1024;
+  const fd = fs.openSync(filePath, 'r');
+  let sampleContent: string;
+  try {
+    const readSize = Math.min(SAMPLE_SIZE, stats.size);
+    const buffer = Buffer.alloc(readSize);
+    fs.readSync(fd, buffer, 0, readSize, 0);
+    sampleContent = stripBom(buffer.toString('utf-8'));
+  } finally {
+    fs.closeSync(fd);
+  }
 
   if (sampleContent.trim().length === 0) {
     throw new Error('File is empty');
@@ -349,12 +233,6 @@ export async function importCSV(
     throw new Error(
       'No column mappings found. Please save mappings before importing.'
     );
-  }
-
-  // Build reverse mapping: csv_column_name -> canonical_name
-  const csvToCanonical: Record<string, string> = {};
-  for (const [canonicalName, csvColumnName] of Object.entries(mappings)) {
-    csvToCanonical[csvColumnName] = canonicalName;
   }
 
   // 3. Determine the canonical columns present in the mapping
@@ -386,84 +264,56 @@ export async function importCSV(
     );
   }
 
-  // Prepare INSERT template
-  const allColumns = ['id', 'row_index', ...canonicalColumns];
-  const columnList = allColumns.map((c) => `"${c}"`).join(', ');
-  const singleRowPlaceholders = `(${allColumns.map(() => '?').join(', ')})`;
-  const INSERT_BATCH_SIZE = 500;
+  // 5. Use DuckDB read_csv to bulk-load with column mapping in a single SQL statement
+  // Build the SELECT clause that maps CSV columns to canonical names
+  const selectExpressions = [
+    'uuid()::VARCHAR AS id',
+    'ROW_NUMBER() OVER ()::INTEGER AS row_index',
+    ...canonicalColumns.map((canonicalCol) => {
+      const csvCol = mappings[canonicalCol];
+      return `TRIM("${sqlEscape(csvCol)}")::VARCHAR AS "${sqlEscape(canonicalCol)}"`;
+    }),
+  ];
 
-  // Collect supplier names and stats during streaming
-  const supplierCsvCol = mappings['supplier_name'];
-  const spendCsvCol = mappings['spend_amount'];
-  const supplierNames = new Set<string>();
-  const supplierStats = new Map<string, { count: number; spend: number }>();
+  const targetColumns = ['id', 'row_index', ...canonicalColumns]
+    .map((c) => `"${sqlEscape(c)}"`)
+    .join(', ');
 
-  // 5. Stream-parse CSV and insert rows in batches
-  const totalRows = await streamCSV(
-    filePath,
-    encoding,
-    delimiter,
-    async (batch, startIndex) => {
-      // Insert this batch into transactions
-      const batchValues: unknown[] = [];
-      const rowPlaceholders: string[] = [];
+  const escapedPath = sqlEscape(filePath);
+  const escapedDelimiter = sqlEscape(delimiter);
 
-      for (let i = 0; i < batch.length; i++) {
-        const record = batch[i];
-        const id = uuidv4();
-        const rowIndex = startIndex + i + 1;
+  const insertSQL = `
+    INSERT INTO transactions (${targetColumns})
+    SELECT ${selectExpressions.join(', ')}
+    FROM read_csv('${escapedPath}', header = true, delim = '${escapedDelimiter}', ignore_errors = true, all_varchar = true, null_padding = true)
+  `;
 
-        batchValues.push(id, rowIndex);
-        for (const canonicalCol of canonicalColumns) {
-          const csvCol = mappings[canonicalCol];
-          batchValues.push(record[csvCol] ?? null);
-        }
-        rowPlaceholders.push(singleRowPlaceholders);
+  await databaseService.exec(insertSQL);
 
-        // Collect supplier names and stats while streaming
-        if (supplierCsvCol) {
-          const name = record[supplierCsvCol];
-          if (name && name.trim().length > 0) {
-            const trimmedName = name.trim();
-            supplierNames.add(trimmedName);
-
-            const stats = supplierStats.get(trimmedName) || { count: 0, spend: 0 };
-            stats.count += 1;
-
-            if (spendCsvCol) {
-              const rawSpend = record[spendCsvCol];
-              if (rawSpend) {
-                const numericStr = rawSpend.replace(/[^0-9.\-]/g, '');
-                const spend = parseFloat(numericStr);
-                if (!isNaN(spend)) {
-                  stats.spend += spend;
-                }
-              }
-            }
-
-            supplierStats.set(trimmedName, stats);
-          }
-        }
-      }
-
-      await databaseService.run(
-        `INSERT INTO transactions (${columnList}) VALUES ${rowPlaceholders.join(', ')}`,
-        ...batchValues
-      );
-    },
-    INSERT_BATCH_SIZE
+  // Get the actual row count from what was inserted
+  const countResult = await databaseService.get<{ cnt: number }>(
+    'SELECT COUNT(*)::INTEGER AS cnt FROM transactions'
   );
+  const totalRows = countResult?.cnt ?? 0;
 
   if (totalRows === 0) {
     throw new Error('CSV file contains no data rows');
   }
 
   // 6. Extract distinct supplier_name values -> match against universe -> INSERT INTO project_suppliers
-  if (supplierCsvCol && supplierNames.size > 0) {
+  const supplierCsvCol = mappings['supplier_name'];
+
+  if (supplierCsvCol) {
     // Load supplier universe and taxonomy nodes for matching
     const universe = await readSupplierUniverse();
     const matcher = buildMatcherIndex(universe);
     const taxonomyNodes = await getTaxonomyNodes();
+
+    // Get distinct supplier names directly from DuckDB (much faster than collecting in Node.js)
+    const supplierRows = await databaseService.all<{ supplier_name: string }>(
+      "SELECT DISTINCT supplier_name FROM transactions WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != ''"
+    );
+    const supplierNames = new Set(supplierRows.map((r) => r.supplier_name.trim()));
 
     // Bulk-load all existing supplier names to avoid N+1 existence checks
     const existingRows = await databaseService.all<{ supplier_name: string }>(
@@ -564,38 +414,37 @@ export async function importCSV(
     }
 
     // 7. Update transaction_count and total_spend on project_suppliers
-    // Re-aggregate stats using resolved canonical names
-    const resolvedStats = new Map<string, { count: number; spend: number }>();
-    for (const [rawName, stats] of supplierStats) {
-      const canonicalName = nameResolution.get(rawName) ?? rawName;
-      const existing = resolvedStats.get(canonicalName) || { count: 0, spend: 0 };
-      existing.count += stats.count;
-      existing.spend += stats.spend;
-      resolvedStats.set(canonicalName, existing);
-    }
-
-    const statsEntries = Array.from(resolvedStats.entries());
-    const STATS_BATCH_SIZE = 200;
-    for (let i = 0; i < statsEntries.length; i += STATS_BATCH_SIZE) {
-      const batch = statsEntries.slice(i, i + STATS_BATCH_SIZE);
-      const names = batch.map(([name]) => name);
-      const namePlaceholders = names.map(() => '?').join(',');
-      const countCases = batch.map(() => 'WHEN supplier_name = ? THEN transaction_count + ?').join(' ');
-      const spendCases = batch.map(() => 'WHEN supplier_name = ? THEN total_spend + ?').join(' ');
-
-      const countParams: unknown[] = [];
-      const spendParams: unknown[] = [];
-      for (const [name, stats] of batch) {
-        countParams.push(name, stats.count);
-        spendParams.push(name, stats.spend);
-      }
-
-      await databaseService.run(
-        `UPDATE project_suppliers SET transaction_count = CASE ${countCases} ELSE transaction_count END, total_spend = CASE ${spendCases} ELSE total_spend END, updated_at = CURRENT_TIMESTAMP WHERE supplier_name IN (${namePlaceholders})`,
-        ...countParams,
-        ...spendParams,
-        ...names
-      );
+    // Use SQL aggregation directly from DuckDB — much faster than Node.js for 7M rows
+    const spendCol = mappings['spend_amount'];
+    if (spendCol) {
+      await databaseService.exec(`
+        UPDATE project_suppliers SET
+          transaction_count = project_suppliers.transaction_count + stats.cnt,
+          total_spend = project_suppliers.total_spend + stats.total,
+          updated_at = CURRENT_TIMESTAMP
+        FROM (
+          SELECT supplier_name,
+                 COUNT(*)::INTEGER AS cnt,
+                 COALESCE(SUM(TRY_CAST(REGEXP_REPLACE(spend_amount, '[^0-9.\\-]', '', 'g') AS DOUBLE)), 0) AS total
+          FROM transactions
+          WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != ''
+          GROUP BY supplier_name
+        ) AS stats
+        WHERE project_suppliers.supplier_name = stats.supplier_name
+      `);
+    } else {
+      await databaseService.exec(`
+        UPDATE project_suppliers SET
+          transaction_count = project_suppliers.transaction_count + stats.cnt,
+          updated_at = CURRENT_TIMESTAMP
+        FROM (
+          SELECT supplier_name, COUNT(*)::INTEGER AS cnt
+          FROM transactions
+          WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != ''
+          GROUP BY supplier_name
+        ) AS stats
+        WHERE project_suppliers.supplier_name = stats.supplier_name
+      `);
     }
   }
 

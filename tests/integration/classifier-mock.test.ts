@@ -1,7 +1,7 @@
 /**
- * Pipeline Mock Test — v2 integration smoke test with mocked LLM
+ * Classifier Mock Test — v2 integration smoke test with mocked LLM
  *
- * Purpose: Validates the full v2 pipeline flow works correctly without
+ * Purpose: Validates the full v2 classification flow works correctly without
  * requiring LLM API calls. Uses mocked LLM responses and minimal test data.
  *
  * Covers:
@@ -15,7 +15,7 @@
  *
  * v2 schema: 5 tables (project, taxonomy, transactions, override_rules, change_log)
  *
- * Run with: npx vitest run tests/integration/pipeline-mock.test.ts
+ * Run with: npx vitest run tests/integration/classifier-mock.test.ts
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import path from 'path';
@@ -112,7 +112,7 @@ function tempPath(suffix: string): string {
   );
 }
 
-describe('Pipeline Mock Integration Test (v2)', () => {
+describe('Classifier Mock Integration Test (v2)', () => {
   let dbPath: string;
   let supplierDbPath: string;
 
@@ -220,7 +220,7 @@ describe('Pipeline Mock Integration Test (v2)', () => {
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 4: Seed supplier_universe.db with test suppliers', async () => {
-    // Classification requires suppliers in supplier_universe.db (research gate)
+    // Classification uses supplier research from supplier_universe.db when available
     const supplierNames = [
       'Acme Corp', 'Globex Inc', 'Initech', 'Wayne Enterprises', 'Stark Industries',
     ];

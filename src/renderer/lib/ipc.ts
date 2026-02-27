@@ -52,9 +52,10 @@ export const ipc = {
       invoke<{ rowsInserted: number }>('upload:csv', filePath, mapping),
   },
 
-  // ── Classification (2 channels + 1 event) ──
+  // ── Classification (3 channels + 1 event) ──
   classification: {
     start: () => invoke<{ started: boolean }>('classification:start'),
+    approve: () => invoke<void>('classification:approve'),
     cancel: () => invoke<void>('classification:cancel'),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on<ClassificationProgress>('classification:progress', callback),

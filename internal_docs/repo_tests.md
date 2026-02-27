@@ -94,6 +94,7 @@ Exports:
 Helpers: `parsePath(fullPath)` — parses `"L1|L2|L3"` into `{l1, l2, l3, depth, parentPath}`
 
 **Specs:**
+- ~~suppose only two levels exist. test if the node will be created. should not allow if all 3 nodes don't exist.~~ → Implemented: `should reject L3 node when only L1 exists (L2 missing)` in `parent path validation` block
 
 
 ---
@@ -110,6 +111,8 @@ Exports:
 - `upsertSupplier(supplierName, data)` — insert or update in supplier_universe.db
 
 **Specs:**
+- suppose project is started without supplier_universe in colab ip and is added right before supplier research starts. test if db connection works okay.
+- suppose supplier universe is deleted halfway through research phase. halt classification and warn.
 
 
 ---
@@ -140,7 +143,7 @@ Exports:
 - `setMainWindow(win)` — sets window ref for progress events
 - `getIsRunning()` — returns boolean
 - `pause()` / `resume()` / `cancel()` — pipeline flow control
-- `startClassification()` — zero-arg; reads state internally from DB. Main loop: gets unclassified suppliers, applies rules, calls LLM per supplier group, emits progress with runId + phase
+- `startClassification(runId?)` — optional runId for pipeline continuity; reads state internally from DB. Main loop: gets all suppliers with unclassified transactions, applies rules, calls LLM per supplier group, emits progress with runId + phase
 - `cleanDescription(desc)` — strips numeric prefixes (pure function)
 
 State: `isRunning`, `isPaused`, `isCancelled`, `currentRunId`
@@ -240,6 +243,41 @@ Helpers: `stripBOM(content)`, `escapeCsv(value)`
 
 ---
 
+### `src/main/services/pipeline.ts`
+
+**Test file:** `tests/unit/services/pipeline.test.ts` (exists)
+
+Mediator that coordinates research → user approval → classification as a single flow.
+
+Exports:
+- `setMainWindow(win)` — sets window ref for progress events
+- `startPipeline()` — runs research → awaiting_approval → approve → classification; generates single `runId` shared across phases
+- `approve()` — resolves approval gate, pipeline continues to classification
+- `cancel()` — cancels whichever phase is active (research, awaiting_approval, or classifying)
+- `getIsRunning()` — returns boolean
+- `getPhase()` — returns current phase string
+
+State: `isRunning`, `isCancelled`, `currentRunId`, `currentPhase` (`'researching' | 'awaiting_approval' | 'classifying'`)
+
+Events emitted: `classification:progress` (reuses same channel with `phase` and `status` fields including `'awaiting_approval'`)
+
+Error handling: if research fails, still emits `awaiting_approval` so user can review partial data and choose to proceed.
+
+**Tests (8):**
+- `should run research → awaiting_approval → approve → classification` — full happy path, verifies runId consistency
+- `should cancel during research phase` — verifies `cancelResearch()` called, cancelled status emitted
+- `should cancel while awaiting approval` — verifies classification never called, cancelled status emitted
+- `should cancel during classification phase` — verifies `cancelClassification()` called
+- `should use a single runId across all phases` — all progress events share one runId, same as passed to classification
+- `should reach awaiting_approval even if research fails` — research rejects, approval still emitted, classification proceeds after approve
+- `should reject if pipeline is already running` — second `startPipeline()` throws
+- `should relay research progress via onProgress callback` — verifies research progress forwarded as `classification:progress` events
+
+**Specs:**
+
+
+---
+
 ### `src/main/services/supplier-research.ts`
 
 **Test file:** `tests/unit/services/supplier-research.test.ts` (exists)
@@ -249,7 +287,7 @@ Exports:
 - `setMainWindow(win)` — sets window ref for progress events
 - `cancel()` — sets cancellation flag
 - `researchSingle(supplierName)` — checks existing data, calls Exa search + LLM research agent, upserts result
-- `researchAllProjectSuppliers()` — sequential research of all project suppliers, emits progress
+- `researchAllProjectSuppliers(onProgress?)` — sequential research of all project suppliers, emits progress; optional callback relays per-supplier progress to pipeline mediator
 
 Events emitted: `suppliers:research:progress`
 
@@ -442,7 +480,9 @@ Channels: `rules:list`, `rules:create`, `rules:update`, `rules:delete`
 
 **Test file:** none
 
-Channels: `classification:start`, `classification:cancel`
+Channels: `classification:start`, `classification:approve`, `classification:cancel`
+
+Note: `classification:start` routes through the pipeline mediator (`pipelineService.startPipeline()`), not classification directly.
 
 **Specs:**
 
@@ -703,9 +743,9 @@ Exports:
 
 ## Integration Tests
 
-### Pipeline Smoke Test (mocked LLM)
+### Classifier Smoke Test (mocked LLM)
 
-**Test file:** `tests/integration/pipeline-mock.test.ts` (exists)
+**Test file:** `tests/integration/classifier-mock.test.ts` (exists)
 
 End-to-end with mocked LLM: create project → import taxonomy → upload CSV → seed suppliers → run classification → verify results → export. Uses real DuckDB, 5-table schema, supplierUniverseService. 7 phased tests.
 
@@ -714,9 +754,9 @@ End-to-end with mocked LLM: create project → import taxonomy → upload CSV �
 
 ---
 
-### Pipeline Real Test (real LLM)
+### Classifier Full Test (real LLM)
 
-**Test file:** `tests/integration/pipeline-real-run.test.ts` (exists)
+**Test file:** `tests/integration/classifier-real-run.test.ts` (exists)
 
 End-to-end with real API calls: 11 phases (project, taxonomy, CSV, suppliers, research, classification, verification, rules, reclassification, export, integrity). 13 phased tests, skips without API key.
 

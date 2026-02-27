@@ -254,25 +254,56 @@ describe('Classification (v2)', () => {
   // ── pipeline execution ──────────────────────────────────────────────────
 
   describe('pipeline execution', () => {
-    it('should skip suppliers not in supplier_universe', async () => {
+    it('should classify suppliers without supplier_universe entry', async () => {
       // Column-existence check + one supplier with unclassified transactions
       mockAll.mockImplementation(async (sql: string) => {
         if (sql.includes('information_schema.columns')) return [{ column_name: 'supplier_name' }];
-        return [{ supplier_name: 'Unknown Inc' }];
+        if (sql.includes('DISTINCT supplier_name')) return [{ supplier_name: 'Unknown Inc' }];
+        if (sql.includes('SELECT * FROM transactions') && sql.includes('classification_status')) {
+          return [{
+            id: 'tx1',
+            supplier_name: 'Unknown Inc',
+            row_index: 0,
+            spend_amount: 500,
+            gl_description: 'Test service',
+            classification_status: 'unclassified',
+          }];
+        }
+        if (sql.includes('COUNT(*)')) return [];
+        return [];
       });
 
-      // Supplier NOT in universe
+      // Supplier NOT in universe — classification still proceeds
       mockUniverseGet.mockResolvedValue(undefined);
+      mockGet.mockResolvedValue({ cnt: 1 });
+
+      vi.mocked(evaluateRules).mockResolvedValue(new Map());
+      vi.mocked(getNodes).mockResolvedValue([{
+        id: 'tid1', fullPath: 'Indirect|IT|Software',
+        l1: 'Indirect', l2: 'IT', l3: 'Software',
+        depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
+      }]);
+      vi.mocked(getMetadata).mockResolvedValue({
+        name: 'Test', filePath: '/test.c91',
+        companyContext: { industry: 'Tech' },
+        columnMappings: null, invoiceGroupingColumns: null,
+        tailSpendThreshold: 10000, taxonomyName: null, createdAt: null,
+      });
+      vi.mocked(classifyInvoiceGroup).mockResolvedValue({
+        classificationPath: 'Indirect|IT|Software',
+        reasoning: 'Test reasoning',
+        descriptionSupplierAligned: true,
+      });
+      vi.mocked(updateTransactions).mockResolvedValue(undefined);
+      vi.mocked(logChange).mockResolvedValue('log1');
 
       await startClassification();
 
-      // Should report failed because no suppliers are researched
+      // Classification should proceed and call classifyInvoiceGroup even without universe entry
+      expect(classifyInvoiceGroup).toHaveBeenCalled();
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
         'classification:progress',
-        expect.objectContaining({
-          status: 'failed',
-          currentStep: expect.stringContaining('No suppliers have been researched'),
-        })
+        expect.objectContaining({ status: 'completed' })
       );
     });
 
@@ -335,11 +366,8 @@ describe('Classification (v2)', () => {
         return undefined;
       });
 
-      // Supplier exists in universe (research gate passes)
+      // Supplier research data in universe
       mockUniverseGet.mockImplementation(async (sql: string, ...args: unknown[]) => {
-        if (sql.includes('SELECT id FROM suppliers')) {
-          return { id: 'sup1' };
-        }
         if (sql.includes('supplier_info')) {
           return { supplier_info: JSON.stringify({ description: 'A tech company' }), parent_name: null };
         }
@@ -446,14 +474,6 @@ describe('Classification (v2)', () => {
           return [];
         }
         return [];
-      });
-
-      // Supplier exists in universe
-      mockUniverseGet.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT id FROM suppliers')) {
-          return { id: 'sup1' };
-        }
-        return undefined;
       });
 
       mockGet.mockResolvedValue({ cnt: 0 });

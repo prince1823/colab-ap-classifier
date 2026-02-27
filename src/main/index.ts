@@ -7,6 +7,7 @@ import path from 'path';
 import { registerAllHandlers } from './ipc';
 import { setMainWindow as setClassificationMainWindow } from './services/classification';
 import { setMainWindow as setResearchMainWindow } from './services/supplier-research';
+import { setMainWindow as setPipelineMainWindow } from './services/pipeline';
 import { setColabipBasePath } from './services/colabip';
 
 // Prevent unhandled errors from crashing the entire Electron app
@@ -65,6 +66,7 @@ app.whenReady().then(() => {
   if (mainWindow) {
     setClassificationMainWindow(mainWindow);
     setResearchMainWindow(mainWindow);
+    setPipelineMainWindow(mainWindow);
   }
 });
 
@@ -80,6 +82,7 @@ app.on('activate', () => {
     if (mainWindow) {
       setClassificationMainWindow(mainWindow);
       setResearchMainWindow(mainWindow);
+      setPipelineMainWindow(mainWindow);
     }
   }
 });

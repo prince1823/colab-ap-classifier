@@ -102,7 +102,9 @@ export async function researchSingle(supplierName: string): Promise<SupplierRese
  * Streams results as each supplier completes.
  * Skips already-researched suppliers.
  */
-export async function researchAllProjectSuppliers(): Promise<void> {
+export async function researchAllProjectSuppliers(
+  onProgress?: (done: number, total: number, currentSupplier: string | null, step: string) => void,
+): Promise<void> {
   isCancelled = false;
 
   // supplier_name is a dynamic column — guard against being called before CSV import
@@ -133,12 +135,14 @@ export async function researchAllProjectSuppliers(): Promise<void> {
   }
 
   emitProgress(done, total, null, 'Starting research');
+  onProgress?.(done, total, null, 'Starting research');
 
   // Research sequentially (simple, predictable — avoids rate limit complexity)
   for (const name of toResearch) {
     if (isCancelled) break;
 
     emitProgress(done, total, name, `Researching: ${name}`);
+    onProgress?.(done, total, name, `Researching: ${name}`);
 
     try {
       await researchSingle(name);
@@ -155,10 +159,12 @@ export async function researchAllProjectSuppliers(): Promise<void> {
 
     done++;
     emitProgress(done, total, name, `Completed: ${name}`);
+    onProgress?.(done, total, name, `Completed: ${name}`);
   }
 
   if (!isCancelled) {
     emitProgress(total, total, null, 'Research complete');
+    onProgress?.(total, total, null, 'Research complete');
   }
 }
 

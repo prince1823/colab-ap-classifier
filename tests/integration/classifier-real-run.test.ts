@@ -1,10 +1,10 @@
 /**
- * Pipeline Full Run — integration test for the v2 architecture.
+ * Classifier Full Run — integration test for the v2 architecture.
  *
- * Exercises the entire backend pipeline end-to-end using real DuckDB,
+ * Exercises the entire backend classifier end-to-end using real DuckDB,
  * real LLM calls, and real fixture data. Only Electron modules are mocked.
  *
- * Pipeline flow:
+ * Classifier flow:
  *   1. Create project (real DuckDB)
  *   2. Set company context
  *   3. Import taxonomy from ColabIP
@@ -195,7 +195,7 @@ import * as colabipService from '../../src/main/services/colabip';
 // for the test: we query the data and write CSV ourselves, or mock the dialog path.
 import { dialog } from 'electron';
 
-describe(`Pipeline Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () => {
+describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () => {
   let testConfig: TestConfig;
   let csvRowCount: number;
 

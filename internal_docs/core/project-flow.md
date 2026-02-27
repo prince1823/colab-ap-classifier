@@ -42,7 +42,7 @@
          3. Supplier context
             1. Supplier info
       3. Any Supplier Universe Rules (category A rules)
-   3. As suppliers are sent back, user reviews/edits on a supplier review page.
+   3. **Pipline mediator**: As suppliers are sent back, user reviews/edits on a supplier review page.
       1. Page shows supplier table (supplier_universe.db) — default filter for project suppliers
       2. Manually edit any fields in supplier database (eg. parent)
 7. Classification

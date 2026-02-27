@@ -79,14 +79,14 @@ async function waitWhilePaused(): Promise<void> {
 /**
  * Start classification.
  *
- * For each supplier with unclassified transactions that exists in supplier_universe.db:
+ * For each supplier with unclassified transactions:
  *   1. Apply override rules
  *   2. AI classify remaining unclassified rows
  *
- * Skips suppliers not in supplier_universe.db (research gate).
+ * Uses supplier research from supplier_universe.db when available.
  * Resumable — skips suppliers whose transactions are already classified.
  */
-export async function startClassification(): Promise<void> {
+export async function startClassification(runId?: string): Promise<void> {
   if (isRunning) {
     throw new Error('Classification is already running');
   }
@@ -94,7 +94,7 @@ export async function startClassification(): Promise<void> {
   isRunning = true;
   isPaused = false;
   isCancelled = false;
-  currentRunId = randomUUID();
+  currentRunId = runId ?? randomUUID();
 
   try {
     // supplier_name is a dynamic column — guard against being called before CSV import
@@ -124,33 +124,8 @@ export async function startClassification(): Promise<void> {
       return;
     }
 
-    // Filter to only suppliers that exist in supplier_universe.db (research gate)
     const supplierNames = supplierRows.map((r) => r.supplier_name);
-    const researchedNames: string[] = [];
-
-    for (const name of supplierNames) {
-      const exists = await supplierUniverseService.get<{ id: string }>(
-        'SELECT id FROM suppliers WHERE supplier_name = ?',
-        name
-      );
-      if (exists) {
-        researchedNames.push(name);
-      }
-    }
-
-    if (researchedNames.length === 0) {
-      emitProgress({
-        status: 'failed',
-        totalSuppliers: supplierNames.length,
-        processedSuppliers: 0,
-        percentage: 0,
-        currentSupplier: null,
-        currentStep: 'No suppliers have been researched. Run supplier research first.',
-      });
-      return;
-    }
-
-    const totalSuppliers = researchedNames.length;
+    const totalSuppliers = supplierNames.length;
     let processedSuppliers = 0;
 
     emitProgress({
@@ -172,7 +147,7 @@ export async function startClassification(): Promise<void> {
     }
     const companyContext = metadata?.companyContext ?? { industry: 'Unknown' };
 
-    for (const supplierName of researchedNames) {
+    for (const supplierName of supplierNames) {
       if (isCancelled) break;
       await waitWhilePaused();
       if (isCancelled) break;

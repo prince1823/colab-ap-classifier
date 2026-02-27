@@ -148,7 +148,8 @@ Services are the business logic layer. Each service owns one concern. IPC handle
 
 | Service | Responsibility |
 |---------|---------------|
-| `classification` | Per supplier: apply override rules → AI classify remaining unclassified rows. Requires supplier to exist in supplier_universe.db. User can pause/resume. Resumable (skips already-classified suppliers). Emits progress per supplier |
+| `pipeline` | Coordinates research → approval → classification. Default entry for `classification:start`. Emits unified progress events across all phases |
+| `classification` | Per supplier: apply override rules → AI classify remaining unclassified rows. Uses supplier research from supplier_universe.db when available. User can pause/resume. Resumable (skips already-classified suppliers). Emits progress per supplier |
 | `rules` | Override rules CRUD, condition-to-SQL conversion, rule evaluation, priority management |
 
 ### Supplier
@@ -212,7 +213,8 @@ Events (main→renderer) are fire-and-forget, no response envelope.
 
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
-| `classification:start` | invoke | Start pipeline |
+| `classification:start` | invoke | Start pipeline (research → approval → classify) |
+| `classification:approve` | invoke | Approve supplier research, continue to classification |
 | `classification:cancel` | invoke | Cancel running pipeline |
 | `classification:progress` | event | Progress updates (main→renderer) |
 

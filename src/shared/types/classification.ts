@@ -6,7 +6,7 @@ export type ClassificationStatus =
 
 export interface ClassificationProgress {
   runId: string;
-  status: 'pending' | 'researching' | 'classifying' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'researching' | 'classifying' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'awaiting_approval';
   phase: 'researching' | 'classifying';
   totalSuppliers: number;
   processedSuppliers: number;

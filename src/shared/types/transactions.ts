@@ -76,3 +76,23 @@ export interface GroupedTransactionsResult {
   totalAmount: number;
   totalCount: number;
 }
+
+/**
+ * A single row from a server-side multi-level pivot aggregation.
+ * dimensions[i] corresponds to the i-th dimension in the request.
+ */
+export interface PivotAggregationRow {
+  dimensions: string[];
+  amount: number;
+  count: number;
+}
+
+/**
+ * Result of a server-side pivot aggregation query.
+ */
+export interface PivotAggregationResult {
+  dimensionColumns: string[];
+  rows: PivotAggregationRow[];
+  totalAmount: number;
+  totalCount: number;
+}

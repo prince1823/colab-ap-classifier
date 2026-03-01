@@ -1,41 +1,46 @@
-import { useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useTransactions } from '../hooks/useTransactions'
-import { transactionToDashboardRow } from '../utils/transactionTransform'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import {
   INITIAL_PIVOT_FILTER_STATE,
-  applyPivotFilters,
   type PivotFilterState,
 } from '../components/review/PivotFilterBar'
 import { exportHierarchicalPivotExcel } from '../utils/exportPivotToExcel'
-import { useHierarchicalPivotData, type Aggregation } from '../hooks/useHierarchicalPivotData'
+import { type Aggregation } from '../hooks/useHierarchicalPivotData'
+import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { convertPivotFiltersToReview } from '../utils/pivotToReviewFilters'
+import { ipc } from '../lib/ipc'
+import type { TransactionFilter, ColumnFilter } from '../../shared/types/transactions'
+
+/**
+ * Convert PivotFilterState (Record<string, string[]>) to TransactionFilter
+ * for server-side filtering in the pivot aggregation query.
+ */
+function pivotFiltersToTransactionFilter(
+  filterState: PivotFilterState
+): TransactionFilter | undefined {
+  const columnFilters: ColumnFilter[] = []
+  for (const [col, values] of Object.entries(filterState)) {
+    if (values.length > 0) {
+      columnFilters.push({ column: col, operator: 'is', values })
+    }
+  }
+  if (columnFilters.length === 0) return undefined
+  return { columnFilters, filterCombinator: 'AND' }
+}
 
 export default function PivotPage() {
   const navigate = useNavigate()
-  const { data: transactions, loading, error } = useTransactions()
 
-  // --- Transform rows ---
-  const rows = useMemo(() => {
-    if (!transactions) return []
-    return transactions.map((t, idx) => transactionToDashboardRow(t, idx))
-  }, [transactions])
-
-  const availableColumns = useMemo(() => {
-    if (!rows.length) return []
-    const keys = new Set<string>()
-    for (const row of rows.slice(0, 100)) {
-      for (const [k, v] of Object.entries(row)) {
-        if (v !== null && v !== undefined && (typeof v === 'string' || typeof v === 'number')) {
-          keys.add(k)
-        }
-      }
-    }
+  // --- Available columns from DuckDB ---
+  const [availableColumns, setAvailableColumns] = useState<string[]>([])
+  useEffect(() => {
     const exclude = new Set(['id', 'row_index', 'taxonomy_node_id', 'classification_reasoning', 'invoice_group_key'])
-    return [...keys].filter((k) => !exclude.has(k)).sort()
-  }, [rows])
+    ipc.transactions.getColumns().then((cols) => {
+      setAvailableColumns(cols.filter((c) => !exclude.has(c)).sort())
+    }).catch(() => {})
+  }, [])
 
   // --- Pivot settings from store (persists across tab switches) ---
   const pivotSettings = useWorkflowStore((s) => s.pivotSettings)
@@ -47,6 +52,40 @@ export default function PivotPage() {
   const setValueDimension = useCallback((v: string) => setPivotSettings({ valueDimension: v }), [setPivotSettings])
   const setAggregation = useCallback((v: Aggregation) => setPivotSettings({ aggregation: v }), [setPivotSettings])
   const setFilterState = useCallback((v: PivotFilterState) => setPivotSettings({ filterState: v }), [setPivotSettings])
+
+  // --- Server-side filter ---
+  const serverFilter = useMemo(
+    () => pivotFiltersToTransactionFilter(filterState),
+    [filterState]
+  )
+
+  // --- Server-side pivot aggregation (replaces useTransactions + useHierarchicalPivotData) ---
+  const { pivotData, loading, error, totalCount } = useServerPivotData(
+    rowDimensions,
+    valueDimension,
+    aggregation,
+    serverFilter
+  )
+
+  // --- Fetch distinct values for filter dropdowns (server-side) ---
+  const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({})
+  useEffect(() => {
+    if (!rowDimensions.length) return
+    let cancelled = false
+    Promise.all(
+      rowDimensions.map((dim) =>
+        ipc.transactions.distinctValues(dim, 500).then((vals) => ({ dim, vals }))
+      )
+    ).then((results) => {
+      if (cancelled) return
+      const opts: Record<string, string[]> = {}
+      for (const { dim, vals } of results) {
+        opts[dim] = vals
+      }
+      setFilterOptions(opts)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [rowDimensions])
 
   // --- Open in Review ---
   const setReviewFilters = useWorkflowStore((s) => s.setReviewFilters)
@@ -72,17 +111,6 @@ export default function PivotPage() {
 
   const openInReviewDisabled = activeFilterCount === 0 || !hasClassifiedData
 
-  // --- Filters ---
-  const filteredRows = useMemo(() => applyPivotFilters(rows, filterState), [rows, filterState])
-
-  // --- Pivot data (for export) ---
-  const pivotData = useHierarchicalPivotData(
-    filteredRows,
-    rowDimensions,
-    valueDimension,
-    aggregation
-  )
-
   // --- Export handler ---
   const handleExportExcel = () => {
     if (!pivotData) return
@@ -90,12 +118,12 @@ export default function PivotPage() {
   }
 
   // --- Loading / Error states ---
-  if (loading) {
+  if (loading && !pivotData) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
-          <span className="text-sm text-gray-500">Loading transactions…</span>
+          <span className="text-sm text-gray-500">Loading pivot data…</span>
         </div>
       </div>
     )
@@ -105,7 +133,7 @@ export default function PivotPage() {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <p className="text-red-600 font-medium">Failed to load transactions</p>
+          <p className="text-red-600 font-medium">Failed to load pivot data</p>
           <p className="text-sm text-gray-500 mt-1">{String(error)}</p>
         </div>
       </div>
@@ -118,7 +146,6 @@ export default function PivotPage() {
       <div className="flex-1 min-h-0">
         <HierarchicalPivotView
           pivotData={pivotData}
-          transactions={filteredRows}
           availableColumns={availableColumns}
           rowDimensions={rowDimensions}
           valueDimension={valueDimension}
@@ -126,7 +153,7 @@ export default function PivotPage() {
           onRowDimensionsChange={setRowDimensions}
           onValueDimensionChange={setValueDimension}
           onAggregationChange={setAggregation}
-          allRows={rows}
+          filterOptions={filterOptions}
           filterState={filterState}
           onFilterStateChange={setFilterState}
           onClearAllFilters={() => setPivotSettings({ filterState: INITIAL_PIVOT_FILTER_STATE })}
@@ -134,6 +161,7 @@ export default function PivotPage() {
           exportDisabled={!pivotData}
           onOpenInReview={handleOpenInReview}
           openInReviewDisabled={openInReviewDisabled}
+          totalCount={totalCount}
         />
       </div>
     </div>

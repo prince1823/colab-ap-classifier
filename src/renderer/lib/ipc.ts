@@ -92,6 +92,10 @@ export const ipc = {
       invoke<string[]>('transactions:distinctValues', column, limit),
     getIdsByValue: (column: string, value: string, filters?: TransactionFilter) =>
       invoke<string[]>('transactions:getIdsByValue', column, value, filters),
+    pivotAggregation: (dimensions: string[], valueDimension: string, filters?: TransactionFilter) =>
+      invoke<import('../../shared/types/transactions').PivotAggregationResult>(
+        'transactions:pivotAggregation', dimensions, valueDimension, filters
+      ),
   },
 
   // ── Taxonomy (4 channels) ──

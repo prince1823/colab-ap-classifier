@@ -44,4 +44,12 @@ export function registerTransactionsHandlers(): void {
       filters as TransactionFilter | undefined
     );
   });
+
+  registerHandler('transactions:pivotAggregation', async (_event, dimensions: unknown, valueDimension: unknown, filters: unknown) => {
+    return transactionsService.queryPivotAggregation(
+      dimensions as string[],
+      valueDimension as string,
+      filters as TransactionFilter | undefined
+    );
+  });
 }

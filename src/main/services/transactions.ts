@@ -1,5 +1,5 @@
 import { databaseService } from './database';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, GroupedRow, GroupedTransactionsResult } from '../../shared/types';
+import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, GroupedRow, GroupedTransactionsResult, PivotAggregationRow, PivotAggregationResult } from '../../shared/types';
 
 // Base columns that always exist on the transactions table
 const BASE_COLUMNS = [
@@ -484,4 +484,64 @@ async function getTailSpendThreshold(): Promise<number> {
     "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
   );
   return result ? parseFloat(result.value) : 10000;
+}
+
+/**
+ * Server-side multi-level pivot aggregation.
+ * Runs GROUP BY on multiple dimensions, returning aggregated amounts and counts.
+ * Replaces client-side useHierarchicalPivotData for 4M+ row datasets.
+ */
+export async function queryPivotAggregation(
+  dimensions: string[],
+  valueDimension: string = 'spend_amount',
+  filters?: TransactionFilter
+): Promise<PivotAggregationResult> {
+  if (!dimensions.length) {
+    return { dimensionColumns: [], rows: [], totalAmount: 0, totalCount: 0 };
+  }
+
+  const validCols = await getColumns();
+
+  // Validate dimensions — only use columns that exist
+  const safeDimensions = dimensions.filter((d) => validCols.includes(d));
+  if (!safeDimensions.length) {
+    return { dimensionColumns: dimensions, rows: [], totalAmount: 0, totalCount: 0 };
+  }
+
+  const { whereSQL, params } = await buildFilterClauses(filters);
+  const hasValue = validCols.includes(valueDimension);
+
+  const amountExpr = hasValue
+    ? `COALESCE(SUM(TRY_CAST(t.${valueDimension} AS DOUBLE)), 0)`
+    : '0';
+
+  // Build SELECT and GROUP BY for all dimension columns
+  const dimSelects = safeDimensions.map(
+    (d, i) => `COALESCE(CAST(t.${d} AS VARCHAR), '') as dim_${i}`
+  );
+  const dimGroupBy = safeDimensions.map((_, i) => `dim_${i}`);
+
+  const sql = `
+    SELECT
+      ${dimSelects.join(',\n      ')},
+      ${amountExpr} as amount,
+      COUNT(*) as count
+    FROM transactions t
+    ${whereSQL}
+    GROUP BY ${dimGroupBy.join(', ')}
+    ORDER BY amount DESC
+  `;
+
+  const rows = await databaseService.all<Record<string, unknown>>(sql, ...params);
+
+  const pivotRows: PivotAggregationRow[] = rows.map((r) => ({
+    dimensions: safeDimensions.map((_, i) => String(r[`dim_${i}`] ?? '')),
+    amount: Number(r.amount),
+    count: Number(r.count),
+  }));
+
+  const totalAmount = pivotRows.reduce((sum, r) => sum + r.amount, 0);
+  const totalCount = pivotRows.reduce((sum, r) => sum + r.count, 0);
+
+  return { dimensionColumns: safeDimensions, rows: pivotRows, totalAmount, totalCount };
 }

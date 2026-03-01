@@ -43,7 +43,8 @@ interface PivotToolbarProps {
   onExpandAll: () => void
   onCollapseAll: () => void
   /* Filter props */
-  rows: Record<string, unknown>[]
+  rows?: Record<string, unknown>[]
+  filterOptions?: Record<string, string[]>
   filterState: PivotFilterState
   onFilterStateChange: (state: PivotFilterState) => void
   onClearAllFilters: () => void
@@ -74,6 +75,7 @@ export default function PivotToolbar({
   onExpandAll,
   onCollapseAll,
   rows,
+  filterOptions: filterOptionsProp,
   filterState,
   onFilterStateChange,
   onClearAllFilters,
@@ -88,8 +90,10 @@ export default function PivotToolbar({
   const addMenuRef = useRef<HTMLDivElement>(null)
   const overflowRef = useRef<HTMLDivElement>(null)
 
-  // Compute unique filter options per column
+  // Use pre-fetched filter options when available, otherwise compute from rows
   const filterOptions = useMemo(() => {
+    if (filterOptionsProp) return filterOptionsProp
+    if (!rows) return {} as Record<string, string[]>
     const opts: Record<string, string[]> = {}
     for (const dim of rowDimensions) {
       if (FILTER_EXCLUDE.has(dim)) continue
@@ -104,7 +108,7 @@ export default function PivotToolbar({
       opts[dim] = [...vals].sort().slice(0, 200)
     }
     return opts
-  }, [rows, rowDimensions])
+  }, [filterOptionsProp, rows, rowDimensions])
 
   const toggleFilterOption = (col: string, value: string) => {
     const current = filterState[col] || []

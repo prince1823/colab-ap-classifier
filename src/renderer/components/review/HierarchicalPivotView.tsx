@@ -13,7 +13,7 @@ import '../../styles/PivotHierarchy.css'
 
 interface HierarchicalPivotViewProps {
   pivotData: HierarchicalPivotData | null
-  transactions: Record<string, unknown>[]
+  transactions?: Record<string, unknown>[]
   availableColumns: string[]
   rowDimensions: string[]
   valueDimension: string
@@ -22,7 +22,8 @@ interface HierarchicalPivotViewProps {
   onValueDimensionChange: (dim: string) => void
   onAggregationChange: (agg: Aggregation) => void
   /* Filter props */
-  allRows: Record<string, unknown>[]
+  allRows?: Record<string, unknown>[]
+  filterOptions?: Record<string, string[]>
   filterState: PivotFilterState
   onFilterStateChange: (state: PivotFilterState) => void
   onClearAllFilters: () => void
@@ -32,6 +33,8 @@ interface HierarchicalPivotViewProps {
   /* Open in Review */
   onOpenInReview: () => void
   openInReviewDisabled: boolean
+  /* Total transaction count (server-side mode) */
+  totalCount?: number
 }
 
 const fmt = (n: number, agg: Aggregation) => {
@@ -55,6 +58,7 @@ export default function HierarchicalPivotView({
   onValueDimensionChange,
   onAggregationChange,
   allRows,
+  filterOptions,
   filterState,
   onFilterStateChange,
   onClearAllFilters,
@@ -62,6 +66,7 @@ export default function HierarchicalPivotView({
   exportDisabled,
   onOpenInReview,
   openInReviewDisabled,
+  totalCount,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
 
@@ -83,7 +88,7 @@ export default function HierarchicalPivotView({
     overscan: 20,
   })
 
-  const hasData = transactions.length > 0
+  const hasData = totalCount ? totalCount > 0 : (transactions?.length ?? 0) > 0
   const grandTotal = pivotData?.grandTotal ?? 0
 
   return (
@@ -102,6 +107,7 @@ export default function HierarchicalPivotView({
         onExpandAll={expandAll}
         onCollapseAll={collapseAll}
         rows={allRows}
+        filterOptions={filterOptions}
         filterState={filterState}
         onFilterStateChange={onFilterStateChange}
         onClearAllFilters={onClearAllFilters}

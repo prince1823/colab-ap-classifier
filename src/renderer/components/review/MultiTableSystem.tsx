@@ -9,6 +9,15 @@ import { evaluateFilterConditions } from '../../utils/filterEvaluation'
 import type { GroupedRow } from '../../../shared/types/transactions'
 import '../../styles/MultiTableSystem.css'
 
+const fmtAbbrev = (n: number): string => {
+  const abs = Math.abs(n)
+  const sign = n < 0 ? '-' : ''
+  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(2)}K`
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+}
+
 export const ITEM_TYPE = 'FILTER_ROW'
 export const TABLE_ROW_TYPE = 'TABLE_ROW'
 export const TABLE_CARD_TYPE = 'TABLE_CARD'
@@ -168,9 +177,9 @@ const HierarchicalRow = ({
           className={`table-row hierarchical level-${level} ${isSelected ? 'selected' : ''} ${isFocused ? 'focused' : ''}`}
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
-          style={{ paddingLeft: `${level * 12 + 8}px` }}
+          style={{ paddingLeft: `${level * 12 + 8}px`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}
         >
-          <div className="row-left">
+          <div className="row-left" style={{ flexShrink: 1, minWidth: 0, overflow: 'hidden' }}>
             {hasChildren && !taxonomyLevelFilter && (
               <button
                 className="expand-btn"
@@ -187,8 +196,8 @@ const HierarchicalRow = ({
               {truncateName(item.value || 'Unknown')}
             </span>
           </div>
-          <span className="row-amount">
-            ${Number(displayAmount || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          <span className="row-amount" style={{ flexShrink: 0, marginLeft: 'auto', textAlign: 'right' }}>
+            {fmtAbbrev(Number(displayAmount || 0))}
           </span>
         </div>
       )}
@@ -359,14 +368,14 @@ const DraggableTableRow = ({ row, column, amount, count, onDragEnd, isSelected, 
       className={`table-row ${isDragging ? 'dragging' : ''} ${isSelected ? 'selected' : ''} ${isKeyboardFocused ? 'keyboard-focused' : ''}`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      style={{ opacity: isDragging ? 0.5 : 1 }}
+      style={{ opacity: isDragging ? 0.5 : 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}
       title={tooltipText}
     >
-      <span className="row-value" title={row}>
+      <span className="row-value" title={row} style={{ flexShrink: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {truncateName(fullDisplayValue)}
       </span>
-      <span className="row-amount">
-        ${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+      <span className="row-amount" style={{ flexShrink: 0, marginLeft: 'auto', textAlign: 'right' }}>
+        {fmtAbbrev(amount)}
       </span>
     </div>
   )
@@ -835,8 +844,8 @@ const FilterTable = React.memo(({
           </span>
           {!collapsed && (
             <>
-              <span className="table-total-badge" title={`Total: $${totalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}>
-                ${(totalAmount / 1000).toFixed(0)}k
+              <span className="table-total-badge" title={`Total: ${fmtAbbrev(totalAmount)}`}>
+                {fmtAbbrev(totalAmount)}
               </span>
             </>
           )}

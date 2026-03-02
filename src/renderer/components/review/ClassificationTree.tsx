@@ -7,9 +7,10 @@ import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
 import { ipc } from '../../lib/ipc'
 import '../../styles/ClassificationTree.css'
 
-const ColumnNode = ({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete, isLeaf }) => {
+const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete, isLeaf }) => {
   const levelLabel = level > 0 ? `L${level}` : ''
   const isDroppableLevel = isLeaf || level >= 3
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [{ isOverShallow, itemType, canDrop }, drop] = useDrop({
     accept: [TABLE_ROW_TYPE, ITEM_TYPE],
@@ -50,7 +51,7 @@ const ColumnNode = ({ node, level, isSelected, isActivePath, onSelect, onDropRow
     }),
   })
 
-  // Auto-open the next column when dragging over this node (fast hover)
+  // Auto-open the next column when dragging over this node (instant)
   useEffect(() => {
     if (isOverShallow && itemType && onHoverExpand) {
       onHoverExpand(node.path, level)
@@ -85,12 +86,12 @@ const ColumnNode = ({ node, level, isSelected, isActivePath, onSelect, onDropRow
 
   return (
     <div
-      className={`node-wrapper column-node-wrapper ${isSelected ? 'selected' : ''} ${isActivePath ? 'active-path' : ''} ${isKeyboardSelected ? 'keyboard-selected' : ''}`}
+      ref={drop}
+      className={`node-wrapper column-node-wrapper ${isSelected ? 'selected' : ''} ${isActivePath ? 'active-path' : ''} ${isKeyboardSelected ? 'keyboard-selected' : ''} ${(isDroppableLevel && canDrop && isOverShallow) ? 'drag-over' : ''}`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
       <button
-        ref={drop}
         className={`node-content column-node column-level-${level} ${isSelected ? 'selected' : ''} ${isActivePath ? 'active-path' : ''} ${isKeyboardSelected ? 'keyboard-selected' : ''} ${(isDroppableLevel && canDrop && isOverShallow) ? 'drag-over' : ''}`}
         onClick={handleClick}
         type="button"
@@ -131,7 +132,7 @@ const ColumnNode = ({ node, level, isSelected, isActivePath, onSelect, onDropRow
       )}
     </div>
   )
-}
+})
 
 const ClassificationTree = ({ 
   transactions, 

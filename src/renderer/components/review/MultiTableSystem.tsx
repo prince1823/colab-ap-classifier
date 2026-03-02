@@ -68,6 +68,7 @@ const HierarchicalRow = ({
   focusedPath = null, // Full classification path string to visually highlight
   onDoubleClickFilter = null
 }) => {
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasChildren = item.children && item.children.length > 0
   const isExpanded = expandedNodes.has(item.value)
   const amount = item.amount || 0
@@ -77,23 +78,32 @@ const HierarchicalRow = ({
     item.fullPath.startsWith(focusedPath + '|')
   )
   const effectiveIsExpanded = taxonomyLevelFilter ? true : (isExpanded || isOnFocusedPath)
-  
+
   const handleClick = (e) => {
     e.stopPropagation()
-    // Always notify parent of selection with the full taxonomy path if available.
-    // This lets clicks on L1 / L2 / L3 drive external filters.
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+    }
     const selectionValue = item.fullPath || item.value
-    if (onSelect && selectionValue) {
-      onSelect(selectionValue)
-    }
-    // For nodes with children, also toggle expand/collapse on row click
-    if (hasChildren) {
-      toggleExpanded(item.value)
-    }
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null
+      if (onSelect && selectionValue) {
+        onSelect(selectionValue)
+      }
+      if (hasChildren) {
+        toggleExpanded(item.value)
+      }
+    }, 200)
   }
 
   const handleDoubleClick = (e) => {
     e.stopPropagation()
+    // Cancel the pending single-click
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+    }
     if (!onDoubleClickFilter) return
     const selectionValue = item.fullPath || item.value
     onDoubleClickFilter(column, [selectionValue])
@@ -224,6 +234,8 @@ const HierarchicalRow = ({
 
 // Regular draggable row component - can be dragged for filtering or reclassification
 const DraggableTableRow = ({ row, column, amount, count, onDragEnd, isSelected, isKeyboardFocused = false, onSelect, transactionRows, onToggleSelect, isMultiSelectMode, selectedRowsInTable = [], data, rowRef, onDoubleClickFilter, serverSide = false }) => {
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Collect all selected rows from the same table for multi-drag
   const selectedValues = selectedRowsInTable.length > 0 && isSelected
     ? selectedRowsInTable
@@ -279,18 +291,29 @@ const DraggableTableRow = ({ row, column, amount, count, onDragEnd, isSelected, 
     if (e.target.closest('.row-checkbox')) {
       return
     }
-    if (e.ctrlKey || e.metaKey) {
-      // Ctrl/Cmd + click: toggle selection
-      e.preventDefault()
-      onToggleSelect && onToggleSelect(row)
-    } else {
-      // Regular click: select/deselect
-      onSelect && onSelect(row)
+    // Delay single-click so double-click can cancel it
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
     }
+    const isMeta = e.ctrlKey || e.metaKey
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null
+      if (isMeta) {
+        onToggleSelect && onToggleSelect(row)
+      } else {
+        onSelect && onSelect(row)
+      }
+    }, 200)
   }
 
   const handleDoubleClick = (e) => {
     e.stopPropagation()
+    // Cancel the pending single-click so it doesn't toggle selection
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+    }
     if (!onDoubleClickFilter) return
     // If multi-selected, apply all selected values as filter
     if (isSelected && selectedRowsInTable.length > 1) {

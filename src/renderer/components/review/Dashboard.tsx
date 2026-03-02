@@ -59,7 +59,16 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     }
   }, [storeSetReviewFilters])
 
-  const [selectedRows, setSelectedRows] = useState([])
+  // ── Persisted table/selection state (survives tab navigation) ──
+  const selectedRows = reviewFilters.selectedRows || []
+  const setSelectedRows = useCallback((updater: any) => {
+    if (typeof updater === 'function') {
+      storeSetReviewFilters({ selectedRows: updater(useWorkflowStore.getState().reviewFilters.selectedRows || []) })
+    } else {
+      storeSetReviewFilters({ selectedRows: updater })
+    }
+  }, [storeSetReviewFilters])
+
   const [isReclassifying, setIsReclassifying] = useState(false)
   const [reclassificationProgress, setReclassificationProgress] = useState({ current: 0, total: 0 })
 
@@ -335,14 +344,29 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       storeSetReviewFilters({ filterState: updater })
     }
   }, [storeSetReviewFilters])
-  const [tables, setTables] = useState(() => [
+  // ── Persisted table config & local filters (survives tab navigation) ──
+  const tables = reviewFilters.tables || [
     { id: 'vendor', title: 'supplier_name', column: 'supplier_name', isHierarchical: false, collapsed: false },
     { id: 'commodity', title: 'line_description', column: 'line_description', isHierarchical: false, collapsed: false },
     { id: 'gl', title: 'gl_description', column: 'gl_description', isHierarchical: false, collapsed: false },
-  ])
+  ]
+  const setTables = useCallback((updater: any) => {
+    if (typeof updater === 'function') {
+      storeSetReviewFilters({ tables: updater(useWorkflowStore.getState().reviewFilters.tables) })
+    } else {
+      storeSetReviewFilters({ tables: updater })
+    }
+  }, [storeSetReviewFilters])
   useEffect(() => { tablesRef.current = tables }, [tables])
   // Per-table local filters - only applied to specific tables via drag-drop
-  const [tableLocalFilters, setTableLocalFilters] = useState({})
+  const tableLocalFilters = reviewFilters.tableLocalFilters || {}
+  const setTableLocalFilters = useCallback((updater: any) => {
+    if (typeof updater === 'function') {
+      storeSetReviewFilters({ tableLocalFilters: updater(useWorkflowStore.getState().reviewFilters.tableLocalFilters || {}) })
+    } else {
+      storeSetReviewFilters({ tableLocalFilters: updater })
+    }
+  }, [storeSetReviewFilters])
   useEffect(() => { tableLocalFiltersRef.current = tableLocalFilters }, [tableLocalFilters])
 
 

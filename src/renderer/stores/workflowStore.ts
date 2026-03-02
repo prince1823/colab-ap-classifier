@@ -27,6 +27,14 @@ const defaultPivotSettings: PivotSettings = {
   filterState: {},
 }
 
+interface ReviewTableConfig {
+  id: string
+  title: string
+  column: string
+  isHierarchical: boolean
+  collapsed: boolean
+}
+
 interface ReviewFilterState {
   activeFilters: Record<string, string[]>
   filterState: Record<string, string[]>
@@ -34,6 +42,9 @@ interface ReviewFilterState {
   filterConnectors: Record<string, 'AND' | 'OR'>
   filterCombinator: 'AND' | 'OR'
   showFilterPanel: boolean
+  tables: ReviewTableConfig[]
+  selectedRows: string[]
+  tableLocalFilters: Record<string, any>
 }
 
 const defaultReviewFilters: ReviewFilterState = {
@@ -57,6 +68,13 @@ const defaultReviewFilters: ReviewFilterState = {
   filterConnectors: {},
   filterCombinator: 'AND',
   showFilterPanel: false,
+  tables: [
+    { id: 'vendor', title: 'supplier_name', column: 'supplier_name', isHierarchical: false, collapsed: false },
+    { id: 'commodity', title: 'line_description', column: 'line_description', isHierarchical: false, collapsed: false },
+    { id: 'gl', title: 'gl_description', column: 'gl_description', isHierarchical: false, collapsed: false },
+  ],
+  selectedRows: [],
+  tableLocalFilters: {},
 }
 
 interface WorkflowState {

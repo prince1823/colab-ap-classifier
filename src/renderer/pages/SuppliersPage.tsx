@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplier, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
+import { useWorkflowStore } from '../stores/workflowStore'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
 
@@ -117,8 +118,11 @@ function EditableCell({
 
 
 export default function SuppliersPage() {
-  const [suppliers, setSuppliers] = useState<ProjectSupplier[]>([])
-  const [loading, setLoading] = useState(true)
+  const cachedSuppliers = useWorkflowStore((s) => s.cachedSuppliers)
+  const setCachedSuppliers = useWorkflowStore((s) => s.setCachedSuppliers)
+
+  const [suppliers, setSuppliers] = useState<ProjectSupplier[]>(cachedSuppliers ?? [])
+  const [loading, setLoading] = useState(cachedSuppliers === null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
@@ -126,11 +130,13 @@ export default function SuppliersPage() {
   const [catAFilter, setCatAFilter] = useState<'all' | 'catA' | 'nonCatA'>('all')
 
   const loadData = async () => {
-    setLoading(true)
+    // Only show spinner if no cached data
+    if (suppliers.length === 0) setLoading(true)
     setError(null)
     try {
       const data = await ipc.suppliers.list()
       setSuppliers(data)
+      setCachedSuppliers(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load suppliers')
     } finally {
@@ -139,6 +145,15 @@ export default function SuppliersPage() {
   }
 
   useEffect(() => { loadData() }, [])
+
+  /** Update both local state and cache */
+  const updateSuppliers = useCallback((updater: (prev: ProjectSupplier[]) => ProjectSupplier[]) => {
+    setSuppliers(prev => {
+      const next = updater(prev)
+      setCachedSuppliers(next)
+      return next
+    })
+  }, [setCachedSuppliers])
 
   /** Save a single supplierInfo field for a supplier */
   const saveField = useCallback(async (supplier: ProjectSupplier, field: keyof SupplierInfo, newValue: string) => {
@@ -152,7 +167,7 @@ export default function SuppliersPage() {
       await ipc.suppliers.update(supplier.supplierName, { supplierInfo: updatedInfo })
 
       // Update local state immediately
-      setSuppliers(prev => prev.map(s =>
+      updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, supplierInfo: updatedInfo } : s
       ))
     } catch (e) {
@@ -160,7 +175,7 @@ export default function SuppliersPage() {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [updateSuppliers])
 
   /** Save parentName for a supplier */
   const saveParentName = useCallback(async (supplier: ProjectSupplier, newValue: string) => {
@@ -168,7 +183,7 @@ export default function SuppliersPage() {
     try {
       const parentName = newValue || null
       await ipc.suppliers.update(supplier.supplierName, { parentName })
-      setSuppliers(prev => prev.map(s =>
+      updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, parentName } : s
       ))
     } catch (e) {
@@ -176,14 +191,14 @@ export default function SuppliersPage() {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [updateSuppliers])
 
   /** Save categoryA toggle */
   const saveCategoryA = useCallback(async (supplier: ProjectSupplier, checked: boolean) => {
     setSaving(true)
     try {
       await ipc.suppliers.update(supplier.supplierName, { categoryA: checked })
-      setSuppliers(prev => prev.map(s =>
+      updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, categoryA: checked } : s
       ))
     } catch (e) {
@@ -191,7 +206,7 @@ export default function SuppliersPage() {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [updateSuppliers])
 
   /** Get display value for a supplierInfo field */
   const getFieldValue = (supplier: ProjectSupplier, field: keyof SupplierInfo): string => {

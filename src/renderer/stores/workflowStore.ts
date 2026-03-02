@@ -93,6 +93,9 @@ interface WorkflowState {
   // Review tab filter state (persists across tab navigation, resets on project close)
   reviewFilters: ReviewFilterState
 
+  // Cached page data (survives tab navigation, resets on project close)
+  cachedSuppliers: any[] | null
+
   // Persisted route — restored on reload
   lastRoute: string | null
 
@@ -119,6 +122,7 @@ interface WorkflowState {
   setPivotSettings: (settings: Partial<PivotSettings>) => void
   setReviewFilters: (filters: Partial<ReviewFilterState>) => void
   clearReviewFilters: () => void
+  setCachedSuppliers: (suppliers: any[] | null) => void
   markDataReviewed: () => void
   setLastRoute: (route: string) => void
   reset: () => void
@@ -165,6 +169,7 @@ export const useWorkflowStore = create<WorkflowState>()(
       uploadDraft: { ...defaultUploadDraft },
       pivotSettings: { ...defaultPivotSettings },
       reviewFilters: { ...defaultReviewFilters },
+      cachedSuppliers: null,
       lastRoute: null,
 
       ...deriveState(null, 0, null, false),
@@ -179,6 +184,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           uploadDraft: { ...defaultUploadDraft },
           pivotSettings: { ...defaultPivotSettings },
           reviewFilters: { ...defaultReviewFilters },
+          cachedSuppliers: null,
           ...deriveState(null, 0, null),
         })
 
@@ -202,6 +208,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           uploadDraft: { ...defaultUploadDraft },
           pivotSettings: { ...defaultPivotSettings },
           reviewFilters: { ...defaultReviewFilters },
+          cachedSuppliers: null,
           ...deriveState(null, 0, null),
         })
 
@@ -279,6 +286,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           uploadDraft: { ...defaultUploadDraft },
           pivotSettings: { ...defaultPivotSettings },
           reviewFilters: { ...defaultReviewFilters },
+          cachedSuppliers: null,
           lastRoute: null,
           ...deriveState(null, 0, null),
         })
@@ -398,6 +406,10 @@ export const useWorkflowStore = create<WorkflowState>()(
         set({ reviewFilters: { ...defaultReviewFilters } })
       },
 
+      setCachedSuppliers: (suppliers) => {
+        set({ cachedSuppliers: suppliers })
+      },
+
       markDataReviewed: () => {
         const { projectMetadata, classifiedRows, classificationProgress } = get()
         set({
@@ -419,6 +431,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           uploadDraft: { ...defaultUploadDraft },
           pivotSettings: { ...defaultPivotSettings },
           reviewFilters: { ...defaultReviewFilters },
+          cachedSuppliers: null,
           lastRoute: null,
           ...deriveState(null, 0, null, false),
         })

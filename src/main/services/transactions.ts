@@ -22,13 +22,18 @@ export function invalidateColumnCache(): void {
  * Build WHERE clauses + params from a TransactionFilter.
  * Shared by queryTransactions, getCount, queryGroupedByColumn, etc.
  * Table alias defaults to 't'.
+ *
+ * Returns `needsTaxonomyJoin: true` when an L1-L4 classification filter
+ * is present — callers that don't already JOIN taxonomy must add:
+ *   LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
  */
 async function buildFilterClauses(
   filters?: TransactionFilter,
   alias = 't'
-): Promise<{ whereSQL: string; params: unknown[] }> {
+): Promise<{ whereSQL: string; params: unknown[]; needsTaxonomyJoin: boolean }> {
   const whereClauses: string[] = [];
   const params: unknown[] = [];
+  let needsTaxonomyJoin = false;
 
   if (filters?.supplierName) {
     whereClauses.push(`${alias}.supplier_name = ?`);
@@ -71,6 +76,80 @@ async function buildFilterClauses(
     const perFilterParams: unknown[][] = [];
 
     for (const cf of filters.columnFilters) {
+      // Handle virtual L1/L2/L3/L4 classification columns
+      // These are derived from taxonomy.full_path (pipe-delimited), not real DB columns
+      const classLevelMatch = /^L(\d)$/i.exec(cf.column);
+      if (classLevelMatch) {
+        needsTaxonomyJoin = true;
+        const levelIdx = parseInt(classLevelMatch[1], 10);
+        const taxExpr = `TRIM(string_split(tax.full_path, '|')[${levelIdx}])`;
+        const cfParams: unknown[] = [];
+        let clause: string;
+
+        switch (cf.operator) {
+          case 'is':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} = ?`;
+              cfParams.push(cf.values[0]);
+            } else {
+              clause = `${taxExpr} IN (${cf.values.map(() => '?').join(', ')})`;
+              cfParams.push(...cf.values);
+            }
+            break;
+          case 'is_not':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} != ?`;
+              cfParams.push(cf.values[0]);
+            } else {
+              clause = `${taxExpr} NOT IN (${cf.values.map(() => '?').join(', ')})`;
+              cfParams.push(...cf.values);
+            }
+            break;
+          case 'contains':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} ILIKE ?`;
+              cfParams.push(`%${cf.values[0]}%`);
+            } else {
+              clause = `(${cf.values.map(() => `${taxExpr} ILIKE ?`).join(' OR ')})`;
+              cfParams.push(...cf.values.map(v => `%${v}%`));
+            }
+            break;
+          case 'not_contains':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} NOT ILIKE ?`;
+              cfParams.push(`%${cf.values[0]}%`);
+            } else {
+              clause = `(${cf.values.map(() => `${taxExpr} NOT ILIKE ?`).join(' AND ')})`;
+              cfParams.push(...cf.values.map(v => `%${v}%`));
+            }
+            break;
+          case 'starts_with':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} ILIKE ?`;
+              cfParams.push(`${cf.values[0]}%`);
+            } else {
+              clause = `(${cf.values.map(() => `${taxExpr} ILIKE ?`).join(' OR ')})`;
+              cfParams.push(...cf.values.map(v => `${v}%`));
+            }
+            break;
+          case 'ends_with':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} ILIKE ?`;
+              cfParams.push(`%${cf.values[0]}`);
+            } else {
+              clause = `(${cf.values.map(() => `${taxExpr} ILIKE ?`).join(' OR ')})`;
+              cfParams.push(...cf.values.map(v => `%${v}`));
+            }
+            break;
+          default:
+            continue;
+        }
+
+        perFilterClauses.push({ column: cf.column, sql: clause });
+        perFilterParams.push(cfParams);
+        continue;
+      }
+
       if (!validCols.includes(cf.column)) continue;
       const col = `${alias}.${cf.column}`;
       const cfParams: unknown[] = [];
@@ -188,7 +267,7 @@ async function buildFilterClauses(
   }
 
   const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-  return { whereSQL, params };
+  return { whereSQL, params, needsTaxonomyJoin };
 }
 
 /**
@@ -316,8 +395,9 @@ export async function getColumns(): Promise<string[]> {
  * Get total count of transactions matching the given filters.
  */
 export async function getCount(filters?: TransactionFilter): Promise<number> {
-  const { whereSQL, params } = await buildFilterClauses(filters);
-  const sql = `SELECT COUNT(*) as cnt FROM transactions t ${whereSQL}`;
+  const { whereSQL, params, needsTaxonomyJoin } = await buildFilterClauses(filters);
+  const taxJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
+  const sql = `SELECT COUNT(*) as cnt FROM transactions t ${taxJoin} ${whereSQL}`;
   const result = await databaseService.get<{ cnt: number | bigint }>(sql, ...params);
   return Number(result?.cnt ?? 0);
 }
@@ -379,6 +459,55 @@ export async function ensureIndexes(): Promise<void> {
 }
 
 /**
+ * GROUP BY on a classification level (L1–L4) extracted from taxonomy.full_path.
+ * DuckDB's string_split gives us pipe-delimited path segments.
+ */
+async function queryGroupedByClassificationLevel(
+  column: string,
+  levelIndex: number,
+  filters?: TransactionFilter
+): Promise<GroupedTransactionsResult> {
+  const { whereSQL, params } = await buildFilterClauses(filters)
+  const validCols = await getColumns()
+  const hasSpend = validCols.includes('spend_amount')
+
+  const amountExpr = hasSpend
+    ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)'
+    : '0'
+
+  // DuckDB string_split is 1-indexed
+  const sql = `
+    SELECT
+      COALESCE(TRIM(string_split(tax.full_path, '|')[${levelIndex}]), '(blank)') as value,
+      ${amountExpr} as amount,
+      COUNT(*) as count
+    FROM transactions t
+    LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
+    ${whereSQL}
+    GROUP BY value
+    HAVING value != '(blank)' AND value != ''
+    ORDER BY ${hasSpend ? 'amount DESC' : 'count DESC'}
+  `
+
+  const rows = await databaseService.all<{
+    value: string
+    amount: number | bigint
+    count: number | bigint
+  }>(sql, ...params)
+
+  const groupedRows: GroupedRow[] = rows.map((r) => ({
+    value: String(r.value),
+    amount: Number(r.amount),
+    count: Number(r.count),
+  }))
+
+  const totalAmount = groupedRows.reduce((sum, r) => sum + r.amount, 0)
+  const totalCount = groupedRows.reduce((sum, r) => sum + r.count, 0)
+
+  return { column, rows: groupedRows, totalAmount, totalCount }
+}
+
+/**
  * Server-side GROUP BY aggregation for a single column.
  * Returns grouped rows with SUM(spend_amount) and COUNT(*).
  * DuckDB handles millions of rows in milliseconds.
@@ -387,17 +516,27 @@ export async function queryGroupedByColumn(
   column: string,
   filters?: TransactionFilter
 ): Promise<GroupedTransactionsResult> {
+  // Handle virtual classification level columns (L1, L2, L3, L4)
+  // These are derived from taxonomy.full_path (pipe-delimited), not real DB columns
+  const classLevelMatch = /^L(\d)$/i.exec(column)
+  if (classLevelMatch) {
+    const levelIndex = parseInt(classLevelMatch[1], 10)
+    return queryGroupedByClassificationLevel(column, levelIndex, filters)
+  }
+
   const validCols = await getColumns();
   if (!validCols.includes(column)) {
     return { column, rows: [], totalAmount: 0, totalCount: 0 };
   }
 
-  const { whereSQL, params } = await buildFilterClauses(filters);
+  const { whereSQL, params, needsTaxonomyJoin } = await buildFilterClauses(filters);
   const hasSpend = validCols.includes('spend_amount');
 
   const amountExpr = hasSpend
     ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)'
     : '0';
+
+  const taxJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
 
   const sql = `
     SELECT
@@ -405,6 +544,7 @@ export async function queryGroupedByColumn(
       ${amountExpr} as amount,
       COUNT(*) as count
     FROM transactions t
+    ${taxJoin}
     ${whereSQL}
     GROUP BY t.${column}
     ORDER BY ${hasSpend ? 'amount DESC' : 'count DESC'}
@@ -462,7 +602,7 @@ export async function getTransactionIdsByColumnValue(
   const validCols = await getColumns();
   if (!validCols.includes(column)) return [];
 
-  const { whereSQL, params } = await buildFilterClauses(filters);
+  const { whereSQL, params, needsTaxonomyJoin } = await buildFilterClauses(filters);
 
   // Add the column=value condition
   const valueCondition = value === '(blank)'
@@ -474,7 +614,8 @@ export async function getTransactionIdsByColumnValue(
     ? `${whereSQL} AND ${valueCondition}`
     : `WHERE ${valueCondition}`;
 
-  const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${fullWhere}`;
+  const taxJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
+  const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${taxJoin} ${fullWhere}`;
   const rows = await databaseService.all<{ id: string }>(sql, ...params);
   return rows.map((r) => String(r.id));
 }
@@ -508,12 +649,14 @@ export async function queryPivotAggregation(
     return { dimensionColumns: dimensions, rows: [], totalAmount: 0, totalCount: 0 };
   }
 
-  const { whereSQL, params } = await buildFilterClauses(filters);
+  const { whereSQL, params, needsTaxonomyJoin } = await buildFilterClauses(filters);
   const hasValue = validCols.includes(valueDimension);
 
   const amountExpr = hasValue
     ? `COALESCE(SUM(TRY_CAST(t.${valueDimension} AS DOUBLE)), 0)`
     : '0';
+
+  const taxJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
 
   // Build SELECT and GROUP BY for all dimension columns
   const dimSelects = safeDimensions.map(
@@ -527,6 +670,7 @@ export async function queryPivotAggregation(
       ${amountExpr} as amount,
       COUNT(*) as count
     FROM transactions t
+    ${taxJoin}
     ${whereSQL}
     GROUP BY ${dimGroupBy.join(', ')}
     ORDER BY amount DESC

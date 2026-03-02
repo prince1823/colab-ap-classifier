@@ -5,6 +5,7 @@ import { TABLE_ROW_TYPE, ITEM_TYPE } from './MultiTableSystem'
 import { buildTaxonomyTree, populateTreeWithTransactions } from '../../utils/taxonomyLoader'
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
 import { ipc } from '../../lib/ipc'
+import { fmtAbbrev } from '../../utils/formatSpend'
 import '../../styles/ClassificationTree.css'
 
 const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete, isLeaf }) => {
@@ -106,9 +107,9 @@ const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect
         {(level === 1 || level === 4) && node.amount > 0 && (
           <span
             className="node-amount"
-            title={`Total: $${Number(node.amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+            title={`Total: ${fmtAbbrev(Number(node.amount || 0))}`}
           >
-            ${Number(node.amount || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            {fmtAbbrev(Number(node.amount || 0))}
           </span>
         )}
       </button>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { X, CheckCircle, FileText, Building2, List, AlertCircle, Sparkles, Edit2 } from 'lucide-react'
+import { fmtAbbrev } from '../../utils/formatSpend'
 import '../../styles/SystemFeedbackModal.css'
 
 const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onReject, onEdit }) => {
@@ -103,16 +104,7 @@ const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onR
   }
 
   // Format amount for display
-  const formatAmount = (amount) => {
-    if (amount === 0) return '$0'
-    if (amount >= 1000000) {
-      return `$${(amount / 1000000).toFixed(2)}M`
-    }
-    if (amount >= 1000) {
-      return `$${(amount / 1000).toFixed(2)}K`
-    }
-    return `$${amount.toFixed(2)}`
-  }
+  const formatAmount = (amount) => fmtAbbrev(amount)
 
   return (
     <>

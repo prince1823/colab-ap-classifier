@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplier, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
 import '../styles/SuppliersPage.css'
+import { fmtAbbrev } from '../utils/formatSpend'
 
 const SUPPLIER_TYPES: SupplierType[] = ['company', 'individual', 'government']
 
@@ -299,7 +300,7 @@ export default function SuppliersPage() {
                 <td className="col-supplier" title={s.supplierName}>{s.supplierName}</td>
                 <td className="col-right">{s.transactionCount}</td>
                 <td className="col-right">
-                  ${s.totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {fmtAbbrev(s.totalSpend)}
                 </td>
                 <td className="col-center">
                   <input

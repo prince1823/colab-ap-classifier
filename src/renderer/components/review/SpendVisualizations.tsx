@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Filter, TrendingUp } from 'lucide-react'
+import { fmtAbbrev } from '../../utils/formatSpend'
 import '../styles/SpendVisualizations.css'
 
 const SpendVisualizations = ({ transactions, activeFilters, excludeTailSpend, setExcludeTailSpend, onQuickAction }) => {
@@ -108,7 +109,7 @@ const SpendVisualizations = ({ transactions, activeFilters, excludeTailSpend, se
                 tick={{ fontSize: 12 }}
               />
               <Tooltip
-                formatter={(value) => [`$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, 'Spend']}
+                formatter={(value) => [fmtAbbrev(Number(value)), 'Spend']}
                 contentStyle={{ cursor: onQuickAction ? 'pointer' : 'default' }}
               />
               <Bar 
@@ -155,7 +156,7 @@ const SpendVisualizations = ({ transactions, activeFilters, excludeTailSpend, se
                             }}
                           />
                           <span className="taxonomy-bar-value">
-                            ${entry.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            {fmtAbbrev(entry.total)}
                           </span>
                         </div>
                       </div>

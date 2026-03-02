@@ -1,4 +1,5 @@
 import type { TransactionStats } from '../../../shared/types/transactions'
+import { fmtAbbrev } from '../../utils/formatSpend'
 
 interface Props {
   stats: TransactionStats
@@ -9,7 +10,7 @@ export default function StatsCards({ stats }: Props) {
     { label: 'Total Rows', value: stats.totalRows.toLocaleString() },
     {
       label: 'Total Spend',
-      value: `$${stats.totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: fmtAbbrev(stats.totalSpend),
     },
     { label: 'Unique Suppliers', value: stats.uniqueSuppliers.toLocaleString() },
     { label: 'Classified', value: stats.classifiedRows.toLocaleString() },

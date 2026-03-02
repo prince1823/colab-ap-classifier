@@ -1,16 +1,10 @@
 import React from 'react'
 import { FileText, DollarSign, Building2 } from 'lucide-react'
+import { fmtAbbrev } from '../../utils/formatSpend'
 import '../styles/TopMetrics.css'
 
 const TopMetrics = ({ metrics }) => {
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount)
-  }
+  const formatCurrency = (amount) => fmtAbbrev(amount)
 
   const formatNumber = (num) => {
     return new Intl.NumberFormat('en-US').format(num)

@@ -5,6 +5,7 @@ import { transactionToDashboardRow } from '../utils/transactionTransform'
 import Dashboard from '../components/review/Dashboard'
 import { ipc } from '../lib/ipc'
 import type { TransactionStats } from '../../shared/types/transactions'
+import { fmtAbbrev } from '../utils/formatSpend'
 
 /**
  * Light-weight loader: fetches only the first page of raw transactions
@@ -56,7 +57,7 @@ const DashboardContent = () => {
       {stats && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-200 bg-gray-50">
           <span className="text-xs text-gray-500">
-            {stats.totalRows.toLocaleString()} rows | ${stats.totalSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })} total spend
+            {stats.totalRows.toLocaleString()} rows | {fmtAbbrev(stats.totalSpend)} total spend
           </span>
         </div>
       )}

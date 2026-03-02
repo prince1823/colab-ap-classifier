@@ -4,21 +4,12 @@ import {
   BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, LabelList
 } from 'recharts'
 import { Sparkles, TrendingUp, TrendingDown, AlertCircle, CheckCircle2, PieChart as PieIcon, BarChart3 } from 'lucide-react'
+import { fmtAbbrev } from '../../utils/formatSpend'
 import '../../styles/MetricsTab.css'
 
-const formatCurrency = (amount) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount || 0)
+const formatCurrency = (amount) => fmtAbbrev(amount || 0)
 
-const formatCurrencyShort = (amount) => {
-  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`
-  if (amount >= 1000) return `$${(amount / 1000).toFixed(1)}k`
-  return `$${Math.round(amount)}`
-}
+const formatCurrencyShort = (amount) => fmtAbbrev(amount)
 
 const formatNumber = (num) => new Intl.NumberFormat('en-US').format(num || 0)
 
@@ -443,36 +434,38 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
             </div>
             <div className="chart-type-badge">Trend</div>
           </div>
-          <div className="metrics-card-body">
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={monthlySeries}>
-                <defs>
-                  <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={(v) => `$${Number(v).toLocaleString()}`} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                  formatter={(v) => [formatCurrency(v), 'Spend']}
-                />
-                <Area
-                  type="monotone"
-                  dataKey={selectedBenchmark === 'topSupplier' ? 'topSupplierSpend' : 'spend'}
-                  stroke="#f97316"
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#colorSpend)"
-                  isAnimationActive={true}
-                  animationDuration={1000}
-                >
-                  <LabelList dataKey={selectedBenchmark === 'topSupplier' ? 'topSupplierSpend' : 'spend'} position="top" formatter={formatCurrencyShort} style={{ fontSize: '10px', fill: 'var(--text-secondary)', fontWeight: '600' }} />
-                </Area>
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="metrics-card-body" style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: Math.max(monthlySeries.length * 80, 400) }}>
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={monthlySeries}>
+                  <defs>
+                    <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={(v) => fmtAbbrev(Number(v))} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
+                    formatter={(v) => [formatCurrency(v), 'Spend']}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey={selectedBenchmark === 'topSupplier' ? 'topSupplierSpend' : 'spend'}
+                    stroke="#f97316"
+                    strokeWidth={3}
+                    fillOpacity={1}
+                    fill="url(#colorSpend)"
+                    isAnimationActive={true}
+                    animationDuration={1000}
+                  >
+                    <LabelList dataKey={selectedBenchmark === 'topSupplier' ? 'topSupplierSpend' : 'spend'} position="top" formatter={formatCurrencyShort} style={{ fontSize: '10px', fill: 'var(--text-secondary)', fontWeight: '600' }} />
+                  </Area>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ipc } from '../lib/ipc'
 import type { TransactionStats } from '../../shared/types/transactions'
+import { fmtAbbrev } from '../utils/formatSpend'
 
 interface ClassificationBreakdown {
   path: string
@@ -130,7 +131,7 @@ export default function OutputPage() {
               <div>
                 <p className="text-xs text-gray-500">Total Spend</p>
                 <p className="text-lg font-semibold text-gray-900">
-                  ${stats.totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {fmtAbbrev(stats.totalSpend)}
                 </p>
               </div>
               <div>
@@ -165,7 +166,7 @@ export default function OutputPage() {
                         </td>
                         <td className="px-4 py-2 text-right text-sm text-gray-700">{item.count.toLocaleString()}</td>
                         <td className="px-4 py-2 text-right text-sm text-gray-700">
-                          ${item.spend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {fmtAbbrev(item.spend)}
                         </td>
                         <td className="px-4 py-2 text-right text-sm text-gray-700">
                           {stats.totalSpend > 0 ? ((item.spend / stats.totalSpend) * 100).toFixed(1) : '0.0'}%

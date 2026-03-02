@@ -1,17 +1,11 @@
 import React from 'react'
 import { X, FileText, DollarSign, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { fmtAbbrev } from '../../utils/formatSpend'
 import '../styles/ExpandableMetrics.css'
 
 const ExpandableMetrics = ({ transactions, filteredTransactions, isOpen, onClose }) => {
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount)
-  }
+  const formatCurrency = (amount) => fmtAbbrev(amount)
 
   const formatNumber = (num) => {
     return new Intl.NumberFormat('en-US').format(num)

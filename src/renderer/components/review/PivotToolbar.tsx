@@ -170,7 +170,10 @@ export default function PivotToolbar({
     onRowDimensionsChange(next)
   }
 
+  const MAX_ROW_DIMS = 6
+
   const addRowDim = (col: string) => {
+    if (rowDimensions.length >= MAX_ROW_DIMS) return
     onRowDimensionsChange([...rowDimensions, col])
     setShowAddMenu(false)
   }
@@ -265,8 +268,8 @@ export default function PivotToolbar({
             )}
           </div>
         )}
-        {/* Add field button */}
-        {availableForRows.length > 0 && (
+        {/* Add field button — hidden once max dimensions reached */}
+        {availableForRows.length > 0 && rowDimensions.length < MAX_ROW_DIMS && (
           <div ref={addMenuRef} style={{ position: 'relative', display: 'inline-flex' }}>
             <button
               className="pivot-add-field-btn"

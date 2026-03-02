@@ -765,3 +765,4 @@ export async function queryPivotAggregation(
 
   return { dimensionColumns: safeDimensions, rows: pivotRows, totalAmount, totalCount };
 }
+

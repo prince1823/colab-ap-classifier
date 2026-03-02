@@ -128,15 +128,50 @@ export default function SuppliersPage() {
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
   const [catAFilter, setCatAFilter] = useState<'all' | 'catA' | 'nonCatA'>('all')
+  const [classificationMap, setClassificationMap] = useState<Record<string, { l1: string; l2: string; l3: string }>>({})
+
+  /** Build supplier→{l1,l2,l3} map from transactions (top classification by spend per supplier) */
+  const buildClassificationMap = (transactions: { classificationPath: string | null; canonicalFields: Record<string, unknown> }[]) => {
+    // Accumulate spend per supplier+path combo
+    const spendBySupplierPath = new Map<string, Map<string, number>>()
+    for (const t of transactions) {
+      const supplier = t.canonicalFields?.supplier_name
+      if (!supplier || !t.classificationPath) continue
+      const name = String(supplier)
+      if (!spendBySupplierPath.has(name)) spendBySupplierPath.set(name, new Map())
+      const pathMap = spendBySupplierPath.get(name)!
+      const spend = Number(t.canonicalFields?.spend_amount ?? 0) || 0
+      pathMap.set(t.classificationPath, (pathMap.get(t.classificationPath) || 0) + Math.abs(spend))
+    }
+
+    // Pick top path per supplier
+    const result: Record<string, { l1: string; l2: string; l3: string }> = {}
+    for (const [supplier, pathMap] of spendBySupplierPath) {
+      let topPath = ''
+      let topSpend = -1
+      for (const [path, spend] of pathMap) {
+        if (spend > topSpend) { topPath = path; topSpend = spend }
+      }
+      if (topPath) {
+        const parts = topPath.split('|').map(p => p.trim())
+        result[supplier] = { l1: parts[0] || '', l2: parts[1] || '', l3: parts[2] || '' }
+      }
+    }
+    return result
+  }
 
   const loadData = async () => {
     // Only show spinner if no cached data
     if (suppliers.length === 0) setLoading(true)
     setError(null)
     try {
-      const data = await ipc.suppliers.list()
+      const [data, transactions] = await Promise.all([
+        ipc.suppliers.list(),
+        ipc.transactions.query(),
+      ])
       setSuppliers(data)
       setCachedSuppliers(data)
+      setClassificationMap(buildClassificationMap(transactions))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load suppliers')
     } finally {
@@ -301,6 +336,9 @@ export default function SuppliersPage() {
               <th className="col-right">Txns</th>
               <th className="col-right">Spend</th>
               <th className="col-center">Cat. A</th>
+              <th>L1</th>
+              <th>L2</th>
+              <th>L3</th>
               {INFO_COLUMNS.map(col => (
                 <React.Fragment key={col.key}>
                   <th>{col.label}</th>
@@ -324,6 +362,15 @@ export default function SuppliersPage() {
                     checked={s.categoryA}
                     onChange={(e) => saveCategoryA(s, e.target.checked)}
                   />
+                </td>
+                <td title={classificationMap[s.supplierName]?.l1 || ''}>
+                  {classificationMap[s.supplierName]?.l1 || <span className="cell-placeholder">-</span>}
+                </td>
+                <td title={classificationMap[s.supplierName]?.l2 || ''}>
+                  {classificationMap[s.supplierName]?.l2 || <span className="cell-placeholder">-</span>}
+                </td>
+                <td title={classificationMap[s.supplierName]?.l3 || ''}>
+                  {classificationMap[s.supplierName]?.l3 || <span className="cell-placeholder">-</span>}
                 </td>
 
                 {INFO_COLUMNS.map(col => {
@@ -411,7 +458,7 @@ export default function SuppliersPage() {
             ))}
             {filteredSuppliers.length === 0 && (
               <tr>
-                <td colSpan={4 + INFO_COLUMNS.length + 1} className="suppliers-empty">
+                <td colSpan={7 + INFO_COLUMNS.length + 1} className="suppliers-empty">
                   {search ? `No suppliers matching "${search}"` : 'No suppliers found. Upload a CSV and run classification to populate suppliers.'}
                 </td>
               </tr>

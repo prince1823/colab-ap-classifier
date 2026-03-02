@@ -52,4 +52,5 @@ export function registerTransactionsHandlers(): void {
       filters as TransactionFilter | undefined
     );
   });
+
 }

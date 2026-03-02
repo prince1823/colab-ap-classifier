@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { X, ChevronDown, ChevronUp, Filter } from 'lucide-react'
 import '../../styles/ActiveFilters.css'
 
+
 const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters = {}, tables = [], onRemoveFilter, onClearAll, onRemoveLocalFilter, compact = false }) => {
   const [isExpanded, setIsExpanded] = useState(false)
   // When the user clicks a remove/clear action inside the dropdown, filters will change.
@@ -238,7 +239,7 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
               <div className="active-filters-list-compact">
                 {combined.map((filter, index) => (
                   <div key={`${filter.key}-${filter.value}-${index}`} className="active-filter-chip-compact">
-                    <span className="filter-value-compact">{filter.value}</span>
+                    <span className="filter-value-compact">{filter.key === 'classification_path' && filter.value.includes('|') ? filter.value.split('|').map(p => p.trim()).filter(Boolean).pop() : filter.value}</span>
                     <button
                       className="remove-filter-btn-compact"
                       onClick={() => {
@@ -302,7 +303,7 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
         <div className="active-filters-list">
           {combined.map((filter, index) => (
             <div key={`${filter.key}-${filter.value}-${index}`} className="active-filter-chip">
-              <span className="filter-value">{filter.value}</span>
+              <span className="filter-value">{filter.key === 'classification_path' && filter.value.includes('|') ? filter.value.split('|').map(p => p.trim()).filter(Boolean).pop() : filter.value}</span>
               <button
                 className="remove-filter-btn"
                 onClick={() => {

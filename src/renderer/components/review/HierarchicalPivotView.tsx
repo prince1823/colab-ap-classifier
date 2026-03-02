@@ -166,7 +166,7 @@ export default function HierarchicalPivotView({
                   className="inline-flex items-center gap-0.5 rounded-full bg-blue-50 border border-blue-200 pl-1.5 pr-0.5 py-px text-[9px] text-blue-700 font-medium flex-shrink-0"
                 >
                   <span className="text-blue-400">{colLabel(col)}:</span>
-                  <span className="truncate max-w-[100px]">{value}</span>
+                  <span className="truncate max-w-[100px]">{col === 'classification_path' && value.includes('|') ? value.split('|').map(p => p.trim()).filter(Boolean).pop() : value}</span>
                   <button
                     onClick={() => removeFilter(col, value)}
                     className="rounded-full hover:bg-blue-100 p-px flex-shrink-0 transition-colors"

@@ -150,6 +150,82 @@ async function buildFilterClauses(
         continue;
       }
 
+      // Handle classification_path — maps to tax.full_path (a JOIN column, not a real DB column)
+      // Use ILIKE for case-insensitive matching, and support both exact full-path
+      // and partial path matching (e.g. value could be full path or a sub-path)
+      if (cf.column === 'classification_path') {
+        needsTaxonomyJoin = true;
+        const taxExpr = `tax.full_path`;
+        const cfParams: unknown[] = [];
+        let clause: string;
+
+        switch (cf.operator) {
+          case 'is':
+            if (cf.values.length === 1) {
+              // Match exact full path OR paths that end with |value (partial path from tree node)
+              clause = `(${taxExpr} ILIKE ? OR ${taxExpr} ILIKE ?)`;
+              cfParams.push(cf.values[0], `%|${cf.values[0]}`);
+            } else {
+              const parts = cf.values.flatMap(v => [`${taxExpr} ILIKE ?`, `${taxExpr} ILIKE ?`]);
+              clause = `(${parts.join(' OR ')})`;
+              cf.values.forEach(v => { cfParams.push(v, `%|${v}`); });
+            }
+            break;
+          case 'is_not':
+            if (cf.values.length === 1) {
+              clause = `(${taxExpr} NOT ILIKE ? AND ${taxExpr} NOT ILIKE ?)`;
+              cfParams.push(cf.values[0], `%|${cf.values[0]}`);
+            } else {
+              const parts = cf.values.flatMap(v => [`${taxExpr} NOT ILIKE ?`, `${taxExpr} NOT ILIKE ?`]);
+              clause = `(${parts.join(' AND ')})`;
+              cf.values.forEach(v => { cfParams.push(v, `%|${v}`); });
+            }
+            break;
+          case 'contains':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} ILIKE ?`;
+              cfParams.push(`%${cf.values[0]}%`);
+            } else {
+              clause = `(${cf.values.map(() => `${taxExpr} ILIKE ?`).join(' OR ')})`;
+              cfParams.push(...cf.values.map(v => `%${v}%`));
+            }
+            break;
+          case 'not_contains':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} NOT ILIKE ?`;
+              cfParams.push(`%${cf.values[0]}%`);
+            } else {
+              clause = `(${cf.values.map(() => `${taxExpr} NOT ILIKE ?`).join(' AND ')})`;
+              cfParams.push(...cf.values.map(v => `%${v}%`));
+            }
+            break;
+          case 'starts_with':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} ILIKE ?`;
+              cfParams.push(`${cf.values[0]}%`);
+            } else {
+              clause = `(${cf.values.map(() => `${taxExpr} ILIKE ?`).join(' OR ')})`;
+              cfParams.push(...cf.values.map(v => `${v}%`));
+            }
+            break;
+          case 'ends_with':
+            if (cf.values.length === 1) {
+              clause = `${taxExpr} ILIKE ?`;
+              cfParams.push(`%${cf.values[0]}`);
+            } else {
+              clause = `(${cf.values.map(() => `${taxExpr} ILIKE ?`).join(' OR ')})`;
+              cfParams.push(...cf.values.map(v => `%${v}`));
+            }
+            break;
+          default:
+            continue;
+        }
+
+        perFilterClauses.push({ column: cf.column, sql: clause });
+        perFilterParams.push(cfParams);
+        continue;
+      }
+
       if (!validCols.includes(cf.column)) continue;
       const col = `${alias}.${cf.column}`;
       const cfParams: unknown[] = [];

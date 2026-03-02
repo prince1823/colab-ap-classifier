@@ -394,17 +394,22 @@ const CurrentFiltersPanel = ({
                     className="fibery-operator-dropdown"
                   />
                   <div className="fibery-row-chips">
-                    {group.values.map((entry) => (
-                      <span key={entry.value} className="fibery-value-chip" title={entry.value}>
-                        <span className="fibery-value-chip-text">{entry.value}</span>
-                        <button
-                          className="fibery-value-chip-x"
-                          onClick={() => handleRemoveValue(group, entry)}
-                        >
-                          <X size={10} />
-                        </button>
-                      </span>
-                    ))}
+                    {group.values.map((entry) => {
+                      const chipText = group.key === 'classification_path' && entry.value.includes('|')
+                        ? entry.value.split('|').map(p => p.trim()).filter(Boolean).pop() || entry.value
+                        : entry.value
+                      return (
+                        <span key={entry.value} className="fibery-value-chip" title={entry.value}>
+                          <span className="fibery-value-chip-text">{chipText}</span>
+                          <button
+                            className="fibery-value-chip-x"
+                            onClick={() => handleRemoveValue(group, entry)}
+                          >
+                            <X size={10} />
+                          </button>
+                        </span>
+                      )
+                    })}
                   </div>
                 </div>
                 {/* AND/OR connector pill between rows */}

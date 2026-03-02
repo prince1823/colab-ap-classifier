@@ -70,7 +70,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       icon: TableCellsIcon,
       step: 3,
       disabled: !ws.hasCanonicalizedData,
-      completed: ws.hasReviewedData,
+      completed: ws.hasReviewedData || ws.hasClassifiedData,
       tooltip: !ws.hasCanonicalizedData ? 'Upload and canonicalize data first' : '',
     },
     {

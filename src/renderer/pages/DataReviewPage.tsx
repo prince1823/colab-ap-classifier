@@ -1,11 +1,7 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ArrowRightIcon } from '@heroicons/react/24/outline'
 import StatsCards from '../components/data-review/StatsCards'
 import SupplierTable from '../components/data-review/SupplierTable'
 import { ipc } from '../lib/ipc'
-import { useWorkflowStore } from '../stores/workflowStore'
-import { useWorkflowState } from '../contexts/WorkflowStateContext'
 import type { TransactionStats } from '../../shared/types/transactions'
 import type { ProjectSupplier } from '../../shared/types/suppliers'
 
@@ -14,16 +10,6 @@ export default function DataReviewPage() {
   const [suppliers, setSuppliers] = useState<ProjectSupplier[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const navigate = useNavigate()
-  const markDataReviewed = useWorkflowStore((s) => s.markDataReviewed)
-  const ws = useWorkflowState()
-
-  const canProceedToClassification = ws.hasCanonicalizedData && ws.hasTaxonomy
-
-  const handleNext = () => {
-    markDataReviewed()
-    navigate('/workflow/classification')
-  }
 
   const loadData = async () => {
     setLoading(true)
@@ -86,18 +72,6 @@ export default function DataReviewPage() {
         <SupplierTable suppliers={suppliers} onUpdated={loadData} />
       </div>
 
-      {/* Next step button */}
-      <div className="flex justify-end pt-2">
-        <button
-          onClick={handleNext}
-          disabled={!canProceedToClassification}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
-          title={!canProceedToClassification ? 'Requires canonicalized data and taxonomy' : ''}
-        >
-          Next: Classification
-          <ArrowRightIcon className="h-4 w-4" />
-        </button>
-      </div>
     </div>
   )
 }

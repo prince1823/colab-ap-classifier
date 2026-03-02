@@ -40,8 +40,8 @@ interface PivotToolbarProps {
   onValueDimensionChange: (dim: string) => void
   onAggregationChange: (agg: Aggregation) => void
   onSearchChange: (search: string) => void
-  onExpandAll: () => void
-  onCollapseAll: () => void
+  isAllExpanded: boolean
+  onToggleExpandAll: () => void
   /* Filter props */
   rows?: Record<string, unknown>[]
   filterOptions?: Record<string, string[]>
@@ -72,8 +72,8 @@ export default function PivotToolbar({
   onValueDimensionChange,
   onAggregationChange,
   onSearchChange,
-  onExpandAll,
-  onCollapseAll,
+  isAllExpanded,
+  onToggleExpandAll,
   rows,
   filterOptions: filterOptionsProp,
   filterState,
@@ -377,17 +377,10 @@ export default function PivotToolbar({
       )}
       <button
         className="pivot-toolbar-icon-btn"
-        onClick={onExpandAll}
-        title="Expand all"
+        onClick={onToggleExpandAll}
+        title={isAllExpanded ? 'Collapse all' : 'Expand all'}
       >
-        <Maximize2 size={12} />
-      </button>
-      <button
-        className="pivot-toolbar-icon-btn"
-        onClick={onCollapseAll}
-        title="Collapse all"
-      >
-        <Minimize2 size={12} />
+        {isAllExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
       </button>
       <button
         onClick={onExport}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react'
-import { ChevronRight, ChevronDown } from 'lucide-react'
+import { ChevronRight, ChevronDown, X } from 'lucide-react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   type Aggregation,
@@ -35,6 +35,29 @@ interface HierarchicalPivotViewProps {
   openInReviewDisabled: boolean
   /* Total transaction count (server-side mode) */
   totalCount?: number
+}
+
+const COLUMN_LABELS: Record<string, string> = {
+  classification_l1: 'L1',
+  classification_l2: 'L2',
+  classification_l3: 'L3',
+  classification_l4: 'L4',
+  supplier_name: 'Supplier',
+  gl_description: 'GL Desc',
+  line_description: 'Line Desc',
+  company: 'Company',
+  spend_amount: 'Spend',
+  amount: 'Amount',
+  invoice_amount: 'Invoice Amt',
+  year: 'Year',
+  quarter: 'Quarter',
+  month: 'Month',
+  costCenter: 'Cost Center',
+  country: 'Country',
+}
+
+function colLabel(col: string): string {
+  return COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 const fmtAbbrev = (n: number): string => {
@@ -78,10 +101,20 @@ export default function HierarchicalPivotView({
   totalCount,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
+  const [isAllExpanded, setIsAllExpanded] = useState(false)
 
   const { flatRows, toggleExpand, expandAll, collapseAll } = usePivotTreeState(
     pivotData?.root ?? null
   )
+
+  const handleToggleExpandAll = () => {
+    if (isAllExpanded) {
+      collapseAll()
+    } else {
+      expandAll()
+    }
+    setIsAllExpanded(!isAllExpanded)
+  }
 
   const visibleRows = useMemo(
     () => filterRowsBySearch(flatRows, search),
@@ -100,8 +133,55 @@ export default function HierarchicalPivotView({
   const hasData = totalCount ? totalCount > 0 : (transactions?.length ?? 0) > 0
   const grandTotal = pivotData?.grandTotal ?? 0
 
+  // Flatten active filters into pills
+  const activeFilters = useMemo(() => {
+    const pills: { col: string; value: string }[] = []
+    for (const [col, values] of Object.entries(filterState)) {
+      for (const value of values) {
+        pills.push({ col, value })
+      }
+    }
+    return pills
+  }, [filterState])
+
+  const removeFilter = (col: string, value: string) => {
+    const current = filterState[col] || []
+    const next = current.filter(v => v !== value)
+    onFilterStateChange({ ...filterState, [col]: next })
+  }
+
   return (
     <div className="flex flex-col gap-2 h-full">
+      {/* Active filters panel — fixed-height slot so table doesn't shift */}
+      <div className="h-6 flex-shrink-0 overflow-hidden">
+        {activeFilters.length > 0 && (
+          <div className="flex items-center gap-1 flex-nowrap overflow-x-auto px-1.5 h-full">
+            <span className="text-[9px] font-semibold text-blue-600 flex-shrink-0">Filters:</span>
+            {activeFilters.map(({ col, value }) => (
+              <span
+                key={`${col}-${value}`}
+                className="inline-flex items-center gap-0.5 rounded-full bg-blue-50 border border-blue-200 pl-1.5 pr-0.5 py-px text-[9px] text-blue-700 font-medium flex-shrink-0"
+              >
+                <span className="text-blue-400">{colLabel(col)}:</span>
+                <span className="truncate max-w-[100px]">{value}</span>
+                <button
+                  onClick={() => removeFilter(col, value)}
+                  className="rounded-full hover:bg-blue-100 p-px flex-shrink-0 transition-colors"
+                >
+                  <X size={8} />
+                </button>
+              </span>
+            ))}
+            <button
+              onClick={onClearAllFilters}
+              className="text-[9px] font-medium text-red-500 hover:text-red-600 flex-shrink-0 ml-0.5 transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Toolbar — always visible so user can adjust filters */}
       <PivotToolbar
         availableColumns={availableColumns}
@@ -113,8 +193,8 @@ export default function HierarchicalPivotView({
         onValueDimensionChange={onValueDimensionChange}
         onAggregationChange={onAggregationChange}
         onSearchChange={setSearch}
-        onExpandAll={expandAll}
-        onCollapseAll={collapseAll}
+        isAllExpanded={isAllExpanded}
+        onToggleExpandAll={handleToggleExpandAll}
         rows={allRows}
         filterOptions={filterOptions}
         filterState={filterState}

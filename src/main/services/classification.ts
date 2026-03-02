@@ -31,7 +31,7 @@ function emitProgress(progress: Omit<ClassificationProgress, 'runId' | 'phase'> 
       phase: progress.phase ?? 'classifying',
       ...progress,
     };
-    mainWindowRef.webContents.send('classification:progress', full);
+    mainWindowRef.webContents.send('pipeline:progress', full);
   }
 }
 

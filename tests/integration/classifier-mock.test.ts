@@ -262,7 +262,7 @@ describe('Classifier Mock Integration Test (v2)', () => {
 
     // Verify progress events were emitted
     const progressCalls = mockSend.mock.calls.filter(
-      (call: unknown[]) => call[0] === 'classification:progress'
+      (call: unknown[]) => call[0] === 'pipeline:progress'
     );
     expect(progressCalls.length).toBeGreaterThan(0);
 

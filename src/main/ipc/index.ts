@@ -8,7 +8,7 @@ import { registerSuppliersHandlers } from './suppliers';
 import { registerSupplierResearchHandlers } from './supplier-research';
 import { registerRulesHandlers } from './rules';
 import { registerTransactionsHandlers } from './transactions';
-import { registerClassificationHandlers } from './classification';
+import { registerPipelineHandlers } from './pipeline';
 import { registerExportHandlers } from './export';
 
 export function registerAllHandlers(): void {
@@ -25,6 +25,6 @@ export function registerAllHandlers(): void {
   registerSupplierResearchHandlers();
   registerRulesHandlers();
   registerTransactionsHandlers();
-  registerClassificationHandlers();
+  registerPipelineHandlers();
   registerExportHandlers();
 }

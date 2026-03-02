@@ -94,8 +94,6 @@ Exports:
 Helpers: `parsePath(fullPath)` — parses `"L1|L2|L3"` into `{l1, l2, l3, depth, parentPath}`
 
 **Specs:**
-- ~~suppose only two levels exist. test if the node will be created. should not allow if all 3 nodes don't exist.~~ → Implemented: `should reject L3 node when only L1 exists (L2 missing)` in `parent path validation` block
-
 
 ---
 
@@ -111,8 +109,6 @@ Exports:
 - `upsertSupplier(supplierName, data)` — insert or update in supplier_universe.db
 
 **Specs:**
-- suppose project is started without supplier_universe in colab ip and is added right before supplier research starts. test if db connection works okay.
-- suppose supplier universe is deleted halfway through research phase. halt classification and warn.
 
 
 ---
@@ -147,7 +143,7 @@ Exports:
 - `cleanDescription(desc)` — strips numeric prefixes (pure function)
 
 State: `isRunning`, `isPaused`, `isCancelled`, `currentRunId`
-Events emitted: `classification:progress` with `{runId, phase, status, totalSuppliers, processedSuppliers, percentage, currentSupplier, currentStep}`
+Events emitted: `pipeline:progress` with `{runId, phase, status, totalSuppliers, processedSuppliers, percentage, currentSupplier, currentStep}`
 
 **Specs:**
 
@@ -259,7 +255,7 @@ Exports:
 
 State: `isRunning`, `isCancelled`, `currentRunId`, `currentPhase` (`'researching' | 'awaiting_approval' | 'classifying'`)
 
-Events emitted: `classification:progress` (reuses same channel with `phase` and `status` fields including `'awaiting_approval'`)
+Events emitted: `pipeline:progress` (unified channel with `phase` and `status` fields including `'awaiting_approval'`)
 
 Error handling: if research fails, still emits `awaiting_approval` so user can review partial data and choose to proceed.
 
@@ -271,7 +267,7 @@ Error handling: if research fails, still emits `awaiting_approval` so user can r
 - `should use a single runId across all phases` — all progress events share one runId, same as passed to classification
 - `should reach awaiting_approval even if research fails` — research rejects, approval still emitted, classification proceeds after approve
 - `should reject if pipeline is already running` — second `startPipeline()` throws
-- `should relay research progress via onProgress callback` — verifies research progress forwarded as `classification:progress` events
+- `should relay research progress via onProgress callback` — verifies research progress forwarded as `pipeline:progress` events
 
 **Specs:**
 
@@ -476,13 +472,13 @@ Channels: `rules:list`, `rules:create`, `rules:update`, `rules:delete`
 
 ---
 
-### `src/main/ipc/classification.ts`
+### `src/main/ipc/pipeline.ts`
 
 **Test file:** none
 
-Channels: `classification:start`, `classification:approve`, `classification:cancel`
+Channels: `pipeline:start`, `pipeline:approve`, `pipeline:cancel`
 
-Note: `classification:start` routes through the pipeline mediator (`pipelineService.startPipeline()`), not classification directly.
+Note: `pipeline:start` routes through the pipeline mediator (`pipelineService.startPipeline()`), which orchestrates research → approval → classification.
 
 **Specs:**
 
@@ -677,7 +673,7 @@ Actions:
 - `loadProject(filePath)` — closes backend, opens via IPC, fetches metadata with fallback
 - `closeProject()` — closes backend, resets all state
 - `refreshMetadata()` / `refreshStats()` — fetches and merges
-- `subscribeToClassificationProgress()` — handles progress events, deduplicates stale events via runId
+- `subscribeToPipelineProgress()` — handles progress events, deduplicates stale events via runId
 - `deriveState(metadata, classifiedRows, progress)` — computes all derived booleans
 
 **Specs:**

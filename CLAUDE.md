@@ -61,7 +61,7 @@ colab-ap-classifier/
 ## Key Conventions
 
 ### IPC
-- Channels follow `namespace:method` naming (e.g., `project:new`, `classification:start`)
+- Channels follow `namespace:method` naming (e.g., `project:new`, `pipeline:start`)
 - All handlers return `IPCResponse<T>`: `{ success: boolean; data?: T; error?: string }`
 - Events (main→renderer) do NOT use the response envelope
 

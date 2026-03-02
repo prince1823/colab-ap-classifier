@@ -533,7 +533,11 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     supplierResearchService.setMainWindow({
       webContents: {
         send: (_channel: string, ...args: unknown[]) => {
-          progressEvents.push(args[0]);
+          const evt = args[0] as { done?: number; total?: number; currentSupplier?: string; step?: string };
+          if (evt?.step) {
+            console.log(`    [Research ${evt.done ?? '?'}/${evt.total ?? '?'}] ${evt.step}`);
+          }
+          progressEvents.push(evt);
         },
       },
     });
@@ -574,7 +578,11 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     classificationService.setMainWindow({
       webContents: {
         send: (_channel: string, ...args: unknown[]) => {
-          progressEvents.push(args[0]);
+          const evt = args[0] as { percentage?: number; currentSupplier?: string; currentStep?: string; status?: string };
+          if (evt?.currentStep) {
+            console.log(`    [Classification ${evt.percentage ?? 0}%] ${evt.currentStep}`);
+          }
+          progressEvents.push(evt);
         },
       },
     });

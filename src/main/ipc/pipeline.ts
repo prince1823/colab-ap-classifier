@@ -1,8 +1,8 @@
 import { registerHandler } from './register';
 import * as pipelineService from '../services/pipeline';
 
-export function registerClassificationHandlers(): void {
-  registerHandler('classification:start', async () => {
+export function registerPipelineHandlers(): void {
+  registerHandler('pipeline:start', async () => {
     // Fire-and-forget — progress is streamed via events
     pipelineService.startPipeline().catch((err) => {
       console.error('[IPC] Pipeline failed:', err);
@@ -10,11 +10,11 @@ export function registerClassificationHandlers(): void {
     return { started: true };
   });
 
-  registerHandler('classification:approve', async () => {
+  registerHandler('pipeline:approve', async () => {
     pipelineService.approve();
   });
 
-  registerHandler('classification:cancel', async () => {
+  registerHandler('pipeline:cancel', async () => {
     await pipelineService.cancel();
   });
 }

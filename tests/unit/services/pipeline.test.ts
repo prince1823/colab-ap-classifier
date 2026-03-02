@@ -59,7 +59,7 @@ function createDeferred<T = void>() {
 
 function getProgressCalls(mockWindow: ReturnType<typeof createMockWindow>) {
   return mockWindow.webContents.send.mock.calls
-    .filter((call: unknown[]) => call[0] === 'classification:progress')
+    .filter((call: unknown[]) => call[0] === 'pipeline:progress')
     .map((call: unknown[]) => call[1] as Record<string, unknown>);
 }
 

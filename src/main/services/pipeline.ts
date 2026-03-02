@@ -38,7 +38,7 @@ function emitProgress(progress: Partial<ClassificationProgress>): void {
       currentStep: '',
       ...progress,
     };
-    mainWindowRef.webContents.send('classification:progress', full);
+    mainWindowRef.webContents.send('pipeline:progress', full);
   }
 }
 

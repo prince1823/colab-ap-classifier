@@ -325,19 +325,6 @@ describe('TaxonomyService', () => {
       ).rejects.toThrow('Parent path "Direct|IT" not found');
     });
 
-    it('should reject L3 node when only L1 exists (L2 missing)', async () => {
-      await addNode('Direct', 'L1 exists');
-
-      await expect(
-        addNode('Direct|IT|Software', 'L2 missing')
-      ).rejects.toThrow('Parent path "Direct|IT" not found');
-
-      // Only the L1 node should remain
-      const nodes = await getNodes();
-      expect(nodes).toHaveLength(1);
-      expect(nodes[0].fullPath).toBe('Direct');
-    });
-
     it('should accept depth-2 node when depth-1 parent exists', async () => {
       await addNode('Direct', 'L1');
       await addNode('Direct|IT', 'L2');

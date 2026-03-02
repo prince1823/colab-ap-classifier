@@ -19,8 +19,8 @@
  *
  * v2 changes:
  * - classification service (v2) replaces v1 classification-pipeline
- * - classification:start takes no params (fire-and-forget)
- * - No classification:getStatus handler
+ * - pipeline:start takes no params (fire-and-forget)
+ * - No pipeline:getStatus handler
  * - No canonicalization:save handler
  * - project:isOpen removed — use project:getMetadata
  * - project table replaces settings table
@@ -286,7 +286,7 @@ describe('IPC Workflow Integration — Full Flow (v2)', () => {
   // Phase 4: Classification
   // ────────────────────────────────────────────────────────────────────
 
-  it('Phase 4a: Start classification via classification:start (fire-and-forget)', async () => {
+  it('Phase 4a: Start pipeline via pipeline:start (fire-and-forget)', async () => {
     // Set up mock main window for progress events
     classificationService.setMainWindow({
       webContents: {
@@ -294,8 +294,8 @@ describe('IPC Workflow Integration — Full Flow (v2)', () => {
       },
     });
 
-    // classification:start is fire-and-forget in v2
-    const res = await invoke<{ started: boolean }>('classification:start');
+    // pipeline:start is fire-and-forget in v2
+    const res = await invoke<{ started: boolean }>('pipeline:start');
     expect(res.success).toBe(true);
     expect(res.data!.started).toBe(true);
 
@@ -394,10 +394,10 @@ describe('IPC Workflow Integration — Full Flow (v2)', () => {
   // Error Handling — Frontend will see these as IPCResponse.success=false
   // ────────────────────────────────────────────────────────────────────
 
-  it('Error: classification:start rejects when already running', async () => {
-    // Start a classification
+  it('Error: pipeline:start rejects when already running', async () => {
+    // Start a pipeline
     classificationService.setMainWindow({ webContents: { send: vi.fn() } });
-    const res1 = await invoke<{ started: boolean }>('classification:start');
+    const res1 = await invoke<{ started: boolean }>('pipeline:start');
     expect(res1.success).toBe(true);
 
     // Try to start another immediately — the startClassification function should throw

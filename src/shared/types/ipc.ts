@@ -17,10 +17,11 @@ export type IPCChannel =
   | 'upload:selectFile'
   | 'upload:parsePreview'
   | 'upload:csv'
-  // Classification (2 channels + 1 event)
-  | 'classification:start'
-  | 'classification:cancel'
-  | 'classification:progress'
+  // Pipeline (3 channels + 1 event)
+  | 'pipeline:start'
+  | 'pipeline:approve'
+  | 'pipeline:cancel'
+  | 'pipeline:progress'
   // Transactions (4 channels)
   | 'transactions:query'
   | 'transactions:stats'

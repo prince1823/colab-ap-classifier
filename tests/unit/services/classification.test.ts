@@ -142,7 +142,7 @@ describe('Classification (v2)', () => {
 
       // Should have emitted a completed progress event
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
-        'classification:progress',
+        'pipeline:progress',
         expect.objectContaining({
           status: 'completed',
           totalSuppliers: 0,
@@ -212,7 +212,7 @@ describe('Classification (v2)', () => {
 
       // Should emit cancelled progress
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
-        'classification:progress',
+        'pipeline:progress',
         expect.objectContaining({
           status: 'cancelled',
         })
@@ -302,7 +302,7 @@ describe('Classification (v2)', () => {
       // Classification should proceed and call classifyInvoiceGroup even without universe entry
       expect(classifyInvoiceGroup).toHaveBeenCalled();
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
-        'classification:progress',
+        'pipeline:progress',
         expect.objectContaining({ status: 'completed' })
       );
     });
@@ -495,7 +495,7 @@ describe('Classification (v2)', () => {
       // Verify progress events were emitted via mainWindow
       const sendCalls = mockWindow.webContents.send.mock.calls;
       const progressCalls = sendCalls.filter(
-        (call: unknown[]) => call[0] === 'classification:progress'
+        (call: unknown[]) => call[0] === 'pipeline:progress'
       );
 
       expect(progressCalls.length).toBeGreaterThan(0);

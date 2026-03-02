@@ -1,5 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react'
 import { ChevronRight, ChevronDown, X } from 'lucide-react'
+import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   type Aggregation,
@@ -152,34 +153,69 @@ export default function HierarchicalPivotView({
 
   return (
     <div className="flex flex-col gap-2 h-full">
-      {/* Active filters panel — fixed-height slot so table doesn't shift */}
-      <div className="h-6 flex-shrink-0 overflow-hidden">
-        {activeFilters.length > 0 && (
-          <div className="flex items-center gap-1 flex-nowrap overflow-x-auto px-1.5 h-full">
-            <span className="text-[9px] font-semibold text-blue-600 flex-shrink-0">Filters:</span>
-            {activeFilters.map(({ col, value }) => (
-              <span
-                key={`${col}-${value}`}
-                className="inline-flex items-center gap-0.5 rounded-full bg-blue-50 border border-blue-200 pl-1.5 pr-0.5 py-px text-[9px] text-blue-700 font-medium flex-shrink-0"
-              >
-                <span className="text-blue-400">{colLabel(col)}:</span>
-                <span className="truncate max-w-[100px]">{value}</span>
-                <button
-                  onClick={() => removeFilter(col, value)}
-                  className="rounded-full hover:bg-blue-100 p-px flex-shrink-0 transition-colors"
+      {/* Top row — filter pills (left) + search/export (right) */}
+      <div className="h-6 flex-shrink-0 flex items-center gap-1.5">
+        {/* Filter pills — scrollable left section */}
+        <div className="flex items-center gap-1 flex-nowrap overflow-x-auto flex-1 min-w-0 h-full">
+          {activeFilters.length > 0 && (
+            <>
+              <span className="text-[9px] font-semibold text-blue-600 flex-shrink-0">Filters:</span>
+              {activeFilters.map(({ col, value }) => (
+                <span
+                  key={`${col}-${value}`}
+                  className="inline-flex items-center gap-0.5 rounded-full bg-blue-50 border border-blue-200 pl-1.5 pr-0.5 py-px text-[9px] text-blue-700 font-medium flex-shrink-0"
                 >
-                  <X size={8} />
-                </button>
-              </span>
-            ))}
-            <button
-              onClick={onClearAllFilters}
-              className="text-[9px] font-medium text-red-500 hover:text-red-600 flex-shrink-0 ml-0.5 transition-colors"
-            >
-              Clear all
-            </button>
+                  <span className="text-blue-400">{colLabel(col)}:</span>
+                  <span className="truncate max-w-[100px]">{value}</span>
+                  <button
+                    onClick={() => removeFilter(col, value)}
+                    className="rounded-full hover:bg-blue-100 p-px flex-shrink-0 transition-colors"
+                  >
+                    <X size={8} />
+                  </button>
+                </span>
+              ))}
+              <button
+                onClick={onClearAllFilters}
+                className="text-[9px] font-medium text-red-500 hover:text-red-600 flex-shrink-0 ml-0.5 transition-colors"
+              >
+                Clear all
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Right section — search + export */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="relative flex items-center">
+            <input
+              type="text"
+              className="pivot-toolbar-search"
+              placeholder="Search rows..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ width: 120, fontSize: 10, padding: '1px 6px', height: 20 }}
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-1 rounded-full hover:bg-gray-100 p-px"
+              >
+                <X size={8} />
+              </button>
+            )}
           </div>
-        )}
+          <button
+            onClick={onExport}
+            disabled={exportDisabled || !hasData}
+            className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-1.5 py-px text-[10px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            title="Export as Excel"
+            style={{ height: 20 }}
+          >
+            <ArrowDownTrayIcon className="h-2.5 w-2.5" />
+            <span>.xlsx</span>
+          </button>
+        </div>
       </div>
 
       {/* Toolbar — always visible so user can adjust filters */}
@@ -188,22 +224,18 @@ export default function HierarchicalPivotView({
         rowDimensions={rowDimensions}
         valueDimension={valueDimension}
         aggregation={aggregation}
-        search={search}
         onRowDimensionsChange={onRowDimensionsChange}
         onValueDimensionChange={onValueDimensionChange}
         onAggregationChange={onAggregationChange}
-        onSearchChange={setSearch}
         isAllExpanded={isAllExpanded}
         onToggleExpandAll={handleToggleExpandAll}
+        onOpenInReview={onOpenInReview}
+        openInReviewDisabled={openInReviewDisabled}
         rows={allRows}
         filterOptions={filterOptions}
         filterState={filterState}
         onFilterStateChange={onFilterStateChange}
         onClearAllFilters={onClearAllFilters}
-        onExport={onExport}
-        exportDisabled={exportDisabled || !hasData}
-        onOpenInReview={onOpenInReview}
-        openInReviewDisabled={openInReviewDisabled}
       />
 
       {!hasData && (

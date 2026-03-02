@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { Plus, X, ChevronUp, ChevronDown, Maximize2, Minimize2, Filter, ExternalLink } from 'lucide-react'
-import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import * as Popover from '@radix-ui/react-popover'
 import type { Aggregation } from '../../hooks/useHierarchicalPivotData'
 import type { PivotFilterState } from './PivotFilterBar'
@@ -35,25 +34,20 @@ interface PivotToolbarProps {
   rowDimensions: string[]
   valueDimension: string
   aggregation: Aggregation
-  search: string
   onRowDimensionsChange: (dims: string[]) => void
   onValueDimensionChange: (dim: string) => void
   onAggregationChange: (agg: Aggregation) => void
-  onSearchChange: (search: string) => void
   isAllExpanded: boolean
   onToggleExpandAll: () => void
+  /* Open in Review */
+  onOpenInReview: () => void
+  openInReviewDisabled: boolean
   /* Filter props */
   rows?: Record<string, unknown>[]
   filterOptions?: Record<string, string[]>
   filterState: PivotFilterState
   onFilterStateChange: (state: PivotFilterState) => void
   onClearAllFilters: () => void
-  /* Export */
-  onExport: () => void
-  exportDisabled: boolean
-  /* Open in Review */
-  onOpenInReview: () => void
-  openInReviewDisabled: boolean
 }
 
 /** Columns to exclude from the filter list (non-filterable) */
@@ -67,22 +61,18 @@ export default function PivotToolbar({
   rowDimensions,
   valueDimension,
   aggregation,
-  search,
   onRowDimensionsChange,
   onValueDimensionChange,
   onAggregationChange,
-  onSearchChange,
   isAllExpanded,
   onToggleExpandAll,
+  onOpenInReview,
+  openInReviewDisabled,
   rows,
   filterOptions: filterOptionsProp,
   filterState,
   onFilterStateChange,
   onClearAllFilters,
-  onExport,
-  exportDisabled,
-  onOpenInReview,
-  openInReviewDisabled,
 }: PivotToolbarProps) {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [addMenuSearch, setAddMenuSearch] = useState('')
@@ -357,49 +347,25 @@ export default function PivotToolbar({
         </select>
       </div>
 
-      {/* Search + Expand / Collapse all + Export */}
-      <input
-        type="text"
-        className="pivot-toolbar-search"
-        placeholder="Search rows..."
-        value={search}
-        onChange={e => onSearchChange(e.target.value)}
-        style={{ marginLeft: 'auto' }}
-      />
-      {search && (
+      {/* Expand/Collapse + Review — right side */}
+      <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
         <button
-          className="pivot-dim-chip-x"
-          onClick={() => onSearchChange('')}
-          style={{ opacity: 1, padding: 2 }}
+          className="pivot-toolbar-icon-btn"
+          onClick={onToggleExpandAll}
+          title={isAllExpanded ? 'Collapse all' : 'Expand all'}
         >
-          <X size={10} />
+          {isAllExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
         </button>
-      )}
-      <button
-        className="pivot-toolbar-icon-btn"
-        onClick={onToggleExpandAll}
-        title={isAllExpanded ? 'Collapse all' : 'Expand all'}
-      >
-        {isAllExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-      </button>
-      <button
-        onClick={onExport}
-        disabled={exportDisabled}
-        className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-        title="Export as Excel"
-      >
-        <ArrowDownTrayIcon className="h-3 w-3" />
-        <span>.xlsx</span>
-      </button>
-      <button
-        onClick={onOpenInReview}
-        disabled={openInReviewDisabled}
-        className="inline-flex items-center gap-0.5 rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-        title="Open filtered transactions in Review tab"
-      >
-        <ExternalLink size={12} />
-        <span>Review</span>
-      </button>
+        <button
+          onClick={onOpenInReview}
+          disabled={openInReviewDisabled}
+          className="inline-flex items-center gap-0.5 rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+          title="Open filtered transactions in Review tab"
+        >
+          <ExternalLink size={12} />
+          <span>Review</span>
+        </button>
+      </div>
     </div>
   )
 }

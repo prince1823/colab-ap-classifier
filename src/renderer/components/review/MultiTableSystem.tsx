@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import React, { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
 import { useDrag, useDrop } from 'react-dnd'
 import { Plus, X, ChevronRight, ChevronDown } from 'lucide-react'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -407,12 +407,59 @@ const DraggableTableRow = ({ row, column, amount, count, onDragEnd, isSelected, 
 
 // Virtualized flat row renderer — renders only ~50 DOM nodes for thousands of grouped rows
 const VirtualizedFlatRows = ({ tableData, column, selectedRows, tableSelectedRows, keyboardFocus, tableNav, tableIndex, onSelectRow, onToggleRowSelect, transactionsByValue, data, focusedRowRef, onDoubleClickFilter, serverSide, scrollParentRef }) => {
+  // --- Scroll preservation across filter apply/clear ---
+  // Continuously track the current scrollTop via scroll events.
+  const lastScrollTopRef = useRef(0)
+  // When data shrinks (filter applied), snapshot the scrollTop from BEFORE the shrink.
+  const preFilterScrollRef = useRef(0)
+  // Track previous row count so we can detect shrink (filter) vs grow (clear).
+  const prevCountRef = useRef(tableData.length)
+
   const rowVirtualizer = useVirtualizer({
     count: tableData.length,
     getScrollElement: () => scrollParentRef.current,
     estimateSize: () => 32,
     overscan: 20,
   })
+
+  // Always track the scroll position of the container
+  useEffect(() => {
+    const el = scrollParentRef.current
+    if (!el) return
+    const handler = () => { lastScrollTopRef.current = el.scrollTop }
+    el.addEventListener('scroll', handler, { passive: true })
+    return () => el.removeEventListener('scroll', handler)
+  }, [scrollParentRef])
+
+  // Detect when data shrinks (filter applied) vs grows (filter cleared).
+  // On shrink: save the pre-filter scrollTop.
+  // On grow:   restore it so the user lands back where they were.
+  useLayoutEffect(() => {
+    const prevCount = prevCountRef.current
+    const newCount = tableData.length
+    prevCountRef.current = newCount
+
+    if (prevCount === 0 || newCount === 0) return
+
+    if (newCount < prevCount) {
+      // Data shrank → filter was applied.  lastScrollTopRef still holds the
+      // scroll position from before the DOM update (the scroll handler hasn't
+      // fired yet because useLayoutEffect runs synchronously before paint).
+      preFilterScrollRef.current = lastScrollTopRef.current
+    } else if (newCount > prevCount && preFilterScrollRef.current > 0) {
+      // Data grew → filter was cleared.  Restore the saved position.
+      const savedTop = preFilterScrollRef.current
+      preFilterScrollRef.current = 0
+      // Use rAF so the virtualizer finishes measuring first.
+      requestAnimationFrame(() => {
+        const el = scrollParentRef.current
+        if (el) {
+          // Clamp to max scrollable range in case the dataset is smaller now
+          el.scrollTop = Math.min(savedTop, el.scrollHeight - el.clientHeight)
+        }
+      })
+    }
+  }, [tableData, scrollParentRef])
 
   return (
     <div

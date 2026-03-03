@@ -1,12 +1,13 @@
 import fs from 'fs';
+import path from 'path';
 import { dialog, BrowserWindow } from 'electron';
 import { parse } from 'csv-parse/sync';
 import { randomUUID } from 'crypto';
-import type { CSVPreview, CSVPreviewWithMappings, ColumnMapping, ColumnMappingResult } from '../../shared/types/column-mapping';
+import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority } from '../../shared/types/column-mapping';
+import { toEnrichedMapping } from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
-import { suggestMappings } from '../agents/column-mapping-agent';
+import { suggestMappings as agentSuggestMappings } from '../agents/column-mapping-agent';
 import { databaseService } from './database';
-import * as projectService from './project';
 import { invalidateColumnCache } from './transactions';
 
 const SAMPLE_ROW_LIMIT = 10;
@@ -191,40 +192,34 @@ function emptyMappingSuggestion(columns: string[]): ColumnMappingResult {
 }
 
 /**
- * Parse a CSV file, return a preview, and automatically suggest column mappings
- * via the column-mapping agent (LLM-first flow).
- *
- * If the LLM call fails, the preview is still returned with empty mappings
- * so the user can map manually.
+ * Suggest column mappings via the column-mapping agent (LLM).
+ * Gracefully falls back to empty mappings if the LLM call fails.
  */
-export async function parsePreview(filePath: string): Promise<CSVPreviewWithMappings> {
-  const preview = parseCSVPreview(filePath);
-
-  let mappingSuggestion: ColumnMappingResult;
+export async function suggestMappings(
+  columns: string[],
+  sampleRows: Record<string, string>[]
+): Promise<ColumnMappingResult> {
   try {
-    mappingSuggestion = await suggestMappings(preview.columns, preview.sampleRows);
+    return await agentSuggestMappings(columns, sampleRows);
   } catch (err) {
-    console.error('[parsePreview] LLM mapping suggestion failed:', err instanceof Error ? err.message : err);
-    mappingSuggestion = emptyMappingSuggestion(preview.columns);
+    console.error('[suggestMappings] LLM mapping suggestion failed:', err instanceof Error ? err.message : err);
+    return emptyMappingSuggestion(columns);
   }
-
-  return { ...preview, mappingSuggestion };
 }
 
 /**
  * Import a CSV file into the transactions table.
- * Uses the column mapping from the most recent parsePreview call (stored in the upload draft).
  *
  * Steps:
  * 1. Parse the CSV file
- * 2. ALTER TABLE to add canonical columns
- * 3. INSERT rows with canonical + raw values
- * 4. Save column mapping to the project table
+ * 2. ALTER TABLE to add mapped canonical columns only
+ * 3. INSERT rows with canonical column values (unmapped CSV columns are excluded)
+ * 4. Save upload record to the uploads table
  */
 export async function importCSV(
   filePath: string,
   columnMapping?: ColumnMapping
-): Promise<{ rowsInserted: number }> {
+): Promise<{ rowsInserted: number; uploadId: string }> {
   if (!filePath || !fs.existsSync(filePath)) {
     throw new Error(`CSV file not found: ${filePath}`);
   }
@@ -254,27 +249,15 @@ export async function importCSV(
   // Get canonical column names that are actually mapped
   const canonicalNames = Object.keys(mapping);
 
-  // All original CSV column names
-  const csvColumns = Object.keys(allRecords[0]);
-
-  // ALTER TABLE to add canonical columns (if they don't already exist)
+  // ALTER TABLE to add mapped canonical columns only (if they don't already exist)
   const existingColumns = await databaseService.all<{ column_name: string }>(
     "SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = 'transactions'"
   );
   const existingSet = new Set(existingColumns.map((c) => c.column_name));
 
-  // Add canonical columns
   for (const canonical of canonicalNames) {
     if (!existingSet.has(canonical)) {
       await databaseService.run(`ALTER TABLE transactions ADD COLUMN "${canonical}" VARCHAR`);
-    }
-  }
-
-  // Also add any unmapped CSV columns as-is
-  for (const csvCol of csvColumns) {
-    const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    if (!existingSet.has(snakeCol) && !canonicalNames.includes(snakeCol)) {
-      await databaseService.run(`ALTER TABLE transactions ADD COLUMN "${snakeCol}" VARCHAR`);
     }
   }
 
@@ -288,61 +271,13 @@ export async function importCSV(
   for (let batchStart = 0; batchStart < allRecords.length; batchStart += BATCH_SIZE) {
     const batch = allRecords.slice(batchStart, batchStart + BATCH_SIZE);
 
-    const inserts: string[] = [];
-    for (let i = 0; i < batch.length; i++) {
-      const record = batch[i];
-      const rowIndex = batchStart + i;
-      const id = randomUUID();
-
-      const colNames: string[] = ['id', 'row_index'];
-      const values: string[] = [`'${id}'`, `${rowIndex}`];
-
-      // Add canonical columns
-      for (const [canonical, csvCol] of Object.entries(mapping)) {
-        const rawValue = record[csvCol];
-        if (rawValue !== undefined && rawValue !== null) {
-          colNames.push(`"${canonical}"`);
-          values.push(`'${String(rawValue).replace(/'/g, "''")}'`);
-        }
-      }
-
-      // Add unmapped raw columns
-      for (const csvCol of csvColumns) {
-        const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-        // Skip if this CSV column is mapped OR if its snake_case name collides with a canonical key
-        const isMappedValue = Object.values(mapping).includes(csvCol);
-        if (!isMappedValue && !canonicalNames.includes(snakeCol) && record[csvCol] !== undefined) {
-          colNames.push(`"${snakeCol}"`);
-          values.push(`'${String(record[csvCol]).replace(/'/g, "''")}'`);
-        }
-      }
-
-      inserts.push(`(${values.join(', ')})`);
-      // Build matching column list for first row only
-      if (i === 0 && batchStart === 0) {
-        // We'll use the colNames from the first row for all rows
-        // This is safe because all rows have the same CSV columns
-      }
-    }
-
-    // Build the INSERT using the first record's column list
-    const record = batch[0];
+    // Build column list from first record — mapped canonical columns only
     const colNames: string[] = ['id', 'row_index'];
-    for (const canonical of Object.keys(mapping)) {
-      if (record[mapping[canonical]] !== undefined) {
-        colNames.push(`"${canonical}"`);
-      }
-    }
-    for (const csvCol of csvColumns) {
-      const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-      const isMappedValue = Object.values(mapping).includes(csvCol);
-      // Skip if this CSV column is mapped OR if its snake_case name collides with a canonical key
-      if (!isMappedValue && !canonicalNames.includes(snakeCol)) {
-        colNames.push(`"${snakeCol}"`);
-      }
+    for (const canonical of canonicalNames) {
+      colNames.push(`"${canonical}"`);
     }
 
-    // Re-build values with consistent columns
+    // Build value rows
     const valueRows: string[] = [];
     for (let i = 0; i < batch.length; i++) {
       const rec = batch[i];
@@ -350,22 +285,11 @@ export async function importCSV(
       const id = randomUUID();
       const vals: string[] = [`'${id}'`, `${rowIndex}`];
 
-      for (const canonical of Object.keys(mapping)) {
+      for (const canonical of canonicalNames) {
         const rawValue = rec[mapping[canonical]];
         vals.push(rawValue !== undefined && rawValue !== null
           ? `'${String(rawValue).replace(/'/g, "''")}'`
           : 'NULL');
-      }
-      for (const csvCol of csvColumns) {
-        const snakeCol = csvCol.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-        const isMappedValue = Object.values(mapping).includes(csvCol);
-        // Skip if this CSV column is mapped OR if its snake_case name collides with a canonical key
-        if (!isMappedValue && !canonicalNames.includes(snakeCol)) {
-          const rawValue = rec[csvCol];
-          vals.push(rawValue !== undefined && rawValue !== null
-            ? `'${String(rawValue).replace(/'/g, "''")}'`
-            : 'NULL');
-        }
       }
 
       valueRows.push(`(${vals.join(', ')})`);
@@ -376,8 +300,44 @@ export async function importCSV(
     rowsInserted += batch.length;
   }
 
-  // Save column mapping to project metadata
-  await projectService.updateMetadata({ columnMapping: mapping as Record<string, unknown> });
+  // Save upload record to uploads table
+  const uploadId = randomUUID();
+  const fileName = path.basename(filePath);
+  const enrichedMapping = toEnrichedMapping(mapping);
+  await databaseService.run(
+    `INSERT INTO uploads (id, file_name, column_mappings, row_count, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    uploadId,
+    fileName,
+    JSON.stringify(enrichedMapping),
+    rowsInserted
+  );
 
-  return { rowsInserted };
+  return { rowsInserted, uploadId };
+}
+
+/**
+ * Get the most recent upload record.
+ * Returns null if no uploads exist.
+ */
+export async function getLatestUpload(): Promise<{
+  id: string;
+  fileName: string;
+  columnMappings: ColumnMappingWithPriority | null;
+  rowCount: number;
+} | null> {
+  const row = await databaseService.get<{
+    id: string;
+    file_name: string;
+    column_mappings: string | null;
+    row_count: number;
+  }>('SELECT * FROM uploads ORDER BY created_at DESC LIMIT 1');
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    fileName: row.file_name,
+    columnMappings: row.column_mappings ? JSON.parse(row.column_mappings) : null,
+    rowCount: row.row_count,
+  };
 }

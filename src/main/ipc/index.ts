@@ -3,7 +3,7 @@ import { registerColabipHandlers } from './colabip';
 import { registerProjectHandlers } from './project';
 import { registerChangelogHandlers } from './changelog';
 import { registerTaxonomyHandlers } from './taxonomy';
-import { registerUploadHandlers } from './upload';
+import { registerIngestHandlers } from './ingest';
 import { registerSuppliersHandlers } from './suppliers';
 import { registerSupplierResearchHandlers } from './supplier-research';
 import { registerRulesHandlers } from './rules';
@@ -20,7 +20,7 @@ export function registerAllHandlers(): void {
   registerProjectHandlers();
   registerChangelogHandlers();
   registerTaxonomyHandlers();
-  registerUploadHandlers();
+  registerIngestHandlers();
   registerSuppliersHandlers();
   registerSupplierResearchHandlers();
   registerRulesHandlers();

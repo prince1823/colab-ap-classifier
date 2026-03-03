@@ -183,7 +183,7 @@ function writeSummary(): void {
 import { databaseService, supplierUniverseService } from '../../src/main/services/database';
 import * as projectService from '../../src/main/services/project';
 import * as taxonomyService from '../../src/main/services/taxonomy';
-import * as uploadService from '../../src/main/services/upload';
+import * as ingestService from '../../src/main/services/ingest';
 import * as supplierService from '../../src/main/services/suppliers';
 import * as rulesService from '../../src/main/services/rules';
 import * as classificationService from '../../src/main/services/classification';
@@ -371,33 +371,31 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
   // ────────────────────────────────────────────────────────────────
 
   it('Phase 3a: Preview CSV and get column mappings', async () => {
-    if (!HAS_API_KEY) {
-      // Without an API key, parsePreview will fail on the LLM mapping call
-      // but should still return the preview with empty mappings
-      const preview = await uploadService.parsePreview(CSV_PATH);
-      expect(preview.totalRows).toBe(csvRowCount);
-      expect(preview.columns.length).toBeGreaterThan(0);
+    // Step 1: Parse CSV (fast, no LLM)
+    const preview = await ingestService.parseCSVPreview(CSV_PATH);
+    expect(preview.totalRows).toBe(csvRowCount);
+    expect(preview.columns.length).toBeGreaterThan(0);
 
+    if (!HAS_API_KEY) {
       // Use expectedMappings from config or build manual mappings
       columnMapping = testConfig.expectedMappings ?? {};
       console.log('  Preview returned (LLM mapping skipped — no API key)');
       return;
     }
 
-    const preview = await uploadService.parsePreview(CSV_PATH);
+    // Step 2: Suggest mappings via LLM
+    const mappingSuggestion = await ingestService.suggestMappings(preview.columns, preview.sampleRows);
 
-    expect(preview.totalRows).toBe(csvRowCount);
     expect(preview.sampleRows.length).toBeGreaterThan(0);
-    expect(preview.columns.length).toBeGreaterThan(0);
-    expect(preview.mappingSuggestion).toBeDefined();
+    expect(mappingSuggestion).toBeDefined();
 
-    const llmMappings = preview.mappingSuggestion.mappings;
+    const llmMappings = mappingSuggestion.mappings;
 
-    logSummary(`## Phase 3: CSV Upload\n`);
+    logSummary(`## Phase 3: CSV Ingest\n`);
     logSummary(`- File: \`${path.basename(CSV_PATH)}\``);
     logSummary(`- Rows: ${preview.totalRows}`);
     logSummary(`- Columns: ${preview.columns.join(', ')}`);
-    logSummary(`- LLM confidence: ${preview.mappingSuggestion.confidence}`);
+    logSummary(`- LLM confidence: ${mappingSuggestion.confidence}`);
     logSummary('');
 
     // Compare LLM mappings with expected (if provided)
@@ -437,7 +435,7 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
   it('Phase 3b: Import CSV data', async () => {
     expect(Object.keys(columnMapping).length).toBeGreaterThan(0);
 
-    const result = await uploadService.importCSV(CSV_PATH, columnMapping);
+    const result = await ingestService.importCSV(CSV_PATH, columnMapping);
     expect(result.rowsInserted).toBe(csvRowCount);
 
     // Verify transactions were inserted

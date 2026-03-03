@@ -1,6 +1,6 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { ProjectMetadata, ProjectMetadataUpdate } from '../../shared/types/project';
-import type { CSVPreviewWithMappings } from '../../shared/types/column-mapping';
+import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority } from '../../shared/types/column-mapping';
 import type { ClassificationProgress } from '../../shared/types/classification';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate } from '../../shared/types/transactions';
 import type { TaxonomyNode, TaxonomyInfo } from '../../shared/types/taxonomy';
@@ -43,13 +43,17 @@ export const ipc = {
       invoke<void>('project:updateMetadata', updates),
   },
 
-  // ── Upload (3 channels) ──
-  upload: {
-    selectFile: () => invoke<string | null>('upload:selectFile'),
-    parsePreview: (filePath: string) =>
-      invoke<CSVPreviewWithMappings>('upload:parsePreview', filePath),
-    csv: (filePath: string, mapping?: Record<string, string>) =>
-      invoke<{ rowsInserted: number }>('upload:csv', filePath, mapping),
+  // ── Ingest (5 channels) ──
+  ingest: {
+    selectFile: () => invoke<string | null>('ingest:selectFile'),
+    parseCSV: (filePath: string) =>
+      invoke<CSVPreview>('ingest:parseCSV', filePath),
+    suggestMappings: (columns: string[], sampleRows: Record<string, string>[]) =>
+      invoke<ColumnMappingResult>('ingest:suggestMappings', columns, sampleRows),
+    importCSV: (filePath: string, mapping?: ColumnMapping) =>
+      invoke<{ rowsInserted: number; uploadId: string }>('ingest:importCSV', filePath, mapping),
+    getUpload: () =>
+      invoke<{ id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null>('ingest:getUpload'),
   },
 
   // ── Classification (3 channels + 1 event) ──

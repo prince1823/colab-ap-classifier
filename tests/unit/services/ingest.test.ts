@@ -44,7 +44,7 @@ vi.mock('../../../src/shared/canonical-columns', () => ({
 }));
 
 import { dialog } from 'electron';
-import { selectFile, parsePreview, parseCSVPreview } from '../../../src/main/services/upload';
+import { selectFile, suggestMappings, parseCSVPreview } from '../../../src/main/services/ingest';
 import * as columnMappingAgent from '../../../src/main/agents/column-mapping-agent';
 import type { ColumnMappingResult } from '../../../src/shared/types/column-mapping';
 
@@ -66,7 +66,7 @@ const MOCK_MAPPING_RESULT: ColumnMappingResult = {
   reasoning: 'Mapped based on column names',
 };
 
-describe('Upload Service', () => {
+describe('Ingest Service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedAgent.suggestMappings.mockResolvedValue(MOCK_MAPPING_RESULT);
@@ -305,7 +305,7 @@ describe('Upload Service', () => {
     });
 
     it('should throw for an empty file', () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-test-'));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-test-'));
       const emptyFile = path.join(tmpDir, 'empty.csv');
       fs.writeFileSync(emptyFile, '');
 
@@ -317,7 +317,7 @@ describe('Upload Service', () => {
     });
 
     it('should throw for a file with only headers and no data rows', () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-test-'));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-test-'));
       const headerOnlyFile = path.join(tmpDir, 'header-only.csv');
       fs.writeFileSync(headerOnlyFile, 'Col1,Col2,Col3\n');
 
@@ -336,7 +336,7 @@ describe('Upload Service', () => {
   // -------------------------------------------------------------------
   describe('parseCSVPreview — encoding detection', () => {
     it('should handle UTF-8 BOM', () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-test-'));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-test-'));
       const bomFile = path.join(tmpDir, 'bom.csv');
       // Write UTF-8 BOM followed by CSV content
       const bom = Buffer.from([0xef, 0xbb, 0xbf]);
@@ -354,7 +354,7 @@ describe('Upload Service', () => {
     });
 
     it('should handle Latin-1 encoded files', () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-test-'));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-test-'));
       const latin1File = path.join(tmpDir, 'latin1.csv');
       // Write Latin-1 content (bytes 0x80-0xFF that are invalid standalone UTF-8)
       const content = Buffer.from(
@@ -377,83 +377,30 @@ describe('Upload Service', () => {
   });
 
   // -------------------------------------------------------------------
-  // parsePreview — async with LLM mapping suggestions (LLM-first flow)
+  // suggestMappings — LLM mapping suggestions (standalone)
   // -------------------------------------------------------------------
-  describe('parsePreview — LLM-first mapping suggestions', () => {
-    it('should return CSV preview with mapping suggestions', async () => {
-      const result = await parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
+  describe('suggestMappings', () => {
+    it('should return mapping result from column-mapping agent', async () => {
+      const columns = ['Supplier', 'Invoice Number', 'Amount', 'Date', 'Description'];
+      const sampleRows = [{ Supplier: 'Acme Corp', 'Invoice Number': 'INV-001', Amount: '1500.00', Date: '2024-01-15', Description: 'Office Supplies' }];
 
-      expect(result.columns).toEqual([
-        'Supplier',
-        'Invoice Number',
-        'Amount',
-        'Date',
-        'Description',
-      ]);
-      expect(result.totalRows).toBe(5);
-      expect(result.sampleRows).toHaveLength(5);
-      expect(result.mappingSuggestion).toEqual(MOCK_MAPPING_RESULT);
-    });
+      const result = await suggestMappings(columns, sampleRows);
 
-    it('should call column-mapping agent with columns and sample rows', async () => {
-      await parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
-
+      expect(result).toEqual(MOCK_MAPPING_RESULT);
       expect(mockedAgent.suggestMappings).toHaveBeenCalledOnce();
-      const [columns, sampleData] = mockedAgent.suggestMappings.mock.calls[0];
-      expect(columns).toEqual([
-        'Supplier',
-        'Invoice Number',
-        'Amount',
-        'Date',
-        'Description',
-      ]);
-      expect(sampleData).toHaveLength(5);
-      expect(sampleData[0].Supplier).toBe('Acme Corp');
+      expect(mockedAgent.suggestMappings).toHaveBeenCalledWith(columns, sampleRows);
     });
 
     it('should gracefully degrade when LLM call fails', async () => {
       mockedAgent.suggestMappings.mockRejectedValueOnce(new Error('API key missing'));
 
-      const result = await parsePreview(path.join(FIXTURES_DIR, 'standard.csv'));
+      const columns = ['Supplier', 'Invoice Number', 'Amount', 'Date', 'Description'];
+      const result = await suggestMappings(columns, []);
 
-      // CSV preview should still be returned
-      expect(result.columns).toEqual([
-        'Supplier',
-        'Invoice Number',
-        'Amount',
-        'Date',
-        'Description',
-      ]);
-      expect(result.totalRows).toBe(5);
-
-      // Mapping suggestion should be empty fallback
-      expect(result.mappingSuggestion.mappings).toEqual({});
-      expect(result.mappingSuggestion.confidence).toBe('low');
-      expect(result.mappingSuggestion.unmappedClientColumns).toEqual([
-        'Supplier',
-        'Invoice Number',
-        'Amount',
-        'Date',
-        'Description',
-      ]);
-      expect(result.mappingSuggestion.reasoning).toContain('unavailable');
-    });
-
-    it('should still throw for invalid file paths', async () => {
-      await expect(parsePreview('')).rejects.toThrow('File path must not be empty');
-      await expect(parsePreview('/nonexistent.csv')).rejects.toThrow('File not found');
-    });
-
-    it('should include mapping suggestions for large files', async () => {
-      const result = await parsePreview(path.join(FIXTURES_DIR, 'large.csv'));
-
-      expect(result.sampleRows).toHaveLength(10);
-      expect(result.totalRows).toBe(50);
-      expect(result.mappingSuggestion).toEqual(MOCK_MAPPING_RESULT);
-
-      // Agent should be called with sample rows (up to 10)
-      const [, sampleData] = mockedAgent.suggestMappings.mock.calls[0];
-      expect(sampleData).toHaveLength(10);
+      expect(result.mappings).toEqual({});
+      expect(result.confidence).toBe('low');
+      expect(result.unmappedClientColumns).toEqual(columns);
+      expect(result.reasoning).toContain('unavailable');
     });
   });
 });

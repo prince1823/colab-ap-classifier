@@ -526,7 +526,8 @@ const FilterTable = React.memo(({
   tableIndex = 0,
   focusedClassificationPath = null,
   headerDragRef = null, // ref from DraggableTableCard — attaches to header bar for drag
-  onDoubleClickFilter = null // callback for double-click to apply filter
+  onDoubleClickFilter = null, // callback for double-click to apply filter
+  onTableDataComputed = null // callback to report rendered flat data to parent for keyboard nav
 }) => {
   const isTaxonomyTable = column === 'classification_path'
   const [expandedNodes, setExpandedNodes] = useState(new Set())
@@ -815,6 +816,14 @@ const FilterTable = React.memo(({
     groupedRows,
   ])
 
+  // Report flat tableData to parent for keyboard navigation alignment.
+  // This ensures getCurrentTableData() matches what VirtualizedFlatRows renders.
+  useEffect(() => {
+    if (onTableDataComputed && !effectiveHierarchical) {
+      onTableDataComputed(tableIndex, tableData)
+    }
+  }, [onTableDataComputed, tableIndex, tableData, effectiveHierarchical])
+
   // Compute the max depth of the taxonomy tree so we only show level tabs that exist
   const maxTaxonomyDepth = useMemo(() => {
     if (!isTaxonomyTable || !effectiveHierarchical) return 0
@@ -987,7 +996,7 @@ const FilterTable = React.memo(({
                           expandedNodes={expandedNodes}
                           toggleExpanded={toggleExpanded}
                           onSelect={onSelectRow}
-                          isSelected={selectedRows?.includes(item.value)}
+                          isSelected={selectedRows?.includes(`${column}:${item.value}`) || selectedRows?.includes(item.value)}
                           data={data}
                           column={column}
                           taxonomyLevelFilter={taxonomyLevelFilterProp}
@@ -1144,6 +1153,17 @@ const MultiTableSystem = ({
 }) => {
   const [focusedClassificationPath, setFocusedClassificationPath] = useState(null)
 
+  // Ref for tableNav to avoid stale closures during rapid keyboard Enter presses
+  const tableNavRef = useRef(tableNav)
+  tableNavRef.current = tableNav
+
+  // Map of tableIndex → rendered flat tableData, reported by FilterTable.
+  // This ensures keyboard navigation uses the exact same data as the rendered table.
+  const renderedTableDataRef = useRef({})
+  const handleTableDataComputed = useCallback((tableIndex, tableData) => {
+    renderedTableDataRef.current[tableIndex] = tableData
+  }, [])
+
   // Double-click applies ALL selected rows as filters (any table), not just the clicked row
   const effectiveOnDoubleClickFilter = useCallback((column, values) => {
     if ((selectedRows && selectedRows.length > 0) && onApplySelectionAsFilter) {
@@ -1227,7 +1247,7 @@ const MultiTableSystem = ({
       }
       return [...prev, key]
     })
-  }, [])
+  }, [tables, setKeyboardFocus, setTableNav, setSelectedRows])
 
 
   // Get unique values for filter dropdowns.
@@ -1602,22 +1622,28 @@ const MultiTableSystem = ({
     })
   }, [selectedRows])
 
-  // Get current table's data for keyboard navigation
+  // Get current table's rendered data for keyboard navigation.
+  // Uses the exact data reported by FilterTable via onTableDataComputed,
+  // so row indices match what VirtualizedFlatRows actually renders.
   const getCurrentTableData = useCallback(() => {
-    if (!tables || tables.length === 0 || tableNav.tableIndex >= tables.length) return []
-    const currentTable = tables[tableNav.tableIndex]
+    const idx = tableNav.tableIndex
+    if (!tables || tables.length === 0 || idx >= tables.length) return []
+
+    // Use the rendered data reported by FilterTable (exact index match)
+    const rendered = renderedTableDataRef.current[idx]
+    if (rendered && rendered.length > 0) return rendered
+
+    // Fallback: client-side grouping (for initial render before FilterTable reports)
+    const currentTable = tables[idx]
     if (!currentTable) return []
-    
-    // Choose the right transaction set: taxonomy table ignores per-level filters
     const sourceTransactions = currentTable.column === 'classification_path'
       ? taxonomyTransactions
       : filteredTransactions
 
-    // Group by column value (similar to FilterTable logic)
     const grouped = sourceTransactions.reduce((acc, row) => {
       const rawValue = row[currentTable.column]
-      const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '') 
-        ? String(rawValue).trim() 
+      const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '')
+        ? String(rawValue).trim()
         : 'Unknown'
       const amount = parseFloat(row.spend_amount || 0) || 0
       acc[value] = (acc[value] || 0) + amount
@@ -1626,7 +1652,16 @@ const MultiTableSystem = ({
 
     return Object.entries(grouped)
       .map(([value, amount]) => ({ value, amount }))
-      .filter(item => item.amount > 0)
+      .filter(item => {
+        if (item.amount <= 0) return false
+        // Filter out blank/unknown values (matching FilterTable logic)
+        const isBlank = !item.value ||
+                       item.value.trim() === '' ||
+                       item.value.toLowerCase() === '[blank]' ||
+                       item.value.toLowerCase() === 'unknown' ||
+                       item.value.toLowerCase() === 'blank'
+        return !isBlank
+      })
       .sort((a, b) => b.amount - a.amount)
   }, [tables, tableNav.tableIndex, filteredTransactions, taxonomyTransactions])
 
@@ -1676,27 +1711,33 @@ const MultiTableSystem = ({
     })
   }, [keyboardFocus, getCurrentTableData, tables.length, setKeyboardFocus])
 
-  // Handle Enter to toggle-select row (multi-select across tables)
+  // Handle Enter to add row to selection (add-only, never deselects)
+  // Uses tableNavRef to read fresh nav state during rapid keypresses
   const handleTableEnter = useCallback(() => {
     if (keyboardFocus !== 'tables') return
 
+    const nav = tableNavRef.current
     const currentTableData = getCurrentTableData()
     if (currentTableData.length === 0) return
 
-    const currentRow = currentTableData[tableNav.rowIndex]
+    const currentRow = currentTableData[nav.rowIndex]
     if (!currentRow) return
 
-    const currentTable = tables[tableNav.tableIndex]
+    const currentTable = tables[nav.tableIndex]
     if (!currentTable) return
 
-    // Toggle-select the row (adds to selection without clearing other tables)
-    handleToggleRowSelect(currentRow.value, currentTable.column)
+    const key = `${currentTable.column}:${currentRow.value}`
 
-    // Move to next row for multi-select
-    if (tableNav.rowIndex < currentTableData.length - 1) {
-      setTableNav(prev => ({ ...prev, rowIndex: prev.rowIndex + 1 }))
+    // Add to selection (not toggle) — prevents rapid-press deselection
+    setSelectedRows(prev => prev.includes(key) ? prev : [...prev, key])
+
+    // Move to next row — update ref synchronously to handle rapid presses
+    if (nav.rowIndex < currentTableData.length - 1) {
+      const nextNav = { ...nav, rowIndex: nav.rowIndex + 1 }
+      tableNavRef.current = nextNav
+      setTableNav(nextNav)
     }
-  }, [keyboardFocus, getCurrentTableData, tableNav, tables, handleToggleRowSelect])
+  }, [keyboardFocus, getCurrentTableData, tables, setSelectedRows, setTableNav])
 
   // Handle Cmd/Ctrl+K — apply ALL selected rows (across all tables) as global filters
   const handleApplyFilters = useCallback(() => {
@@ -1874,6 +1915,7 @@ const MultiTableSystem = ({
                     tableIndex={index}
                     focusedClassificationPath={null}
                     onDoubleClickFilter={effectiveOnDoubleClickFilter}
+                    onTableDataComputed={handleTableDataComputed}
                   />
                 </DraggableTableCard>
               )

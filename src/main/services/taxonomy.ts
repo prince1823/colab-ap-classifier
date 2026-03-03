@@ -262,6 +262,6 @@ export async function importFromColabip(industryName: string): Promise<void> {
     );
   }
 
-  // Update taxonomy_name in project metadata
-  await projectService.updateMetadata({ taxonomyName: industryName });
+  // TODO: taxonomy_name removed from project settings — re-evaluate if needed
+  // await projectService.updateMetadata({ taxonomyName: industryName });
 }

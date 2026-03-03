@@ -38,7 +38,7 @@ function convertPlaceholders(sql: string): string {
 }
 
 // ─── Expected tables for v2 schema ───────────────────────────────────────────
-const EXPECTED_TABLES = ['project', 'taxonomy', 'transactions', 'override_rules', 'change_log'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads'];
 
 // ─── Project database service ────────────────────────────────────────────────
 
@@ -74,13 +74,29 @@ class DatabaseService {
 
     this.currentFilePath = filePath;
 
-    // Check for v2 schema by looking for the `project` table
+    // Check for v2 schema by looking for the `project_settings` table
     const tables = await this.all<{ table_name: string }>(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'project'"
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'project_settings'"
     );
 
     if (tables.length === 0) {
       await this.initializeSchema();
+    }
+
+    // Ensure uploads table exists (added in ingest refactor — migrate existing .c91 files)
+    const uploadsTable = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'uploads'"
+    );
+    if (uploadsTable.length === 0) {
+      await this.exec(`
+        CREATE TABLE IF NOT EXISTS uploads (
+          id VARCHAR PRIMARY KEY,
+          file_name VARCHAR NOT NULL,
+          column_mappings JSON,
+          row_count INTEGER,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
     }
   }
 
@@ -159,23 +175,19 @@ class DatabaseService {
   }
 
   /**
-   * v2 schema: 5 tables only.
-   * - project (single row)
+   * v2 schema: 6 tables.
+   * - project_settings (key-value store)
    * - taxonomy
    * - transactions (base columns; canonical columns added at import via ALTER TABLE)
    * - override_rules
    * - change_log
+   * - uploads (file metadata + column mappings)
    */
   private async initializeSchema(): Promise<void> {
     await this.exec(`
-      CREATE TABLE IF NOT EXISTS project (
-        id VARCHAR PRIMARY KEY,
-        project_name VARCHAR NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        company_context JSON,
-        taxonomy_name VARCHAR,
-        tail_spend_threshold DECIMAL DEFAULT 10000,
-        column_mapping JSON
+      CREATE TABLE IF NOT EXISTS project_settings (
+        key VARCHAR PRIMARY KEY,
+        value JSON
       );
 
       CREATE TABLE IF NOT EXISTS taxonomy (
@@ -219,6 +231,14 @@ class DatabaseService {
         old_values JSON,
         new_values JSON,
         description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS uploads (
+        id VARCHAR PRIMARY KEY,
+        file_name VARCHAR NOT NULL,
+        column_mappings JSON,
+        row_count INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 

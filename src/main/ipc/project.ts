@@ -5,10 +5,11 @@ import {
   createProject,
   openProject,
   closeProject,
-  getMetadata,
-  updateMetadata,
+  getSetting,
+  setSetting,
+  deleteSetting,
+  getAllSettings,
 } from '../services/project';
-import type { ProjectMetadataUpdate } from '../../shared/types';
 
 export function registerProjectHandlers(): void {
   registerHandler('project:new', async (_event, projectName: unknown, filePath?: unknown) => {
@@ -37,11 +38,19 @@ export function registerProjectHandlers(): void {
     await closeProject();
   });
 
-  registerHandler('project:getMetadata', async () => {
-    return getMetadata();
+  registerHandler('project:getSetting', async (_event, key: unknown) => {
+    return getSetting(key as string);
   });
 
-  registerHandler('project:updateMetadata', async (_event, updates: unknown) => {
-    await updateMetadata(updates as ProjectMetadataUpdate);
+  registerHandler('project:setSetting', async (_event, key: unknown, value: unknown) => {
+    await setSetting(key as string, value);
+  });
+
+  registerHandler('project:deleteSetting', async (_event, key: unknown) => {
+    await deleteSetting(key as string);
+  });
+
+  registerHandler('project:getAllSettings', async () => {
+    return getAllSettings();
   });
 }

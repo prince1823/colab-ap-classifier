@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto';
 import { databaseService, supplierUniverseService } from './database';
 import { getNodes } from './taxonomy';
-import { getMetadata } from './project';
+// TODO: migrate to getSetting('company_context') from './project'
+// import { getMetadata } from './project';
+import { getSetting } from './project';
 import { evaluateRules } from './rules';
 import { updateTransactions } from './transactions';
 import { classifyInvoiceGroup } from '../agents/classification-agent';
@@ -139,13 +141,13 @@ export async function startClassification(runId?: string): Promise<void> {
 
     // Load shared data
     const taxonomy = await getNodes();
-    let metadata;
+    // TODO: migrate to getSetting('company_context') — old getMetadata() removed
+    let companyContext;
     try {
-      metadata = await getMetadata();
+      companyContext = await getSetting('company_context') ?? { industry: 'Unknown' };
     } catch {
-      metadata = null;
+      companyContext = { industry: 'Unknown' };
     }
-    const companyContext = metadata?.companyContext ?? { industry: 'Unknown' };
 
     for (const supplierName of supplierNames) {
       if (isCancelled) break;

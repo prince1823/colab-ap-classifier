@@ -46,8 +46,10 @@ import {
   openProject,
   closeProject,
   isProjectOpen,
-  getMetadata,
-  updateMetadata,
+  getSetting,
+  setSetting,
+  deleteSetting,
+  getAllSettings,
   selectSavePath,
   selectOpenPath,
 } from '../../../src/main/services/project';
@@ -88,13 +90,11 @@ describe('ProjectService', () => {
       expect(fs.existsSync(filePath)).toBe(true);
       expect(isProjectOpen()).toBe(true);
 
-      // Verify schema was initialised (project table exists with seeded data)
-      const row = await databaseService.get<{
-        project_name: string;
-        tail_spend_threshold: number;
-      }>('SELECT project_name, tail_spend_threshold FROM project LIMIT 1');
-      expect(row?.project_name).toBe('TestProject');
-      expect(Number(row?.tail_spend_threshold)).toBe(10000);
+      // Verify schema was initialised (project_settings KV table seeded)
+      const name = await getSetting('project_name');
+      expect(name).toBe('TestProject');
+      const threshold = await getSetting('tail_spend_threshold');
+      expect(threshold).toBe(10000);
     });
 
     it('should create the parent directory if it does not exist', async () => {
@@ -144,7 +144,7 @@ describe('ProjectService', () => {
       expect(isProjectOpen()).toBe(true);
     });
 
-    it('should read metadata after opening', async () => {
+    it('should read settings after opening', async () => {
       const filePath = path.join(testDir, 'projects', 'MetaTest.c91');
 
       await createProject('MetaTest', filePath);
@@ -152,9 +152,10 @@ describe('ProjectService', () => {
 
       await openProject(filePath);
 
-      const metadata = await getMetadata();
-      expect(metadata.projectName).toBe('MetaTest');
-      expect(metadata.tailSpendThreshold).toBe(10000);
+      const name = await getSetting('project_name');
+      expect(name).toBe('MetaTest');
+      const threshold = await getSetting('tail_spend_threshold');
+      expect(threshold).toBe(10000);
     });
 
     it('should throw if file does not exist', async () => {
@@ -202,12 +203,12 @@ describe('ProjectService', () => {
       await createProject('ThrowAfterClose', filePath);
       await closeProject();
 
-      await expect(getMetadata()).rejects.toThrow(
+      await expect(getSetting('project_name')).rejects.toThrow(
         'No project is currently open'
       );
 
       await expect(
-        updateMetadata({ tailSpendThreshold: 5000 })
+        setSetting('tail_spend_threshold', 5000)
       ).rejects.toThrow('No project is currently open');
     });
   });
@@ -229,104 +230,64 @@ describe('ProjectService', () => {
   });
 
   // -----------------------------------------------------------------------
-  // getMetadata / updateMetadata roundtrip
+  // Settings KV CRUD
   // -----------------------------------------------------------------------
-  describe('Metadata roundtrip', () => {
-    let projectFilePath: string;
-
+  describe('Settings KV CRUD', () => {
     beforeEach(async () => {
-      projectFilePath = path.join(testDir, 'projects', 'MetaRoundtrip.c91');
-      await createProject('MetaRoundtrip', projectFilePath);
+      const filePath = path.join(testDir, 'projects', 'KVTest.c91');
+      await createProject('KVTest', filePath);
     });
 
-    it('should return default metadata for a new project', async () => {
-      const metadata = await getMetadata();
+    it('should create a new key when setSetting is called with a non-existent key', async () => {
+      // Key does not exist yet
+      const before = await getSetting('custom_flag');
+      expect(before).toBeUndefined();
 
-      expect(metadata.projectName).toBe('MetaRoundtrip');
-      expect(metadata.companyContext).toBeNull();
-      expect(metadata.columnMapping).toBeNull();
-      expect(metadata.tailSpendThreshold).toBe(10000);
-      expect(metadata.taxonomyName).toBeNull();
-      expect(metadata.createdAt).toBeTruthy();
+      // setSetting should insert (not throw)
+      await setSetting('custom_flag', true);
+
+      const after = await getSetting('custom_flag');
+      expect(after).toBe(true);
     });
 
-    it('should update and retrieve company context', async () => {
-      const companyContext = {
-        industry: 'Healthcare',
-        sector: 'Medical Devices',
-        description: 'A healthcare company',
-        businessFocus: 'Medical equipment manufacturing',
-        procurementNuances: 'Strict vendor qualifications required',
-      };
+    it('should overwrite an existing key on subsequent setSetting calls', async () => {
+      await setSetting('threshold', 100);
+      await setSetting('threshold', 999);
 
-      await updateMetadata({ companyContext });
-      const metadata = await getMetadata();
-
-      expect(metadata.companyContext).toEqual(companyContext);
+      const value = await getSetting('threshold');
+      expect(value).toBe(999);
     });
 
-    it('should update and retrieve company context with companyName', async () => {
-      const companyContext = {
-        companyName: 'Acme Corp',
-        industry: 'Manufacturing',
-        sector: 'Industrial Equipment',
-      };
-
-      await updateMetadata({ companyContext });
-      const metadata = await getMetadata();
-
-      expect(metadata.companyContext).toEqual(companyContext);
-      expect(metadata.companyContext!.companyName).toBe('Acme Corp');
+    it('should return undefined for a key that was never set', async () => {
+      const value = await getSetting('nonexistent_key');
+      expect(value).toBeUndefined();
     });
 
-    it('should return undefined companyName when not set', async () => {
-      const companyContext = {
-        industry: 'Tech',
-      };
+    it('should delete a key and return undefined after deletion', async () => {
+      await setSetting('temp_key', 'hello');
+      expect(await getSetting('temp_key')).toBe('hello');
 
-      await updateMetadata({ companyContext });
-      const metadata = await getMetadata();
-
-      expect(metadata.companyContext!.industry).toBe('Tech');
-      expect(metadata.companyContext!.companyName).toBeUndefined();
+      await deleteSetting('temp_key');
+      expect(await getSetting('temp_key')).toBeUndefined();
     });
 
-    it('should update and retrieve tail spend threshold', async () => {
-      await updateMetadata({ tailSpendThreshold: 25000 });
-      const metadata = await getMetadata();
-
-      expect(metadata.tailSpendThreshold).toBe(25000);
+    it('should not throw when deleting a non-existent key', async () => {
+      await expect(deleteSetting('never_existed')).resolves.toBeUndefined();
     });
 
-    it('should update both company context and threshold together', async () => {
-      const companyContext = {
-        industry: 'Finance',
-        sector: 'Banking',
-      };
-
-      await updateMetadata({ companyContext, tailSpendThreshold: 50000 });
-      const metadata = await getMetadata();
-
-      expect(metadata.companyContext!.industry).toBe('Finance');
-      expect(metadata.companyContext!.sector).toBe('Banking');
-      expect(metadata.tailSpendThreshold).toBe(50000);
+    it('should return all settings via getAllSettings', async () => {
+      // project_name and tail_spend_threshold are seeded by createProject
+      const all = await getAllSettings();
+      expect(all.project_name).toBe('KVTest');
+      expect(all.tail_spend_threshold).toBe(10000);
     });
 
-    it('should persist metadata across close/reopen cycle', async () => {
-      const companyContext = {
-        industry: 'Retail',
-        description: 'A retail company',
-      };
-      await updateMetadata({ companyContext, tailSpendThreshold: 7500 });
+    it('should handle JSON object values', async () => {
+      const ctx = { industry: 'Tech', sector: 'SaaS' };
+      await setSetting('company_context', ctx);
 
-      const filePath = databaseService.getFilePath()!;
-      await closeProject();
-      await openProject(filePath);
-
-      const metadata = await getMetadata();
-      expect(metadata.companyContext!.industry).toBe('Retail');
-      expect(metadata.companyContext!.description).toBe('A retail company');
-      expect(metadata.tailSpendThreshold).toBe(7500);
+      const retrieved = await getSetting('company_context');
+      expect(retrieved).toEqual(ctx);
     });
   });
 

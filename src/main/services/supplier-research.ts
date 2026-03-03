@@ -51,11 +51,10 @@ export async function researchSingle(supplierName: string): Promise<SupplierRese
     }
   }
 
-  // Get company context for research
+  // TODO: migrate to getSetting('company_context') — old getMetadata() removed
   let companyContext;
   try {
-    const metadata = await projectService.getMetadata();
-    companyContext = metadata.companyContext ?? undefined;
+    companyContext = await projectService.getSetting('company_context') ?? undefined;
   } catch {
     // Project might not be open or metadata unavailable
   }

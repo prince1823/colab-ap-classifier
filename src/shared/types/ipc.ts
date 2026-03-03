@@ -7,16 +7,20 @@ export interface IPCResponse<T> {
 
 // ~30 IPC channel names — aligned to project flow (architecture.md)
 export type IPCChannel =
-  // Project (5 channels)
+  // Project (7 channels)
   | 'project:new'
   | 'project:open'
   | 'project:close'
-  | 'project:getMetadata'
-  | 'project:updateMetadata'
-  // Upload (3 channels)
-  | 'upload:selectFile'
-  | 'upload:parsePreview'
-  | 'upload:csv'
+  | 'project:getSetting'
+  | 'project:setSetting'
+  | 'project:deleteSetting'
+  | 'project:getAllSettings'
+  // Ingest (5 channels)
+  | 'ingest:selectFile'
+  | 'ingest:parseCSV'
+  | 'ingest:suggestMappings'
+  | 'ingest:importCSV'
+  | 'ingest:getUpload'
   // Pipeline (3 channels + 1 event)
   | 'pipeline:start'
   | 'pipeline:approve'

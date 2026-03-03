@@ -1,14 +1,8 @@
 import path from 'path';
 import fs from 'fs';
 import { dialog, BrowserWindow } from 'electron';
-import { v4 as uuidv4 } from 'uuid';
 import { databaseService, supplierUniverseService } from './database';
 import { invalidateColumnCache } from './transactions';
-import type {
-  ProjectMetadata,
-  ProjectMetadataUpdate,
-  CompanyContext,
-} from '../../shared/types';
 
 const C91_EXTENSION = '.c91';
 
@@ -24,7 +18,7 @@ let currentProjectName: string | null = null;
  *
  * 1. Creates the DuckDB-backed .c91 file at the given path.
  * 2. Schema + seed data are initialised by `databaseService.openDatabase`.
- * 3. Inserts the single `project` row.
+ * 3. Seeds the `project_settings` KV table with defaults.
  */
 export async function createProject(
   name: string,
@@ -51,14 +45,9 @@ export async function createProject(
   await databaseService.openDatabase(filePath);
   invalidateColumnCache();
 
-  // Insert the single project row
-  const id = uuidv4();
-  await databaseService.run(
-    `INSERT INTO project (id, project_name, created_at, tail_spend_threshold)
-     VALUES (?, ?, CURRENT_TIMESTAMP, 10000)`,
-    id,
-    name
-  );
+  // Seed default settings
+  await setSetting('project_name', name);
+  await setSetting('tail_spend_threshold', 10000);
 
   // Open supplier universe alongside
   await supplierUniverseService.open();
@@ -102,11 +91,9 @@ export async function openProject(
     }
   }
 
-  // Get project name from the single project row
-  const projectRow = await databaseService.get<{ project_name: string }>(
-    'SELECT project_name FROM project LIMIT 1'
-  );
-  const name = projectRow?.project_name ?? path.basename(filePath, C91_EXTENSION);
+  // Get project name from settings
+  const name = (await getSetting('project_name') as string)
+    ?? path.basename(filePath, C91_EXTENSION);
 
   currentProjectName = name;
 
@@ -139,104 +126,83 @@ export function isProjectOpen(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Metadata
+// Settings (Key-Value CRUD)
 // ---------------------------------------------------------------------------
 
 /**
- * Read full project metadata from the single `project` row.
+ * Get a single setting value by key. Returns undefined if not found.
  */
-export async function getMetadata(): Promise<ProjectMetadata> {
-  if (!isProjectOpen()) {
+export async function getSetting(key: string): Promise<unknown> {
+  if (!databaseService.isOpen()) {
     throw new Error('No project is currently open');
   }
 
-  const row = await databaseService.get<{
-    id: string;
-    project_name: string;
-    created_at: string;
-    company_context: string | null;
-    taxonomy_name: string | null;
-    tail_spend_threshold: number;
-    column_mapping: string | null;
-  }>('SELECT id, project_name, created_at, company_context, taxonomy_name, tail_spend_threshold, column_mapping FROM project LIMIT 1');
+  const row = await databaseService.get<{ value: string }>(
+    'SELECT value FROM project_settings WHERE key = ?',
+    key
+  );
 
-  if (!row) {
-    throw new Error('Project row not found — database may be corrupted');
+  if (!row) return undefined;
+
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return row.value;
   }
-
-  let companyContext: CompanyContext | null = null;
-  if (row.company_context) {
-    try {
-      companyContext = typeof row.company_context === 'string'
-        ? JSON.parse(row.company_context)
-        : row.company_context;
-    } catch {
-      companyContext = null;
-    }
-  }
-
-  let columnMapping: Record<string, unknown> | null = null;
-  if (row.column_mapping) {
-    try {
-      columnMapping = typeof row.column_mapping === 'string'
-        ? JSON.parse(row.column_mapping)
-        : row.column_mapping;
-    } catch {
-      columnMapping = null;
-    }
-  }
-
-  return {
-    id: row.id,
-    projectName: row.project_name,
-    createdAt: String(row.created_at),
-    companyContext,
-    taxonomyName: row.taxonomy_name ?? null,
-    tailSpendThreshold: Number(row.tail_spend_threshold ?? 10000),
-    columnMapping,
-  };
 }
 
 /**
- * Update mutable project metadata fields.
- * Builds a dynamic UPDATE targeting only provided fields.
+ * Set (upsert) a setting value by key.
  */
-export async function updateMetadata(
-  updates: ProjectMetadataUpdate
-): Promise<void> {
-  if (!isProjectOpen()) {
+export async function setSetting(key: string, value: unknown): Promise<void> {
+  if (!databaseService.isOpen()) {
     throw new Error('No project is currently open');
   }
 
-  const setClauses: string[] = [];
-  const params: unknown[] = [];
+  const jsonValue = JSON.stringify(value);
+  await databaseService.run(
+    `INSERT INTO project_settings (key, value) VALUES (?, ?)
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    key,
+    jsonValue
+  );
+}
 
-  if (updates.companyContext !== undefined) {
-    setClauses.push('company_context = ?');
-    params.push(JSON.stringify(updates.companyContext));
+/**
+ * Delete a setting by key.
+ */
+export async function deleteSetting(key: string): Promise<void> {
+  if (!databaseService.isOpen()) {
+    throw new Error('No project is currently open');
   }
-
-  if (updates.tailSpendThreshold !== undefined) {
-    setClauses.push('tail_spend_threshold = ?');
-    params.push(updates.tailSpendThreshold);
-  }
-
-  if (updates.taxonomyName !== undefined) {
-    setClauses.push('taxonomy_name = ?');
-    params.push(updates.taxonomyName);
-  }
-
-  if (updates.columnMapping !== undefined) {
-    setClauses.push('column_mapping = ?');
-    params.push(JSON.stringify(updates.columnMapping));
-  }
-
-  if (setClauses.length === 0) return;
 
   await databaseService.run(
-    `UPDATE project SET ${setClauses.join(', ')}`,
-    ...params
+    'DELETE FROM project_settings WHERE key = ?',
+    key
   );
+}
+
+/**
+ * Get all settings as a key-value record.
+ */
+export async function getAllSettings(): Promise<Record<string, unknown>> {
+  if (!databaseService.isOpen()) {
+    throw new Error('No project is currently open');
+  }
+
+  const rows = await databaseService.all<{ key: string; value: string }>(
+    'SELECT key, value FROM project_settings'
+  );
+
+  const result: Record<string, unknown> = {};
+  for (const row of rows) {
+    try {
+      result[row.key] = JSON.parse(row.value);
+    } catch {
+      result[row.key] = row.value;
+    }
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

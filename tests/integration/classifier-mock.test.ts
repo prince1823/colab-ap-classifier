@@ -7,13 +7,13 @@
  * Covers:
  *   - Project creation via createProject() + company context via updateMetadata()
  *   - Taxonomy import from ColabIP fixtures
- *   - CSV upload with column mapping via importCSV()
+ *   - CSV ingest with column mapping via importCSV()
  *   - Supplier universe seeding (real DuckDB)
  *   - Classification with mocked LLM (startClassification)
  *   - Results verification (classification_status != 'unclassified')
  *   - Export functionality (exportCSV)
  *
- * v2 schema: 5 tables (project, taxonomy, transactions, override_rules, change_log)
+ * v2 schema: 6 tables (project_settings, taxonomy, transactions, override_rules, change_log, uploads)
  *
  * Run with: npx vitest run tests/integration/classifier-mock.test.ts
  */
@@ -88,7 +88,7 @@ import { dialog } from 'electron';
 import { databaseService, supplierUniverseService } from '../../src/main/services/database';
 import * as projectService from '../../src/main/services/project';
 import * as taxonomyService from '../../src/main/services/taxonomy';
-import * as uploadService from '../../src/main/services/upload';
+import * as ingestService from '../../src/main/services/ingest';
 import * as classificationService from '../../src/main/services/classification';
 import * as exportService from '../../src/main/services/export';
 import * as colabipService from '../../src/main/services/colabip';
@@ -151,19 +151,18 @@ describe('Classifier Mock Integration Test (v2)', () => {
     expect(databaseService.isOpen()).toBe(true);
     expect(supplierUniverseService.isOpen()).toBe(true);
 
-    // Set company context via updateMetadata (v2 stores as JSON on project table)
-    await projectService.updateMetadata({
-      companyContext: {
-        industry: 'Technology',
-        sector: 'Software',
-        description: 'Mock company for integration testing',
-        businessFocus: 'Enterprise software development',
-      },
+    // Set company context via setSetting (KV store)
+    await projectService.setSetting('company_context', {
+      industry: 'Technology',
+      sector: 'Software',
+      description: 'Mock company for integration testing',
+      businessFocus: 'Enterprise software development',
     });
 
-    const metadata = await projectService.getMetadata();
-    expect(metadata.companyContext?.industry).toBe('Technology');
-    expect(metadata.projectName).toBe('Mock Integration Test');
+    const companyContext = await projectService.getSetting('company_context') as Record<string, string> | undefined;
+    expect(companyContext?.industry).toBe('Technology');
+    const projectName = await projectService.getSetting('project_name');
+    expect(projectName).toBe('Mock Integration Test');
   });
 
   // ────────────────────────────────────────────────────────────────
@@ -181,9 +180,9 @@ describe('Classifier Mock Integration Test (v2)', () => {
     expect(softwareNode).toBeDefined();
     expect(softwareNode!.depth).toBe(3);
 
-    // Verify project metadata updated with taxonomy name
-    const metadata = await projectService.getMetadata();
-    expect(metadata.taxonomyName).toBe('general');
+    // taxonomy_name no longer stored in project settings (removed in KV migration)
+    // Verify taxonomy was imported by checking nodes exist
+    expect(nodes.length).toBeGreaterThan(0);
   });
 
   // ────────────────────────────────────────────────────────────────
@@ -199,8 +198,9 @@ describe('Classifier Mock Integration Test (v2)', () => {
       line_description: 'Description',
     };
 
-    const result = await uploadService.importCSV(STANDARD_CSV, columnMapping);
+    const result = await ingestService.importCSV(STANDARD_CSV, columnMapping);
     expect(result.rowsInserted).toBe(5);
+    expect(result.uploadId).toBeTruthy();
 
     const stats = await transactionService.getStats();
     expect(stats.totalRows).toBe(5);
@@ -213,6 +213,17 @@ describe('Classifier Mock Integration Test (v2)', () => {
     expect(columns).toContain('spend_amount');
     expect(columns).toContain('invoice_date');
     expect(columns).toContain('line_description');
+
+    // Verify unmapped CSV columns are NOT in the transactions table
+    expect(columns).not.toContain('invoice_number');
+
+    // Verify upload record was saved
+    const upload = await ingestService.getLatestUpload();
+    expect(upload).not.toBeNull();
+    expect(upload!.rowCount).toBe(5);
+    expect(upload!.fileName).toBe('standard.csv');
+    expect(upload!.columnMappings).toBeTruthy();
+    expect(upload!.columnMappings!.supplier_name.csvColumn).toBe('Supplier');
   });
 
   // ────────────────────────────────────────────────────────────────

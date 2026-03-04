@@ -280,9 +280,58 @@ export class TaxonomyStore implements ITaxonomyStore {
   }
 
   async createFromText(text: string): Promise<{ nodeCount: number }> {
-    const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+    const rawLines = text.split('\n');
 
-    const nodes: Array<{
+    // Phase 1: Parse path + description pairs
+    // Format: path line followed by optional tab-indented description line
+    const explicit: Array<{ fullPath: string; description: string | null }> = [];
+
+    for (const raw of rawLines) {
+      if (raw.length === 0 || raw.trim().length === 0) continue;
+
+      // Description line: starts with tab or leading whitespace
+      if (/^\s/.test(raw)) {
+        if (explicit.length > 0) {
+          explicit[explicit.length - 1].description = raw.trim();
+        }
+        continue;
+      }
+
+      // Path line: strip markdown list prefixes
+      const trimmed = raw.replace(/^[-*]\s*/, '').trim();
+      if (!trimmed) continue;
+
+      const { depth } = parsePath(trimmed);
+      if (depth !== 3) {
+        throw new Error(
+          `Invalid taxonomy path "${trimmed}": all paths must have exactly 3 levels (L1|L2|L3), got ${depth}`
+        );
+      }
+
+      explicit.push({ fullPath: trimmed, description: null });
+    }
+
+    // Phase 2: Validate no duplicate paths
+    const pathSet = new Set<string>();
+    for (const entry of explicit) {
+      if (pathSet.has(entry.fullPath)) {
+        throw new Error(`Duplicate taxonomy path: "${entry.fullPath}"`);
+      }
+      pathSet.add(entry.fullPath);
+    }
+
+    // Phase 3: Auto-generate missing parent nodes (L1, L2)
+    const parentPaths = new Set<string>();
+    for (const entry of explicit) {
+      const parts = entry.fullPath.split('|');
+      const l1 = parts[0];
+      const l2 = `${parts[0]}|${parts[1]}`;
+      if (!pathSet.has(l1)) parentPaths.add(l1);
+      if (!pathSet.has(l2)) parentPaths.add(l2);
+    }
+
+    // Phase 4: Build final node list — L1 first, then L2, then L3
+    type NodeEntry = {
       id: string;
       fullPath: string;
       l1: string;
@@ -291,43 +340,44 @@ export class TaxonomyStore implements ITaxonomyStore {
       depth: number;
       description: string | null;
       parentPath: string | null;
-    }> = [];
+    };
 
-    for (const line of lines) {
-      // Format: "path" or "path|description" (description after last pipe for leaf nodes is tricky)
-      // Assume format: each line is a pipe-delimited taxonomy path
-      const trimmedLine = line.replace(/^[-*]\s*/, '').trim(); // Strip markdown list prefixes
-      if (!trimmedLine) continue;
+    const nodes: NodeEntry[] = [];
 
-      const { l1, l2, l3, depth, parentPath } = parsePath(trimmedLine);
+    // Add auto-generated parents sorted by depth
+    const sortedParents = [...parentPaths].sort((a, b) => {
+      const dA = a.split('|').length;
+      const dB = b.split('|').length;
+      return dA - dB || a.localeCompare(b);
+    });
+
+    for (const pp of sortedParents) {
+      const parsed = parsePath(pp);
       nodes.push({
         id: uuidv4(),
-        fullPath: trimmedLine,
-        l1,
-        l2,
-        l3,
-        depth,
+        fullPath: pp,
+        l1: parsed.l1,
+        l2: parsed.l2,
+        l3: parsed.l3,
+        depth: parsed.depth,
         description: null,
-        parentPath,
+        parentPath: parsed.parentPath,
       });
     }
 
-    // Validate unique paths
-    const pathSet = new Set<string>();
-    for (const node of nodes) {
-      if (pathSet.has(node.fullPath)) {
-        throw new Error(`Duplicate taxonomy path: "${node.fullPath}"`);
-      }
-      pathSet.add(node.fullPath);
-    }
-
-    // Validate parent paths exist
-    for (const node of nodes) {
-      if (node.parentPath !== null && !pathSet.has(node.parentPath)) {
-        throw new Error(
-          `Parent path "${node.parentPath}" not found for node "${node.fullPath}"`
-        );
-      }
+    // Add explicit L3 nodes
+    for (const entry of explicit) {
+      const parsed = parsePath(entry.fullPath);
+      nodes.push({
+        id: uuidv4(),
+        fullPath: entry.fullPath,
+        l1: parsed.l1,
+        l2: parsed.l2,
+        l3: parsed.l3,
+        depth: parsed.depth,
+        description: entry.description,
+        parentPath: parsed.parentPath,
+      });
     }
 
     // Clear existing taxonomy

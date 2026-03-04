@@ -168,6 +168,113 @@ describe('TaxonomyStore', () => {
     });
   });
 
+  describe('createFromText', () => {
+    it('should parse path + tab-indented description format', async () => {
+      const text = [
+        'Direct|IT|Software',
+        '\tSoftware licenses and SaaS subscriptions',
+        'Direct|IT|Hardware',
+        '\tComputers, servers, and networking equipment',
+      ].join('\n');
+
+      const result = await store.createFromText(text);
+      const nodes = await store.getNodes();
+
+      // 2 explicit L3 + auto-generated: Direct (L1), Direct|IT (L2) = 4
+      expect(result.nodeCount).toBe(4);
+
+      const software = nodes.find((n) => n.fullPath === 'Direct|IT|Software');
+      expect(software).toBeDefined();
+      expect(software!.description).toBe('Software licenses and SaaS subscriptions');
+      expect(software!.depth).toBe(3);
+
+      const hardware = nodes.find((n) => n.fullPath === 'Direct|IT|Hardware');
+      expect(hardware!.description).toBe('Computers, servers, and networking equipment');
+    });
+
+    it('should auto-generate missing L1 and L2 parent nodes', async () => {
+      const text = 'Clinical|Equipment|X-Ray\n\tX-ray machines';
+      await store.createFromText(text);
+      const nodes = await store.getNodes();
+
+      const l1 = nodes.find((n) => n.fullPath === 'Clinical');
+      expect(l1).toBeDefined();
+      expect(l1!.depth).toBe(1);
+      expect(l1!.description).toBeNull();
+      expect(l1!.parentPath).toBeNull();
+
+      const l2 = nodes.find((n) => n.fullPath === 'Clinical|Equipment');
+      expect(l2).toBeDefined();
+      expect(l2!.depth).toBe(2);
+      expect(l2!.description).toBeNull();
+      expect(l2!.parentPath).toBe('Clinical');
+    });
+
+    it('should not duplicate auto-generated parents across sibling L3 nodes', async () => {
+      const text = [
+        'Direct|IT|Software',
+        'Direct|IT|Hardware',
+        'Direct|HR|Recruiting',
+      ].join('\n');
+
+      await store.createFromText(text);
+      const nodes = await store.getNodes();
+
+      // L1: Direct (1), L2: Direct|IT, Direct|HR (2), L3: 3 = 6 total
+      expect(nodes).toHaveLength(6);
+      const directNodes = nodes.filter((n) => n.fullPath === 'Direct');
+      expect(directNodes).toHaveLength(1);
+    });
+
+    it('should reject L1-only paths', async () => {
+      await expect(store.createFromText('Direct')).rejects.toThrow(
+        'all paths must have exactly 3 levels'
+      );
+    });
+
+    it('should reject L2-only paths', async () => {
+      await expect(store.createFromText('Direct|IT')).rejects.toThrow(
+        'all paths must have exactly 3 levels'
+      );
+    });
+
+    it('should reject paths with depth > 3', async () => {
+      await expect(store.createFromText('A|B|C|D')).rejects.toThrow(
+        'depth must be 1, 2, or 3'
+      );
+    });
+
+    it('should reject duplicate paths', async () => {
+      const text = 'Direct|IT|Software\nDirect|IT|Software';
+      await expect(store.createFromText(text)).rejects.toThrow(
+        'Duplicate taxonomy path'
+      );
+    });
+
+    it('should handle paths without descriptions', async () => {
+      const text = 'Direct|IT|Software\nDirect|IT|Hardware';
+      await store.createFromText(text);
+      const nodes = await store.getNodes();
+      const software = nodes.find((n) => n.fullPath === 'Direct|IT|Software');
+      expect(software!.description).toBeNull();
+    });
+
+    it('should load fixture file via importFromFile', async () => {
+      const fixturePath = path.join(
+        __dirname, '..', '..', 'fixtures', 'colabip', 'taxonomies', 'general', 'taxonomy.txt'
+      );
+      const result = await store.importFromFile(fixturePath);
+      expect(result.nodeCount).toBeGreaterThan(0);
+
+      const nodes = await store.getNodes();
+      const l3Nodes = nodes.filter((n) => n.depth === 3);
+      // All L3 nodes from fixture should have descriptions
+      for (const n of l3Nodes) {
+        expect(n.description).not.toBeNull();
+      }
+    });
+  });
+
   describe('getNodes', () => {
     it('should return empty array when no taxonomy is set', async () => {
       const nodes = await store.getNodes();

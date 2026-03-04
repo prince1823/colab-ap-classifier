@@ -7,3 +7,4 @@ export * from './rules';
 export * from './transactions';
 export * from './classification';
 export * from './changelog';
+export * from './services';

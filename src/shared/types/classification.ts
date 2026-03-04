@@ -1,18 +1,41 @@
+import type { TaxonomyNode } from './taxonomy';
+import type { CompanyContext } from './project';
+import type { SupplierInfo } from './suppliers';
+
 export type ClassificationStatus =
   | 'unclassified'
   | 'classified_by_rule'
-  | 'classified_by_ai'
-  | 'human_reviewed';
+  | 'classified_by_ai';
 
-export interface ClassificationProgress {
-  runId: string;
-  status: 'pending' | 'researching' | 'classifying' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'awaiting_approval';
-  phase: 'researching' | 'classifying';
+export interface ResearchProgress {
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   totalSuppliers: number;
   processedSuppliers: number;
   percentage: number;
   currentSupplier: string | null;
   currentStep: string;
-  total?: number;
-  processed?: number;
+}
+
+export interface ClassificationProgress {
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  totalSuppliers: number;
+  processedSuppliers: number;
+  percentage: number;
+  currentSupplier: string | null;
+  currentStep: string;
+}
+
+export interface ClassificationInput {
+  transactions: Array<Record<string, unknown>>;
+  taxonomy: TaxonomyNode[];
+  companyContext: CompanyContext;
+  supplierResearch: SupplierInfo | null;
+  parentName?: string | null;
+  historicalClassifications: { l1: string; l2: string; l3: string; count: number }[];
+}
+
+export interface ClassificationResult {
+  classificationPath: string;
+  reasoning: string;
+  descriptionSupplierAligned: boolean;
 }

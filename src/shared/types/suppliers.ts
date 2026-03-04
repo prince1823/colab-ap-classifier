@@ -26,30 +26,35 @@ export interface Supplier {
   parentSupplierId: string | null;
   parentName: string | null;
   supplierInfo: SupplierInfo | null;
-  categoryA: boolean;
-  categoryATaxonomyNodeId: string | null;
+  mappedTaxonomyPaths: string[] | null;
   createdAt: string;
   updatedAt: string;
 }
 
-/** A project supplier = derived from transactions + enriched from supplier_universe.db */
-export interface ProjectSupplierView {
+// ─── Project Suppliers (per-project, FK-based model) ─────────────────────────
+
+export type SupplierConfirmationStatus = 'pending' | 'confirmed' | 'rejected' | 'merged';
+
+export interface ProjectSupplier {
+  id: string;
   supplierName: string;
+  confirmationStatus: SupplierConfirmationStatus;
+  isTailSpend: boolean;
+  parentSupplierName: string | null;
+  dataSource: 'universe' | 'web_search' | 'manual';
+  universeMatch: boolean;
+  createdAt: string;
+}
+
+export interface ProjectSupplierView extends ProjectSupplier {
   transactionCount: number;
   totalSpend: number;
-  /** null if not yet researched (no row in supplier_universe.db) */
-  supplierInfo: SupplierInfo | null;
-  parentName: string | null;
-  categoryA: boolean;
-  categoryATaxonomyNodeId: string | null;
-  isResearched: boolean;
+  aliases: string[];
 }
 
 export interface SupplierUpdateInput {
   parentSupplierId?: string | null;
   parentName?: string | null;
-  categoryA?: boolean;
-  categoryATaxonomyNodeId?: string | null;
   supplierInfo?: SupplierInfo;
   aliases?: string[] | null;
 }

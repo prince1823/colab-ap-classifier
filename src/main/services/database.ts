@@ -38,7 +38,7 @@ function convertPlaceholders(sql: string): string {
 }
 
 // ─── Expected tables for v2 schema ───────────────────────────────────────────
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers'];
 
 // ─── Project database service ────────────────────────────────────────────────
 
@@ -204,10 +204,14 @@ class DatabaseService {
 
       CREATE TABLE IF NOT EXISTS transactions (
         id VARCHAR PRIMARY KEY,
+        upload_id VARCHAR,
         row_index INTEGER,
         taxonomy_node_id VARCHAR,
         classification_status VARCHAR DEFAULT 'unclassified',
+        human_reviewed BOOLEAN DEFAULT FALSE,
         classification_reasoning TEXT,
+        original_supplier_name VARCHAR,
+        project_supplier_id VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -217,7 +221,7 @@ class DatabaseService {
         name VARCHAR NOT NULL,
         conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
-        priority_score INTEGER UNIQUE,
+        priority INTEGER NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -237,13 +241,31 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS uploads (
         id VARCHAR PRIMARY KEY,
         file_name VARCHAR NOT NULL,
-        column_mappings JSON,
+        file_path VARCHAR,
+        column_mappings JSON NOT NULL,
         row_count INTEGER,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        status VARCHAR DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS project_suppliers (
+        id VARCHAR PRIMARY KEY,
+        supplier_name VARCHAR NOT NULL UNIQUE,
+        confirmation_status VARCHAR DEFAULT 'pending',
+        is_tail_spend BOOLEAN DEFAULT FALSE,
+        parent_supplier_name VARCHAR,
+        data_source VARCHAR DEFAULT 'manual',
+        universe_match BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_project_suppliers_name ON project_suppliers(supplier_name);
       CREATE INDEX IF NOT EXISTS idx_transactions_taxonomy ON transactions(taxonomy_node_id);
       CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(classification_status);
+      CREATE INDEX IF NOT EXISTS idx_transactions_upload ON transactions(upload_id);
+      CREATE INDEX IF NOT EXISTS idx_transactions_supplier ON transactions(project_supplier_id);
     `);
   }
 }
@@ -371,8 +393,7 @@ class SupplierUniverseService {
         parent_supplier_id VARCHAR,
         parent_name VARCHAR,
         supplier_info JSON,
-        category_a BOOLEAN DEFAULT FALSE,
-        category_a_taxonomy_node_id VARCHAR,
+        mapped_taxonomy_paths JSON,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );

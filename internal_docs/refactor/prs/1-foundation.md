@@ -20,15 +20,14 @@ export interface Database {
   get<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T | undefined>;
 }
 
-export interface SupplierUniverseDb {
+export interface SupplierUniverse {
   open(filePath?: string): Promise<void>;
   close(): Promise<void>;
   isOpen(): boolean;
-  setDefaultPath(p: string): void;
-  run(sql: string, ...params: unknown[]): Promise<void>;
-  exec(sql: string): Promise<void>;
-  all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T[]>;
-  get<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T | undefined>;
+  getSupplier(name: string): Promise<SupplierInfo | null>;
+  getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>>;
+  upsertSupplier(name: string, data: Partial<SupplierInfo>): Promise<void>;
+  searchVariants(name: string): Promise<string[]>;  // fuzzy match, aliases
 }
 ```
 
@@ -53,16 +52,6 @@ export interface WebSearch {
   isAvailable(): boolean;
   searchSupplier(supplierName: string, supplierAddress?: string, numResults?: number): Promise<Array<{
     title: string; url: string; text: string; publishedDate?: string;
-  }>>;
-}
-
-export interface ColabipSync {
-  setBasePath(p: string): void;
-  getBasePath(): string;
-  listTaxonomies(): Promise<TaxonomyInfo[]>;
-  readTaxonomy(industryName: string): Promise<{ nodes: Array<{ path: string; description: string }> }>;
-  readRulePack(industryName: string): Promise<Array<{
-    name: string; conditions: FilterCondition[]; targetPath: string; priorityScore: number;
   }>>;
 }
 ```
@@ -112,21 +101,25 @@ export interface TaxonomyStore {
   getNodes(): Promise<TaxonomyNode[]>;
   addNode(fullPath: string, description?: string): Promise<TaxonomyNode>;
   updateNode(nodeId: string, updates: { description?: string }): Promise<void>;
-  deleteNode(nodeId: string): Promise<void>;
-  importFromColabip(industryName: string): Promise<void>;
+  deleteNode(nodeId: string, reassignTo?: string): Promise<void>;
+  renameNode(nodeId: string, newName: string): Promise<void>;
+  mergeNodes(sourceId: string, targetId: string): Promise<{ transactionsMoved: number }>;
+  importFromFile(filePath: string): Promise<{ nodeCount: number }>;
   createFromText(text: string): Promise<{ nodeCount: number }>;
 }
 
-export interface SupplierStore {
-  getSupplierByName(name: string): Promise<Supplier | null>;
-  getSuppliersByNames(names: string[]): Promise<Map<string, Supplier>>;
-  upsertSupplier(supplierName: string, data: Partial<Supplier>): Promise<void>;
+export interface SupplierService {
+  normalizeSupplierName(rawName: string): Promise<string>;  // returns project_supplier_id
+  normalizeAllTransactions(): Promise<void>;
+  addAlias(canonicalName: string, alias: string): Promise<void>;
+  getAliases(canonicalName: string): Promise<string[]>;
+  renameSupplier(supplierId: string, newName: string): Promise<void>;
   listProjectSuppliers(): Promise<ProjectSupplierView[]>;
-  getProjectSupplier(supplierName: string): Promise<ProjectSupplier | null>;
-  confirmSupplier(supplierName: string, status: SupplierConfirmationStatus): Promise<void>;
-  assignParent(supplierName: string, parentName: string): Promise<void>;
+  getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
+  confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
+  assignParent(id: string, parentId: string): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;
-  getSupplierVariants(supplierName: string): Promise<string[]>;
+  enrichProjectSupplier(id: string): Promise<ProjectSupplierView>;
 }
 
 export interface RuleStore {
@@ -147,8 +140,9 @@ export interface IngestService {
   selectFile(): Promise<string | null>;
   parseCSVPreview(filePath: string): CSVPreview;
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
-  importCSV(filePath: string, columnMappings: ColumnMappingWithPriority): Promise<{ rowsInserted: number; uploadId: string }>;
-  getLatestUpload(): Promise<UploadRecord | null>;
+  getStoredMappings(columns: string[]): Promise<UploadRecord | null>;
+  importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
+  getUploadHistory(): Promise<UploadRecord[]>;
 }
 
 export interface ExportService {
@@ -165,39 +159,39 @@ export interface SupplierResearcher {
 }
 
 export interface ClassificationRunner {
-  classifySupplier(supplierName: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void>;
+  classifyAll(): Promise<void>;
+  classifySupplier(projectSupplierId: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void>;
   getIsRunning(): boolean;
   cancel(): Promise<void>;
-}
-
-export interface Pipeline {
-  start(): Promise<void>;
-  resume(): void;
-  cancel(): Promise<void>;
-  getIsRunning(): boolean;
-  getStatus(): PipelineStatus;
 }
 ```
 
-## 1b. Updated Progress & Pipeline Types
+## 1b. Progress Types
 
 **Modify:** `src/shared/types/classification.ts`
 
 ```typescript
-export interface PipelineProgress {
-  runId: string;
-  status: 'pending' | 'running' | 'awaiting_review' | 'completed' | 'failed' | 'cancelled';
-  currentService: 'research' | 'classification' | null;
+// Separate progress types — no pipeline, no checkpoints
+export interface ResearchProgress {
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   totalSuppliers: number;
   processedSuppliers: number;
   percentage: number;
   currentSupplier: string | null;
   currentStep: string;
-  checkpoint?: number;
+}
+
+export interface ClassificationProgress {
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  totalSuppliers: number;
+  processedSuppliers: number;
+  percentage: number;
+  currentSupplier: string | null;
+  currentStep: string;
 }
 ```
 
-Remove: `ClassificationProgress`, `phase` field, legacy `total`/`processed` fields.
+Remove old `ClassificationProgress` with `phase` and `runId` fields.
 
 ## 1c. New `project_suppliers` Types
 
@@ -211,29 +205,41 @@ export interface ProjectSupplier {
   supplierName: string;
   confirmationStatus: SupplierConfirmationStatus;
   isTailSpend: boolean;
-  parentSupplierId: string | null;
+  parentSupplierName: string | null;
+  dataSource: 'universe' | 'web_search' | 'manual';
+  universeMatch: boolean;
+  createdAt: string;
+}
+
+export interface ProjectSupplierView extends ProjectSupplier {
   transactionCount: number;
   totalSpend: number;
-  isResearched: boolean;
-  createdAt: string;
+  aliases: string[];
 }
 ```
 
-## 1d. Database Schema — Add `project_suppliers` Table
+## 1d. Database Schema Updates
 
 **Modify:** `src/main/services/database.ts` `initializeSchema()`:
 
 ```sql
+-- Add project_suppliers table
 CREATE TABLE IF NOT EXISTS project_suppliers (
   id VARCHAR PRIMARY KEY,
   supplier_name VARCHAR NOT NULL UNIQUE,
   confirmation_status VARCHAR DEFAULT 'pending',
   is_tail_spend BOOLEAN DEFAULT FALSE,
-  parent_supplier_id VARCHAR,
+  parent_supplier_name VARCHAR,
+  data_source VARCHAR DEFAULT 'manual',
+  universe_match BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_project_suppliers_name ON project_suppliers(supplier_name);
+
+-- Add project_supplier_id FK column to transactions (dynamic — added at schema init)
+-- ALTER TABLE transactions ADD COLUMN IF NOT EXISTS project_supplier_id VARCHAR;
+-- CREATE INDEX IF NOT EXISTS idx_transactions_supplier ON transactions(project_supplier_id);
 ```
 
 Add `'project_suppliers'` to `EXPECTED_TABLES` array.
@@ -260,6 +266,17 @@ export const eventBus: EventBus = new AppEventBus();
 **Create:** `tests/helpers/mock-services.ts`
 
 One factory per interface — returns an object where every method is a `vi.fn()`.
+
+```typescript
+export function createMockDatabase(): Database { ... }
+export function createMockSupplierUniverse(): SupplierUniverse { ... }
+export function createMockEventBus(): EventBus { ... }
+export function createMockLLMClient(): LLMClient { ... }
+export function createMockWebSearch(): WebSearch { ... }
+export function createMockTransactionStore(): TransactionStore { ... }
+export function createMockSupplierService(): SupplierService { ... }
+// ... etc for all interfaces
+```
 
 ## 1g. Update Exports
 

@@ -1,20 +1,25 @@
 # PR 2: All Backend Services + Container + IPC Wiring
 
-**Goal:** Convert every service/agent to a class, build the interleaved pipeline, implement project_suppliers, wire the container. This is the big PR.
+**Goal:** Convert every service/agent to a class with constructor injection, wire the container, update IPC handlers. No Pipeline class — research and classification are independent user-triggered operations.
 
 ## Naming Convention
 
-- **Leaf layer** (DB-specific): Descriptive names — `DuckDBDatabase`, `DuckDBSupplierUniverse`, `OpenRouterLLMClient`, `ExaWebSearch`, `GitColabipSync`
-- **Data services**: Same name as interface — `TransactionStore`, `ProjectStore`, etc. Disambiguated by import path (`@shared/types` for interface, `../services/transactions` for class)
-- **Orchestrators**: Same name as interface — `SupplierResearcher`, `ClassificationRunner`, `InterleavedPipeline`
+- **Leaf layer** (DB-specific): Descriptive names — `DuckDBDatabase`, `DuckDBSupplierUniverse`, `OpenRouterLLMClient`, `ExaWebSearch`
+- **Data services**: Same name as interface — `TransactionStore`, `ProjectStore`, `SupplierService`, etc.
+- **Orchestrators**: Same name as interface — `SupplierResearcher`, `ClassificationRunner`
 - **Agents**: Prefixed with `LLM` — `LLMClassificationAgent`, `LLMResearchAgent`, `LLMColumnMappingAgent`
 
 ## 2a. Database Layer
 
 **Modify:** `src/main/services/database.ts`
 - Rename `DatabaseService` → `DuckDBDatabase implements Database`
-- Rename `SupplierUniverseService` → `DuckDBSupplierUniverse implements SupplierUniverseDb`
-- Remove module-level singleton exports — export classes only
+- Remove module-level singleton exports — export class only
+- Remove `SupplierUniverseService` (moved to separate file)
+
+**Create:** `src/main/services/supplier-universe.ts`
+- `class DuckDBSupplierUniverse implements SupplierUniverse`
+- High-level methods: `getSupplier(name)`, `upsertSupplier(name, data)`, `searchVariants(name)`
+- Internally uses DuckDB (the shared `supplier_universe.db`)
 
 ## 2b. External Services
 
@@ -22,7 +27,8 @@
 |---|---|---|
 | `OpenRouterLLMClient implements LLMClient` | `llm-client.ts` | Constructor reads env vars |
 | `ExaWebSearch implements WebSearch` | `exa-search.ts` | |
-| `GitColabipSync implements ColabipSync` | `colabip.ts` | `basePath` as instance field |
+
+**Delete:** `src/main/services/colabip.ts` — ColabipSync removed entirely
 
 ## 2c. Agents (thin classes wrapping LLMClient)
 
@@ -40,74 +46,59 @@ Prompt builders + parsers stay as standalone exported pure functions.
 |---|---|---|
 | `ChangelogStore` | `changelog.ts` | `db: Database` |
 | `TransactionStore` | `transactions.ts` | `db: Database, changelog: ChangelogStore` |
-| `ProjectStore` | `project.ts` | `db: Database, supplierUniverse: SupplierUniverseDb, transactions: TransactionStore` |
-| `TaxonomyStore` | `taxonomy.ts` | `db: Database, colabip: ColabipSync, project: ProjectStore` |
-| `SupplierStore` | `suppliers.ts` | `db: Database, supplierUniverse: SupplierUniverseDb` |
+| `ProjectStore` | `project.ts` | `db: Database, transactions: TransactionStore` |
+| `TaxonomyStore` | `taxonomy.ts` | `db: Database, project: ProjectStore` |
+| `SupplierService` | `supplier-service.ts` | `db: Database, supplierUniverse: SupplierUniverse` |
 | `RuleStore` | `rules.ts` | `db: Database` |
 | `IngestService` | `ingest.ts` | `db: Database, transactions: TransactionStore, columnMappingAgent: ColumnMappingAgent` |
 | `ExportService` | `export.ts` | `db: Database` |
 
-These classes are database-agnostic — they receive a `Database` interface and write SQL against it. The `DuckDB` prefix only lives on the database layer itself.
+### Key changes in `TaxonomyStore`:
+- `importFromColabip(industryName)` → `importFromFile(filePath)` — reads taxonomy files directly
+- `deleteNode(nodeId, reassignTo?)` — reassigns affected transactions
+- `renameNode(nodeId, newName)` — cascades full_path updates to children + transaction references
+- `mergeNodes(sourceId, targetId)` — re-maps transactions, deletes source
+- No ColabipSync dependency
 
-### Key changes in `SupplierStore`:
-- New methods for `project_suppliers` table: `getProjectSupplier`, `confirmSupplier`, `assignParent`, `filterTailSpend`, `getSupplierVariants`
-- `listProjectSuppliers()` joins `project_suppliers` + `supplier_universe` + transaction aggregates
+### Key changes in `SupplierService`:
+- `normalizeSupplierName(rawName)` → resolves to canonical supplier, returns `project_supplier_id`
+- `normalizeAllTransactions()` → batch: for each unique `original_supplier_name`, resolve and set `project_supplier_id` FK on transaction rows
+- `addAlias(canonicalName, alias)` / `getAliases(canonicalName)` — alias management
+- `renameSupplier(supplierId, newName)` — single row update, zero transaction rows touched (FK-based)
+- `listProjectSuppliers()` — JOIN with transactions for count/spend aggregates
+- `confirmSupplier(id, status)`, `assignParent(id, parentId)`, `filterTailSpend(threshold)`
+- `enrichProjectSupplier(id)` — delegates to SupplierUniverse for shared data
+
+### Key changes in `IngestService`:
+- No `updateColumnPriority()` — column priorities are in `project_settings` via `ProjectStore`
+- `importCSV()` accepts `ColumnMapping` (no priority sub-object), stores in uploads table
+- `getStoredMappings(columns)` — find existing uploads with matching column structure for reuse
 
 ### Pure functions extracted:
 - `buildWhereClause`, `conditionToSQL` → `src/main/utils/query-builder.ts`
 - `cleanDescription` → `src/main/utils/text.ts`
 
-## 2e. Orchestrators — Interleaved Pipeline
+## 2e. Orchestrators
 
-### `SupplierResearcher implements SupplierResearcher`
+### `SupplierResearcher`
 **File:** `src/main/services/supplier-research.ts`
-**Constructor:** `(db: Database, suppliers: SupplierStore, project: ProjectStore, webSearch: WebSearch, researchAgent: ResearchAgent, eventBus: EventBus)`
+**Constructor:** `(supplierUniverse: SupplierUniverse, webSearch: WebSearch, researchAgent: ResearchAgent, eventBus: EventBus)`
 
-- `researchSingle(supplierName)` — atomic: web search → LLM format → upsert supplier
-- `researchAll(onProgress?)` — loop calling `researchSingle` per supplier
+- `researchSingle(supplierName)` — check universe → web search fallback → LLM format → upsert to universe
+- `researchAll(onProgress?)` — sequential loop calling `researchSingle` per supplier, emits progress events
+- `cancel()` — sets cancellation flag
 
-### `ClassificationRunner implements ClassificationRunner`
+### `ClassificationRunner`
 **File:** `src/main/services/classification.ts`
-**Constructor:** `(db: Database, supplierUniverse: SupplierUniverseDb, taxonomy: TaxonomyStore, project: ProjectStore, rules: RuleStore, transactions: TransactionStore, changelog: ChangelogStore, classificationAgent: ClassificationAgent, eventBus: EventBus)`
+**Constructor:** `(db: Database, taxonomy: TaxonomyStore, project: ProjectStore, rules: RuleStore, transactions: TransactionStore, changelog: ChangelogStore, classificationAgent: ClassificationAgent, eventBus: EventBus)`
 
-- `classifySupplier(supplierName, taxonomy, companyContext)` — **public** atomic method: rules → LLM classify
-- `startClassification()` removed — pipeline orchestrates the loop
+- `classifyAll()` — classify all unclassified suppliers, emitting progress via EventBus
+- `classifySupplier(projectSupplierId, taxonomy, companyContext)` — atomic: get transactions by `project_supplier_id` FK → evaluate rules → LLM classify remaining → update transactions
+- `getIsRunning()` / `cancel()`
+- No pipeline, no checkpoints — runs to completion
 
-### `InterleavedPipeline implements Pipeline` (REWRITE)
-**File:** `src/main/services/pipeline.ts`
-**Constructor:** `(researcher: SupplierResearcher, classifier: ClassificationRunner, project: ProjectStore, transactions: TransactionStore, taxonomy: TaxonomyStore, eventBus: EventBus)`
-
-```typescript
-async start(): Promise<void> {
-  const suppliers = await this.getUnclassifiedSuppliers();
-  const taxonomyNodes = await this.taxonomy.getNodes();
-  const companyContext = await this.project.getSetting('company_context');
-  const checkpoints = [25, 50, 75];
-  let nextCheckpointIdx = 0;
-
-  for (let i = 0; i < suppliers.length; i++) {
-    if (this.isCancelled) break;
-    const supplier = suppliers[i];
-
-    this.emitProgress({ status: 'running', currentService: 'research', currentSupplier: supplier });
-    await this.researcher.researchSingle(supplier);
-
-    this.emitProgress({ status: 'running', currentService: 'classification', currentSupplier: supplier });
-    await this.classifier.classifySupplier(supplier, taxonomyNodes, companyContext);
-
-    this.processedSuppliers = i + 1;
-    const pct = Math.round((this.processedSuppliers / suppliers.length) * 100);
-
-    if (nextCheckpointIdx < checkpoints.length && pct >= checkpoints[nextCheckpointIdx]) {
-      nextCheckpointIdx++;
-      this.emitProgress({ status: 'awaiting_review', checkpoint: nextCheckpointIdx });
-      await this.waitForResume();
-    }
-  }
-
-  this.emitProgress({ status: 'completed' });
-}
-```
+### Pipeline: REMOVED
+**Delete:** `src/main/services/pipeline.ts` — no automated pipeline. Research and classification are separate user-triggered actions.
 
 ## 2f. Service Container
 
@@ -115,60 +106,63 @@ async start(): Promise<void> {
 
 ```typescript
 export interface ServiceContainer {
+  // Leaf
   db: Database;
-  supplierUniverseDb: SupplierUniverseDb;
+  supplierUniverse: SupplierUniverse;
   eventBus: EventBus;
   llm: LLMClient;
   webSearch: WebSearch;
-  colabip: ColabipSync;
+  // Agents
   classificationAgent: ClassificationAgent;
   researchAgent: ResearchAgent;
   columnMappingAgent: ColumnMappingAgent;
+  // Data
   changelog: ChangelogStore;
   transactions: TransactionStore;
   project: ProjectStore;
   taxonomy: TaxonomyStore;
-  suppliers: SupplierStore;
+  suppliers: SupplierService;
   rules: RuleStore;
   ingest: IngestService;
   export: ExportService;
+  // Orchestrators
   researcher: SupplierResearcher;
   classifier: ClassificationRunner;
-  pipeline: Pipeline;
 }
 
 export function createContainer(): ServiceContainer {
-  // Leaf (DB-specific implementations)
+  // Leaf layer
   const db = new DuckDBDatabase();
-  const supplierUniverseDb = new DuckDBSupplierUniverse();
+  const supplierUniverse = new DuckDBSupplierUniverse();
   const llm = new OpenRouterLLMClient();
   const webSearch = new ExaWebSearch();
-  const colabip = new GitColabipSync();
 
   // Agents
   const classificationAgent = new LLMClassificationAgent(llm);
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
 
-  // Data layer (database-agnostic — receive Database interface)
+  // Data layer (order matters — respect dependency graph)
   const changelog = new ChangelogStore(db);
   const transactions = new TransactionStore(db, changelog);
-  const project = new ProjectStore(db, supplierUniverseDb, transactions);
-  const taxonomy = new TaxonomyStore(db, colabip, project);
-  const suppliers = new SupplierStore(db, supplierUniverseDb);
+  const project = new ProjectStore(db, transactions);
+  const taxonomy = new TaxonomyStore(db, project);
+  const suppliers = new SupplierService(db, supplierUniverse);
   const rules = new RuleStore(db);
   const ingest = new IngestService(db, transactions, columnMappingAgent);
-  const exportService = new ExportService(db);
+  const exportSvc = new ExportService(db);
 
   // Orchestrators
-  const researcher = new SupplierResearcher(db, suppliers, project, webSearch, researchAgent, eventBus);
-  const classifier = new ClassificationRunner(db, supplierUniverseDb, taxonomy, project, rules, transactions, changelog, classificationAgent, eventBus);
-  const pipeline = new InterleavedPipeline(researcher, classifier, project, transactions, taxonomy, eventBus);
+  const researcher = new SupplierResearcher(
+    supplierUniverse, webSearch, researchAgent, eventBus);
+  const classifier = new ClassificationRunner(
+    db, taxonomy, project, rules,
+    transactions, changelog, classificationAgent, eventBus);
 
-  return { db, supplierUniverseDb, eventBus, llm, webSearch, colabip,
+  return { db, supplierUniverse, eventBus, llm, webSearch,
     classificationAgent, researchAgent, columnMappingAgent,
     changelog, transactions, project, taxonomy, suppliers, rules,
-    ingest, export: exportService, researcher, classifier, pipeline };
+    ingest, export: exportSvc, researcher, classifier };
 }
 ```
 
@@ -178,19 +172,18 @@ export function createContainer(): ServiceContainer {
 |---|---|
 | `project.ts` | `project: ProjectStore` |
 | `ingest.ts` | `ingest: IngestService` |
-| `pipeline.ts` | `pipeline: Pipeline` |
 | `transactions.ts` | `transactions: TransactionStore` |
 | `taxonomy.ts` | `taxonomy: TaxonomyStore` |
-| `suppliers.ts` | `suppliers: SupplierStore` |
-| `supplier-research.ts` | `researcher: SupplierResearcher` |
+| `suppliers.ts` | `suppliers: SupplierService, researcher: SupplierResearcher` |
+| `classification.ts` | `classifier: ClassificationRunner` |
 | `rules.ts` | `rules: RuleStore` |
 | `changelog.ts` | `changelog: ChangelogStore` |
 | `export.ts` | `export: ExportService` |
-| `colabip.ts` | `colabip: ColabipSync` |
+
+**Delete:** `src/main/ipc/colabip.ts` — no longer needed
+**Delete:** `src/main/ipc/pipeline.ts` — pipeline removed
 
 **Modify:** `src/main/ipc/index.ts` — `registerAllHandlers(services: ServiceContainer)`
-
-**Rename:** `pipeline:approve` → `pipeline:resume`
 
 ## 2h. Entry Point
 
@@ -201,15 +194,20 @@ import { eventBus } from './event-bus';
 
 app.whenReady().then(() => {
   const services = createContainer();
-  services.colabip.setBasePath(getColabipDir());
   registerAllHandlers(services);
   createWindow();
 
-  eventBus.on('pipeline:progress', (...args) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pipeline:progress', ...args);
+  // Forward events to renderer
+  eventBus.on('suppliers:research:progress', (...args) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('suppliers:research:progress', ...args);
+  });
+  eventBus.on('classification:progress', (...args) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('classification:progress', ...args);
   });
 });
 ```
+
+No more `setMainWindow()` calls. No more `setColabipBasePath()` calls.
 
 ## Verify
 - `npx tsc --noEmit`
@@ -220,9 +218,15 @@ app.whenReady().then(() => {
 | Action | Path |
 |---|---|
 | Create | `src/main/container.ts` |
+| Create | `src/main/services/supplier-universe.ts` |
+| Create | `src/main/services/supplier-service.ts` |
 | Create | `src/main/utils/query-builder.ts` |
 | Create | `src/main/utils/text.ts` |
-| Modify | All 15 files in `src/main/services/` |
+| Delete | `src/main/services/colabip.ts` |
+| Delete | `src/main/services/pipeline.ts` |
+| Delete | `src/main/ipc/colabip.ts` |
+| Delete | `src/main/ipc/pipeline.ts` |
+| Modify | All remaining files in `src/main/services/` |
 | Modify | 3 files in `src/main/agents/` |
-| Modify | All files in `src/main/ipc/` |
+| Modify | All remaining files in `src/main/ipc/` |
 | Modify | `src/main/index.ts` |

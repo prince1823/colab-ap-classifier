@@ -1,6 +1,5 @@
-/**
- * Options for LLM chat calls.
- */
+import type { LLMClient } from '../../shared/types/services';
+
 export interface ChatOptions {
   model?: string;
   maxTokens?: number;
@@ -8,44 +7,10 @@ export interface ChatOptions {
   provider?: string;
 }
 
-/**
- * Read LLM configuration from environment variables.
- * No settings service — .env is the single source of truth.
- */
-function getEnvSettings(): { provider: string; model: string } {
-  return {
-    provider: process.env.CLASSIFIER_LLM_PROVIDER || 'openrouter',
-    model: process.env.CLASSIFIER_MODEL || 'claude-3-5-haiku-latest',
-  };
-}
-
-/**
- * Get API key for the given provider from environment variables.
- */
-function getApiKeyForProvider(provider: string): string | undefined {
-  switch (provider) {
-    case 'anthropic':
-      return process.env.ANTHROPIC_API_KEY;
-    case 'openai':
-      return process.env.OPENAI_API_KEY;
-    case 'openrouter':
-      return process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Error thrown when the LLM client encounters a problem.
- */
 export class LLMClientError extends Error {
   constructor(
     message: string,
-    public readonly code:
-      | 'MISSING_API_KEY'
-      | 'INVALID_RESPONSE'
-      | 'TIMEOUT'
-      | 'API_ERROR',
+    public readonly code: 'MISSING_API_KEY' | 'INVALID_RESPONSE' | 'TIMEOUT' | 'API_ERROR',
     public readonly statusCode?: number
   ) {
     super(message);
@@ -53,9 +18,6 @@ export class LLMClientError extends Error {
   }
 }
 
-/**
- * Provider endpoint configuration.
- */
 interface ProviderConfig {
   url: string;
   format: 'anthropic' | 'openai';
@@ -83,37 +45,41 @@ const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_TEMPERATURE = 0;
 const REQUEST_TIMEOUT_MS = 60_000;
-
-// Retry configuration for transient errors (429, 5xx)
 const MAX_RETRIES = 6;
 const INITIAL_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
-/** Status codes that should trigger a retry. */
+function getEnvSettings(): { provider: string; model: string } {
+  return {
+    provider: process.env.CLASSIFIER_LLM_PROVIDER || 'openrouter',
+    model: process.env.CLASSIFIER_MODEL || 'claude-3-5-haiku-latest',
+  };
+}
+
+function getApiKeyForProvider(provider: string): string | undefined {
+  switch (provider) {
+    case 'anthropic': return process.env.ANTHROPIC_API_KEY;
+    case 'openai': return process.env.OPENAI_API_KEY;
+    case 'openrouter': return process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    default: return undefined;
+  }
+}
+
 function isRetryableStatus(status: number, errorBody?: string): boolean {
   if (status >= 500) return true;
   if (status === 429) {
-    // OpenAI uses 429 for both rate limits AND quota exhaustion.
-    // Anthropic/OpenRouter use 429 only for rate limits (quota = 402).
-    // Check body to skip retries on OpenAI quota exhaustion.
     if (errorBody && isQuotaExhausted(errorBody)) return false;
     return true;
   }
   return false;
 }
 
-/** Detect quota-exhaustion 429s (OpenAI-specific: no money left). */
 function isQuotaExhausted(errorBody: string): boolean {
   const lower = errorBody.toLowerCase();
-  return (
-    lower.includes('insufficient_quota') ||
-    lower.includes('exceeded your current quota')
-  );
+  return lower.includes('insufficient_quota') || lower.includes('exceeded your current quota');
 }
 
-/** Exponential backoff with jitter. */
 function retryDelay(attempt: number, retryAfterHeader?: string | null): number {
-  // Honour Retry-After header if the server provided one (seconds)
   if (retryAfterHeader) {
     const seconds = Number(retryAfterHeader);
     if (!isNaN(seconds) && seconds > 0) {
@@ -125,240 +91,127 @@ function retryDelay(attempt: number, retryAfterHeader?: string | null): number {
   return Math.min(base + jitter, MAX_RETRY_DELAY_MS);
 }
 
-/**
- * Build the request body for the Anthropic API format.
- */
-function buildAnthropicBody(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  maxTokens: number,
-  temperature: number
-): object {
-  return {
-    model,
-    max_tokens: maxTokens,
-    temperature,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
-  };
+function buildAnthropicBody(systemPrompt: string, userPrompt: string, model: string, maxTokens: number, temperature: number): object {
+  return { model, max_tokens: maxTokens, temperature, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] };
 }
 
-/**
- * Build the request body for the OpenAI / OpenRouter API format.
- */
-function buildOpenAIBody(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  maxTokens: number,
-  temperature: number
-): object {
-  return {
-    model,
-    max_tokens: maxTokens,
-    temperature,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-  };
+function buildOpenAIBody(systemPrompt: string, userPrompt: string, model: string, maxTokens: number, temperature: number): object {
+  return { model, max_tokens: maxTokens, temperature, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] };
 }
 
-/**
- * Build request headers for the given provider.
- */
-function buildHeaders(
-  provider: string,
-  apiKey: string,
-  format: 'anthropic' | 'openai'
-): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
+function buildHeaders(provider: string, apiKey: string, format: 'anthropic' | 'openai'): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (format === 'anthropic') {
     headers['x-api-key'] = apiKey;
     headers['anthropic-version'] = '2023-06-01';
   } else {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
-
   if (provider === 'openrouter') {
     headers['HTTP-Referer'] = 'https://colab-ap-classifier.app';
     headers['X-Title'] = 'colab-ap-classifier';
   }
-
   return headers;
 }
 
-/**
- * Extract the text content from an Anthropic API response.
- */
 function extractAnthropicText(data: unknown): string {
-  const resp = data as {
-    content?: Array<{ type: string; text: string }>;
-  };
+  const resp = data as { content?: Array<{ type: string; text: string }> };
   if (!resp.content || !Array.isArray(resp.content) || resp.content.length === 0) {
-    throw new LLMClientError(
-      'Anthropic response missing content array',
-      'INVALID_RESPONSE'
-    );
+    throw new LLMClientError('Anthropic response missing content array', 'INVALID_RESPONSE');
   }
   const textBlock = resp.content.find((block) => block.type === 'text');
   if (!textBlock || typeof textBlock.text !== 'string') {
-    throw new LLMClientError(
-      'Anthropic response missing text block',
-      'INVALID_RESPONSE'
-    );
+    throw new LLMClientError('Anthropic response missing text block', 'INVALID_RESPONSE');
   }
   return textBlock.text;
 }
 
-/**
- * Extract the text content from an OpenAI / OpenRouter API response.
- */
 function extractOpenAIText(data: unknown): string {
-  const resp = data as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
+  const resp = data as { choices?: Array<{ message?: { content?: string } }> };
   if (!resp.choices || !Array.isArray(resp.choices) || resp.choices.length === 0) {
-    throw new LLMClientError(
-      'OpenAI response missing choices array',
-      'INVALID_RESPONSE'
-    );
+    throw new LLMClientError('OpenAI response missing choices array', 'INVALID_RESPONSE');
   }
   const content = resp.choices[0]?.message?.content;
   if (typeof content !== 'string') {
-    throw new LLMClientError(
-      'OpenAI response missing message content',
-      'INVALID_RESPONSE'
-    );
+    throw new LLMClientError('OpenAI response missing message content', 'INVALID_RESPONSE');
   }
   return content;
 }
 
-/**
- * Send a chat message to an LLM provider and return the response text.
- *
- * @param systemPrompt - The system prompt to set context
- * @param userPrompt - The user message to send
- * @param options - Optional overrides for model, max tokens, temperature, and provider
- * @returns The LLM response text
- */
-export async function chat(
-  systemPrompt: string,
-  userPrompt: string,
-  options?: ChatOptions
-): Promise<string> {
-  const envSettings = getEnvSettings();
-  const provider = options?.provider ?? envSettings.provider;
-  const config = PROVIDER_CONFIGS[provider];
+export class OpenRouterLLMClient implements LLMClient {
+  async chat(systemPrompt: string, userPrompt: string, options?: ChatOptions): Promise<string> {
+    const envSettings = getEnvSettings();
+    const provider = options?.provider ?? envSettings.provider;
+    const config = PROVIDER_CONFIGS[provider];
 
-  if (!config) {
-    throw new LLMClientError(
-      `Unknown provider: ${provider}`,
-      'API_ERROR'
-    );
-  }
+    if (!config) {
+      throw new LLMClientError(`Unknown provider: ${provider}`, 'API_ERROR');
+    }
 
-  const apiKey = getApiKeyForProvider(provider);
-  if (!apiKey) {
-    throw new LLMClientError(
-      `No API key configured for provider "${provider}". Set the appropriate environment variable in .env.`,
-      'MISSING_API_KEY'
-    );
-  }
+    const apiKey = getApiKeyForProvider(provider);
+    if (!apiKey) {
+      throw new LLMClientError(`No API key configured for provider "${provider}". Set the appropriate environment variable in .env.`, 'MISSING_API_KEY');
+    }
 
-  const model = options?.model ?? envSettings.model ?? config.defaultModel;
-  const maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
-  const temperature = options?.temperature ?? DEFAULT_TEMPERATURE;
+    const model = options?.model ?? envSettings.model ?? config.defaultModel;
+    const maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
+    const temperature = options?.temperature ?? DEFAULT_TEMPERATURE;
 
-  const body =
-    config.format === 'anthropic'
+    const body = config.format === 'anthropic'
       ? buildAnthropicBody(systemPrompt, userPrompt, model, maxTokens, temperature)
       : buildOpenAIBody(systemPrompt, userPrompt, model, maxTokens, temperature);
 
-  const headers = buildHeaders(provider, apiKey, config.format);
+    const headers = buildHeaders(provider, apiKey, config.format);
+    let lastError: LLMClientError | null = null;
 
-  let lastError: LLMClientError | null = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    let response: Response;
-    try {
-      response = await fetch(config.url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (error: unknown) {
-      clearTimeout(timeoutId);
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new LLMClientError(
-          `Request to ${provider} timed out after ${REQUEST_TIMEOUT_MS}ms`,
-          'TIMEOUT'
-        );
-      }
-      throw new LLMClientError(
-        `Network error calling ${provider}: ${error instanceof Error ? error.message : String(error)}`,
-        'API_ERROR'
-      );
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (!response.ok) {
-      let errorBody = '';
+      let response: Response;
       try {
-        errorBody = await response.text();
-      } catch {
-        // ignore read errors on error responses
+        response = await fetch(config.url, {
+          method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
+        });
+      } catch (error: unknown) {
+        clearTimeout(timeoutId);
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw new LLMClientError(`Request to ${provider} timed out after ${REQUEST_TIMEOUT_MS}ms`, 'TIMEOUT');
+        }
+        throw new LLMClientError(`Network error calling ${provider}: ${error instanceof Error ? error.message : String(error)}`, 'API_ERROR');
+      } finally {
+        clearTimeout(timeoutId);
       }
 
-      // Retry on transient rate limits and 5xx — skip quota exhaustion
-      if (isRetryableStatus(response.status, errorBody) && attempt < MAX_RETRIES) {
-        const delay = retryDelay(attempt, response.headers.get('retry-after'));
-        console.warn(
-          `[LLM] ${provider} returned HTTP ${response.status}, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`
-        );
-        lastError = new LLMClientError(
-          `${provider} API returned HTTP ${response.status}: ${errorBody}`,
-          'API_ERROR',
-          response.status
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        continue;
+      if (!response.ok) {
+        let errorBody = '';
+        try { errorBody = await response.text(); } catch { /* ignore */ }
+
+        if (isRetryableStatus(response.status, errorBody) && attempt < MAX_RETRIES) {
+          const delay = retryDelay(attempt, response.headers.get('retry-after'));
+          console.warn(`[LLM] ${provider} returned HTTP ${response.status}, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+          lastError = new LLMClientError(`${provider} API returned HTTP ${response.status}: ${errorBody}`, 'API_ERROR', response.status);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        throw new LLMClientError(`${provider} API returned HTTP ${response.status}: ${errorBody}`, 'API_ERROR', response.status);
       }
 
-      throw new LLMClientError(
-        `${provider} API returned HTTP ${response.status}: ${errorBody}`,
-        'API_ERROR',
-        response.status
-      );
+      let data: unknown;
+      try { data = await response.json(); } catch {
+        throw new LLMClientError(`Failed to parse JSON response from ${provider}`, 'INVALID_RESPONSE');
+      }
+
+      return config.format === 'anthropic' ? extractAnthropicText(data) : extractOpenAIText(data);
     }
 
-    let data: unknown;
-    try {
-      data = await response.json();
-    } catch {
-      throw new LLMClientError(
-        `Failed to parse JSON response from ${provider}`,
-        'INVALID_RESPONSE'
-      );
-    }
-
-    return config.format === 'anthropic'
-      ? extractAnthropicText(data)
-      : extractOpenAIText(data);
+    throw lastError ?? new LLMClientError(`${provider} API failed after ${MAX_RETRIES} retries`, 'API_ERROR');
   }
+}
 
-  // All retries exhausted
-  throw lastError ?? new LLMClientError(
-    `${provider} API failed after ${MAX_RETRIES} retries`,
-    'API_ERROR'
-  );
+// Backward compatibility: export standalone chat function
+export async function chat(systemPrompt: string, userPrompt: string, options?: ChatOptions): Promise<string> {
+  const client = new OpenRouterLLMClient();
+  return client.chat(systemPrompt, userPrompt, options);
 }

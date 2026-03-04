@@ -2,8 +2,13 @@ import type { ConfidenceLevel } from '../../shared/types/column-mapping';
 import type { CompanyContext } from '../../shared/types/project';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import type { ExaSearchResult } from '../services/exa-search';
-import type { SupplierResearchResult } from '../services/supplier-research';
+import type { ResearchAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
+
+export interface SupplierResearchResult extends SupplierInfo {
+  confidence: 'high' | 'medium' | 'low';
+  sources: string[];
+}
 
 /**
  * Build the system prompt for the supplier research agent.
@@ -250,4 +255,38 @@ export async function researchSupplier(
   });
 
   return parseResponse(responseText);
+}
+
+/**
+ * DI-compatible research agent class.
+ */
+export class LLMResearchAgent implements ResearchAgent {
+  constructor(private llm: LLMClient) {}
+
+  async researchSupplier(
+    supplierName: string,
+    context?: unknown,
+    supplierAddress?: string,
+    searchResults?: Array<{ title: string; url: string; text: string }>
+  ): Promise<SupplierInfo> {
+    if (!supplierName.trim()) {
+      return {};
+    }
+
+    const systemPrompt = buildSystemPrompt();
+    const userPrompt = buildUserPrompt(
+      supplierName,
+      context as CompanyContext | undefined,
+      supplierAddress,
+      searchResults as ExaSearchResult[] | undefined
+    );
+
+    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
+      temperature: 0,
+      maxTokens: 1024,
+    });
+
+    const { result } = parseResponse(responseText);
+    return result;
+  }
 }

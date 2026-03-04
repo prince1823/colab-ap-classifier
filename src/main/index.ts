@@ -4,11 +4,8 @@ loadEnv();
 
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
+import { createContainer } from './container';
 import { registerAllHandlers } from './ipc';
-import { setMainWindow as setClassificationMainWindow } from './services/classification';
-import { setMainWindow as setResearchMainWindow } from './services/supplier-research';
-import { setMainWindow as setPipelineMainWindow } from './services/pipeline';
-import { setColabipBasePath } from './services/colabip';
 
 // Prevent unhandled errors from crashing the entire Electron app
 process.on('uncaughtException', (error) => {
@@ -36,7 +33,6 @@ function createWindow(): void {
     title: 'Colab91 Classifier',
   });
 
-  // In development, load from Vite dev server; in production, load built files
   const isDev = !app.isPackaged;
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
@@ -51,23 +47,22 @@ function createWindow(): void {
   });
 }
 
-function getColabipDir(): string {
-  const isDev = !app.isPackaged;
-  if (isDev) {
-    return path.join(process.cwd(), 'colabip');
-  }
-  return path.join(process.resourcesPath, 'colabip');
-}
-
 app.whenReady().then(() => {
-  setColabipBasePath(getColabipDir());
-  registerAllHandlers();
+  const services = createContainer();
+  registerAllHandlers(services);
   createWindow();
-  if (mainWindow) {
-    setClassificationMainWindow(mainWindow);
-    setResearchMainWindow(mainWindow);
-    setPipelineMainWindow(mainWindow);
-  }
+
+  // Forward EventBus events to renderer
+  services.eventBus.on('classification:progress', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('classification:progress', ...args);
+    }
+  });
+  services.eventBus.on('suppliers:research:progress', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('suppliers:research:progress', ...args);
+    }
+  });
 });
 
 app.on('window-all-closed', () => {
@@ -79,10 +74,5 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
-    if (mainWindow) {
-      setClassificationMainWindow(mainWindow);
-      setResearchMainWindow(mainWindow);
-      setPipelineMainWindow(mainWindow);
-    }
   }
 });

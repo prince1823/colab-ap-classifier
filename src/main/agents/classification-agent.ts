@@ -1,28 +1,12 @@
 import type { TaxonomyNode } from '../../shared/types/taxonomy';
 import type { CompanyContext } from '../../shared/types/project';
 import type { SupplierInfo } from '../../shared/types/suppliers';
+import type { ClassificationInput, ClassificationResult } from '../../shared/types/classification';
+import type { ClassificationAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
 
-/**
- * Input data required to classify an invoice group.
- */
-export interface ClassificationInput {
-  transactions: Array<Record<string, unknown>>;
-  taxonomy: TaxonomyNode[];
-  companyContext: CompanyContext;
-  supplierResearch: SupplierInfo | null;
-  parentName?: string | null;
-  historicalClassifications: { l1: string; l2: string; l3: string; count: number }[];
-}
-
-/**
- * Result of classifying an invoice group.
- */
-export interface ClassificationResult {
-  classificationPath: string; // "L1|L2|L3"
-  reasoning: string;
-  descriptionSupplierAligned: boolean;
-}
+// Re-export from shared types for backward compatibility
+export type { ClassificationInput, ClassificationResult };
 
 /**
  * Build the system prompt for the classification agent.
@@ -520,10 +504,7 @@ export function validateClassification(
 }
 
 /**
- * Classify an invoice group using the LLM.
- *
- * @param input - All data needed for classification
- * @returns The classification result with path, reasoning, and alignment flag
+ * Classify an invoice group using the LLM (standalone function — backward compat).
  */
 export async function classifyInvoiceGroup(
   input: ClassificationInput
@@ -548,4 +529,34 @@ export async function classifyInvoiceGroup(
 
   const rawResult = parseResponse(responseText);
   return validateClassification(rawResult, taxonomy);
+}
+
+/**
+ * DI-compatible classification agent class.
+ */
+export class LLMClassificationAgent implements ClassificationAgent {
+  constructor(private llm: LLMClient) {}
+
+  async classifyInvoiceGroup(input: ClassificationInput): Promise<ClassificationResult> {
+    const { taxonomy } = input;
+
+    if (input.transactions.length === 0) {
+      return {
+        classificationPath: 'Indirect|Uncategorized|Uncategorized',
+        reasoning: 'No transactions provided for classification.',
+        descriptionSupplierAligned: false,
+      };
+    }
+
+    const systemPrompt = buildSystemPrompt();
+    const userPrompt = buildUserPrompt(input);
+
+    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
+      temperature: 0,
+      maxTokens: 512,
+    });
+
+    const rawResult = parseResponse(responseText);
+    return validateClassification(rawResult, taxonomy);
+  }
 }

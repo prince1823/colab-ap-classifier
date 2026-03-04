@@ -3,6 +3,7 @@ import type {
   ConfidenceLevel,
 } from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
+import type { ColumnMappingAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
 
 const MAX_SAMPLE_ROWS = 5;
@@ -234,4 +235,37 @@ export async function suggestMappings(
   });
 
   return parseResponse(responseText);
+}
+
+/**
+ * DI-compatible column mapping agent class.
+ */
+export class LLMColumnMappingAgent implements ColumnMappingAgent {
+  constructor(private llm: LLMClient) {}
+
+  async suggestMappings(
+    columns: string[],
+    sampleRows: Record<string, string>[]
+  ): Promise<ColumnMappingResult> {
+    if (columns.length === 0) {
+      return {
+        mappings: {},
+        confidence: 'low',
+        unmappedClientColumns: [],
+        importantUnmappedColumns: [],
+        unmappedCanonicalColumns: CANONICAL_COLUMNS.map((c) => c.name),
+        reasoning: 'No columns provided.',
+      };
+    }
+
+    const systemPrompt = buildSystemPrompt();
+    const userPrompt = buildUserPrompt(columns, sampleRows);
+
+    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
+      temperature: 0,
+      maxTokens: 1024,
+    });
+
+    return parseResponse(responseText);
+  }
 }

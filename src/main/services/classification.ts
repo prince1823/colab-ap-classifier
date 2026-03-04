@@ -1,360 +1,279 @@
-import { randomUUID } from 'crypto';
-import { databaseService, supplierUniverseService } from './database';
-import { getNodes } from './taxonomy';
-// TODO: migrate to getSetting('company_context') from './project'
-// import { getMetadata } from './project';
-import { getSetting } from './project';
-import { evaluateRules } from './rules';
-import { updateTransactions } from './transactions';
-import { classifyInvoiceGroup } from '../agents/classification-agent';
-import { logChange } from './changelog';
-import type { ClassificationProgress } from '../../shared/types';
+import type {
+  Database,
+  TaxonomyStore as ITaxonomyStore,
+  ProjectStore as IProjectStore,
+  RuleStore as IRuleStore,
+  TransactionStore as ITransactionStore,
+  ChangelogStore as IChangelogStore,
+  ClassificationAgent,
+  EventBus,
+  ClassificationRunner as IClassificationRunner,
+  SupplierUniverse,
+} from '../../shared/types/services';
+import type { TaxonomyNode } from '../../shared/types';
+import type { CompanyContext } from '../../shared/types/project';
+import type { ClassificationProgress } from '../../shared/types/classification';
+import { cleanDescription } from '../utils/text';
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
+export class ClassificationRunner implements IClassificationRunner {
+  private isRunningFlag = false;
+  private isCancelled = false;
 
-let isRunning = false;
-let isPaused = false;
-let isCancelled = false;
-let currentRunId = '';
+  constructor(
+    private db: Database,
+    private taxonomy: ITaxonomyStore,
+    private project: IProjectStore,
+    private rules: IRuleStore,
+    private transactions: ITransactionStore,
+    private changelog: IChangelogStore,
+    private classificationAgent: ClassificationAgent,
+    private eventBus: EventBus,
+    private supplierUniverse: SupplierUniverse
+  ) {}
 
-/** Reference to the main window for progress events */
-let mainWindowRef: { webContents: { send: (channel: string, ...args: unknown[]) => void } } | null = null;
-
-export function setMainWindow(win: { webContents: { send: (channel: string, ...args: unknown[]) => void } } | null): void {
-  mainWindowRef = win;
-}
-
-function emitProgress(progress: Omit<ClassificationProgress, 'runId' | 'phase'> & { phase?: 'researching' | 'classifying' }): void {
-  if (mainWindowRef) {
-    const full: ClassificationProgress = {
-      runId: currentRunId,
-      phase: progress.phase ?? 'classifying',
-      ...progress,
-    };
-    mainWindowRef.webContents.send('pipeline:progress', full);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Control
-// ---------------------------------------------------------------------------
-
-export function getIsRunning(): boolean {
-  return isRunning;
-}
-
-export function pause(): void {
-  if (isRunning) isPaused = true;
-}
-
-export function resume(): void {
-  isPaused = false;
-}
-
-export async function cancel(): Promise<void> {
-  isCancelled = true;
-  isPaused = false;
-
-  emitProgress({
-    status: 'cancelled',
-    totalSuppliers: 0,
-    processedSuppliers: 0,
-    percentage: 0,
-    currentSupplier: null,
-    currentStep: 'Cancelled',
-  });
-}
-
-/** Wait while paused (checked between suppliers). */
-async function waitWhilePaused(): Promise<void> {
-  while (isPaused && !isCancelled) {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Main classification loop
-// ---------------------------------------------------------------------------
-
-/**
- * Start classification.
- *
- * For each supplier with unclassified transactions:
- *   1. Apply override rules
- *   2. AI classify remaining unclassified rows
- *
- * Uses supplier research from supplier_universe.db when available.
- * Resumable — skips suppliers whose transactions are already classified.
- */
-export async function startClassification(runId?: string): Promise<void> {
-  if (isRunning) {
-    throw new Error('Classification is already running');
+  private emitProgress(progress: ClassificationProgress): void {
+    this.eventBus.emit('classification:progress', progress);
   }
 
-  isRunning = true;
-  isPaused = false;
-  isCancelled = false;
-  currentRunId = runId ?? randomUUID();
+  getIsRunning(): boolean {
+    return this.isRunningFlag;
+  }
 
-  try {
-    // supplier_name is a dynamic column — guard against being called before CSV import
-    const hasCol = await databaseService.all<{ column_name: string }>(
-      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'supplier_name'"
-    );
-
-    // Get all distinct suppliers with unclassified transactions
-    const supplierRows = hasCol.length === 0
-      ? []
-      : await databaseService.all<{ supplier_name: string }>(
-          `SELECT DISTINCT supplier_name
-           FROM transactions
-           WHERE supplier_name IS NOT NULL AND classification_status = 'unclassified'
-           ORDER BY supplier_name`
-        );
-
-    if (supplierRows.length === 0) {
-      emitProgress({
-        status: 'completed',
-        totalSuppliers: 0,
-        processedSuppliers: 0,
-        percentage: 100,
-        currentSupplier: null,
-        currentStep: 'No unclassified transactions',
-      });
-      return;
-    }
-
-    const supplierNames = supplierRows.map((r) => r.supplier_name);
-    const totalSuppliers = supplierNames.length;
-    let processedSuppliers = 0;
-
-    emitProgress({
-      status: 'running',
-      totalSuppliers,
+  async cancel(): Promise<void> {
+    this.isCancelled = true;
+    this.emitProgress({
+      status: 'cancelled',
+      totalSuppliers: 0,
       processedSuppliers: 0,
       percentage: 0,
       currentSupplier: null,
-      currentStep: 'Starting classification',
+      currentStep: 'Cancelled',
     });
+  }
 
-    // Load shared data
-    const taxonomy = await getNodes();
-    // TODO: migrate to getSetting('company_context') — old getMetadata() removed
-    let companyContext;
-    try {
-      companyContext = await getSetting('company_context') ?? { industry: 'Unknown' };
-    } catch {
-      companyContext = { industry: 'Unknown' };
+  async classifyAll(): Promise<void> {
+    if (this.isRunningFlag) {
+      throw new Error('Classification is already running');
     }
 
-    for (const supplierName of supplierNames) {
-      if (isCancelled) break;
-      await waitWhilePaused();
-      if (isCancelled) break;
+    this.isRunningFlag = true;
+    this.isCancelled = false;
 
-      emitProgress({
-        status: isPaused ? 'paused' : 'running',
-        totalSuppliers,
-        processedSuppliers,
-        percentage: totalSuppliers > 0 ? Math.round((processedSuppliers / totalSuppliers) * 100) : 0,
-        currentSupplier: supplierName,
-        currentStep: `Classifying: ${supplierName}`,
-      });
+    try {
+      // Get all project suppliers with unclassified transactions
+      const supplierRows = await this.db.all<{ id: string; supplier_name: string }>(
+        `SELECT DISTINCT ps.id, ps.supplier_name
+         FROM project_suppliers ps
+         JOIN transactions t ON t.project_supplier_id = ps.id
+         WHERE t.classification_status = 'unclassified'
+         ORDER BY ps.supplier_name`
+      );
 
-      try {
-        await classifySupplier(supplierName, taxonomy, companyContext as unknown as Record<string, unknown>);
-      } catch (err) {
-        console.error(`[Classification] Failed to classify supplier "${supplierName}":`, err);
-        // Mark this supplier's unclassified transactions as failed
-        const failedTxns = await databaseService.all<{ id: string }>(
-          `SELECT id FROM transactions WHERE supplier_name = ? AND classification_status = 'unclassified'`,
-          supplierName
-        );
-        if (failedTxns.length > 0) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          await updateTransactions(
-            {
-              ids: failedTxns.map((t) => t.id),
-              classificationReasoning: `Classification failed: ${errMsg}`,
-            },
-            'pipeline'
-          );
-        }
+      if (supplierRows.length === 0) {
+        this.emitProgress({
+          status: 'completed',
+          totalSuppliers: 0,
+          processedSuppliers: 0,
+          percentage: 100,
+          currentSupplier: null,
+          currentStep: 'No unclassified transactions',
+        });
+        return;
       }
 
-      processedSuppliers++;
-    }
+      const totalSuppliers = supplierRows.length;
+      let processedSuppliers = 0;
 
-    if (isCancelled) return;
-
-    // Log to changelog
-    const classifiedCount = await databaseService.get<{ cnt: number | bigint }>(
-      `SELECT COUNT(*) as cnt FROM transactions WHERE classification_status != 'unclassified'`
-    );
-    await logChange({
-      source: 'pipeline',
-      affectedTable: 'transactions',
-      affectedIds: [],
-      affectedCount: Number(classifiedCount?.cnt ?? 0),
-      oldValues: null,
-      newValues: { status: 'classified' },
-      description: `Classification completed: ${processedSuppliers} suppliers processed`,
-    });
-
-    emitProgress({
-      status: 'completed',
-      totalSuppliers,
-      processedSuppliers: totalSuppliers,
-      percentage: 100,
-      currentSupplier: null,
-      currentStep: 'Completed',
-    });
-  } catch (err) {
-    if (!isCancelled) {
-      emitProgress({
-        status: 'failed',
-        totalSuppliers: 0,
+      this.emitProgress({
+        status: 'running',
+        totalSuppliers,
         processedSuppliers: 0,
         percentage: 0,
         currentSupplier: null,
-        currentStep: err instanceof Error ? err.message : String(err),
+        currentStep: 'Starting classification',
       });
+
+      // Load shared data
+      const taxonomyNodes = await this.taxonomy.getNodes();
+      let companyContext: CompanyContext;
+      try {
+        companyContext = (await this.project.getSetting('company_context') as CompanyContext) ?? { industry: 'Unknown' };
+      } catch {
+        companyContext = { industry: 'Unknown' };
+      }
+
+      for (const supplier of supplierRows) {
+        if (this.isCancelled) break;
+
+        this.emitProgress({
+          status: 'running',
+          totalSuppliers,
+          processedSuppliers,
+          percentage: totalSuppliers > 0 ? Math.round((processedSuppliers / totalSuppliers) * 100) : 0,
+          currentSupplier: supplier.supplier_name,
+          currentStep: `Classifying: ${supplier.supplier_name}`,
+        });
+
+        try {
+          await this.classifySupplier(supplier.id, taxonomyNodes, companyContext);
+        } catch (err) {
+          console.error(`[Classification] Failed for "${supplier.supplier_name}":`, err);
+          // Mark failed transactions
+          const failedTxns = await this.db.all<{ id: string }>(
+            `SELECT id FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
+            supplier.id
+          );
+          if (failedTxns.length > 0) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            await this.transactions.updateTransactions(
+              {
+                ids: failedTxns.map((t) => t.id),
+                classificationReasoning: `Classification failed: ${errMsg}`,
+              },
+              'pipeline'
+            );
+          }
+        }
+
+        processedSuppliers++;
+      }
+
+      if (this.isCancelled) return;
+
+      // Log to changelog
+      const classifiedCount = await this.db.get<{ cnt: number | bigint }>(
+        `SELECT COUNT(*) as cnt FROM transactions WHERE classification_status != 'unclassified'`
+      );
+      await this.changelog.logChange({
+        source: 'pipeline',
+        affectedTable: 'transactions',
+        affectedIds: [],
+        affectedCount: Number(classifiedCount?.cnt ?? 0),
+        oldValues: null,
+        newValues: { status: 'classified' },
+        description: `Classification completed: ${processedSuppliers} suppliers processed`,
+      });
+
+      this.emitProgress({
+        status: 'completed',
+        totalSuppliers,
+        processedSuppliers: totalSuppliers,
+        percentage: 100,
+        currentSupplier: null,
+        currentStep: 'Completed',
+      });
+    } catch (err) {
+      if (!this.isCancelled) {
+        this.emitProgress({
+          status: 'failed',
+          totalSuppliers: 0,
+          processedSuppliers: 0,
+          percentage: 0,
+          currentSupplier: null,
+          currentStep: err instanceof Error ? err.message : String(err),
+        });
+      }
+      throw err;
+    } finally {
+      this.isRunningFlag = false;
+      this.isCancelled = false;
     }
-    throw err;
-  } finally {
-    isRunning = false;
-    isPaused = false;
-    isCancelled = false;
   }
-}
 
-// ---------------------------------------------------------------------------
-// Per-supplier classification
-// ---------------------------------------------------------------------------
+  async classifySupplier(
+    projectSupplierId: string,
+    taxonomy: TaxonomyNode[],
+    companyContext: CompanyContext
+  ): Promise<void> {
+    // Step 1: Get unclassified transactions for this supplier
+    const txnRows = await this.db.all<Record<string, unknown>>(
+      `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
+      projectSupplierId
+    );
 
-async function classifySupplier(
-  supplierName: string,
-  taxonomy: Awaited<ReturnType<typeof getNodes>>,
-  companyContext: Record<string, unknown>
-): Promise<void> {
-  // Step 1: Get unclassified transactions for this supplier
-  const txnRows = await databaseService.all<Record<string, unknown>>(
-    `SELECT * FROM transactions WHERE supplier_name = ? AND classification_status = 'unclassified'`,
-    supplierName
-  );
+    if (txnRows.length === 0) return;
 
-  if (txnRows.length === 0) return;
+    const txnIds = txnRows.map((r) => String(r.id));
 
-  const txnIds = txnRows.map((r) => String(r.id));
+    // Step 2: Apply override rules
+    const ruleMatches = await this.rules.evaluateRules(txnIds);
 
-  // Step 2: Apply override rules
-  const ruleMatches = await evaluateRules(txnIds);
+    const txnsByTargetNode = new Map<string, string[]>();
+    const matchedTxnIds = new Set<string>();
 
-  // Group matched transactions by target node for bulk UPDATE
-  const txnsByTargetNode = new Map<string, string[]>();
-  const matchedTxnIds = new Set<string>();
-
-  for (const [txnId, match] of ruleMatches.entries()) {
-    let ids = txnsByTargetNode.get(match.targetTaxonomyNodeId);
-    if (!ids) {
-      ids = [];
-      txnsByTargetNode.set(match.targetTaxonomyNodeId, ids);
+    for (const [txnId, match] of ruleMatches.entries()) {
+      let ids = txnsByTargetNode.get(match.targetTaxonomyNodeId);
+      if (!ids) {
+        ids = [];
+        txnsByTargetNode.set(match.targetTaxonomyNodeId, ids);
+      }
+      ids.push(txnId);
+      matchedTxnIds.add(txnId);
     }
-    ids.push(txnId);
-    matchedTxnIds.add(txnId);
-  }
 
-  // Apply rule matches
-  for (const [targetNodeId, ids] of txnsByTargetNode) {
-    await updateTransactions(
+    for (const [targetNodeId, ids] of txnsByTargetNode) {
+      await this.transactions.updateTransactions(
+        {
+          ids,
+          taxonomyNodeId: targetNodeId,
+          classificationStatus: 'classified_by_rule',
+          classificationReasoning: 'Matched override rule',
+        },
+        'rule'
+      );
+    }
+
+    // Step 3: AI classify unmatched transactions
+    const unmatchedTxns = txnRows.filter((r) => !matchedTxnIds.has(String(r.id)));
+    if (unmatchedTxns.length === 0) return;
+
+    // Get supplier name for research lookup
+    const supplierRow = await this.db.get<{ supplier_name: string }>(
+      'SELECT supplier_name FROM project_suppliers WHERE id = ?',
+      projectSupplierId
+    );
+    const supplierName = supplierRow?.supplier_name;
+
+    // Get supplier research from universe
+    let supplierResearch = null;
+    let parentName: string | null = null;
+    if (supplierName) {
+      supplierResearch = await this.supplierUniverse.getSupplier(supplierName);
+    }
+
+    // Clean descriptions
+    const cleanedTxns = unmatchedTxns.map((txn) => {
+      const cleaned = { ...txn };
+      if (typeof cleaned.gl_description === 'string') {
+        cleaned.gl_description = cleanDescription(cleaned.gl_description);
+      }
+      return cleaned;
+    });
+
+    // Classify the batch
+    const result = await this.classificationAgent.classifyInvoiceGroup({
+      transactions: cleanedTxns,
+      taxonomy,
+      companyContext,
+      supplierResearch,
+      parentName,
+      historicalClassifications: [],
+    });
+
+    const taxonomyNode = taxonomy.find(
+      (n) => n.fullPath === result.classificationPath
+    );
+
+    // Apply classification
+    const unmatchedIds = unmatchedTxns.map((r) => String(r.id));
+    await this.transactions.updateTransactions(
       {
-        ids,
-        taxonomyNodeId: targetNodeId,
-        classificationStatus: 'classified_by_rule',
-        classificationReasoning: 'Matched override rule',
+        ids: unmatchedIds,
+        taxonomyNodeId: taxonomyNode?.id ?? undefined,
+        classificationStatus: 'classified_by_ai',
+        classificationReasoning: result.reasoning,
       },
-      'rule'
+      'pipeline'
     );
   }
-
-  // Step 3: AI classify unmatched transactions
-  const unmatchedTxns = txnRows.filter((r) => !matchedTxnIds.has(String(r.id)));
-
-  if (unmatchedTxns.length === 0) return;
-
-  // Get supplier research from universe
-  const supplierRow = await supplierUniverseService.get<{ supplier_info: string | null; parent_name: string | null }>(
-    'SELECT supplier_info, parent_name FROM suppliers WHERE supplier_name = ?',
-    supplierName
-  );
-
-  let supplierResearch = null;
-  let parentName: string | null = null;
-  if (supplierRow) {
-    try {
-      supplierResearch = supplierRow.supplier_info
-        ? (typeof supplierRow.supplier_info === 'string'
-          ? JSON.parse(supplierRow.supplier_info)
-          : supplierRow.supplier_info)
-        : null;
-    } catch { /* ignore */ }
-    parentName = supplierRow.parent_name ?? null;
-  }
-
-  // Clean descriptions
-  const cleanedTxns = unmatchedTxns.map((txn) => {
-    const cleaned = { ...txn };
-    if (typeof cleaned.gl_description === 'string') {
-      cleaned.gl_description = cleanDescription(cleaned.gl_description);
-    }
-    return cleaned;
-  });
-
-  // Classify the batch
-  const result = await classifyInvoiceGroup({
-    transactions: cleanedTxns,
-    taxonomy,
-    companyContext,
-    supplierResearch,
-    parentName,
-    historicalClassifications: [],
-  });
-
-  const taxonomyNode = taxonomy.find(
-    (n) => n.fullPath === result.classificationPath
-  );
-
-  // Apply classification
-  const unmatchedIds = unmatchedTxns.map((r) => String(r.id));
-  await updateTransactions(
-    {
-      ids: unmatchedIds,
-      taxonomyNodeId: taxonomyNode?.id ?? undefined,
-      classificationStatus: 'classified_by_ai',
-      classificationReasoning: result.reasoning,
-    },
-    'pipeline'
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Clean a description string — if ≥70% numeric characters, strip them.
- */
-export function cleanDescription(desc: string): string {
-  if (!desc) return desc;
-
-  const numericChars = desc.replace(/[^0-9]/g, '').length;
-  const totalChars = desc.replace(/\s/g, '').length;
-
-  if (totalChars > 0 && numericChars / totalChars >= 0.7) {
-    return desc.replace(/[0-9]/g, '').replace(/\s+/g, ' ').trim();
-  }
-
-  return desc;
 }

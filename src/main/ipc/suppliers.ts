@@ -1,13 +1,20 @@
 import { registerHandler } from './register';
-import { listProjectSuppliers, updateSupplier } from '../services/suppliers';
-import type { SupplierUpdateInput } from '../../shared/types/suppliers';
+import type { SupplierService, SupplierResearcher } from '../../shared/types/services';
+import type { SupplierConfirmationStatus } from '../../shared/types/suppliers';
 
-export function registerSuppliersHandlers(): void {
+export function registerSuppliersHandlers(
+  suppliers: SupplierService,
+  researcher: SupplierResearcher
+): void {
   registerHandler('suppliers:list', async () => {
-    return listProjectSuppliers();
+    return suppliers.listProjectSuppliers();
   });
 
-  registerHandler('suppliers:update', async (_event, supplierName: unknown, updates: unknown) => {
-    await updateSupplier(supplierName as string, updates as SupplierUpdateInput);
+  registerHandler('suppliers:update', async (_event, supplierId: unknown, newName: unknown) => {
+    await suppliers.renameSupplier(supplierId as string, newName as string);
+  });
+
+  registerHandler('suppliers:confirm', async (_event, id: unknown, status: unknown) => {
+    await suppliers.confirmSupplier(id as string, status as SupplierConfirmationStatus);
   });
 }

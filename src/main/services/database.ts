@@ -1,6 +1,6 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
 import { existsSync, unlinkSync } from 'fs';
-import path from 'path';
+import type { Database } from '../../shared/types/services';
 
 /**
  * Convert `?` placeholders to DuckDB positional `$1, $2, ...` format.
@@ -18,7 +18,6 @@ function convertPlaceholders(sql: string): string {
       inString = true;
       result += ch;
     } else if (ch === "'" && inString) {
-      // Handle escaped quotes ('')
       if (i + 1 < sql.length && sql[i + 1] === "'") {
         result += "''";
         i++;
@@ -37,12 +36,11 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-// ─── Expected tables for v2 schema ───────────────────────────────────────────
 const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers'];
 
-// ─── Project database service ────────────────────────────────────────────────
+export { convertPlaceholders };
 
-class DatabaseService {
+export class DuckDBDatabase implements Database {
   private instance: DuckDBInstance | null = null;
   private connection: DuckDBConnection | null = null;
   private currentFilePath: string | null = null;
@@ -56,15 +54,10 @@ class DatabaseService {
       this.instance = await DuckDBInstance.create(filePath);
       this.connection = await this.instance.connect();
     } catch (err) {
-      // Handle corrupted WAL file — delete it and retry
       const walPath = filePath + '.wal';
       if (existsSync(walPath)) {
         console.warn(`[Database] Failed to open database, removing corrupted WAL file: ${walPath}`);
-        try {
-          unlinkSync(walPath);
-        } catch {
-          // Ignore WAL deletion errors
-        }
+        try { unlinkSync(walPath); } catch { /* ignore */ }
         this.instance = await DuckDBInstance.create(filePath);
         this.connection = await this.instance.connect();
       } else {
@@ -74,7 +67,6 @@ class DatabaseService {
 
     this.currentFilePath = filePath;
 
-    // Check for v2 schema by looking for the `project_settings` table
     const tables = await this.all<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'project_settings'"
     );
@@ -83,7 +75,7 @@ class DatabaseService {
       await this.initializeSchema();
     }
 
-    // Ensure uploads table exists (added in ingest refactor — migrate existing .c91 files)
+    // Migrate existing .c91 files: ensure uploads table exists
     const uploadsTable = await this.all<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'uploads'"
     );
@@ -92,22 +84,41 @@ class DatabaseService {
         CREATE TABLE IF NOT EXISTS uploads (
           id VARCHAR PRIMARY KEY,
           file_name VARCHAR NOT NULL,
-          column_mappings JSON,
+          file_path VARCHAR,
+          column_mappings JSON NOT NULL,
           row_count INTEGER,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          status VARCHAR DEFAULT 'pending',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+      `);
+    }
+
+    // Migrate: ensure project_suppliers table exists
+    const psTable = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'project_suppliers'"
+    );
+    if (psTable.length === 0) {
+      await this.exec(`
+        CREATE TABLE IF NOT EXISTS project_suppliers (
+          id VARCHAR PRIMARY KEY,
+          supplier_name VARCHAR NOT NULL UNIQUE,
+          confirmation_status VARCHAR DEFAULT 'pending',
+          is_tail_spend BOOLEAN DEFAULT FALSE,
+          parent_supplier_name VARCHAR,
+          data_source VARCHAR DEFAULT 'manual',
+          universe_match BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_suppliers_name ON project_suppliers(supplier_name);
       `);
     }
   }
 
   async closeDatabase(): Promise<void> {
     if (this.connection) {
-      // Flush WAL to main database file before closing to prevent corruption
-      try {
-        await this.run('CHECKPOINT');
-      } catch {
-        // Ignore checkpoint errors — close anyway
-      }
+      try { await this.run('CHECKPOINT'); } catch { /* ignore */ }
       this.connection.closeSync();
       this.connection = null;
     }
@@ -133,7 +144,6 @@ class DatabaseService {
     return this.currentFilePath;
   }
 
-  /** Get the expected tables for validation */
   getExpectedTables(): string[] {
     return [...EXPECTED_TABLES];
   }
@@ -148,10 +158,6 @@ class DatabaseService {
     }
   }
 
-  /**
-   * Execute one or more SQL statements (semicolon-separated), without returning results.
-   * Useful for multi-statement batches like multiple INSERTs.
-   */
   async exec(sql: string): Promise<void> {
     const conn = this.getConnection();
     await conn.run(sql);
@@ -174,15 +180,6 @@ class DatabaseService {
     return results[0];
   }
 
-  /**
-   * v2 schema: 6 tables.
-   * - project_settings (key-value store)
-   * - taxonomy
-   * - transactions (base columns; canonical columns added at import via ALTER TABLE)
-   * - override_rules
-   * - change_log
-   * - uploads (file metadata + column mappings)
-   */
   private async initializeSchema(): Promise<void> {
     await this.exec(`
       CREATE TABLE IF NOT EXISTS project_settings (
@@ -269,139 +266,3 @@ class DatabaseService {
     `);
   }
 }
-
-// ─── Supplier Universe database service ──────────────────────────────────────
-
-class SupplierUniverseService {
-  private instance: DuckDBInstance | null = null;
-  private connection: DuckDBConnection | null = null;
-  private filePath: string | null = null;
-  private defaultPath: string | null = null;
-
-  /**
-   * Override the default supplier_universe.db location.
-   * Useful for tests to avoid DuckDB file lock conflicts.
-   */
-  setDefaultPath(p: string): void {
-    this.defaultPath = p;
-  }
-
-  /**
-   * Open (or create) the shared supplier_universe.db.
-   * Default location: colabip/supplier_universe.db (or overridden via setDefaultPath)
-   */
-  async open(filePath?: string): Promise<void> {
-    if (this.instance) {
-      await this.close();
-    }
-
-    const dbPath = filePath || this.defaultPath || path.join(process.cwd(), 'colabip', 'supplier_universe.db');
-
-    try {
-      this.instance = await DuckDBInstance.create(dbPath);
-      this.connection = await this.instance.connect();
-    } catch (err) {
-      const walPath = dbPath + '.wal';
-      if (existsSync(walPath)) {
-        console.warn(`[SupplierUniverse] Removing corrupted WAL file: ${walPath}`);
-        try { unlinkSync(walPath); } catch { /* ignore */ }
-        this.instance = await DuckDBInstance.create(dbPath);
-        this.connection = await this.instance.connect();
-      } else {
-        throw err;
-      }
-    }
-
-    this.filePath = dbPath;
-
-    // Initialize schema if needed
-    const tables = await this.all<{ table_name: string }>(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'suppliers'"
-    );
-
-    if (tables.length === 0) {
-      await this.initializeSchema();
-    }
-  }
-
-  async close(): Promise<void> {
-    if (this.connection) {
-      try { await this.run('CHECKPOINT'); } catch { /* ignore */ }
-      this.connection.closeSync();
-      this.connection = null;
-    }
-    if (this.instance) {
-      this.instance.closeSync();
-      this.instance = null;
-    }
-    this.filePath = null;
-  }
-
-  private getConnection(): DuckDBConnection {
-    if (!this.connection) {
-      throw new Error('Supplier universe database is not open');
-    }
-    return this.connection;
-  }
-
-  isOpen(): boolean {
-    return this.connection !== null;
-  }
-
-  getFilePath(): string | null {
-    return this.filePath;
-  }
-
-  async run(sql: string, ...params: unknown[]): Promise<void> {
-    const conn = this.getConnection();
-    if (params.length > 0) {
-      const converted = convertPlaceholders(sql);
-      await conn.run(converted, params as (string | number | boolean | null)[]);
-    } else {
-      await conn.run(sql);
-    }
-  }
-
-  async exec(sql: string): Promise<void> {
-    const conn = this.getConnection();
-    await conn.run(sql);
-  }
-
-  async all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T[]> {
-    const conn = this.getConnection();
-    let reader;
-    if (params.length > 0) {
-      const converted = convertPlaceholders(sql);
-      reader = await conn.runAndReadAll(converted, params as (string | number | boolean | null)[]);
-    } else {
-      reader = await conn.runAndReadAll(sql);
-    }
-    return reader.getRowObjectsJson() as T[];
-  }
-
-  async get<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T | undefined> {
-    const results = await this.all<T>(sql, ...params);
-    return results[0];
-  }
-
-  private async initializeSchema(): Promise<void> {
-    await this.exec(`
-      CREATE TABLE IF NOT EXISTS suppliers (
-        id VARCHAR PRIMARY KEY,
-        supplier_name VARCHAR NOT NULL UNIQUE,
-        aliases JSON,
-        parent_supplier_id VARCHAR,
-        parent_name VARCHAR,
-        supplier_info JSON,
-        mapped_taxonomy_paths JSON,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(supplier_name);
-    `);
-  }
-}
-
-export const databaseService = new DatabaseService();
-export const supplierUniverseService = new SupplierUniverseService();

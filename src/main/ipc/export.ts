@@ -1,7 +1,7 @@
 import { registerHandler } from './register';
-import * as exportService from '../services/export';
+import type { ExportService } from '../../shared/types/services';
 
-export function registerExportHandlers(): void {
+export function registerExportHandlers(exportService: ExportService): void {
   registerHandler('export:csv', async () => {
     return exportService.exportCSV();
   });

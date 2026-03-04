@@ -1,21 +1,21 @@
 import { registerHandler } from './register';
-import * as transactionsService from '../services/transactions';
+import type { TransactionStore } from '../../shared/types/services';
 import type { TransactionFilter, TransactionUpdate } from '../../shared/types';
 
-export function registerTransactionsHandlers(): void {
+export function registerTransactionsHandlers(transactions: TransactionStore): void {
   registerHandler('transactions:query', async (_event, filters: unknown) => {
-    return transactionsService.queryTransactionsPaginated(filters as TransactionFilter | undefined);
+    return transactions.queryTransactionsPaginated(filters as TransactionFilter | undefined);
   });
 
   registerHandler('transactions:stats', async () => {
-    return transactionsService.getStats();
+    return transactions.getStats();
   });
 
   registerHandler('transactions:getColumns', async () => {
-    return transactionsService.getColumns();
+    return transactions.getColumns();
   });
 
   registerHandler('transactions:update', async (_event, update: unknown) => {
-    await transactionsService.updateTransactions(update as TransactionUpdate, 'manual');
+    await transactions.updateTransactions(update as TransactionUpdate, 'manual');
   });
 }

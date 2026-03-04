@@ -1,30 +1,24 @@
 import { registerHandler } from './register';
-import {
-  getNodes,
-  addNode,
-  updateNode,
-  deleteNode,
-  importFromColabip,
-} from '../services/taxonomy';
+import type { TaxonomyStore } from '../../shared/types/services';
 
-export function registerTaxonomyHandlers(): void {
+export function registerTaxonomyHandlers(taxonomy: TaxonomyStore): void {
   registerHandler('taxonomy:getNodes', async () => {
-    return getNodes();
+    return taxonomy.getNodes();
   });
 
   registerHandler('taxonomy:addNode', async (_event, fullPath: unknown, description?: unknown) => {
-    return addNode(fullPath as string, description as string | undefined);
+    return taxonomy.addNode(fullPath as string, description as string | undefined);
   });
 
   registerHandler('taxonomy:updateNode', async (_event, nodeId: unknown, updates: unknown) => {
-    await updateNode(nodeId as string, updates as { description?: string });
+    await taxonomy.updateNode(nodeId as string, updates as { description?: string });
   });
 
   registerHandler('taxonomy:deleteNode', async (_event, nodeId: unknown) => {
-    await deleteNode(nodeId as string);
+    await taxonomy.deleteNode(nodeId as string);
   });
 
-  registerHandler('taxonomy:importFromColabip', async (_event, industryName: unknown) => {
-    await importFromColabip(industryName as string);
+  registerHandler('taxonomy:importFromFile', async (_event, filePath: unknown) => {
+    return taxonomy.importFromFile(filePath as string);
   });
 }

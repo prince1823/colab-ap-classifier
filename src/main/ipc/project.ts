@@ -1,56 +1,44 @@
 import { registerHandler } from './register';
-import {
-  selectSavePath,
-  selectOpenPath,
-  createProject,
-  openProject,
-  closeProject,
-  getSetting,
-  setSetting,
-  deleteSetting,
-  getAllSettings,
-} from '../services/project';
+import type { ProjectStore } from '../../shared/types/services';
 
-export function registerProjectHandlers(): void {
+export function registerProjectHandlers(project: ProjectStore): void {
   registerHandler('project:new', async (_event, projectName: unknown, filePath?: unknown) => {
-    // If no filePath, prompt user with save dialog
     let targetPath = filePath as string | undefined;
     if (!targetPath) {
-      const selected = await selectSavePath();
-      if (!selected) return null; // user cancelled
+      const selected = await project.selectSavePath();
+      if (!selected) return null;
       targetPath = selected;
     }
-    return createProject(projectName as string, targetPath);
+    return project.createProject(projectName as string, targetPath);
   });
 
   registerHandler('project:open', async (_event, filePath?: unknown) => {
-    // If no filePath, prompt user with open dialog
     let targetPath = filePath as string | undefined;
     if (!targetPath) {
-      const selected = await selectOpenPath();
-      if (!selected) return null; // user cancelled
+      const selected = await project.selectOpenPath();
+      if (!selected) return null;
       targetPath = selected;
     }
-    return openProject(targetPath);
+    return project.openProject(targetPath);
   });
 
   registerHandler('project:close', async () => {
-    await closeProject();
+    await project.closeProject();
   });
 
   registerHandler('project:getSetting', async (_event, key: unknown) => {
-    return getSetting(key as string);
+    return project.getSetting(key as string);
   });
 
   registerHandler('project:setSetting', async (_event, key: unknown, value: unknown) => {
-    await setSetting(key as string, value);
+    await project.setSetting(key as string, value);
   });
 
   registerHandler('project:deleteSetting', async (_event, key: unknown) => {
-    await deleteSetting(key as string);
+    await project.deleteSetting(key as string);
   });
 
   registerHandler('project:getAllSettings', async () => {
-    return getAllSettings();
+    return project.getAllSettings();
   });
 }

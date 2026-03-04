@@ -1,16 +1,15 @@
 import { registerHandler } from './register';
-import { researchAllProjectSuppliers, cancel } from '../services/supplier-research';
+import type { SupplierResearcher } from '../../shared/types/services';
 
-export function registerSupplierResearchHandlers(): void {
-  registerHandler('suppliers:research', async () => {
-    // Fire-and-forget — progress is streamed via events
-    researchAllProjectSuppliers().catch((err) => {
+export function registerSupplierResearchHandlers(researcher: SupplierResearcher): void {
+  registerHandler('suppliers:researchAll', async () => {
+    // Fire-and-forget — progress is streamed via EventBus
+    researcher.researchAll().catch((err) => {
       console.error('[IPC] Supplier research failed:', err);
     });
-    return { started: true };
   });
 
-  registerHandler('suppliers:research:cancel', async () => {
-    cancel();
+  registerHandler('suppliers:researchSingle', async (_event, supplierName: unknown) => {
+    return researcher.researchSingle(supplierName as string);
   });
 }

@@ -1,0 +1,85 @@
+### Core Architecture (services, agents, tables)
+
+- project
+    - lifecycle: create, open, close project file
+    - crud on any key-value pair in project_settings
+	    - project name
+	    - company context json
+	    - tail spend threshold
+    - file dialogs (save/open .c91)
+- ingest data
+	- select file, parsecsv (today: file = csv only.)
+	- column mappings
+		- add new column
+		- change mapped column
+		- delete column
+		- save mappings to column_mappings key in uploads table
+		- update column classification priority (1 is highest priority, no number means don't send)
+	- import csv: create transactions table with mapped columns + set columns (classification, reasoning, rowid)
+- supplier
+	- get supplier research
+		- call supplier research agent
+	- filter out tail spend suppliers
+	- get + update potential supplier name variants based on transaction data (case differences, aliases)
+	- assign parent --- select from existing rows/create new parent
+	- crud for supplier universe
+		- *save info on confirmation*
+	- track supplier confirmation via project_suppliers table 
+		- (supplier columns, confirmation status) 
+- classification
+	- call classification on a set of rows. filter params provided.
+		- classify based on rules
+		- call classification agent for remaining rows with classification_priority columns and values
+	- classification progress
+	- read classification_priority values
+- llm
+	- given a prompt, call the specified llm
+- exa
+	- given a prompt, call exa
+- database
+	- crud (table, row info)
+- transactions
+	- crud for transactions table
+		- classified_by: rule, ai, qc_agent, human ---- this we can do with telemetry.
+		- review_status: reviewed
+- taxonomy
+	- format txt taxonomy from csv and throw error if incorrect formatting/incomplete
+	- crud for taxonomy node
+		- assign orphaned nodes (delete then update)
+		- merge nodes (update then delete)
+		- create taxonomy from txt
+- rules
+	- crud for rules, using filter params (any combination of columns and values)
+		- cat a suppliers as global rule, with linked supplier_id
+		- priority score adjusts based on user organization
+- changelog
+	- new row added per change to transactions or rules table.
+		- type of change:
+			- qc
+				- previous -> post classification. array.
+			- ai
+		- table name
+
+
+- agents
+	- supplier research agent
+		- exa to get research via sources
+		- llm call to put in correct format
+	- classification agent
+		- 
+	- column mapping agent
+
+
+
+- tables
+	- project_settings
+	- uploads
+		- column mappings + classification_priority
+		- number of rows
+	- project_suppliers
+	- override_rules
+	- transactions
+	- taxonomy
+		- each new value has it's own row, with parent id connecting.
+		- the node description is at the l3 node.
+	- changelog

@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Colab91 AP Classifier — Architecture (Post-Refactor)</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f8f9fb;
+    --surface2: #f0f1f4;
+    --border: #d4d7e0;
+    --text: #1a1d27;
+    --text-muted: #5f6478;
+    --accent: #4a56c9;
+    --accent-dim: #3b46a8;
+    --green: #16a34a;
+    --amber: #b45309;
+    --red: #dc2626;
+    --cyan: #0e7490;
+    --purple: #7c3aed;
+    --pink: #db2777;
+    --orange: #c2410c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+  }
+  pre {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre code { background: none; padding: 0; }
+
+  /* Layout */
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+  /* Header */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 32px 0;
+    margin-bottom: 32px;
+  }
+  header h1 { font-size: 2em; margin-bottom: 8px; }
+  header p { color: var(--text-muted); font-size: 1.1em; }
+
+  /* Navigation */
+  nav {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    z-index: 100;
+    padding: 12px 0;
+    margin-bottom: 32px;
+  }
+  nav .container { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 24px; }
+  nav a {
+    padding: 6px 14px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 0.85em;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  nav a:hover { background: var(--surface2); text-decoration: none; border-color: var(--accent-dim); }
+  nav a.active { background: var(--accent-dim); border-color: var(--accent-dim); color: white; }
+
+  /* Sections */
+  section { margin-bottom: 48px; }
+  section h2 {
+    font-size: 1.5em;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--accent-dim);
+    display: inline-block;
+  }
+  section h3 { font-size: 1.15em; margin: 20px 0 10px; color: var(--cyan); }
+  section h4 { font-size: 1em; margin: 16px 0 8px; color: var(--amber); }
+
+  /* Cards */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+    margin: 16px 0;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    transition: border-color 0.15s;
+  }
+  .card:hover { border-color: var(--accent-dim); }
+  .card h4 { margin-top: 0; color: var(--text); font-size: 1.05em; }
+  .card .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 600;
+    margin-right: 4px;
+    margin-bottom: 6px;
+  }
+  .badge-interface { background: #dbeafe; color: #1e40af; }
+  .badge-class { background: #ede9fe; color: #5b21b6; }
+  .badge-pure { background: #dcfce7; color: #166534; }
+  .badge-infra { background: #fef3c7; color: #92400e; }
+  .badge-new { background: #fee2e2; color: #991b1b; }
+  .card .deps { color: var(--text-muted); font-size: 0.85em; margin-top: 8px; }
+  .card .file { color: var(--text-muted); font-size: 0.8em; font-family: monospace; }
+  .card .methods { margin-top: 10px; }
+  .card .methods li {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    list-style: none;
+    padding: 2px 0;
+    font-family: monospace;
+  }
+  .card .methods li::before { content: "→ "; color: var(--accent); }
+
+  /* Diagram */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    overflow-x: auto;
+    margin: 16px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82em;
+    line-height: 1.5;
+    white-space: pre;
+  }
+  .diagram .layer-label {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 0.9em;
+  }
+  th, td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--surface2);
+    color: var(--cyan);
+    font-weight: 600;
+    position: sticky;
+    top: 50px;
+  }
+  tr:hover td { background: var(--surface); }
+  td code { font-size: 0.9em; }
+
+  /* State machine */
+  .state-machine {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin: 16px 0;
+  }
+  .state {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9em;
+    margin: 4px;
+  }
+  .state-pending { background: #f1f5f9; color: var(--text-muted); border: 1px solid var(--border); }
+  .state-running { background: #dbeafe; color: #1e40af; border: 1px solid #3b82f6; }
+  .state-review { background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; }
+  .state-done { background: #dcfce7; color: #166534; border: 1px solid #22c55e; }
+  .state-fail { background: #fee2e2; color: #991b1b; border: 1px solid #ef4444; }
+  .arrow { color: var(--text-muted); font-size: 1.2em; margin: 0 4px; vertical-align: middle; }
+
+  /* Collapsible */
+  details { margin: 8px 0; }
+  details summary {
+    cursor: pointer;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-weight: 600;
+    color: var(--text);
+    transition: background 0.15s;
+  }
+  details summary:hover { background: var(--surface2); }
+  details[open] summary { border-radius: 8px 8px 0 0; border-bottom: none; }
+  details .detail-body {
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+  }
+
+  /* Flow diagram */
+  .flow-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 8px 0;
+  }
+  .flow-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-dim);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85em;
+    flex-shrink: 0;
+  }
+  .flow-content { flex: 1; }
+  .flow-content strong { color: var(--cyan); }
+
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 8px 24px; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a href="#overview">Overview</a>
+    <a href="#architecture">Architecture Diagram</a>
+    <a href="#dependency-graph">Dependency Graph</a>
+    <a href="#container">Service Container</a>
+    <a href="#data-flow">Data Flow</a>
+    <a href="#database">Database Schema</a>
+    <a href="#services">Service Details</a>
+    <a href="#agents">Agents</a>
+    <a href="#ipc">IPC Channels</a>
+    <a href="#pipeline">Workflow & Progress</a>
+    <a href="#renderer">Renderer</a>
+    <a href="#testing">Testing</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<header>
+  <h1>Colab91 AP Classifier</h1>
+  <p>Post-Refactor Architecture — DI, User-Driven Workflow, Full-Stack Alignment</p>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="overview">
+<h2>Overview</h2>
+<p>
+  Desktop Electron app for automated classification of accounts payable transactions.
+  Users import CSV transaction data, configure taxonomy and company context, run AI-powered
+  classification (with web research on suppliers), then review and correct results.
+</p>
+
+<h3>Key Architectural Decisions</h3>
+<ul>
+  <li><strong>Dependency Injection</strong> — all services receive dependencies via constructor. No module-level singletons (except EventBus).</li>
+  <li><strong>Interface-first</strong> — every service has a clean interface in <code>src/shared/types/services.ts</code>. Consumers depend on abstractions, not implementations.</li>
+  <li><strong>Service Container</strong> — a lightweight factory function (<code>createContainer()</code>) wires everything at startup. No DI framework.</li>
+  <li><strong>User-Driven Workflow</strong> — research and classification are separate user-triggered actions. No automated pipeline or forced checkpoints. User researches suppliers, reviews results, then triggers classification. Progress is reported via EventBus.</li>
+  <li><strong>EventBus</strong> — single typed event emitter replaces 3 <code>setMainWindow()</code> calls. Services emit events; entry point forwards to renderer.</li>
+</ul>
+
+<h3>Naming Convention</h3>
+<table>
+  <tr><th>Kind</th><th>Pattern</th><th>Example</th></tr>
+  <tr><td>Interface</td><td>Clean name</td><td><code>Database</code>, <code>SupplierService</code>, <code>LLMClient</code></td></tr>
+  <tr><td>Implementation</td><td>Descriptive name for leaf layer; same name as interface for data services</td><td><code>DuckDBDatabase</code>, <code>OpenRouterLLMClient</code>, <code>TransactionStore</code>, <code>SupplierService</code></td></tr>
+  <tr><td>Pure functions</td><td>Standalone export</td><td><code>buildWhereClause()</code>, <code>cleanDescription()</code></td></tr>
+  <tr><td>IPC channels</td><td><code>namespace:method</code></td><td><code>classification:start</code>, <code>project:getSetting</code></td></tr>
+  <tr><td>DB columns</td><td>snake_case</td><td><code>supplier_name</code>, <code>taxonomy_node_id</code></td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="architecture">
+<h2>Architecture Diagram</h2>
+<div class="diagram">
+<span class="layer-label">┌─── RENDERER (React + Zustand) ──────────────────────────────────────────────────────────────┐</span>
+│                                                                                              │
+│   Pages: Upload → DataReview → Classification → Review → Output                             │
+│   Stores: workflowStore (Zustand)                                                            │
+│   Hooks: useIPC&lt;T&gt;                                                                           │
+│                                                                                              │
+│   Calls: window.electronAPI.invoke('namespace:method', ...args)                              │
+│   Listens: window.electronAPI.on('classification:progress', callback)                        │
+│                                                                                              │
+<span class="layer-label">└──────────────────────────── contextBridge (preload) ─────────────────────────────────────────┘</span>
+                                        │ IPC
+                                        ▼
+<span class="layer-label">┌─── MAIN PROCESS (Node.js) ──────────────────────────────────────────────────────────────────┐</span>
+│                                                                                              │
+│  ┌─ index.ts ──────────────────────────────────────────────────────────────────────────────┐  │
+│  │  createContainer() → ServiceContainer                                                   │  │
+│  │  registerAllHandlers(services)                                                          │  │
+│  │  eventBus.on('classification:progress', 'suppliers:research:progress' → webContents.send)│  │
+│  └─────────────────────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                              │
+│  ┌─ IPC Handlers ─────────────────────────────────────────────────────────────────────────┐   │
+│  │  Each registerXxxHandlers(service) receives its dependency via argument.                │   │
+│  │  Returns IPCResponse&lt;T&gt;: { success, data?, error? }                                    │   │
+│  │                                                                                        │   │
+│  │  project │ ingest │ classification │ transactions │ taxonomy │ suppliers │ rules │ ...   │   │
+│  └────────────────────────────────────────── calls ───────────────────────────────────────┘   │
+│                                                │                                             │
+│  ┌─ ORCHESTRATORS ─────────────────────────────▼──────────────────────────────────────────┐   │
+│  │                                                                                        │   │
+│  │  SupplierResearcher                                                               │   │
+│  │  ClassificationRunner                                                              │   │
+│  │                                                                                        │   │
+│  └────────────────────────────────── uses ────────────────────────────────────────────────┘   │
+│                                       │                                                      │
+│  ┌─ DATA SERVICES ────────────────────▼───────────────────────────────────────────────────┐   │
+│  │                                                                                        │   │
+│  │  ProjectStore │ TransactionStore │ TaxonomyStore                                   │   │
+│  │  SupplierService │ RuleStore │ ChangelogStore                                       │   │
+│  │  IngestService │ ExportService                                               │   │
+│  │                                                                                        │   │
+│  └────────────────────────────────── uses ────────────────────────────────────────────────┘   │
+│                                       │                                                      │
+│  ┌─ LEAF LAYER ───────────────────────▼───────────────────────────────────────────────────┐   │
+│  │                                                                                        │   │
+│  │  DuckDBDatabase │ DuckDBSupplierUniverse │ OpenRouterLLMClient │ ExaWebSearch │ AppEventBus │   │
+│  │                                                                                        │   │
+│  └────────────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                              │
+│  ┌─ AGENTS ───────────────────────────────────────────────────────────────────────────────┐   │
+│  │  LLMClassificationAgent │ LLMResearchAgent │ LLMColumnMappingAgent                     │   │
+│  │  (Each wraps LLMClient. Prompt builders/parsers are standalone pure functions.)         │   │
+│  └────────────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                              │
+<span class="layer-label">└──────────────────────────────────────────────────────────────────────────────────────────────┘</span>
+                           │                    │                    │
+                    ┌──────┘                    │                    └──────┐
+                    ▼                           ▼                           ▼
+           ┌──────────────┐          ┌─────────────────┐          ┌──────────────┐
+           │  .c91 Files  │          │ supplier_universe│          │  OpenRouter  │
+           │  (DuckDB)    │          │     .db          │          │  / Exa APIs  │
+           └──────────────┘          └─────────────────┘          └──────────────┘
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="dependency-graph">
+<h2>Dependency Graph</h2>
+<p>Every arrow means "receives via constructor." No service imports another service directly.</p>
+
+<div class="diagram">
+<span class="layer-label">LEAF (no dependencies)</span>
+  DuckDBDatabase
+  DuckDBSupplierUniverse
+  OpenRouterLLMClient
+  ExaWebSearch
+  AppEventBus (singleton — infrastructure only)
+
+<span class="layer-label">AGENTS (depend on LLMClient)</span>
+  LLMClassificationAgent  ← LLMClient
+  LLMResearchAgent         ← LLMClient
+  LLMColumnMappingAgent    ← LLMClient
+
+<span class="layer-label">DATA SERVICES (depend on Database + other stores)</span>
+  ChangelogStore           ← Database
+  TransactionStore         ← Database, ChangelogStore
+  ProjectStore             ← Database, TransactionStore
+  TaxonomyStore            ← Database, ProjectStore
+  SupplierService            ← Database, SupplierUniverse
+  RuleStore                ← Database
+  IngestService     ← Database, TransactionStore, ColumnMappingAgent
+  ExportService         ← Database
+
+<span class="layer-label">ORCHESTRATORS (depend on data services + agents)</span>
+  SupplierResearcher ← SupplierUniverse, WebSearch, ResearchAgent, EventBus
+  ClassificationRunner ← Database, TaxonomyStore, ProjectStore,
+                                 RuleStore, TransactionStore, ChangelogStore, ClassificationAgent, EventBus
+
+<span class="layer-label">PURE FUNCTIONS (no dependencies — standalone exports)</span>
+  buildWhereClause()       src/main/utils/query-builder.ts
+  conditionToSQL()         src/main/utils/query-builder.ts
+  cleanDescription()       src/main/utils/text.ts
+  buildSystemPrompt()      src/main/agents/*.ts (per agent)
+  buildUserPrompt()        src/main/agents/*.ts (per agent)
+  parseResponse()          src/main/agents/*.ts (per agent)
+  validateClassification() src/main/agents/classification-agent.ts
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="container">
+<h2>Service Container</h2>
+<p>
+  The container is a plain factory function — ~60 lines, no framework, no decorators.
+  It instantiates everything in dependency order and returns a typed <code>ServiceContainer</code> object.
+</p>
+
+<h3>File: <code>src/main/container.ts</code></h3>
+<pre><code>export interface ServiceContainer {
+  // Leaf
+  db: Database;
+  supplierUniverse: SupplierUniverse;
+  eventBus: EventBus;
+  llm: LLMClient;
+  webSearch: WebSearch;
+  // Agents
+  classificationAgent: ClassificationAgent;
+  researchAgent: ResearchAgent;
+  columnMappingAgent: ColumnMappingAgent;
+  // Data
+  changelog: ChangelogStore;
+  transactions: TransactionStore;
+  project: ProjectStore;
+  taxonomy: TaxonomyStore;
+  suppliers: SupplierService;
+  rules: RuleStore;
+  ingest: IngestService;
+  export: ExportService;
+  // Orchestrators
+  researcher: SupplierResearcher;
+  classifier: ClassificationRunner;
+}
+
+export function createContainer(): ServiceContainer {
+  // Leaf layer
+  const db = new DuckDBDatabase();
+  const supplierUniverse = new DuckDBSupplierUniverse();
+  const llm = new OpenRouterLLMClient();
+  const webSearch = new ExaWebSearch();
+
+  // Agents
+  const classificationAgent = new LLMClassificationAgent(llm);
+  const researchAgent = new LLMResearchAgent(llm);
+  const columnMappingAgent = new LLMColumnMappingAgent(llm);
+
+  // Data layer (order matters — respect dependency graph)
+  const changelog = new ChangelogStore(db);
+  const transactions = new TransactionStore(db, changelog);
+  const project = new ProjectStore(db, transactions);
+  const taxonomy = new TaxonomyStore(db, project);
+  const suppliers = new SupplierService(db, supplierUniverse);
+  const rules = new RuleStore(db);
+  const ingest = new IngestService(db, transactions, columnMappingAgent);
+  const exportSvc = new ExportService(db);
+
+  // Orchestrators
+  const researcher = new SupplierResearcher(
+    supplierUniverse, webSearch, researchAgent, eventBus);
+  const classifier = new ClassificationRunner(
+    db, taxonomy, project, rules,
+    transactions, changelog, classificationAgent, eventBus);
+
+  return { db, supplierUniverse, eventBus, llm, webSearch,
+    classificationAgent, researchAgent, columnMappingAgent,
+    changelog, transactions, project, taxonomy, suppliers, rules,
+    ingest, export: exportSvc, researcher, classifier };
+}</code></pre>
+
+<h3>Entry Point: <code>src/main/index.ts</code></h3>
+<pre><code>app.whenReady().then(() => {
+  const services = createContainer();
+  registerAllHandlers(services);  // IPC handlers receive their services
+  createWindow();
+
+  // Forward events to renderer
+  services.eventBus.on('classification:progress', (...args) => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send('classification:progress', ...args);
+  });
+  services.eventBus.on('suppliers:research:progress', (...args) => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send('suppliers:research:progress', ...args);
+  });
+});</code></pre>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="data-flow">
+<h2>Data Flow</h2>
+<p>End-to-end flow from CSV import to classified export.</p>
+
+<div class="flow-step">
+  <div class="flow-num">1</div>
+  <div class="flow-content">
+    <strong>CSV Import</strong> — User selects CSV file. <code>IngestService.parseCSVPreview()</code> reads columns + sample rows.
+    System checks for existing uploads with matching columns to offer stored mappings.
+    If no match: <code>ColumnMappingAgent.suggestMappings()</code> uses LLM to suggest mappings.
+    User reviews/adjusts column mappings.
+    User confirms → mappings saved to <code>uploads</code> table for reuse.
+    <code>IngestService.importCSV()</code> creates transactions with mapped columns. Each row gets <code>upload_id</code> linking back to this upload.
+    Column classification priorities (which columns to send to LLM, in what order) are set separately via <code>project_settings.column_priorities</code>.
+  </div>
+</div>
+
+<div class="flow-step">
+  <div class="flow-num">2</div>
+  <div class="flow-content">
+    <strong>Project Setup</strong> — User configures company context (industry, sector, procurement nuances) via <code>ProjectStore.setSetting('company_context', ...)</code>.
+    Imports taxonomy from file (<code>TaxonomyStore.importFromFile()</code>) or creates from text.
+    Optionally creates override rules (<code>RuleStore.createRule()</code>) for known classifications.
+  </div>
+</div>
+
+<div class="flow-step">
+  <div class="flow-num">3</div>
+  <div class="flow-content">
+    <strong>Research</strong> — User clicks "Research All Suppliers" → <code>SupplierResearcher.researchAll()</code>.
+    For each supplier: check SupplierUniverse for existing data → web search fallback → LLM formats → upsert to universe.
+    User reviews research results on Supplier page (normalize names, confirm/reject, assign parents).
+    Normalization sets <code>project_supplier_id</code> FK on each transaction row, linking aliases to their canonical supplier.
+  </div>
+</div>
+
+<div class="flow-step">
+  <div class="flow-num">4</div>
+  <div class="flow-content">
+    <strong>Classification</strong> — User clicks "Classify All" → <code>ClassificationRunner.classifyAll()</code>.
+    For each supplier: retrieves transactions via <code>project_supplier_id</code> FK → apply override rules → LLM classify remaining.
+    Progress reported via events. Runs to completion. No forced checkpoints.
+  </div>
+</div>
+
+<div class="flow-step">
+  <div class="flow-num">5</div>
+  <div class="flow-content">
+    <strong>Review</strong> — User reviews classified transactions. Can accept (sets <code>human_reviewed = true</code>) or reclassify (updates taxonomy_node_id + sets <code>human_reviewed = true</code>). Review status is tracked independently from classification method.
+    All changes logged to <code>change_log</code> table with before/after values.
+    <code>ChangelogStore.revertChange()</code> for undo.
+  </div>
+</div>
+
+<div class="flow-step">
+  <div class="flow-num">6</div>
+  <div class="flow-content">
+    <strong>Export</strong> — <code>ExportService.exportCSV()</code> writes classified transactions with taxonomy paths to CSV.
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="database">
+<h2>Database Schema</h2>
+
+<h3>Project Database (<code>.c91</code> DuckDB file) — 7 Tables</h3>
+
+<details>
+  <summary>project_settings — Key-value store for project configuration</summary>
+  <div class="detail-body">
+    <table>
+      <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      <tr><td><code>key</code></td><td>VARCHAR PK</td><td>Setting name</td></tr>
+      <tr><td><code>value</code></td><td>JSON</td><td>Setting value (any JSON)</td></tr>
+    </table>
+    <p><strong>Common keys:</strong> <code>project_name</code>, <code>company_context</code>, <code>tail_spend_threshold</code>, <code>column_priorities</code></p>
+    <p><strong>Column priorities:</strong> The <code>column_priorities</code> setting stores which canonical columns are sent to the LLM during classification and in what priority order. This is a project-level concern, decoupled from CSV import. Value format: <code>{ canonicalCol: number }</code> (lower number = higher priority). Example: <code>{ "supplier_name": 1, "gl_description": 2, "spend_amount": 3 }</code>. Updated via the UI independently of upload/import.</p>
+  </div>
+</details>
+
+<details>
+  <summary>taxonomy — 3-level classification hierarchy (L1 → L2 → L3)</summary>
+  <div class="detail-body">
+    <table>
+      <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      <tr><td><code>id</code></td><td>VARCHAR PK</td><td>UUID</td></tr>
+      <tr><td><code>full_path</code></td><td>VARCHAR UNIQUE</td><td>Pipe-delimited: <code>"Corporate Services|IT|Software"</code></td></tr>
+      <tr><td><code>l1</code></td><td>VARCHAR NOT NULL</td><td>Top-level category</td></tr>
+      <tr><td><code>l2</code></td><td>VARCHAR</td><td>Mid-level (null for L1 nodes)</td></tr>
+      <tr><td><code>l3</code></td><td>VARCHAR</td><td>Leaf-level (null for L1/L2 nodes)</td></tr>
+      <tr><td><code>depth</code></td><td>INTEGER NOT NULL</td><td>1, 2, or 3</td></tr>
+      <tr><td><code>description</code></td><td>TEXT</td><td>Node description (at L3 level)</td></tr>
+      <tr><td><code>created_at</code></td><td>TIMESTAMP</td><td></td></tr>
+    </table>
+  </div>
+</details>
+
+<details>
+  <summary>transactions — Dynamic schema, grows via ALTER TABLE at CSV import</summary>
+  <div class="detail-body">
+    <table>
+      <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      <tr><td><code>id</code></td><td>VARCHAR PK</td><td>UUID</td></tr>
+      <tr><td><code>upload_id</code></td><td>VARCHAR (indexed)</td><td>FK → uploads.id — tracks which CSV file this row came from</td></tr>
+      <tr><td><code>row_index</code></td><td>INTEGER</td><td>Original CSV row number (within the upload file)</td></tr>
+      <tr><td><code>taxonomy_node_id</code></td><td>VARCHAR (indexed)</td><td>FK → taxonomy.id</td></tr>
+      <tr><td><code>classification_status</code></td><td>VARCHAR (indexed)</td><td>unclassified | classified_by_rule | classified_by_ai</td></tr>
+      <tr><td><code>human_reviewed</code></td><td>BOOLEAN</td><td>Default FALSE. Set to TRUE when a human has reviewed this row (independent of classification method).</td></tr>
+      <tr><td><code>classification_reasoning</code></td><td>TEXT</td><td>LLM reasoning or "Matched override rule: {name}"</td></tr>
+      <tr><td><code>created_at</code></td><td>TIMESTAMP</td><td></td></tr>
+      <tr><td><code>updated_at</code></td><td>TIMESTAMP</td><td></td></tr>
+      <tr><td><code>original_supplier_name</code></td><td>VARCHAR</td><td>Raw supplier name from CSV. Never modified after import.</td></tr>
+      <tr><td><code>project_supplier_id</code></td><td>VARCHAR (indexed)</td><td>FK → project_suppliers.id. Set during normalization. All aliases for the same canonical supplier share the same FK value.</td></tr>
+      <tr><td colspan="3"><em>+ dynamic canonical columns: spend_amount, gl_description, etc. (supplier_name is NOT stored here — derived via JOIN on project_supplier_id)</em></td></tr>
+    </table>
+    <p><strong>Key design decisions:</strong></p>
+    <ul>
+      <li><code>upload_id</code> links each row to its source CSV upload, enabling per-upload queries, selective re-import, and future deduplication.</li>
+      <li><code>human_reviewed</code> is a separate boolean from <code>classification_status</code>. A row can be <code>classified_by_ai</code> + <code>human_reviewed=true</code> (reviewed and accepted), or <code>classified_by_rule</code> + <code>human_reviewed=false</code> (not yet seen by a person). This decouples review tracking from the classification method.</li>
+      <li><code>classification_status</code> no longer includes "human_reviewed" as a value — that's now a separate field.</li>
+      <li><code>original_supplier_name</code> preserves the raw CSV value as an audit trail.</li>
+      <li><code>project_supplier_id</code> is a FK to <code>project_suppliers.id</code>. During normalization, SupplierService resolves raw names to canonical suppliers and sets this FK. All CSV aliases ("AMZN", "Amazon COM", "Amazn US") point to the same <code>project_suppliers</code> row. This means:
+        <ul>
+          <li><strong>Retrieval:</strong> <code>WHERE project_supplier_id = ?</code> — fast indexed lookup, no string matching.</li>
+          <li><strong>Rename:</strong> Update only <code>project_suppliers.supplier_name</code> — zero transaction rows touched.</li>
+          <li><strong>Classification:</strong> Get all transactions for a supplier via FK, not by name.</li>
+          <li><strong>Supplier name display:</strong> JOIN with <code>project_suppliers</code> to get the canonical name. No denormalized <code>supplier_name</code> column on transactions.</li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>override_rules — Classification rules with ordered priority</summary>
+  <div class="detail-body">
+    <table>
+      <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      <tr><td><code>id</code></td><td>VARCHAR PK</td><td>UUID</td></tr>
+      <tr><td><code>name</code></td><td>VARCHAR NOT NULL</td><td>Rule name</td></tr>
+      <tr><td><code>conditions</code></td><td>JSON NOT NULL</td><td>Array of FilterCondition (AND logic)</td></tr>
+      <tr><td><code>target_taxonomy_node_id</code></td><td>VARCHAR NOT NULL</td><td>FK → taxonomy.id (must be L3 leaf)</td></tr>
+      <tr><td><code>priority</code></td><td>INTEGER NOT NULL</td><td>Lower = higher priority. Simple integer ordering, no bands.</td></tr>
+      <tr><td><code>is_active</code></td><td>BOOLEAN</td><td>Default TRUE</td></tr>
+      <tr><td><code>created_at</code></td><td>TIMESTAMP</td><td></td></tr>
+    </table>
+    <p><code>priority</code> is a simple integer for ordering — no predefined bands. Rules are evaluated in priority order; first match wins.</p>
+  </div>
+</details>
+
+<details>
+  <summary><span class="badge badge-new">NEW</span> project_suppliers — Per-project supplier tracking with provenance</summary>
+  <div class="detail-body">
+    <table>
+      <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      <tr><td><code>id</code></td><td>VARCHAR PK</td><td>UUID</td></tr>
+      <tr><td><code>supplier_name</code></td><td>VARCHAR UNIQUE (indexed)</td><td>Matches supplier_name in transactions</td></tr>
+      <tr><td><code>confirmation_status</code></td><td>VARCHAR</td><td>pending | confirmed | rejected | merged</td></tr>
+      <tr><td><code>is_tail_spend</code></td><td>BOOLEAN</td><td>Below tail_spend_threshold</td></tr>
+      <tr><td><code>parent_supplier_name</code></td><td>VARCHAR</td><td>Parent company name (e.g., "Acme West" → parent "Acme Corp"). NULL if this supplier is standalone or IS the parent.</td></tr>
+      <tr><td><code>data_source</code></td><td>VARCHAR</td><td>universe | web_search | manual — where the supplier research data came from</td></tr>
+      <tr><td><code>universe_match</code></td><td>BOOLEAN</td><td>TRUE if this supplier was found in the SupplierUniverse. FALSE if only web-searched or manually entered.</td></tr>
+      <tr><td><code>created_at</code></td><td>TIMESTAMP</td><td></td></tr>
+      <tr><td><code>updated_at</code></td><td>TIMESTAMP</td><td></td></tr>
+    </table>
+    <p><strong>Design notes:</strong></p>
+    <ul>
+      <li><code>parent_supplier_name</code> tracks parent company relationships (e.g., subsidiary → parent). This is NOT a self-reference — it's a business relationship. NULL means standalone supplier or the supplier itself is a parent.</li>
+      <li><code>data_source</code> tracks provenance: "universe" = found in SupplierUniverse, "web_search" = researched via web + LLM, "manual" = manually entered by user.</li>
+      <li><code>universe_match</code> is a quick boolean check: was this supplier already known in the universe when we encountered it?</li>
+    </ul>
+    <p>Joined with transactions (for count/spend) and SupplierUniverse (for research data) at query time.</p>
+  </div>
+</details>
+
+<details>
+  <summary>change_log — Audit trail with revert capability</summary>
+  <div class="detail-body">
+    <table>
+      <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      <tr><td><code>id</code></td><td>VARCHAR PK</td><td>UUID</td></tr>
+      <tr><td><code>source</code></td><td>VARCHAR NOT NULL</td><td>manual | pipeline | rule</td></tr>
+      <tr><td><code>affected_table</code></td><td>VARCHAR NOT NULL</td><td>Table that was changed</td></tr>
+      <tr><td><code>affected_ids</code></td><td>JSON NOT NULL</td><td>Array of row IDs</td></tr>
+      <tr><td><code>affected_count</code></td><td>INTEGER NOT NULL</td><td></td></tr>
+      <tr><td><code>old_values</code></td><td>JSON</td><td>Before state</td></tr>
+      <tr><td><code>new_values</code></td><td>JSON</td><td>After state</td></tr>
+      <tr><td><code>description</code></td><td>TEXT</td><td></td></tr>
+      <tr><td><code>created_at</code></td><td>TIMESTAMP</td><td></td></tr>
+    </table>
+  </div>
+</details>
+
+<details>
+  <summary>uploads — CSV import metadata with reusable column mappings</summary>
+  <div class="detail-body">
+    <table>
+      <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      <tr><td><code>id</code></td><td>VARCHAR PK</td><td>UUID</td></tr>
+      <tr><td><code>file_name</code></td><td>VARCHAR NOT NULL</td><td>Original CSV filename</td></tr>
+      <tr><td><code>file_path</code></td><td>VARCHAR</td><td>Path at time of import (informational)</td></tr>
+      <tr><td><code>column_mappings</code></td><td>JSON NOT NULL</td><td>Confirmed mappings: { canonicalCol → csvColumn }. Stored for reuse on subsequent uploads. Column priorities are a separate project-level setting (see <code>project_settings.column_priorities</code>).</td></tr>
+      <tr><td><code>row_count</code></td><td>INTEGER</td><td>Rows imported</td></tr>
+      <tr><td><code>status</code></td><td>VARCHAR</td><td>pending | mapped | imported | failed</td></tr>
+      <tr><td><code>created_at</code></td><td>TIMESTAMP</td><td></td></tr>
+      <tr><td><code>updated_at</code></td><td>TIMESTAMP</td><td></td></tr>
+    </table>
+    <p><strong>Design notes:</strong></p>
+    <ul>
+      <li>Column mappings are confirmed by the user before import and stored per-upload. When re-uploading an updated CSV with the same structure, the stored mappings can be reused without re-running the LLM suggestion step.</li>
+      <li>Different CSVs can have different mappings (e.g., one vendor sends spend data in format A, another in format B).</li>
+      <li><strong>Future: deduplication</strong> — When re-importing updated CSVs, the system will need to detect and handle duplicate rows. Potential approaches: content hashing per row, composite key matching (supplier + date + amount), or upload-level "replace previous" semantics. The <code>upload_id</code> on transactions enables tracking which rows came from which file for selective replacement.</li>
+    </ul>
+  </div>
+</details>
+
+<h3>Shared Database (<code>colabip/supplier_universe.db</code>) — accessed via <code>SupplierUniverse</code> interface</h3>
+
+<details>
+  <summary>suppliers — Global supplier universe shared across projects</summary>
+  <div class="detail-body">
+    <table>
+      <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      <tr><td><code>id</code></td><td>VARCHAR PK</td><td>UUID</td></tr>
+      <tr><td><code>supplier_name</code></td><td>VARCHAR UNIQUE (indexed)</td><td></td></tr>
+      <tr><td><code>aliases</code></td><td>JSON</td><td>Array of name variants</td></tr>
+      <tr><td><code>parent_supplier_id</code></td><td>VARCHAR</td><td>Self-FK for parent companies</td></tr>
+      <tr><td><code>parent_name</code></td><td>VARCHAR</td><td></td></tr>
+      <tr><td><code>supplier_info</code></td><td>JSON</td><td>SupplierInfo (type, industry, products, NAICS, etc.)</td></tr>
+      <tr><td><code>mapped_taxonomy_paths</code></td><td>JSON</td><td>Array of full_path strings this supplier has been classified under across projects. Used for classification suggestions. e.g., <code>["Corporate Services|IT|Software", "Corporate Services|IT|Licenses"]</code></td></tr>
+      <tr><td><code>created_at</code></td><td>TIMESTAMP</td><td></td></tr>
+      <tr><td><code>updated_at</code></td><td>TIMESTAMP</td><td></td></tr>
+    </table>
+  </div>
+</details>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="services">
+<h2>Service Details</h2>
+
+<h3>Leaf Layer — No Dependencies</h3>
+<div class="card-grid">
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: Database</span>
+    <span class="badge badge-class">Class: DuckDBDatabase</span>
+    <h4>Database</h4>
+    <div class="file">src/main/services/database.ts</div>
+    <p>Core DuckDB wrapper for the project <code>.c91</code> file. Manages connection lifecycle, schema initialization, and parameterized queries.</p>
+    <ul class="methods">
+      <li>openDatabase(filePath) — open/create .c91 file, init schema if needed</li>
+      <li>closeDatabase() — checkpoint WAL + close</li>
+      <li>run(sql, ...params) — execute without results</li>
+      <li>exec(sql) — multi-statement batch execution</li>
+      <li>all&lt;T&gt;(sql, ...params) — query returning rows</li>
+      <li>get&lt;T&gt;(sql, ...params) — query returning first row</li>
+      <li>isOpen() / getFilePath() / getExpectedTables()</li>
+    </ul>
+    <div class="deps">Dependencies: none</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: SupplierUniverse</span>
+    <span class="badge badge-class">Class: DuckDBSupplierUniverse</span>
+    <h4>Supplier Universe</h4>
+    <div class="file">src/main/services/supplier-universe.ts</div>
+    <p>Single interface for shared supplier data. Implementation may be DuckDB, files on disk, etc. The default <code>DuckDBSupplierUniverse</code> manages a separate DuckDB instance for <code>supplier_universe.db</code>.</p>
+    <ul class="methods">
+      <li>open() — open/create the supplier universe database</li>
+      <li>close() — close the database</li>
+      <li>getSupplier(name) — look up a single supplier by name</li>
+      <li>getSuppliersByNames(names) — batch lookup by names</li>
+      <li>upsertSupplier(name, data) — create or update supplier record</li>
+      <li>searchVariants(name) — find name variants / aliases</li>
+    </ul>
+    <div class="deps">Dependencies: none</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: LLMClient</span>
+    <span class="badge badge-class">Class: OpenRouterLLMClient</span>
+    <h4>LLM Client</h4>
+    <div class="file">src/main/services/llm-client.ts</div>
+    <p>Provider-agnostic LLM API client. Supports Anthropic, OpenAI, and OpenRouter endpoints. Includes retry logic (6 retries for 5xx/429), Retry-After support, 60s timeout.</p>
+    <ul class="methods">
+      <li>chat(systemPrompt, userPrompt, options?) — single LLM call, returns text</li>
+    </ul>
+    <div class="deps">Dependencies: none (reads env vars in constructor)</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: WebSearch</span>
+    <span class="badge badge-class">Class: ExaWebSearch</span>
+    <h4>Web Search (Exa)</h4>
+    <div class="file">src/main/services/exa-search.ts</div>
+    <p>Exa API client for supplier web research. Returns title, URL, and text content from search results.</p>
+    <ul class="methods">
+      <li>isAvailable() — checks if API key is configured</li>
+      <li>searchSupplier(name, address?, numResults?) — web search for supplier info</li>
+    </ul>
+    <div class="deps">Dependencies: none</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-infra">Infrastructure</span>
+    <span class="badge badge-class">Class: AppEventBus</span>
+    <h4>EventBus</h4>
+    <div class="file">src/main/event-bus.ts</div>
+    <p>Typed event emitter (extends Node.js EventEmitter). The <strong>only module-level singleton</strong> — infrastructure, not business logic. Services emit progress events; the entry point subscribes and forwards to the renderer via <code>webContents.send()</code>.</p>
+    <ul class="methods">
+      <li>emit(channel, ...args)</li>
+      <li>on(channel, listener)</li>
+      <li>off(channel, listener)</li>
+    </ul>
+    <div class="deps">Dependencies: none</div>
+  </div>
+</div>
+
+<h3>Data Services — CRUD + Business Logic</h3>
+<div class="card-grid">
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: ProjectStore</span>
+    <span class="badge badge-class">Class: ProjectStore</span>
+    <h4>Project Store</h4>
+    <div class="file">src/main/services/project.ts</div>
+    <p>Project lifecycle (create/open/close .c91 files) + key-value settings CRUD via <code>project_settings</code> table. Also manages file dialogs for save/open.</p>
+    <ul class="methods">
+      <li>createProject(name, filePath) — create .c91, init schema, set name</li>
+      <li>openProject(filePath) — open existing .c91 + supplier_universe.db</li>
+      <li>closeProject() — close both databases</li>
+      <li>getSetting(key) / setSetting(key, value) / deleteSetting(key)</li>
+      <li>getAllSettings()</li>
+      <li>selectSavePath() / selectOpenPath() — Electron file dialogs</li>
+    </ul>
+    <div class="deps">Dependencies: Database, TransactionStore</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: TransactionStore</span>
+    <span class="badge badge-class">Class: TransactionStore</span>
+    <h4>Transaction Store</h4>
+    <div class="file">src/main/services/transactions.ts</div>
+    <p>Transaction CRUD with dynamic filtering engine. Supports pagination, sorting, aggregation stats. Column list is cached and invalidated on import.</p>
+    <ul class="methods">
+      <li>queryTransactions(filters?) — filtered list</li>
+      <li>queryTransactionsPaginated(filters?) — with pagination</li>
+      <li>getStats() — totalRows, totalSpend, uniqueSuppliers, classified/unclassified counts</li>
+      <li>getColumns() — cached list of dynamic columns</li>
+      <li>updateTransactions(update, source) — bulk update + changelog</li>
+    </ul>
+    <div class="deps">Dependencies: Database, ChangelogStore</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: TaxonomyStore</span>
+    <span class="badge badge-class">Class: TaxonomyStore</span>
+    <h4>Taxonomy Store</h4>
+    <div class="file">src/main/services/taxonomy.ts</div>
+    <p>CRUD for the 3-level taxonomy hierarchy. Supports importing from file and creating from formatted text. Handles orphaned node reassignment and node merging.</p>
+    <ul class="methods">
+      <li>getNodes() — all taxonomy nodes</li>
+      <li>addNode(fullPath, description?) — parse path, create at correct depth</li>
+      <li>updateNode(nodeId, updates)</li>
+      <li>deleteNode(nodeId, reassignTo?) — delete node. If transactions reference it, reassign them to reassignTo or set to unclassified.</li>
+      <li>renameNode(nodeId, newName) — rename a taxonomy node</li>
+      <li>mergeNodes(sourceId, targetId) — merge two taxonomy nodes</li>
+      <li>importFromFile(filePath) — import taxonomy from file</li>
+      <li>createFromText(text) — parse formatted taxonomy text</li>
+    </ul>
+    <div class="deps">Dependencies: Database, ProjectStore</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: SupplierService</span>
+    <span class="badge badge-class">Class: SupplierService</span>
+    <span class="badge badge-new">EXPANDED</span>
+    <h4>Supplier Service</h4>
+    <div class="file">src/main/services/supplier-service.ts</div>
+    <p>More than a store — handles supplier name normalization, alias management, and per-project tracking. Normalizes raw CSV names (e.g., "AMZN" → "Amazon.com, Inc.") using SupplierUniverse aliases. Multiple raw names resolve to the same <code>project_suppliers</code> row via FK. Transactions reference suppliers by <code>project_supplier_id</code>, not by name — so renames are free (single row update).</p>
+    <ul class="methods">
+      <li>normalizeSupplierName(rawName) — resolve raw name to canonical supplier, return project_supplier_id</li>
+      <li>normalizeAllTransactions() — batch: for each unique original_supplier_name, resolve to project_supplier and set FK on transaction rows</li>
+      <li>addAlias(canonicalName, alias) — register a new alias for a supplier</li>
+      <li>getAliases(canonicalName) — list all known aliases</li>
+      <li>renameSupplier(supplierId, newName) — update canonical name (single row, no transaction updates needed)</li>
+      <li>listProjectSuppliers() — joined view: canonical name, aliases, transaction count, spend, research status, data_source</li>
+      <li>getProjectSupplier(id) — per-project status including provenance</li>
+      <li>confirmSupplier(id, status) — set confirmation (pending/confirmed/rejected/merged)</li>
+      <li>assignParent(id, parentId) — set parent company relationship</li>
+      <li>filterTailSpend(threshold) — mark suppliers below threshold</li>
+      <li>enrichProjectSupplier(id) — fetch and merge data from SupplierUniverse</li>
+    </ul>
+    <div class="deps">Dependencies: Database, SupplierUniverse</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: RuleStore</span>
+    <span class="badge badge-class">Class: RuleStore</span>
+    <h4>Rule Store</h4>
+    <div class="file">src/main/services/rules.ts</div>
+    <p>Override rules with ordered priority evaluation. Rules use FilterCondition arrays (AND logic). First matching rule wins (lowest priority number). No predefined priority bands — simple integer ordering.</p>
+    <ul class="methods">
+      <li>listRules() / createRule(input) / updateRule(id, updates) / deleteRule(id)</li>
+      <li>evaluateRules(transactionIds?) — returns Map&lt;txnId, {ruleId, targetNodeId}&gt;</li>
+    </ul>
+    <div class="deps">Dependencies: Database</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: ChangelogStore</span>
+    <span class="badge badge-class">Class: ChangelogStore</span>
+    <h4>Changelog Store</h4>
+    <div class="file">src/main/services/changelog.ts</div>
+    <p>Audit trail for all mutations to transactions and rules tables. Records source (manual/pipeline/rule), affected IDs, and before/after values. Supports revert.</p>
+    <ul class="methods">
+      <li>listChanges() — all changelog entries</li>
+      <li>logChange(entry) — record a change</li>
+      <li>revertChange(changeId) — undo a change using old_values</li>
+    </ul>
+    <div class="deps">Dependencies: Database</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: IngestService</span>
+    <span class="badge badge-class">Class: IngestService</span>
+    <h4>Ingest Service</h4>
+    <div class="file">src/main/services/ingest.ts</div>
+    <p>CSV import pipeline: file selection → parsing → check for reusable stored mappings → LLM column mapping (if needed) → user confirmation → transaction table creation with dynamic schema. Mappings are stored per-upload in the uploads table for reuse on subsequent imports.</p>
+    <ul class="methods">
+      <li>selectFile() — Electron file dialog</li>
+      <li>parseCSVPreview(filePath) — columns + sample rows + total count</li>
+      <li>suggestMappings(columns, sampleRows) — LLM-powered column mapping suggestion</li>
+      <li>getStoredMappings(columns) — find existing uploads with matching column structure</li>
+      <li>importCSV(filePath, mappings, uploadId?) — ALTER TABLE + batch INSERT with upload_id tracking</li>
+      <li>getUploadHistory() — list all uploads with their mappings</li>
+      <!-- Column priorities removed from IngestService — now a project_settings concern via ProjectStore.getSetting/setSetting('column_priorities') -->
+    </ul>
+    <div class="deps">Dependencies: Database, TransactionStore, ColumnMappingAgent</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: ExportService</span>
+    <span class="badge badge-class">Class: ExportService</span>
+    <h4>Export Service</h4>
+    <div class="file">src/main/services/export.ts</div>
+    <p>Exports classified transactions to CSV with taxonomy paths, classification status, and reasoning.</p>
+    <ul class="methods">
+      <li>exportCSV() — Electron save dialog → write CSV</li>
+    </ul>
+    <div class="deps">Dependencies: Database</div>
+  </div>
+</div>
+
+<h3>Orchestrators — Research & Classification</h3>
+<div class="card-grid">
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: SupplierResearcher</span>
+    <span class="badge badge-class">Class: SupplierResearcher</span>
+    <h4>Supplier Researcher</h4>
+    <div class="file">src/main/services/supplier-research.ts</div>
+    <p>Per-supplier research: checks SupplierUniverse first, falls back to web search + LLM, stores results back. Can be triggered for a single supplier or all project suppliers. Emits progress events for batch operations. User-triggered — no automatic sequencing with classification.</p>
+    <ul class="methods">
+      <li>researchSingle(supplierName) — atomic: check universe → web search fallback → LLM format → save</li>
+      <li>researchAll(onProgress?) — sequential loop (used if running standalone)</li>
+      <li>cancel()</li>
+    </ul>
+    <div class="deps">Dependencies: SupplierUniverse, WebSearch, ResearchAgent, EventBus</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: ClassificationRunner</span>
+    <span class="badge badge-class">Class: ClassificationRunner</span>
+    <h4>Classification Runner</h4>
+    <div class="file">src/main/services/classification.ts</div>
+    <p>Classifies all unclassified transactions by supplier. For each supplier: retrieves transactions via <code>project_supplier_id</code> FK, applies override rules first, then LLM classifies remaining. Emits progress events. No checkpoint gates — just runs and reports progress. User reviews results on the Review page after completion.</p>
+    <ul class="methods">
+      <li>classifyAll() — classify all unclassified suppliers, emitting progress</li>
+      <li>classifySupplier(projectSupplierId, taxonomy, companyContext) — atomic: get transactions by FK → rules → LLM → update transactions</li>
+      <li>getIsRunning() / cancel()</li>
+    </ul>
+    <div class="deps">Dependencies: Database, TaxonomyStore, ProjectStore, RuleStore, TransactionStore, ChangelogStore, ClassificationAgent, EventBus</div>
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="agents">
+<h2>Agents</h2>
+<p>Thin classes wrapping <code>LLMClient</code>. Each agent owns its prompt templates and response parsing. Prompt builders and parsers are <strong>also exported as standalone pure functions</strong> for reuse in tests and utilities.</p>
+
+<div class="card-grid">
+  <div class="card">
+    <span class="badge badge-interface">Interface: ClassificationAgent</span>
+    <span class="badge badge-class">Class: LLMClassificationAgent</span>
+    <h4>Classification Agent</h4>
+    <div class="file">src/main/agents/classification-agent.ts</div>
+    <p>Classifies a group of transactions for a single supplier into the taxonomy. Handles response parsing (JSON/markdown), validation (fuzzy matching, depth checking), and fallbacks.</p>
+    <ul class="methods">
+      <li>classifyInvoiceGroup(input) → { classificationPath, reasoning, descriptionSupplierAligned }</li>
+    </ul>
+    <p><strong>Pure functions (also exported):</strong> buildSystemPrompt(), buildUserPrompt(), parseResponse(), validateClassification(), findClosestTaxonomyMatch()</p>
+    <div class="deps">Constructor: LLMClient</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: ResearchAgent</span>
+    <span class="badge badge-class">Class: LLMResearchAgent</span>
+    <h4>Research Agent</h4>
+    <div class="file">src/main/agents/research-agent.ts</div>
+    <p>Researches a supplier using web search results. Returns structured SupplierInfo (type, industry, products, NAICS, business model, etc.).</p>
+    <ul class="methods">
+      <li>researchSupplier(name, context?, address?, searchResults?) → SupplierInfo</li>
+    </ul>
+    <p><strong>Pure functions:</strong> buildSystemPrompt(), buildUserPrompt(), parseResponse(), validateConfidence()</p>
+    <div class="deps">Constructor: LLMClient</div>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-interface">Interface: ColumnMappingAgent</span>
+    <span class="badge badge-class">Class: LLMColumnMappingAgent</span>
+    <h4>Column Mapping Agent</h4>
+    <div class="file">src/main/agents/column-mapping-agent.ts</div>
+    <p>Suggests CSV column → canonical column mappings using LLM. Auto-corrects inverted mappings.</p>
+    <ul class="methods">
+      <li>suggestMappings(columns, sampleRows) → ColumnMappingResult</li>
+    </ul>
+    <p><strong>Pure functions:</strong> buildSystemPrompt(), buildUserPrompt(), parseResponse()</p>
+    <div class="deps">Constructor: LLMClient</div>
+  </div>
+</div>
+
+<h3>Pure Utility Functions</h3>
+<div class="card-grid">
+  <div class="card">
+    <span class="badge badge-pure">Pure Function</span>
+    <h4>Query Builder</h4>
+    <div class="file">src/main/utils/query-builder.ts</div>
+    <p>Dynamic SQL WHERE clause construction from <code>FilterCondition</code> arrays. <code>FilterCondition</code> is a universal type used across the entire stack — from frontend filter controls to backend queries, rule evaluation, and transaction updates. It provides a uniform way to describe "which rows" for any operation: querying transactions, applying rules, bulk updates, or building views.</p>
+    <ul class="methods">
+      <li>buildWhereClause(conditions) → { sql, params } | null</li>
+      <li>conditionToSQL(condition, params) → string | null</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-pure">Pure Function</span>
+    <h4>Text Utilities</h4>
+    <div class="file">src/main/utils/text.ts</div>
+    <p>Text processing for classification inputs.</p>
+    <ul class="methods">
+      <li>cleanDescription(desc) — strip numerics if ≥70% of characters</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="ipc">
+<h2>IPC Channel Map</h2>
+<p>All channels follow <code>namespace:method</code>. Handlers return <code>IPCResponse&lt;T&gt;: { success, data?, error? }</code>. Events (main→renderer) are unwrapped.</p>
+
+<table>
+  <tr><th>Channel</th><th>Direction</th><th>Handler Receives</th><th>Returns / Emits</th></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Project (7 channels)</td></tr>
+  <tr><td><code>project:new</code></td><td>invoke</td><td>ProjectStore</td><td>{ filePath, name }</td></tr>
+  <tr><td><code>project:open</code></td><td>invoke</td><td>ProjectStore</td><td>{ filePath, name }</td></tr>
+  <tr><td><code>project:close</code></td><td>invoke</td><td>ProjectStore</td><td>void</td></tr>
+  <tr><td><code>project:getSetting</code></td><td>invoke</td><td>ProjectStore</td><td>unknown (JSON value)</td></tr>
+  <tr><td><code>project:setSetting</code></td><td>invoke</td><td>ProjectStore</td><td>void</td></tr>
+  <tr><td><code>project:deleteSetting</code></td><td>invoke</td><td>ProjectStore</td><td>void</td></tr>
+  <tr><td><code>project:getAllSettings</code></td><td>invoke</td><td>ProjectStore</td><td>Record&lt;string, unknown&gt;</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Ingest (5 channels)</td></tr>
+  <tr><td><code>ingest:selectFile</code></td><td>invoke</td><td>IngestService</td><td>string | null</td></tr>
+  <tr><td><code>ingest:parseCSV</code></td><td>invoke</td><td>IngestService</td><td>CSVPreview</td></tr>
+  <tr><td><code>ingest:suggestMappings</code></td><td>invoke</td><td>IngestService</td><td>ColumnMappingResult</td></tr>
+  <tr><td><code>ingest:importCSV</code></td><td>invoke</td><td>IngestService</td><td>{ rowsInserted, uploadId }</td></tr>
+  <tr><td><code>ingest:getUpload</code></td><td>invoke</td><td>IngestService</td><td>UploadRecord | null</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Supplier Research (2 + 1 event)</td></tr>
+  <tr><td><code>suppliers:researchAll</code></td><td>invoke</td><td>SupplierResearcher</td><td>void (fire-and-forget, emits progress)</td></tr>
+  <tr><td><code>suppliers:researchSingle</code></td><td>invoke</td><td>SupplierResearcher</td><td>SupplierInfo</td></tr>
+  <tr><td><code>suppliers:research:progress</code></td><td style="color:var(--amber)">event ←</td><td>—</td><td>ResearchProgress</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Classification (3 + 1 event)</td></tr>
+  <tr><td><code>classification:start</code></td><td>invoke</td><td>ClassificationRunner</td><td>void (fire-and-forget, emits progress)</td></tr>
+  <tr><td><code>classification:cancel</code></td><td>invoke</td><td>ClassificationRunner</td><td>void</td></tr>
+  <tr><td><code>classification:progress</code></td><td style="color:var(--amber)">event ←</td><td>—</td><td>ClassificationProgress</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Transactions (4 channels)</td></tr>
+  <tr><td><code>transactions:query</code></td><td>invoke</td><td>TransactionStore</td><td>PaginatedTransactions</td></tr>
+  <tr><td><code>transactions:stats</code></td><td>invoke</td><td>TransactionStore</td><td>TransactionStats</td></tr>
+  <tr><td><code>transactions:getColumns</code></td><td>invoke</td><td>TransactionStore</td><td>string[]</td></tr>
+  <tr><td><code>transactions:update</code></td><td>invoke</td><td>TransactionStore</td><td>void</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Taxonomy (5 channels)</td></tr>
+  <tr><td><code>taxonomy:getNodes</code></td><td>invoke</td><td>TaxonomyStore</td><td>TaxonomyNode[]</td></tr>
+  <tr><td><code>taxonomy:addNode</code></td><td>invoke</td><td>TaxonomyStore</td><td>TaxonomyNode</td></tr>
+  <tr><td><code>taxonomy:updateNode</code></td><td>invoke</td><td>TaxonomyStore</td><td>void</td></tr>
+  <tr><td><code>taxonomy:deleteNode</code></td><td>invoke</td><td>TaxonomyStore</td><td>void</td></tr>
+  <tr><td><code>taxonomy:importFromFile</code></td><td>invoke</td><td>TaxonomyStore</td><td>void</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Suppliers (3 channels)</td></tr>
+  <tr><td><code>suppliers:list</code></td><td>invoke</td><td>SupplierService</td><td>ProjectSupplierView[]</td></tr>
+  <tr><td><code>suppliers:update</code></td><td>invoke</td><td>SupplierService</td><td>void</td></tr>
+  <tr><td><code>suppliers:confirm</code></td><td>invoke</td><td>SupplierService</td><td>void</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Rules (4 channels)</td></tr>
+  <tr><td><code>rules:list</code></td><td>invoke</td><td>RuleStore</td><td>OverrideRule[]</td></tr>
+  <tr><td><code>rules:create</code></td><td>invoke</td><td>RuleStore</td><td>{ id }</td></tr>
+  <tr><td><code>rules:update</code></td><td>invoke</td><td>RuleStore</td><td>void</td></tr>
+  <tr><td><code>rules:delete</code></td><td>invoke</td><td>RuleStore</td><td>void</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Changelog (2 channels)</td></tr>
+  <tr><td><code>changelog:list</code></td><td>invoke</td><td>ChangelogStore</td><td>ChangeLog[]</td></tr>
+  <tr><td><code>changelog:revert</code></td><td>invoke</td><td>ChangelogStore</td><td>void</td></tr>
+
+  <tr><td colspan="4" style="background:var(--surface2); color:var(--cyan); font-weight:600;">Export</td></tr>
+  <tr><td><code>export:csv</code></td><td>invoke</td><td>ExportService</td><td>{ rowsExported }</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="pipeline">
+<h2>Workflow & Progress</h2>
+
+<h3>User-Driven Phases</h3>
+<p>Research and classification are separate user-triggered actions. There is no automated pipeline — the user controls when each phase starts.</p>
+
+<div class="flow-step">
+  <div class="flow-num">1</div>
+  <div class="flow-content">
+    <strong>Research Phase</strong> — User clicks "Research All Suppliers" → <code>SupplierResearcher.researchAll()</code>.
+    For each supplier: check SupplierUniverse → web search fallback → LLM format → store.
+    Progress emitted via <code>suppliers:research:progress</code> event. User can cancel anytime.
+  </div>
+</div>
+
+<div class="flow-step">
+  <div class="flow-num">2</div>
+  <div class="flow-content">
+    <strong>Review Research</strong> — User reviews supplier research results on the Supplier page.
+    Can normalize names, confirm/reject suppliers, assign parents, re-research individuals.
+    No time pressure — user proceeds to classification when ready.
+  </div>
+</div>
+
+<div class="flow-step">
+  <div class="flow-num">3</div>
+  <div class="flow-content">
+    <strong>Classification Phase</strong> — User clicks "Classify All" → <code>ClassificationRunner.classifyAll()</code>.
+    For each supplier: apply override rules → LLM classify remaining → update transactions.
+    Progress emitted via <code>classification:progress</code> event. User can cancel anytime.
+  </div>
+</div>
+
+<div class="flow-step">
+  <div class="flow-num">4</div>
+  <div class="flow-content">
+    <strong>Review Classifications</strong> — User reviews results on the Review page.
+    Can accept (sets <code>human_reviewed = true</code>) or reclassify individual transactions.
+  </div>
+</div>
+
+<h3>Progress Types</h3>
+<pre><code>interface ResearchProgress {
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  totalSuppliers: number;
+  processedSuppliers: number;
+  percentage: number;
+  currentSupplier: string | null;
+  currentStep: string;
+}
+
+interface ClassificationProgress {
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  totalSuppliers: number;
+  processedSuppliers: number;
+  percentage: number;
+  currentSupplier: string | null;
+  currentStep: string;
+}</code></pre>
+
+<p><strong>Note:</strong> No <code>awaiting_review</code> status or checkpoint gates. Classification runs to completion (or cancellation). User reviews results afterward on the Review page.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="renderer">
+<h2>Renderer (React Frontend)</h2>
+<p>The renderer communicates exclusively via IPC. It has <strong>zero direct dependencies</strong> on main process code — only on shared types.</p>
+
+<h3>Pages (workflow steps)</h3>
+<table>
+  <tr><th>Route</th><th>Page</th><th>IPC Channels Used</th></tr>
+  <tr><td><code>/workflow/upload</code></td><td>Upload / Ingest</td><td>ingest:selectFile, ingest:parseCSV, ingest:suggestMappings, ingest:importCSV</td></tr>
+  <tr><td><code>/workflow/data-review</code></td><td>Data Review</td><td>transactions:query, transactions:stats, transactions:getColumns, suppliers:list</td></tr>
+  <tr><td><code>/workflow/classification</code></td><td>Classification</td><td>classification:start, classification:cancel, classification:progress (event), suppliers:researchAll, suppliers:research:progress (event)</td></tr>
+  <tr><td><code>/workflow/review</code></td><td>Review</td><td>transactions:query, transactions:update, taxonomy:getNodes</td></tr>
+  <tr><td><code>/workflow/output</code></td><td>Export</td><td>export:csv</td></tr>
+  <tr><td><code>/project/details</code></td><td>Company Context</td><td>project:getSetting, project:setSetting</td></tr>
+  <tr><td><code>/project/taxonomy</code></td><td>Taxonomy Editor</td><td>taxonomy:*</td></tr>
+  <tr><td><code>/project/suppliers</code></td><td>Supplier Research</td><td>suppliers:list, suppliers:update, suppliers:confirm, suppliers:researchAll, suppliers:researchSingle, suppliers:research:progress (event)</td></tr>
+  <tr><td><code>/project/override-rules</code></td><td>Rules Editor</td><td>rules:*</td></tr>
+  <tr><td><code>/project/version-history</code></td><td>Changelog</td><td>changelog:list, changelog:revert</td></tr>
+</table>
+
+<h3>State Management</h3>
+<ul>
+  <li><strong>Zustand store</strong> (<code>workflowStore.ts</code>) — global state: hasProject, hasCompanyContext, hasTaxonomy, hasUploadedData, classificationProgress, researchProgress</li>
+  <li><strong>WorkflowStateContext</strong> — React context wrapping the store, enables <code>ProtectedRoute</code> components</li>
+  <li><strong>useIPC&lt;T&gt; hook</strong> — generic data loading: <code>{ data, loading, error, refetch }</code></li>
+  <li><strong>Progress streaming</strong> — listens on <code>classification:progress</code> and <code>suppliers:research:progress</code> events, updates Zustand store in real-time</li>
+</ul>
+
+<h3>Key Frontend Changes (PR 3)</h3>
+<ul>
+  <li>Use <code>classification:*</code> IPC calls for classification and <code>suppliers:*</code> for research</li>
+  <li>Use <code>ClassificationProgress</code> and <code>ResearchProgress</code> types</li>
+  <li>Add research progress UI on Supplier page</li>
+  <li>Add classification progress UI on Classification page</li>
+  <li>Fix <code>isClassifying</code> logic to check <code>status === 'running'</code></li>
+</ul>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="testing">
+<h2>Testing Strategy</h2>
+
+<h3>With DI — No More vi.mock() for Services</h3>
+<p>Before (fragile):</p>
+<pre><code>vi.mock('../../../src/main/services/database', () => ({
+  databaseService: { run: vi.fn(), all: vi.fn() }
+}));
+vi.mock('../../../src/main/services/taxonomy', () => ({
+  getNodes: vi.fn()
+}));
+// ... 5 more mocks
+import { startClassification } from '../../../src/main/services/classification';</code></pre>
+
+<p>After (clean):</p>
+<pre><code>import { ClassificationRunner } from '../../../src/main/services/classification';
+import { createMockDatabase, createMockEventBus } from '../../helpers/mock-services';
+
+const db = createMockDatabase();
+const eventBus = createMockEventBus();
+const classifier = new ClassificationRunner(
+  db, mockTaxonomy, mockProject,
+  mockRules, mockTransactions, mockChangelog, mockAgent, eventBus
+);
+
+it('applies rules before LLM classification', async () => {
+  vi.mocked(db.all).mockResolvedValue([{ id: '1', supplier_name: 'Acme' }]);
+  await classifier.classifySupplier('Acme', taxonomyNodes, companyContext);
+  expect(mockRules.evaluateRules).toHaveBeenCalled();
+});</code></pre>
+
+<h3>Test Mock Factories</h3>
+<p><code>tests/helpers/mock-services.ts</code> — one factory per interface:</p>
+<pre><code>export function createMockDatabase(): Database {
+  return {
+    openDatabase: vi.fn(), closeDatabase: vi.fn(),
+    isOpen: vi.fn().mockReturnValue(true),
+    getFilePath: vi.fn().mockReturnValue('/test.c91'),
+    getExpectedTables: vi.fn().mockReturnValue([...]),
+    run: vi.fn(), exec: vi.fn(),
+    all: vi.fn().mockResolvedValue([]),
+    get: vi.fn(),
+  };
+}
+// ... createMockEventBus(), createMockLLMClient(), etc.</code></pre>
+
+<h3>What Still Needs vi.mock()</h3>
+<p>Only truly external libraries: <code>electron</code> (dialog, BrowserWindow), <code>csv-parse</code>, <code>@duckdb/node-api</code>, <code>exa-js</code>.</p>
+</section>
+
+</div>
+
+<script>
+// Highlight active nav link on scroll
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('nav a');
+
+function updateActiveNav() {
+  const scrollPos = window.scrollY + 100;
+  let currentSection = '';
+
+  sections.forEach(section => {
+    if (section.offsetTop <= scrollPos) {
+      currentSection = section.id;
+    }
+  });
+
+  navLinks.forEach(link => {
+    link.classList.toggle('active', link.getAttribute('href') === `#${currentSection}`);
+  });
+}
+
+window.addEventListener('scroll', updateActiveNav);
+window.addEventListener('load', updateActiveNav);
+
+// Smooth scroll for nav links
+navLinks.forEach(link => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    const target = document.querySelector(link.getAttribute('href'));
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+});
+</script>
+
+</body>
+</html>

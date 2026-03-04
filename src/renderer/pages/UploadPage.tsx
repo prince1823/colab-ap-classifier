@@ -40,8 +40,10 @@ export default function UploadPage() {
     setError(null)
     setShowMappingEditor(false)
     try {
-      const result = await ipc.upload.parsePreview(path)
-      setUploadDraft({ preview: result, mapping: result.mappingSuggestion.mappings })
+      const preview = await ipc.ingest.parseCSV(path)
+      const mappingSuggestion = await ipc.ingest.suggestMappings(preview.columns, preview.sampleRows)
+      const result = { ...preview, mappingSuggestion }
+      setUploadDraft({ preview: result, mapping: mappingSuggestion.mappings })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to parse file')
     } finally {
@@ -54,7 +56,7 @@ export default function UploadPage() {
     setImporting(true)
     setError(null)
     try {
-      await ipc.upload.csv(uploadDraft.filePath, uploadDraft.mapping)
+      await ipc.ingest.importCSV(uploadDraft.filePath, uploadDraft.mapping)
       await refreshMetadata()
       navigate('/workflow/data-review')
     } catch (e) {

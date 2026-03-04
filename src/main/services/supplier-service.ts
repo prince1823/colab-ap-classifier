@@ -130,7 +130,7 @@ export class SupplierService implements ISupplierService {
       FROM project_suppliers ps
       LEFT JOIN transactions t ON t.project_supplier_id = ps.id
       GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
-               ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.created_at
+               ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.created_at, ps.updated_at
       ORDER BY ps.supplier_name`
     );
 

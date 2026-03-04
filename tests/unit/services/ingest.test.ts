@@ -19,8 +19,8 @@ vi.mock('electron', () => ({
 
 import { dialog } from 'electron';
 import { IngestService } from '../../../src/main/services/ingest';
-import { createMockDatabase, createMockTransactionStore, createMockColumnMappingAgent } from '../../helpers/mock-services';
-import type { Database, TransactionStore, ColumnMappingAgent } from '../../../src/shared/types/services';
+import { createMockDatabase, createMockTransactionStore, createMockColumnMappingAgent, createMockSupplierService } from '../../helpers/mock-services';
+import type { Database, TransactionStore, ColumnMappingAgent, SupplierService } from '../../../src/shared/types/services';
 import type { ColumnMappingResult } from '../../../src/shared/types/column-mapping';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../../fixtures/csv');
@@ -42,6 +42,7 @@ const MOCK_MAPPING_RESULT: ColumnMappingResult = {
 describe('IngestService', () => {
   let db: Database;
   let transactions: TransactionStore;
+  let suppliers: SupplierService;
   let columnMappingAgent: ColumnMappingAgent;
   let service: IngestService;
 
@@ -49,8 +50,9 @@ describe('IngestService', () => {
     vi.clearAllMocks();
     db = createMockDatabase();
     transactions = createMockTransactionStore();
+    suppliers = createMockSupplierService();
     columnMappingAgent = createMockColumnMappingAgent();
-    service = new IngestService(db, transactions, columnMappingAgent);
+    service = new IngestService(db, transactions, suppliers, columnMappingAgent);
     vi.mocked(columnMappingAgent.suggestMappings).mockResolvedValue(MOCK_MAPPING_RESULT);
   });
 

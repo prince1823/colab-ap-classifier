@@ -82,7 +82,7 @@ export function createContainer(): ServiceContainer {
   const taxonomy = new TaxonomyStore(db, project);
   const suppliers = new SupplierService(db, supplierUniverse);
   const rules = new RuleStore(db);
-  const ingest = new IngestService(db, transactions, columnMappingAgent);
+  const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
   const exportSvc = new ExportService(db);
 
   // Orchestrators

@@ -96,7 +96,7 @@ describe('Classifier Mock Integration Test (v2 DI)', () => {
     taxonomy = new TaxonomyStore(db, project);
     rules = new RuleStore(db);
     suppliers = new SupplierService(db, supplierUniverse);
-    ingest = new IngestService(db, transactions, columnMappingAgent);
+    ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
     exportSvc = new ExportService(db);
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
@@ -166,24 +166,13 @@ describe('Classifier Mock Integration Test (v2 DI)', () => {
     expect(stats.unclassifiedRows).toBe(5);
   });
 
-  it('Phase 3b: Normalize suppliers', async () => {
-    // importCSV doesn't create project_suppliers; we need to link them
-    // Get distinct supplier names from transactions
-    const supplierRows = await db.all<{ supplier_name: string }>(
-      'SELECT DISTINCT supplier_name FROM transactions WHERE supplier_name IS NOT NULL'
+  it('Phase 3b: Verify supplier normalization (done by importCSV)', async () => {
+    // importCSV now calls normalizeAllTransactions() — verify it worked
+    const supplierRows = await db.all<{ original_supplier_name: string }>(
+      'SELECT DISTINCT original_supplier_name FROM transactions WHERE original_supplier_name IS NOT NULL'
     );
     expect(supplierRows.length).toBe(5);
 
-    for (const row of supplierRows) {
-      const supplierId = await suppliers.normalizeSupplierName(row.supplier_name);
-      await db.run(
-        'UPDATE transactions SET project_supplier_id = ? WHERE supplier_name = ?',
-        supplierId,
-        row.supplier_name
-      );
-    }
-
-    // Verify linking
     const unlinked = await db.get<{ cnt: number | bigint }>(
       'SELECT COUNT(*) as cnt FROM transactions WHERE project_supplier_id IS NULL'
     );

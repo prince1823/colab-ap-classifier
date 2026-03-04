@@ -164,7 +164,7 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     taxonomy = new TaxonomyStore(db, project);
     rules = new RuleStore(db);
     suppliers = new SupplierService(db, supplierUniverse);
-    ingest = new IngestService(db, transactions, columnMappingAgent);
+    ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
     exportSvc = new ExportService(db);
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
@@ -238,27 +238,17 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     console.log(`  Imported ${result.rowsInserted} transactions`);
   });
 
-  it('Phase 3b: Normalize suppliers', async () => {
-    // Link transactions to project_suppliers (required for classifier query)
-    const supplierRows = await db.all<{ supplier_name: string }>(
-      'SELECT DISTINCT supplier_name FROM transactions WHERE supplier_name IS NOT NULL'
-    );
-
-    for (const row of supplierRows) {
-      const supplierId = await suppliers.normalizeSupplierName(row.supplier_name);
-      await db.run(
-        'UPDATE transactions SET project_supplier_id = ? WHERE supplier_name = ?',
-        supplierId,
-        row.supplier_name
-      );
-    }
-
+  it('Phase 3b: Verify supplier normalization (done by importCSV)', async () => {
+    // importCSV now calls normalizeAllTransactions() — verify it worked
     const unlinked = await db.get<{ cnt: number | bigint }>(
       'SELECT COUNT(*) as cnt FROM transactions WHERE project_supplier_id IS NULL'
     );
     expect(Number(unlinked?.cnt ?? 0)).toBe(0);
 
-    console.log(`  Normalized ${supplierRows.length} suppliers`);
+    const supplierCount = await db.get<{ cnt: number | bigint }>(
+      'SELECT COUNT(*) as cnt FROM project_suppliers'
+    );
+    console.log(`  Normalized ${Number(supplierCount?.cnt ?? 0)} suppliers`);
   });
 
   it.skipIf(!HAS_API_KEY)('Phase 4: Run classification (real LLM)', async () => {

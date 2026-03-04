@@ -14,6 +14,7 @@ import type {
   Database,
   IngestService as IIngestService,
   TransactionStore as ITransactionStore,
+  SupplierService as ISupplierService,
   ColumnMappingAgent,
   UploadRecord,
 } from '../../shared/types/services';
@@ -107,6 +108,7 @@ export class IngestService implements IIngestService {
   constructor(
     private db: Database,
     private transactions: ITransactionStore,
+    private suppliers: ISupplierService,
     private columnMappingAgent: ColumnMappingAgent
   ) {}
 
@@ -246,6 +248,16 @@ export class IngestService implements IIngestService {
     }
 
     const mapping = columnMapping || {};
+
+    // Redirect supplier_name → original_supplier_name (built-in column).
+    // Frontend gets supplier_name via JOIN on project_suppliers — no dynamic column needed.
+    if (mapping.supplier_name) {
+      if (!mapping.original_supplier_name) {
+        mapping.original_supplier_name = mapping.supplier_name;
+      }
+      delete mapping.supplier_name;
+    }
+
     const canonicalNames = Object.keys(mapping);
 
     // ALTER TABLE to add mapped canonical columns
@@ -309,6 +321,9 @@ export class IngestService implements IIngestService {
       JSON.stringify(enrichedMapping),
       rowsInserted
     );
+
+    // Link transactions to project_suppliers via original_supplier_name
+    await this.suppliers.normalizeAllTransactions();
 
     return { rowsInserted, uploadId: finalUploadId };
   }

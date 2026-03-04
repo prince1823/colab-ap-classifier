@@ -38,7 +38,7 @@ export class TransactionStore implements ITransactionStore {
     const params: unknown[] = [];
 
     if (filters?.supplierName) {
-      whereClauses.push('ps.supplier_name = ?');
+      whereClauses.push('t.supplier_name = ?');
       params.push(filters.supplierName);
     }
     if (filters?.taxonomyNodeId) {
@@ -82,10 +82,9 @@ export class TransactionStore implements ITransactionStore {
     const dynamicCols = validColumns.filter((c) => !BASE_COLUMNS.includes(c));
 
     const sql = `
-      SELECT t.*, tax.full_path as classification_path, ps.supplier_name as supplier_name
+      SELECT t.*, tax.full_path as classification_path
       FROM transactions t
       LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
-      LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
       ${whereSQL}
       ORDER BY t.${safeSortBy} ${safeOrder}
       ${limitClause}
@@ -99,10 +98,6 @@ export class TransactionStore implements ITransactionStore {
         if (row[col] !== undefined) {
           canonicalFields[col] = typeof row[col] === 'bigint' ? Number(row[col]) : row[col];
         }
-      }
-      // Add supplier_name from JOIN
-      if (row.supplier_name) {
-        canonicalFields.supplier_name = row.supplier_name;
       }
 
       return {
@@ -173,7 +168,7 @@ export class TransactionStore implements ITransactionStore {
     const params: unknown[] = [];
 
     if (filters?.supplierName) {
-      whereClauses.push('ps.supplier_name = ?');
+      whereClauses.push('t.supplier_name = ?');
       params.push(filters.supplierName);
     }
     if (filters?.taxonomyNodeId) {
@@ -201,7 +196,7 @@ export class TransactionStore implements ITransactionStore {
     }
 
     const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-    const sql = `SELECT COUNT(*) as cnt FROM transactions t LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id ${whereSQL}`;
+    const sql = `SELECT COUNT(*) as cnt FROM transactions t ${whereSQL}`;
     const result = await this.db.get<{ cnt: number | bigint }>(sql, ...params);
     return Number(result?.cnt ?? 0);
   }

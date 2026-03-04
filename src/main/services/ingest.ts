@@ -249,12 +249,10 @@ export class IngestService implements IIngestService {
 
     const mapping = columnMapping || {};
 
-    // Redirect supplier_name → original_supplier_name (built-in column).
-    // Frontend gets supplier_name via JOIN on project_suppliers — no dynamic column needed.
+    // Raw CSV supplier value → original_supplier_name (static column, audit trail).
+    // supplier_name (static column) gets populated later by normalizeAllTransactions().
     if (mapping.supplier_name) {
-      if (!mapping.original_supplier_name) {
-        mapping.original_supplier_name = mapping.supplier_name;
-      }
+      mapping.original_supplier_name = mapping.supplier_name;
       delete mapping.supplier_name;
     }
 

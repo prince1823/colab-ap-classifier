@@ -1,10 +1,11 @@
 /**
- * Classifier Full Run — integration test for the v2 DI architecture.
+ * Classifier Real Run — integration test with real LLM calls.
  *
  * Exercises the entire backend classifier end-to-end using real DuckDB,
- * real LLM calls, and real fixture data. Only Electron modules are mocked.
+ * real LLM calls, and fixture data. Only Electron modules are mocked.
+ * Phases that require an API key are skipped when no key is available.
  *
- * Run with: TEST_NAME=innova_test npx vitest run tests/integration/classifier-real-run.test.ts
+ * Run with: npx vitest run tests/integration/classifier-real-run.test.ts
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import path from 'path';
@@ -45,65 +46,43 @@ const HAS_API_KEY = !!(
   process.env.OPENAI_API_KEY
 );
 
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
-const TEST_NAME = process.env.TEST_NAME ?? 'innova_test';
-const TEST_DATA_DIR = path.join(PROJECT_ROOT, 'test_data', TEST_NAME);
-const HAS_TEST_DATA = fs.existsSync(TEST_DATA_DIR) &&
-  fs.existsSync(path.join(TEST_DATA_DIR, 'input.csv')) &&
-  fs.existsSync(path.join(TEST_DATA_DIR, 'config.json'));
+// ─── Fixture paths ───────────────────────────────────────────────────────────
 
-const FIXTURES_DIR = path.join(PROJECT_ROOT, 'tests', 'fixtures');
-const FIXTURE_CSV_PATH = path.join(FIXTURES_DIR, 'csv', 'standard.csv');
+const FIXTURES_DIR = path.resolve(__dirname, '..', 'fixtures', 'pipeline');
+const FIXTURE_CSV = path.join(FIXTURES_DIR, 'innova-test.csv');
+const FIXTURE_CONFIG = path.join(FIXTURES_DIR, 'config.json');
+const FIXTURE_TAXONOMY = path.join(FIXTURES_DIR, 'taxonomy.txt');
+const FIXTURE_RULES = path.join(FIXTURES_DIR, 'rules.json');
+const FIXTURE_SUPPLIER_RESEARCH = path.join(FIXTURES_DIR, 'supplier-research.json');
 
-const USE_TEST_DATA = HAS_TEST_DATA && HAS_API_KEY;
-const CSV_PATH = USE_TEST_DATA
-  ? path.join(TEST_DATA_DIR, 'input.csv')
-  : FIXTURE_CSV_PATH;
-
-const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'c91-pipeline-test-'));
-const DB_PATH = path.join(
-  USE_TEST_DATA ? TEST_DATA_DIR : TEMP_DIR,
-  USE_TEST_DATA ? `${TEST_NAME}.c91` : 'test-pipeline.c91'
-);
-const EXPORT_PATH = path.join(
-  USE_TEST_DATA ? TEST_DATA_DIR : TEMP_DIR,
-  USE_TEST_DATA ? `${TEST_NAME}-export.csv` : 'test-export.csv'
-);
+// ─── Load fixture data ──────────────────────────────────────────────────────
 
 interface TestConfig {
   projectName: string;
-  taxonomy: string;
-  companyContext: {
-    industry: string;
-    sector?: string;
-    description?: string;
-    businessFocus?: string;
-    procurementNuances?: string;
-  };
-  expectedMappings?: Record<string, string>;
+  companyContext: Record<string, string>;
+  columnMapping: Record<string, string>;
 }
 
-function loadTestConfig(): TestConfig {
-  if (USE_TEST_DATA) {
-    return JSON.parse(fs.readFileSync(path.join(TEST_DATA_DIR, 'config.json'), 'utf-8'));
-  }
-  return {
-    projectName: 'Pipeline Integration Test',
-    taxonomy: 'healthcare',
-    companyContext: {
-      industry: 'Healthcare',
-      sector: 'Physician Practice Management',
-      description: 'A healthcare company operating physician clinics.',
-    },
-    expectedMappings: {
-      supplier_name: 'Supplier',
-      spend_amount: 'Amount',
-      line_description: 'Description',
-    },
-  };
+interface RuleFixture {
+  name: string;
+  conditions: Array<{ field: string; operator: string; value: string }>;
+  targetTaxonomyPath: string;
+  priorityScore: number;
 }
 
-// Service imports — using DI classes
+interface SupplierResearchFixture {
+  seed: Record<string, import('../../src/shared/types/suppliers').SupplierInfo>;
+  mock: Record<string, import('../../src/shared/types/suppliers').SupplierInfo>;
+}
+
+const testConfig: TestConfig = JSON.parse(fs.readFileSync(FIXTURE_CONFIG, 'utf-8'));
+const rulesFixture: RuleFixture[] = JSON.parse(fs.readFileSync(FIXTURE_RULES, 'utf-8'));
+const supplierResearchFixture: SupplierResearchFixture = JSON.parse(
+  fs.readFileSync(FIXTURE_SUPPLIER_RESEARCH, 'utf-8')
+);
+
+// ─── Service imports ────────────────────────────────────────────────────────
+
 import { dialog } from 'electron';
 import { DuckDBDatabase } from '../../src/main/services/database';
 import { DuckDBSupplierUniverse } from '../../src/main/services/supplier-universe';
@@ -124,10 +103,17 @@ import { SupplierService } from '../../src/main/services/supplier-service';
 import { SupplierResearcher } from '../../src/main/services/supplier-research';
 import { ClassificationRunner } from '../../src/main/services/classification';
 
-describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () => {
-  let testConfig: TestConfig;
+// ─── Temp paths ─────────────────────────────────────────────────────────────
+
+const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'c91-real-run-'));
+const DB_PATH = path.join(TEMP_DIR, 'test-pipeline.c91');
+const UNIVERSE_PATH = path.join(TEMP_DIR, 'test-universe.db');
+const EXPORT_PATH = path.join(TEMP_DIR, 'test-export.csv');
+
+// ─── Test suite ─────────────────────────────────────────────────────────────
+
+describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
   let csvRowCount: number;
-  let columnMapping: Record<string, string> = {};
 
   // Service graph
   let db: DuckDBDatabase;
@@ -141,11 +127,10 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
   let ingest: IngestService;
   let exportSvc: ExportService;
   let classifier: ClassificationRunner;
+  let researcher: SupplierResearcher;
 
   beforeAll(async () => {
-    testConfig = loadTestConfig();
-
-    const csvContent = fs.readFileSync(CSV_PATH, 'utf-8').replace(/^\uFEFF/, '');
+    const csvContent = fs.readFileSync(FIXTURE_CSV, 'utf-8').replace(/^\uFEFF/, '');
     csvRowCount = csvContent.trim().split(/\r?\n/).length - 1;
     expect(csvRowCount).toBeGreaterThan(0);
 
@@ -166,14 +151,15 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     suppliers = new SupplierService(db, supplierUniverse);
     ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
     exportSvc = new ExportService(db);
+    researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus);
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
       transactions, changelog, classificationAgent, eventBus, supplierUniverse
     );
 
-    console.log(`\n  Mode: ${USE_TEST_DATA ? 'test_data' : 'fixtures'}`);
-    console.log(`  CSV: ${CSV_PATH} (${csvRowCount} rows)`);
+    console.log(`\n  CSV: ${FIXTURE_CSV} (${csvRowCount} rows)`);
     console.log(`  DB: ${DB_PATH}`);
+    console.log(`  Universe: ${UNIVERSE_PATH}`);
     console.log(`  Has API Key: ${HAS_API_KEY}\n`);
   });
 
@@ -185,51 +171,48 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     if (supplierUniverse.isOpen()) {
       await supplierUniverse.close();
     }
-    if (!USE_TEST_DATA) {
-      try { fs.rmSync(TEMP_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
-    }
+    try { fs.rmSync(TEMP_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  it('Phase 1: Create project', async () => {
-    if (fs.existsSync(DB_PATH)) fs.unlinkSync(DB_PATH);
-    const walPath = DB_PATH + '.wal';
-    if (fs.existsSync(walPath)) fs.unlinkSync(walPath);
+  // ─── Phase 1: Create project ────────────────────────────────────────────
+
+  it('Phase 1: Create project and set company context', async () => {
+    // Set default path before createProject so it opens the temp universe, not colabip/
+    supplierUniverse.setDefaultPath(UNIVERSE_PATH);
 
     const result = await project.createProject(testConfig.projectName, DB_PATH);
     expect(result.name).toBe(testConfig.projectName);
     expect(db.isOpen()).toBe(true);
+    expect(supplierUniverse.isOpen()).toBe(true);
 
+    // Seed universe with fixture data
+    for (const [name, info] of Object.entries(supplierResearchFixture.seed)) {
+      await supplierUniverse.upsertSupplier(name, info);
+    }
+
+    // Set company context
     await project.setSetting('company_context', testConfig.companyContext);
 
     console.log('  Project created:', DB_PATH);
   });
 
-  it('Phase 2: Add taxonomy nodes (parents first)', async () => {
-    // TaxonomyStore.addNode validates parents exist, so add L1 → L2 → L3
-    await taxonomy.addNode('Direct');
-    await taxonomy.addNode('Direct|IT');
-    await taxonomy.addNode('Direct|IT|Software', 'Software licenses');
-    await taxonomy.addNode('Direct|IT|Hardware', 'Hardware purchases');
-    await taxonomy.addNode('Indirect');
-    await taxonomy.addNode('Indirect|Office');
-    await taxonomy.addNode('Indirect|Office|Supplies', 'Office supplies');
-    await taxonomy.addNode('Indirect|Facilities');
-    await taxonomy.addNode('Indirect|Facilities|Cleaning', 'Cleaning services');
+  // ─── Phase 2: Load taxonomy ─────────────────────────────────────────────
+
+  it('Phase 2: Load taxonomy from fixture', async () => {
+    const result = await taxonomy.importFromFile(FIXTURE_TAXONOMY);
+    expect(result.nodeCount).toBeGreaterThan(0);
 
     const nodes = await taxonomy.getNodes();
-    expect(nodes.length).toBe(9);
+    const l3Nodes = nodes.filter((n) => n.depth === 3);
+    expect(l3Nodes.length).toBeGreaterThan(50);
 
-    console.log(`  Taxonomy: ${nodes.length} nodes`);
+    console.log(`  Taxonomy: ${result.nodeCount} total nodes, ${l3Nodes.length} L3 nodes`);
   });
 
-  it('Phase 3: Import CSV data', async () => {
-    columnMapping = testConfig.expectedMappings ?? {
-      supplier_name: 'Supplier',
-      spend_amount: 'Amount',
-      line_description: 'Description',
-    };
+  // ─── Phase 3: Import CSV ────────────────────────────────────────────────
 
-    const result = await ingest.importCSV(CSV_PATH, columnMapping);
+  it('Phase 3: Import CSV with column mapping', async () => {
+    const result = await ingest.importCSV(FIXTURE_CSV, testConfig.columnMapping);
     expect(result.rowsInserted).toBe(csvRowCount);
 
     const stats = await transactions.getStats();
@@ -238,8 +221,9 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     console.log(`  Imported ${result.rowsInserted} transactions`);
   });
 
-  it('Phase 3b: Verify supplier normalization (done by importCSV)', async () => {
-    // importCSV now calls normalizeAllTransactions() — verify it worked
+  // ─── Phase 4: Verify supplier normalization ─────────────────────────────
+
+  it('Phase 4: Verify supplier normalization', async () => {
     const unlinked = await db.get<{ cnt: number | bigint }>(
       'SELECT COUNT(*) as cnt FROM transactions WHERE project_supplier_id IS NULL'
     );
@@ -251,7 +235,49 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     console.log(`  Normalized ${Number(supplierCount?.cnt ?? 0)} suppliers`);
   });
 
-  it.skipIf(!HAS_API_KEY)('Phase 4: Run classification (real LLM)', async () => {
+  // ─── Phase 5: Supplier research ─────────────────────────────────────────
+
+  it.skipIf(!HAS_API_KEY)('Phase 5: Supplier research (real LLM)', async () => {
+    // McKesson was seeded — should already be in universe
+    const mckesson = await supplierUniverse.getSupplier('mckesson medical surgical');
+    expect(mckesson).not.toBeNull();
+
+    // Research all project suppliers
+    const projectSuppliers = await suppliers.listProjectSuppliers();
+    for (const ps of projectSuppliers) {
+      await researcher.researchSingle(ps.supplierName);
+    }
+
+    console.log(`  Researched ${projectSuppliers.length} suppliers`);
+  });
+
+  // ─── Phase 6: Create override rules ─────────────────────────────────────
+
+  it('Phase 6: Create override rules from fixture', async () => {
+    const nodes = await taxonomy.getNodes();
+
+    for (const ruleFixture of rulesFixture) {
+      const targetNode = nodes.find((n) => n.fullPath === ruleFixture.targetTaxonomyPath);
+      expect(targetNode).toBeDefined();
+
+      const { id } = await rules.createRule({
+        name: ruleFixture.name,
+        conditions: ruleFixture.conditions,
+        targetTaxonomyNodeId: targetNode!.id,
+        priorityScore: ruleFixture.priorityScore,
+      });
+      expect(id).toBeTruthy();
+    }
+
+    const ruleList = await rules.listRules();
+    expect(ruleList.length).toBe(rulesFixture.length);
+
+    console.log(`  Created ${ruleList.length} override rules`);
+  });
+
+  // ─── Phase 7: Run classification ────────────────────────────────────────
+
+  it.skipIf(!HAS_API_KEY)('Phase 7: Run classification (real LLM)', async () => {
     await classifier.classifyAll();
     expect(classifier.getIsRunning()).toBe(false);
 
@@ -261,29 +287,49 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     console.log(`  Classified: ${stats.classifiedRows}/${stats.totalRows}`);
   });
 
-  it('Phase 5: Test override rules', async () => {
-    const nodes = await taxonomy.getNodes();
-    const l3Nodes = nodes.filter((n) => n.depth === 3);
-    expect(l3Nodes.length).toBeGreaterThan(0);
+  // ─── Phase 8: Verify classification results ─────────────────────────────
 
-    const { id: ruleId } = await rules.createRule({
-      name: 'Test Rule',
-      conditions: [
-        { field: 'supplier_name', operator: 'equals', value: 'Acme Corp' },
-      ],
-      targetTaxonomyNodeId: l3Nodes[0].id,
-      priorityScore: 100,
-    });
+  it.skipIf(!HAS_API_KEY)('Phase 8: Verify classification results', async () => {
+    // McKesson transactions should be classified_by_rule
+    const ruleClassified = await db.all<{ id: string; classification_status: string }>(
+      `SELECT t.id, t.classification_status FROM transactions t
+       JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+       WHERE LOWER(ps.supplier_name) LIKE '%mckesson%'`
+    );
+    expect(ruleClassified.length).toBeGreaterThan(0);
+    for (const row of ruleClassified) {
+      expect(row.classification_status).toBe('classified_by_rule');
+    }
 
-    expect(ruleId).toBeTruthy();
+    // Other suppliers should be classified_by_ai
+    const aiClassified = await db.all<{ id: string; classification_status: string }>(
+      `SELECT t.id, t.classification_status FROM transactions t
+       JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+       WHERE LOWER(ps.supplier_name) NOT LIKE '%mckesson%'`
+    );
+    expect(aiClassified.length).toBeGreaterThan(0);
+    for (const row of aiClassified) {
+      expect(row.classification_status).toBe('classified_by_ai');
+    }
 
-    const ruleList = await rules.listRules();
-    expect(ruleList.find((r) => r.id === ruleId)).toBeDefined();
-
-    console.log(`  Rule created: ${ruleId}`);
+    console.log(`  Rule-classified: ${ruleClassified.length}, AI-classified: ${aiClassified.length}`);
   });
 
-  it('Phase 6: Export to CSV', async () => {
+  // ─── Phase 9: Verify changelog ──────────────────────────────────────────
+
+  it.skipIf(!HAS_API_KEY)('Phase 9: Verify changelog entries', async () => {
+    const changes = await changelog.listChanges();
+    expect(changes.length).toBeGreaterThan(0);
+
+    const pipelineChanges = changes.filter((c) => c.source === 'pipeline');
+    expect(pipelineChanges.length).toBeGreaterThan(0);
+
+    console.log(`  Changelog: ${changes.length} entries (${pipelineChanges.length} from pipeline)`);
+  });
+
+  // ─── Phase 10: Export CSV ───────────────────────────────────────────────
+
+  it('Phase 10: Export to CSV', async () => {
     (dialog.showSaveDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       canceled: false,
       filePath: EXPORT_PATH,
@@ -294,10 +340,21 @@ describe(`Classifier Full Run [${USE_TEST_DATA ? TEST_NAME : 'fixtures'}]`, () =
     expect(result!.rowsExported).toBe(csvRowCount);
     expect(fs.existsSync(EXPORT_PATH)).toBe(true);
 
+    // Verify CSV structure
+    const csvContent = fs.readFileSync(EXPORT_PATH, 'utf-8');
+    const lines = csvContent.trim().split(/\r?\n/);
+    expect(lines.length).toBe(csvRowCount + 1);
+
+    const header = lines[0].toLowerCase();
+    expect(header).toContain('classification_path');
+    expect(header).toContain('classification_status');
+
     console.log(`  Exported ${result!.rowsExported} rows to ${EXPORT_PATH}`);
   });
 
-  it('Phase 7: Database integrity', async () => {
+  // ─── Phase 11: Database integrity ───────────────────────────────────────
+
+  it('Phase 11: Database integrity checks', async () => {
     const orphanedNodes = await db.get<{ cnt: number | bigint }>(
       `SELECT COUNT(*) as cnt FROM transactions t
        LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id

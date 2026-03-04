@@ -1,8 +1,8 @@
 /**
- * Classifier Mock Test — v2 DI integration smoke test with mocked LLM
+ * Classifier Mock Pipeline Test — full 11-phase pipeline with mocked LLM.
  *
- * Tests the full classification flow using real DuckDB, constructor-injected
- * services, and a mock LLM client.
+ * Uses real DuckDB, real DuckDBSupplierUniverse (temp file), and fixture data
+ * from tests/fixtures/pipeline/. LLM agents and web search are mocked.
  *
  * Run with: npx vitest run tests/integration/classifier-mock.test.ts
  */
@@ -29,6 +29,7 @@ vi.mock('electron', () => {
 
 import { dialog } from 'electron';
 import { DuckDBDatabase } from '../../src/main/services/database';
+import { DuckDBSupplierUniverse } from '../../src/main/services/supplier-universe';
 import { ChangelogStore } from '../../src/main/services/changelog';
 import { TransactionStore } from '../../src/main/services/transactions';
 import { ProjectStore } from '../../src/main/services/project';
@@ -38,16 +39,56 @@ import { IngestService } from '../../src/main/services/ingest';
 import { ExportService } from '../../src/main/services/export';
 import { ClassificationRunner } from '../../src/main/services/classification';
 import { SupplierService } from '../../src/main/services/supplier-service';
-import {
-  createMockSupplierUniverse,
-  createMockEventBus,
-  createMockColumnMappingAgent,
-  createMockClassificationAgent,
-} from '../helpers/mock-services';
-import type { EventBus, SupplierUniverse, ClassificationAgent } from '../../src/shared/types/services';
+import { SupplierResearcher } from '../../src/main/services/supplier-research';
+import { eventBus } from '../../src/main/event-bus';
+import type { ClassificationAgent, ResearchAgent, WebSearch, ColumnMappingAgent } from '../../src/shared/types/services';
+import type { SupplierInfo } from '../../src/shared/types/suppliers';
 
-const FIXTURES_DIR = path.resolve(__dirname, '..', 'fixtures');
-const STANDARD_CSV = path.join(FIXTURES_DIR, 'csv', 'standard.csv');
+// ─── Fixture paths ──────────────────────────────────────────────────────────
+
+const FIXTURES_DIR = path.resolve(__dirname, '..', 'fixtures', 'pipeline');
+const FIXTURE_CSV = path.join(FIXTURES_DIR, 'innova-test.csv');
+const FIXTURE_CONFIG = path.join(FIXTURES_DIR, 'config.json');
+const FIXTURE_TAXONOMY = path.join(FIXTURES_DIR, 'taxonomy.txt');
+const FIXTURE_RULES = path.join(FIXTURES_DIR, 'rules.json');
+const FIXTURE_MOCK_CLASSIFICATIONS = path.join(FIXTURES_DIR, 'mock-classifications.json');
+const FIXTURE_SUPPLIER_RESEARCH = path.join(FIXTURES_DIR, 'supplier-research.json');
+
+// ─── Load fixture data ──────────────────────────────────────────────────────
+
+interface TestConfig {
+  projectName: string;
+  companyContext: Record<string, string>;
+  columnMapping: Record<string, string>;
+}
+
+interface RuleFixture {
+  name: string;
+  conditions: Array<{ field: string; operator: string; value: string }>;
+  targetTaxonomyPath: string;
+  priorityScore: number;
+}
+
+interface MockClassification {
+  classificationPath: string;
+  reasoning: string;
+}
+
+interface SupplierResearchFixture {
+  seed: Record<string, SupplierInfo>;
+  mock: Record<string, SupplierInfo>;
+}
+
+const testConfig: TestConfig = JSON.parse(fs.readFileSync(FIXTURE_CONFIG, 'utf-8'));
+const rulesFixture: RuleFixture[] = JSON.parse(fs.readFileSync(FIXTURE_RULES, 'utf-8'));
+const mockClassifications: Record<string, MockClassification> = JSON.parse(
+  fs.readFileSync(FIXTURE_MOCK_CLASSIFICATIONS, 'utf-8')
+);
+const supplierResearchFixture: SupplierResearchFixture = JSON.parse(
+  fs.readFileSync(FIXTURE_SUPPLIER_RESEARCH, 'utf-8')
+);
+
+// ─── Temp path helpers ──────────────────────────────────────────────────────
 
 function tempPath(suffix: string): string {
   return path.join(
@@ -56,38 +97,99 @@ function tempPath(suffix: string): string {
   );
 }
 
-describe('Classifier Mock Integration Test (v2 DI)', () => {
-  let db: DuckDBDatabase;
-  let dbPath: string;
-  let exportPath: string | null = null;
+// ─── Mock factories ─────────────────────────────────────────────────────────
 
+function createMockClassificationAgentFromFixture(
+  db: DuckDBDatabase
+): ClassificationAgent {
+  return {
+    classifyInvoiceGroup: vi.fn().mockImplementation(async (invoiceGroup) => {
+      // Look up supplier name from the first transaction in the group
+      const txId = invoiceGroup.transactions?.[0]?.id;
+      let supplierKey = '_default';
+      if (txId) {
+        const row = await db.get<{ original_supplier_name: string }>(
+          'SELECT original_supplier_name FROM transactions WHERE id = ?',
+          txId
+        );
+        if (row?.original_supplier_name) {
+          supplierKey = row.original_supplier_name.toLowerCase();
+        }
+      }
+      const match = mockClassifications[supplierKey] || mockClassifications['_default'];
+      return {
+        classificationPath: match.classificationPath,
+        reasoning: match.reasoning,
+        descriptionSupplierAligned: true,
+      };
+    }),
+  } as unknown as ClassificationAgent;
+}
+
+function createMockResearchAgentFromFixture(): ResearchAgent {
+  return {
+    researchSupplier: vi.fn().mockImplementation(async (supplierName: string) => {
+      const key = supplierName.toLowerCase();
+      const mockData = supplierResearchFixture.mock[key];
+      if (mockData) return mockData;
+      return {
+        supplierType: 'company' as const,
+        description: `Mock research result for ${supplierName}`,
+        industry: 'Unknown',
+      };
+    }),
+  } as unknown as ResearchAgent;
+}
+
+function createMockWebSearch(): WebSearch {
+  return {
+    isAvailable: vi.fn().mockReturnValue(false),
+    searchSupplier: vi.fn().mockResolvedValue([]),
+  } as unknown as WebSearch;
+}
+
+function createMockColumnMappingAgent(): ColumnMappingAgent {
+  return {
+    suggestMapping: vi.fn().mockResolvedValue({}),
+  } as unknown as ColumnMappingAgent;
+}
+
+// ─── Test suite ─────────────────────────────────────────────────────────────
+
+describe('Classifier Mock Pipeline Test', () => {
+  let csvRowCount: number;
+  let dbPath: string;
+  let universePath: string;
+  let exportPath: string;
+
+  // Service graph
+  let db: DuckDBDatabase;
+  let supplierUniverse: DuckDBSupplierUniverse;
   let changelog: ChangelogStore;
   let transactions: TransactionStore;
   let project: ProjectStore;
   let taxonomy: TaxonomyStore;
   let rules: RuleStore;
+  let suppliers: SupplierService;
   let ingest: IngestService;
   let exportSvc: ExportService;
   let classifier: ClassificationRunner;
-  let suppliers: SupplierService;
-  let supplierUniverse: SupplierUniverse;
-  let eventBus: EventBus;
-  let classificationAgent: ClassificationAgent;
+  let researcher: SupplierResearcher;
 
   beforeAll(() => {
     dbPath = tempPath('.c91');
+    universePath = tempPath('-universe.db');
+    exportPath = tempPath('.csv');
 
-    // Build service graph with real DuckDB and mock externals
+    const csvContent = fs.readFileSync(FIXTURE_CSV, 'utf-8').replace(/^\uFEFF/, '');
+    csvRowCount = csvContent.trim().split(/\r?\n/).length - 1;
+
+    // Build service graph with real DuckDB + real SupplierUniverse + mocked agents
     db = new DuckDBDatabase();
-    supplierUniverse = createMockSupplierUniverse();
-    eventBus = createMockEventBus();
-    classificationAgent = createMockClassificationAgent();
-    // Override mock to return a path that matches our taxonomy
-    vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
-      classificationPath: 'Direct|IT|Software',
-      reasoning: 'Mock classification',
-      descriptionSupplierAligned: true,
-    });
+    supplierUniverse = new DuckDBSupplierUniverse();
+    const webSearch = createMockWebSearch();
+    const researchAgent = createMockResearchAgentFromFixture();
+    const classificationAgent = createMockClassificationAgentFromFixture(db);
     const columnMappingAgent = createMockColumnMappingAgent();
 
     changelog = new ChangelogStore(db);
@@ -98,15 +200,23 @@ describe('Classifier Mock Integration Test (v2 DI)', () => {
     suppliers = new SupplierService(db, supplierUniverse);
     ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
     exportSvc = new ExportService(db);
+    researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus);
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
       transactions, changelog, classificationAgent, eventBus, supplierUniverse
     );
+
+    console.log(`\n  CSV: ${FIXTURE_CSV} (${csvRowCount} rows)`);
+    console.log(`  DB: ${dbPath}`);
+    console.log(`  Universe: ${universePath}\n`);
   });
 
   afterAll(async () => {
     try { await project.closeProject(); } catch { /* already closed */ }
-    for (const p of [dbPath, exportPath]) {
+    if (supplierUniverse.isOpen()) {
+      await supplierUniverse.close();
+    }
+    for (const p of [dbPath, universePath, exportPath]) {
       if (!p) continue;
       for (const suffix of ['', '.wal']) {
         const fp = p + suffix;
@@ -117,94 +227,209 @@ describe('Classifier Mock Integration Test (v2 DI)', () => {
     }
   });
 
-  it('Phase 1: Create project and set company context', async () => {
-    const result = await project.createProject('Mock Integration Test', dbPath);
-    expect(result.name).toBe('Mock Integration Test');
-    expect(db.isOpen()).toBe(true);
+  // ─── Phase 1: Create project ────────────────────────────────────────────
 
-    await project.setSetting('company_context', {
-      industry: 'Technology',
-      sector: 'Software',
-      description: 'Mock company for integration testing',
-    });
+  it('Phase 1: Create project and set company context', async () => {
+    // Set default path before createProject so it opens the temp universe, not colabip/
+    supplierUniverse.setDefaultPath(universePath);
+
+    const result = await project.createProject(testConfig.projectName, dbPath);
+    expect(result.name).toBe(testConfig.projectName);
+    expect(db.isOpen()).toBe(true);
+    expect(supplierUniverse.isOpen()).toBe(true);
+
+    // Seed universe with fixture data
+    for (const [name, info] of Object.entries(supplierResearchFixture.seed)) {
+      await supplierUniverse.upsertSupplier(name, info);
+    }
+
+    // Set company context
+    await project.setSetting('company_context', testConfig.companyContext);
 
     const companyContext = await project.getSetting('company_context') as Record<string, string> | undefined;
-    expect(companyContext?.industry).toBe('Technology');
+    expect(companyContext?.industry).toBe('Healthcare Services');
+
+    console.log('  Project created:', dbPath);
   });
 
-  it('Phase 2: Add taxonomy nodes (parents first)', async () => {
-    // Must add L1 and L2 parents before L3 leaves
-    await taxonomy.addNode('Direct');
-    await taxonomy.addNode('Direct|IT');
-    await taxonomy.addNode('Direct|IT|Software', 'Software licenses');
-    await taxonomy.addNode('Direct|IT|Hardware', 'Hardware purchases');
-    await taxonomy.addNode('Indirect');
-    await taxonomy.addNode('Indirect|Office');
-    await taxonomy.addNode('Indirect|Office|Supplies', 'Office supplies');
+  // ─── Phase 2: Load taxonomy ─────────────────────────────────────────────
+
+  it('Phase 2: Load taxonomy from fixture', async () => {
+    const result = await taxonomy.importFromFile(FIXTURE_TAXONOMY);
+    expect(result.nodeCount).toBeGreaterThan(0);
 
     const nodes = await taxonomy.getNodes();
-    expect(nodes.length).toBe(7);
+    const l3Nodes = nodes.filter((n) => n.depth === 3);
+    expect(l3Nodes.length).toBeGreaterThan(50);
 
-    const softwareNode = nodes.find((n) => n.fullPath === 'Direct|IT|Software');
-    expect(softwareNode).toBeDefined();
-    expect(softwareNode!.depth).toBe(3);
+    console.log(`  Taxonomy: ${result.nodeCount} total nodes, ${l3Nodes.length} L3 nodes`);
   });
+
+  // ─── Phase 3: Import CSV ────────────────────────────────────────────────
 
   it('Phase 3: Import CSV with column mapping', async () => {
-    const columnMapping = {
-      supplier_name: 'Supplier',
-      spend_amount: 'Amount',
-      invoice_date: 'Date',
-      line_description: 'Description',
-    };
-
-    const result = await ingest.importCSV(STANDARD_CSV, columnMapping);
-    expect(result.rowsInserted).toBe(5);
+    const result = await ingest.importCSV(FIXTURE_CSV, testConfig.columnMapping);
+    expect(result.rowsInserted).toBe(csvRowCount);
 
     const stats = await transactions.getStats();
-    expect(stats.totalRows).toBe(5);
-    expect(stats.unclassifiedRows).toBe(5);
+    expect(stats.totalRows).toBe(csvRowCount);
+
+    console.log(`  Imported ${result.rowsInserted} transactions`);
   });
 
-  it('Phase 3b: Verify supplier normalization (done by importCSV)', async () => {
-    // importCSV now calls normalizeAllTransactions() — verify it worked
-    const supplierRows = await db.all<{ original_supplier_name: string }>(
-      'SELECT DISTINCT original_supplier_name FROM transactions WHERE original_supplier_name IS NOT NULL'
-    );
-    expect(supplierRows.length).toBe(5);
+  // ─── Phase 4: Verify supplier normalization ─────────────────────────────
 
+  it('Phase 4: Verify supplier normalization', async () => {
     const unlinked = await db.get<{ cnt: number | bigint }>(
       'SELECT COUNT(*) as cnt FROM transactions WHERE project_supplier_id IS NULL'
     );
     expect(Number(unlinked?.cnt ?? 0)).toBe(0);
+
+    // Verify supplier_name column is populated
+    const noSupplier = await db.get<{ cnt: number | bigint }>(
+      'SELECT COUNT(*) as cnt FROM transactions WHERE supplier_name IS NULL OR supplier_name = \'\''
+    );
+    expect(Number(noSupplier?.cnt ?? 0)).toBe(0);
+
+    const supplierCount = await db.get<{ cnt: number | bigint }>(
+      'SELECT COUNT(*) as cnt FROM project_suppliers'
+    );
+    console.log(`  Normalized ${Number(supplierCount?.cnt ?? 0)} suppliers, all transactions linked`);
   });
 
-  it('Phase 4: Run classification (mocked LLM)', async () => {
-    await classifier.classifyAll();
+  // ─── Phase 5: Supplier research ─────────────────────────────────────────
 
+  it('Phase 5: Supplier research (seed hits universe, others get researched)', async () => {
+    // McKesson was seeded — should already be in universe
+    const mckesson = await supplierUniverse.getSupplier('mckesson medical surgical');
+    expect(mckesson).not.toBeNull();
+
+    // Research all project suppliers
+    const projectSuppliers = await suppliers.listProjectSuppliers();
+    for (const ps of projectSuppliers) {
+      await researcher.researchSingle(ps.supplierName);
+    }
+
+    console.log(`  Researched ${projectSuppliers.length} suppliers`);
+  });
+
+  // ─── Phase 6: Create override rules ─────────────────────────────────────
+
+  it('Phase 6: Create override rules from fixture', async () => {
+    const nodes = await taxonomy.getNodes();
+
+    for (const ruleFixture of rulesFixture) {
+      const targetNode = nodes.find((n) => n.fullPath === ruleFixture.targetTaxonomyPath);
+      expect(targetNode).toBeDefined();
+
+      const { id } = await rules.createRule({
+        name: ruleFixture.name,
+        conditions: ruleFixture.conditions,
+        targetTaxonomyNodeId: targetNode!.id,
+        priorityScore: ruleFixture.priorityScore,
+      });
+      expect(id).toBeTruthy();
+    }
+
+    const ruleList = await rules.listRules();
+    expect(ruleList.length).toBe(rulesFixture.length);
+
+    console.log(`  Created ${ruleList.length} override rules`);
+  });
+
+  // ─── Phase 7: Run classification ────────────────────────────────────────
+
+  it('Phase 7: Run classification (mocked LLM)', async () => {
+    await classifier.classifyAll();
     expect(classifier.getIsRunning()).toBe(false);
+
+    const stats = await transactions.getStats();
+    expect(stats.classifiedRows).toBe(csvRowCount);
+
+    console.log(`  Classified: ${stats.classifiedRows}/${stats.totalRows}`);
   }, 30000);
 
-  it('Phase 5: Verify transactions got classified', async () => {
-    const stats = await transactions.getStats();
-    expect(stats.classifiedRows).toBe(5);
-    expect(stats.unclassifiedRows).toBe(0);
+  // ─── Phase 8: Verify classification results ─────────────────────────────
+
+  it('Phase 8: Verify classification results', async () => {
+    // McKesson transactions should be classified_by_rule
+    const ruleClassified = await db.all<{ id: string; classification_status: string }>(
+      `SELECT t.id, t.classification_status FROM transactions t
+       JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+       WHERE LOWER(ps.supplier_name) LIKE '%mckesson%'`
+    );
+    expect(ruleClassified.length).toBeGreaterThan(0);
+    for (const row of ruleClassified) {
+      expect(row.classification_status).toBe('classified_by_rule');
+    }
+
+    // Other suppliers should be classified_by_ai
+    const aiClassified = await db.all<{ id: string; classification_status: string }>(
+      `SELECT t.id, t.classification_status FROM transactions t
+       JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+       WHERE LOWER(ps.supplier_name) NOT LIKE '%mckesson%'`
+    );
+    expect(aiClassified.length).toBeGreaterThan(0);
+    for (const row of aiClassified) {
+      expect(row.classification_status).toBe('classified_by_ai');
+    }
+
+    console.log(`  Rule-classified: ${ruleClassified.length}, AI-classified: ${aiClassified.length}`);
   });
 
-  it('Phase 6: Export classified results to CSV', async () => {
-    exportPath = tempPath('.csv');
-    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({
+  // ─── Phase 9: Verify changelog ──────────────────────────────────────────
+
+  it('Phase 9: Verify changelog entries', async () => {
+    const changes = await changelog.listChanges();
+    expect(changes.length).toBeGreaterThan(0);
+
+    const pipelineChanges = changes.filter((c) => c.source === 'pipeline');
+    expect(pipelineChanges.length).toBeGreaterThan(0);
+
+    console.log(`  Changelog: ${changes.length} entries (${pipelineChanges.length} from pipeline)`);
+  });
+
+  // ─── Phase 10: Export CSV ───────────────────────────────────────────────
+
+  it('Phase 10: Export classified results to CSV', async () => {
+    (dialog.showSaveDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       canceled: false,
       filePath: exportPath,
     });
 
     const result = await exportSvc.exportCSV();
     expect(result).not.toBeNull();
-    expect(result!.rowsExported).toBe(5);
+    expect(result!.rowsExported).toBe(csvRowCount);
+    expect(fs.existsSync(exportPath)).toBe(true);
 
-    expect(fs.existsSync(exportPath!)).toBe(true);
-    const csvContent = fs.readFileSync(exportPath!, 'utf-8');
+    // Verify CSV structure
+    const csvContent = fs.readFileSync(exportPath, 'utf-8');
     const lines = csvContent.trim().split(/\r?\n/);
-    expect(lines.length).toBe(6); // header + 5 data rows
+    expect(lines.length).toBe(csvRowCount + 1);
+
+    const header = lines[0].toLowerCase();
+    expect(header).toContain('classification_path');
+    expect(header).toContain('classification_status');
+
+    console.log(`  Exported ${result!.rowsExported} rows to ${exportPath}`);
+  });
+
+  // ─── Phase 11: Database integrity ───────────────────────────────────────
+
+  it('Phase 11: Database integrity checks', async () => {
+    const orphanedNodes = await db.get<{ cnt: number | bigint }>(
+      `SELECT COUNT(*) as cnt FROM transactions t
+       LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
+       WHERE t.taxonomy_node_id IS NOT NULL AND tax.id IS NULL`
+    );
+    expect(Number(orphanedNodes?.cnt ?? 0)).toBe(0);
+
+    const minMax = await db.get<{ min_idx: number; cnt: number | bigint }>(
+      'SELECT MIN(row_index) as min_idx, COUNT(*) as cnt FROM transactions'
+    );
+    expect(minMax?.min_idx).toBe(0);
+    expect(Number(minMax?.cnt)).toBe(csvRowCount);
+
+    console.log('  Integrity checks passed');
   });
 });

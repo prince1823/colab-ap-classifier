@@ -1,0 +1,22 @@
+{
+  "projectName": "Innova Care Health Pipeline Test",
+  "companyContext": {
+    "companyName": "InnovaCare Health",
+    "industry": "Healthcare Services",
+    "sector": "Value-Based Care & Managed Services Organization (MSO)",
+    "description": "InnovaCare Health manages the clinical and financial outcomes for seniors and government-program members through a network of primary care clinics and physician partnerships. The company prioritizes care coordination and quality improvement to reduce total costs under risk-based payer arrangements.",
+    "businessFocus": "The organization operates on a capitated revenue model, assuming financial risk for defined member populations (primarily Medicare Advantage) rather than a traditional fee-for-service structure. Key operational priorities include administering Management Services Organization (MSO) platforms for provider networks, managing downstream utilization costs (hospitalizations and specialist care), and distributing performance-based incentives. Strategic spending focuses on population health analytics, care management infrastructure, and expanding access to primary care to minimize avoidable medical expenditures.",
+    "procurementNuances": "Clinical versus non-clinical spend separation is fundamental: clinical covers anything touching patient care (drugs, implants, lab reagents, medical gases), while non-clinical includes facilities, IT, and administrative, professional services and overhead expenses."
+  },
+  "columnMapping": {
+    "supplier_name": "Supplier",
+    "line_description": "Line Item Description",
+    "spend_amount": "Amount USD",
+    "gl_description": "GL Account Name",
+    "invoice_date": "Accounting Date",
+    "creation_date": "Creation Date of Operational Transaction or Accounting Journal",
+    "company": "Company",
+    "cost_center": "Cost Center Name",
+    "memo": "Memo"
+  }
+}

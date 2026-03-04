@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ipc } from '../lib/ipc'
 import type { OverrideRule, RuleCondition, RuleOperator, RuleSource } from '../../shared/types/rules'
-import type { TaxonomyNode, RulePackInfo } from '../../shared/types/taxonomy'
+import type { TaxonomyNode } from '../../shared/types/taxonomy'
 
 const OPERATORS: RuleOperator[] = [
   'equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with',
@@ -26,7 +26,6 @@ const OPERATOR_LABELS: Record<RuleOperator, string> = {
 export default function OverrideRulesPage() {
   const [rules, setRules] = useState<OverrideRule[]>([])
   const [taxonomyNodes, setTaxonomyNodes] = useState<TaxonomyNode[]>([])
-  const [rulePacks, setRulePacks] = useState<RulePackInfo[]>([])
   const [columns, setColumns] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,21 +38,18 @@ export default function OverrideRulesPage() {
   const [targetNodeId, setTargetNodeId] = useState('')
   const [priority, setPriority] = useState(100)
   const [saving, setSaving] = useState(false)
-  const [importing, setImporting] = useState(false)
 
   const loadData = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [r, n, rp, cols] = await Promise.all([
+      const [r, n, cols] = await Promise.all([
         ipc.rules.list(),
         ipc.taxonomy.getNodes().catch(() => [] as TaxonomyNode[]),
-        ipc.colabip.listRulePacks().catch(() => [] as RulePackInfo[]),
         ipc.transactions.getColumns().catch(() => [] as string[]),
       ])
       setRules(r)
       setTaxonomyNodes(n)
-      setRulePacks(rp)
       setColumns(cols)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load rules')
@@ -118,19 +114,6 @@ export default function OverrideRulesPage() {
     }
   }
 
-  const handleImport = async (packName: string) => {
-    setImporting(true)
-    setError(null)
-    try {
-      await ipc.rules.importFromColabip(packName)
-      await loadData()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to import rules')
-    } finally {
-      setImporting(false)
-    }
-  }
-
   const updateCondition = (index: number, field: keyof RuleCondition, value: string) => {
     setConditions((prev) => prev.map((c, i) => (i === index ? { ...c, [field]: value } : c)))
   }
@@ -178,24 +161,9 @@ export default function OverrideRulesPage() {
           <h2 className="text-lg font-semibold text-gray-900">Override Rules</h2>
           <p className="mt-1 text-sm text-gray-500">{rules.length} rules</p>
         </div>
-        <div className="flex items-center gap-2">
-          {rulePacks.length > 0 && (
-            <select
-              onChange={(e) => e.target.value && handleImport(e.target.value)}
-              disabled={importing}
-              defaultValue=""
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="" disabled>Import rule pack...</option>
-              {rulePacks.map((rp) => (
-                <option key={rp.name} value={rp.name}>{rp.name} ({rp.ruleCount})</option>
-              ))}
-            </select>
-          )}
-          <button onClick={openCreate} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-            Add Rule
-          </button>
-        </div>
+        <button onClick={openCreate} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+          Add Rule
+        </button>
       </div>
 
       {error && <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>}
@@ -333,7 +301,7 @@ export default function OverrideRulesPage() {
               </tr>
             ))}
             {rules.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No override rules. Add rules or import from ColabIP.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No override rules yet.</td></tr>
             )}
           </tbody>
         </table>

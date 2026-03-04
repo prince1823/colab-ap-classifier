@@ -16,7 +16,7 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerHandler('test:ping', async () => 'pong');
 
   // Namespace handlers
-  registerProjectHandlers(services.project);
+  registerProjectHandlers(services.project, services.db);
   registerChangelogHandlers(services.changelog);
   registerTaxonomyHandlers(services.taxonomy);
   registerIngestHandlers(services.ingest);

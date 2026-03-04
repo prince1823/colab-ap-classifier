@@ -5,9 +5,9 @@ export interface IPCResponse<T> {
   error?: string;
 }
 
-// ~30 IPC channel names — aligned to project flow (architecture.md)
+// IPC channel names — aligned to new architecture
 export type IPCChannel =
-  // Project (7 channels)
+  // Project (9 channels)
   | 'project:new'
   | 'project:open'
   | 'project:close'
@@ -15,17 +15,18 @@ export type IPCChannel =
   | 'project:setSetting'
   | 'project:deleteSetting'
   | 'project:getAllSettings'
+  | 'project:getMetadata'
+  | 'project:updateMetadata'
   // Ingest (5 channels)
   | 'ingest:selectFile'
   | 'ingest:parseCSV'
   | 'ingest:suggestMappings'
   | 'ingest:importCSV'
   | 'ingest:getUpload'
-  // Pipeline (3 channels + 1 event)
-  | 'pipeline:start'
-  | 'pipeline:approve'
-  | 'pipeline:cancel'
-  | 'pipeline:progress'
+  // Classification (2 channels + 1 event)
+  | 'classification:start'
+  | 'classification:cancel'
+  | 'classification:progress'
   // Transactions (4 channels)
   | 'transactions:query'
   | 'transactions:stats'
@@ -36,11 +37,14 @@ export type IPCChannel =
   | 'taxonomy:addNode'
   | 'taxonomy:updateNode'
   | 'taxonomy:deleteNode'
-  | 'taxonomy:importFromColabip'
-  // Suppliers (3 channels)
+  | 'taxonomy:importFromFile'
+  // Suppliers (5 channels + 1 event)
   | 'suppliers:list'
   | 'suppliers:update'
-  | 'suppliers:research'
+  | 'suppliers:confirm'
+  | 'suppliers:researchAll'
+  | 'suppliers:researchSingle'
+  | 'suppliers:research:progress'
   // Rules (4 channels)
   | 'rules:list'
   | 'rules:create'
@@ -50,6 +54,4 @@ export type IPCChannel =
   | 'changelog:list'
   | 'changelog:revert'
   // Export (1 channel)
-  | 'export:csv'
-  // ColabIP (1 channel)
-  | 'colabip:listTaxonomies';
+  | 'export:csv';

@@ -91,10 +91,8 @@ function deriveState(metadata: ProjectMetadata | null, classifiedRows: number, p
   const hasCompanyContext = metadata?.companyContext !== null && metadata?.companyContext !== undefined
   const hasTaxonomy = metadata?.taxonomyName !== null && metadata?.taxonomyName !== undefined
   const hasUploadedData = metadata?.columnMapping !== null && metadata?.columnMapping !== undefined
-  // Consider classified if we have rows OR if the pipeline just completed
   const hasClassifiedData = classifiedRows > 0 || (progress !== null && progress.status === 'completed')
-  const isClassifying = progress !== null &&
-    (progress.status === 'pending' || progress.status === 'researching' || progress.status === 'classifying')
+  const isClassifying = progress !== null && progress.status === 'running'
 
   return {
     hasProject,
@@ -255,21 +253,18 @@ export const useWorkflowStore = create<WorkflowState>()(
       },
 
       subscribeToClassificationProgress: () => {
-        // Track cancelled/failed runIds so stale in-flight progress events
-        // don't overwrite the reset UI state.
-        const terminalRunIds = new Set<string>()
+        let reachedTerminal = false
 
         const unsubscribe = ipc.classification.onProgress((progress) => {
-          // If this runId already reached a terminal state, ignore any active-status events
-          if (terminalRunIds.has(progress.runId)) {
-            if (progress.status === 'pending' || progress.status === 'researching' || progress.status === 'classifying') {
-              return // Drop stale event
-            }
+          // If we already reached a terminal state, ignore running events
+          if (reachedTerminal && progress.status === 'running') {
+            return
           }
 
-          // Remember when a run reaches a terminal state
           if (progress.status === 'cancelled' || progress.status === 'failed' || progress.status === 'completed') {
-            terminalRunIds.add(progress.runId)
+            reachedTerminal = true
+          } else {
+            reachedTerminal = false
           }
 
           const { projectMetadata, classifiedRows, dataReviewed } = get()
@@ -279,7 +274,6 @@ export const useWorkflowStore = create<WorkflowState>()(
           })
 
           if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
-            // Refresh stats so classifiedRows updates
             ipc.transactions.stats().then((stats) => {
               console.log('[WorkflowStore] Post-classification stats:', stats)
               set({
@@ -289,9 +283,6 @@ export const useWorkflowStore = create<WorkflowState>()(
             }).catch((e) => {
               console.error('[WorkflowStore] Failed to refresh stats:', e)
             })
-
-            // Clean up after a delay
-            setTimeout(() => terminalRunIds.delete(progress.runId), 60_000)
           }
         })
         return unsubscribe

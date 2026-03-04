@@ -2,13 +2,12 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Maximize2, Minimize2 } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
-import type { TaxonomyNode, TaxonomyInfo } from '../../shared/types/taxonomy'
+import type { TaxonomyNode } from '../../shared/types/taxonomy'
 
 export default function TaxonomyPage() {
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
 
   const [nodes, setNodes] = useState<TaxonomyNode[]>([])
-  const [taxonomies, setTaxonomies] = useState<TaxonomyInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,12 +26,8 @@ export default function TaxonomyPage() {
     setLoading(true)
     setError(null)
     try {
-      const [n, t] = await Promise.all([
-        ipc.taxonomy.getNodes(),
-        ipc.colabip.listTaxonomies().catch(() => [] as TaxonomyInfo[]),
-      ])
+      const n = await ipc.taxonomy.getNodes()
       setNodes(n)
-      setTaxonomies(t)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load taxonomy')
     } finally {
@@ -78,11 +73,7 @@ export default function TaxonomyPage() {
     if (!addPath.trim()) return
     setAddSaving(true)
     try {
-      const existingPaths = nodes.map((n) => ({ path: n.fullPath, description: n.description || undefined }))
-      await ipc.taxonomy.set({
-        name: 'default',
-        nodes: [...existingPaths, { path: addPath.trim(), description: addDesc.trim() || undefined }],
-      })
+      await ipc.taxonomy.addNode(addPath.trim(), addDesc.trim() || undefined)
       setShowAdd(false)
       setAddPath('')
       setAddDesc('')
@@ -96,12 +87,8 @@ export default function TaxonomyPage() {
   }
 
   const handleDeleteNode = async (node: TaxonomyNode) => {
-    const descendantPaths = nodes.filter((n) => n.fullPath.startsWith(node.fullPath)).map((n) => n.fullPath)
-    const remaining = nodes
-      .filter((n) => !descendantPaths.includes(n.fullPath))
-      .map((n) => ({ path: n.fullPath, description: n.description || undefined }))
     try {
-      await ipc.taxonomy.set({ name: 'default', nodes: remaining })
+      await ipc.taxonomy.deleteNode(node.id)
       await loadData()
       await refreshMetadata()
     } catch (e) {
@@ -113,7 +100,7 @@ export default function TaxonomyPage() {
     setImporting(true)
     setError(null)
     try {
-      await ipc.taxonomy.importFromColabip(taxonomyName)
+      await ipc.taxonomy.importFromFile(taxonomyName)
       await loadData()
       await refreshMetadata()
     } catch (e) {
@@ -156,21 +143,13 @@ export default function TaxonomyPage() {
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
-            {taxonomies.length > 0 && (
-              <select
-                onChange={(e) => e.target.value && handleImport(e.target.value)}
-                disabled={importing}
-                defaultValue=""
-                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 focus:border-blue-500 focus:outline-none"
-              >
-                <option value="" disabled>{importing ? 'Importing...' : 'Import from ColabIP...'}</option>
-                {taxonomies.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name} ({t.nodeCount})
-                  </option>
-                ))}
-              </select>
-            )}
+            <button
+              onClick={() => handleImport('')}
+              disabled={importing}
+              className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              {importing ? 'Importing...' : 'Import from File'}
+            </button>
             <button
               onClick={() => setShowAdd(true)}
               className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
@@ -243,7 +222,7 @@ export default function TaxonomyPage() {
         {tree.length === 0 ? (
           <div className="p-12 text-center">
             <div className="text-sm text-gray-400">No taxonomy nodes yet</div>
-            <div className="mt-1 text-xs text-gray-300">Add nodes manually or import from ColabIP</div>
+            <div className="mt-1 text-xs text-gray-300">Add nodes manually or import from a file</div>
           </div>
         ) : (
           <>

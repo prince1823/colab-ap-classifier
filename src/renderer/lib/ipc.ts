@@ -1,10 +1,10 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { ProjectMetadata, ProjectMetadataUpdate } from '../../shared/types/project';
 import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority } from '../../shared/types/column-mapping';
-import type { ClassificationProgress } from '../../shared/types/classification';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate } from '../../shared/types/transactions';
-import type { TaxonomyNode, TaxonomyInfo } from '../../shared/types/taxonomy';
-import type { ProjectSupplierView, SupplierUpdateInput } from '../../shared/types/suppliers';
+import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
+import type { TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate } from '../../shared/types/transactions';
+import type { TaxonomyNode } from '../../shared/types/taxonomy';
+import type { ProjectSupplierView, SupplierConfirmationStatus } from '../../shared/types/suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
 import type { ChangeLog } from '../../shared/types/changelog';
 
@@ -28,16 +28,21 @@ function on<T>(channel: string, callback: (data: T) => void): () => void {
 }
 
 /**
- * Typed IPC client — ~30 channels aligned to architecture spec.
+ * Typed IPC client aligned to new architecture.
  */
 export const ipc = {
-  // ── Project (5 channels) ──
+  // ── Project (9 channels) ──
   project: {
     new: (name: string, filePath?: string) =>
       invoke<{ filePath: string; name: string } | null>('project:new', name, filePath),
     open: (filePath?: string) =>
       invoke<{ filePath: string; name: string } | null>('project:open', filePath),
     close: () => invoke<void>('project:close'),
+    getSetting: (key: string) => invoke<unknown>('project:getSetting', key),
+    setSetting: (key: string, value: unknown) => invoke<void>('project:setSetting', key, value),
+    deleteSetting: (key: string) => invoke<void>('project:deleteSetting', key),
+    getAllSettings: () => invoke<Record<string, unknown>>('project:getAllSettings'),
+    // Compatibility shims
     getMetadata: () => invoke<ProjectMetadata>('project:getMetadata'),
     updateMetadata: (updates: ProjectMetadataUpdate) =>
       invoke<void>('project:updateMetadata', updates),
@@ -56,10 +61,9 @@ export const ipc = {
       invoke<{ id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null>('ingest:getUpload'),
   },
 
-  // ── Classification (3 channels + 1 event) ──
+  // ── Classification (2 channels + 1 event) ──
   classification: {
-    start: () => invoke<{ started: boolean }>('classification:start'),
-    approve: () => invoke<void>('classification:approve'),
+    start: () => invoke<void>('classification:start'),
     cancel: () => invoke<void>('classification:cancel'),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on<ClassificationProgress>('classification:progress', callback),
@@ -84,23 +88,22 @@ export const ipc = {
       invoke<void>('taxonomy:updateNode', nodeId, updates),
     deleteNode: (nodeId: string) =>
       invoke<void>('taxonomy:deleteNode', nodeId),
-    importFromColabip: (industryName: string) =>
-      invoke<void>('taxonomy:importFromColabip', industryName),
+    importFromFile: (filePath: string) =>
+      invoke<{ nodeCount: number }>('taxonomy:importFromFile', filePath),
   },
 
-  // ── Suppliers (3 channels + research event) ──
+  // ── Suppliers (3 channels + research) ──
   suppliers: {
     list: () => invoke<ProjectSupplierView[]>('suppliers:list'),
-    update: (supplierName: string, updates: SupplierUpdateInput) =>
-      invoke<void>('suppliers:update', supplierName, updates),
-    research: () => invoke<{ started: boolean }>('suppliers:research'),
-    onResearchProgress: (callback: (progress: {
-      done: number;
-      total: number;
-      percentage: number;
-      currentSupplier: string | null;
-      step: string;
-    }) => void) => on('suppliers:research:progress', callback),
+    update: (supplierId: string, newName: string) =>
+      invoke<void>('suppliers:update', supplierId, newName),
+    confirm: (id: string, status: SupplierConfirmationStatus) =>
+      invoke<void>('suppliers:confirm', id, status),
+    researchAll: () => invoke<void>('suppliers:researchAll'),
+    researchSingle: (supplierName: string) =>
+      invoke<unknown>('suppliers:researchSingle', supplierName),
+    onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
+      on<ResearchProgress>('suppliers:research:progress', callback),
   },
 
   // ── Rules (4 channels) ──
@@ -122,10 +125,5 @@ export const ipc = {
   // ── Export (1 channel) ──
   export: {
     csv: () => invoke<{ rowsExported: number } | null>('export:csv'),
-  },
-
-  // ── ColabIP (1 channel) ──
-  colabip: {
-    listTaxonomies: () => invoke<TaxonomyInfo[]>('colabip:listTaxonomies'),
   },
 };

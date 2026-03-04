@@ -11,32 +11,20 @@ export default function ClassificationPage() {
 
   // Local copy that persists terminal states even after the store clears progress
   const [localProgress, setLocalProgress] = useState<ClassificationProgress | null>(storeProgress)
-  const [runId, setRunId] = useState<string | null>(storeProgress?.runId ?? null)
   const [error, setError] = useState<string | null>(null)
   const prevStatusRef = useRef<string | null>(storeProgress?.status ?? null)
-
-  // Track dismissed runIds so stale store updates don't re-populate the UI after cancel
-  const dismissedRunRef = useRef<string | null>(null)
 
   // AppShell already subscribes to progress events globally.
   // Sync local state from the store.
   useEffect(() => {
     if (storeProgress) {
-      // If user already cancelled/dismissed this run, ignore stale store updates for it
-      if (dismissedRunRef.current && storeProgress.runId === dismissedRunRef.current) {
-        return
-      }
-
       setLocalProgress(storeProgress)
-      if (storeProgress.runId) {
-        setRunId(storeProgress.runId)
-      }
       if (storeProgress.status !== 'failed') {
         setError(null)
       }
 
       // When transitioning to a terminal state, refresh stats as a safety net
-      const wasActive = prevStatusRef.current === 'pending' || prevStatusRef.current === 'researching' || prevStatusRef.current === 'classifying'
+      const wasActive = prevStatusRef.current === 'running'
       const isTerminal = storeProgress.status === 'completed' || storeProgress.status === 'failed' || storeProgress.status === 'cancelled'
       if (wasActive && isTerminal) {
         refreshStats()
@@ -51,17 +39,13 @@ export default function ClassificationPage() {
   // No mount-time status check needed.
 
   const isRunning =
-    localProgress !== null &&
-    (localProgress.status === 'pending' ||
-      localProgress.status === 'researching' ||
-      localProgress.status === 'classifying')
+    localProgress !== null && localProgress.status === 'running'
 
   const isCompleted = localProgress?.status === 'completed'
   const isCancelled = localProgress?.status === 'cancelled'
   const isFailed = localProgress?.status === 'failed'
 
   const handleStarted = () => {
-    dismissedRunRef.current = null // Allow new run's events through
     setLocalProgress(null)
     setError(null)
   }
@@ -71,19 +55,12 @@ export default function ClassificationPage() {
   }
 
   const handleCancelled = () => {
-    // Mark this runId as dismissed so the store sync useEffect ignores stale events
-    if (runId) {
-      dismissedRunRef.current = runId
-    }
-    // Reset to initial view immediately after cancel
     setLocalProgress(null)
-    setRunId(null)
     setError(null)
   }
 
   const handleDismiss = () => {
     setLocalProgress(null)
-    setRunId(null)
     setError(null)
   }
 
@@ -102,7 +79,6 @@ export default function ClassificationPage() {
 
       <ClassificationControls
         isRunning={isRunning}
-        runId={runId}
         onStarted={handleStarted}
         onError={handleError}
         onCancelled={handleCancelled}

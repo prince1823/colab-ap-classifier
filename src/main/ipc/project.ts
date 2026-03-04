@@ -1,7 +1,8 @@
 import { registerHandler } from './register';
-import type { ProjectStore } from '../../shared/types/services';
+import type { ProjectStore, Database } from '../../shared/types/services';
+import type { ProjectMetadata, ProjectMetadataUpdate, CompanyContext } from '../../shared/types/project';
 
-export function registerProjectHandlers(project: ProjectStore): void {
+export function registerProjectHandlers(project: ProjectStore, db: Database): void {
   registerHandler('project:new', async (_event, projectName: unknown, filePath?: unknown) => {
     let targetPath = filePath as string | undefined;
     if (!targetPath) {
@@ -40,5 +41,36 @@ export function registerProjectHandlers(project: ProjectStore): void {
 
   registerHandler('project:getAllSettings', async () => {
     return project.getAllSettings();
+  });
+
+  // Compatibility: assemble ProjectMetadata from settings KV store
+  registerHandler('project:getMetadata', async () => {
+    const settings = await project.getAllSettings();
+    return {
+      id: '',
+      projectName: (settings.project_name as string) ?? 'Untitled',
+      filePath: db.getFilePath(),
+      createdAt: '',
+      companyContext: (settings.company_context as CompanyContext) ?? null,
+      taxonomyName: (settings.taxonomy_name as string) ?? null,
+      tailSpendThreshold: (settings.tail_spend_threshold as number) ?? 10000,
+      columnMapping: (settings.column_mapping as Record<string, string>) ?? null,
+    } satisfies ProjectMetadata;
+  });
+
+  registerHandler('project:updateMetadata', async (_event, updates: unknown) => {
+    const u = updates as ProjectMetadataUpdate;
+    if (u.companyContext !== undefined) {
+      await project.setSetting('company_context', u.companyContext);
+    }
+    if (u.taxonomyName !== undefined) {
+      await project.setSetting('taxonomy_name', u.taxonomyName);
+    }
+    if (u.tailSpendThreshold !== undefined) {
+      await project.setSetting('tail_spend_threshold', u.tailSpendThreshold);
+    }
+    if (u.columnMapping !== undefined) {
+      await project.setSetting('column_mapping', u.columnMapping);
+    }
   });
 }

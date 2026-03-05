@@ -127,7 +127,18 @@ export class SupplierService implements ISupplierService {
     );
   }
 
+  private async transactionColumnExists(columnName: string): Promise<boolean> {
+    const row = await this.db.get<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = ?`,
+      columnName
+    );
+    return Number(row?.cnt ?? 0) > 0;
+  }
+
   async listProjectSuppliers(): Promise<ProjectSupplierView[]> {
+    const hasSpend = await this.transactionColumnExists('spend_amount');
+    const spendExpr = hasSpend ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)' : '0';
+
     const rows = await this.db.all<{
       id: string;
       supplier_name: string;
@@ -142,7 +153,7 @@ export class SupplierService implements ISupplierService {
     }>(
       `SELECT ps.*,
         COUNT(t.id) as transaction_count,
-        COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0) as total_spend
+        ${spendExpr} as total_spend
       FROM project_suppliers ps
       LEFT JOIN transactions t ON t.project_supplier_id = ps.id
       GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
@@ -223,6 +234,9 @@ export class SupplierService implements ISupplierService {
   }
 
   async filterTailSpend(threshold: number): Promise<string[]> {
+    const hasSpend = await this.transactionColumnExists('spend_amount');
+    if (!hasSpend) return [];
+
     const rows = await this.db.all<{ id: string }>(
       `SELECT ps.id FROM project_suppliers ps
        LEFT JOIN transactions t ON t.project_supplier_id = ps.id

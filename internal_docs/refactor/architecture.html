@@ -1231,29 +1231,29 @@ interface ClassificationProgress {
   <li><strong>Progress streaming</strong> — listens on <code>classification:progress</code> and <code>suppliers:research:progress</code> events, updates Zustand store in real-time</li>
 </ul>
 
-<h3>Frontend Wiring Plan (End-to-End Type Safety)</h3>
-<p>Current target before cleanup: keep Electron IPC as the only boundary and make the renderer DI-friendly.</p>
+<h3>Frontend Wiring (Simplified)</h3>
+<p>Pages call the typed IPC facade directly. No intermediate service layer. Complex page logic (Review page only) is extracted into hooks.</p>
 <ol>
-  <li><strong>Contract-first API facade</strong>:
-    keep <code>src/renderer/lib/ipc.ts</code> as a thin typed facade that exposes only explicit interface methods.
+  <li><strong>Contract-first IPC facade</strong>:
+    <code>src/renderer/lib/ipc.ts</code> backed by <code>IPCInvokeMap</code> &mdash; compile-time safety on every channel, arg, and return type.
   </li>
-  <li><strong>Per-feature service layer</strong>:
-    add <code>src/renderer/services</code> modules (for example <code>projectService</code>, <code>transactionService</code>, <code>supplierService</code>) and keep orchestration there, not in page components.
+  <li><strong>Pages call <code>ipc</code> directly</strong>:
+    No <code>renderer/services/</code> layer. The IPC facade IS the abstraction over the main process. Adding another layer just moves 3&ndash;5 lines of code without adding value.
   </li>
-  <li><strong>DI composition root</strong>:
-    provide service implementations via context in <code>src/renderer/App.tsx</code> (or a provider file nearby), then consume through custom hooks such as <code>useProjectService</code>.
+  <li><strong>Hooks for complex orchestration</strong>:
+    The Review page extracts its reclassification, undo/redo, and filter logic into <code>useReclassification</code>, <code>useUndoRedo</code>, <code>useReviewFilters</code> hooks. All other pages are simple enough to keep logic inline.
   </li>
-  <li><strong>Shared DTOs + strict mapping</strong>:
-    keep shared types as the wire contract; every boundary call is mapped at adapter edges, never partially inferred.
+  <li><strong>Shared DTOs are usually the view model</strong>:
+    <code>TaxonomyNode</code>, <code>OverrideRule</code>, <code>ChangeLog</code>, <code>CompanyContext</code> etc. map 1:1 to UI. Only the Review page needs a view model transform (<code>Transaction &rarr; DashboardTransactionRow</code>).
   </li>
   <li><strong>Event bridge</strong>:
-    stream listeners in one place (e.g., store adapters) and re-expose normalized UI events to components.
+    progress events flow through AppShell subscription &rarr; Zustand store. Components read from store.
   </li>
 </ol>
 
-<p>Preferred data flow:</p>
+<p>Data flow:</p>
 <div class="diagram">
-Page/Component → Feature Service → Typed IPC Adapter → preload invoke/event → main IPC handler → DI service/container
+Page/Component (or Hook) → Typed IPC Facade (ipc.ts) → preload invoke/event → main IPC handler → DI service/container
 </div>
 
 <h3>Current Frontend Mismatches (to resolve before refactor)</h3>
@@ -1341,351 +1341,60 @@ type Result&lt;K extends Channel&gt; = IPCInvokeMap[K]['result'];</code></pre>
 </ul>
 
 <h3>Detailed Frontend Contract Audit (Page + Component)</h3>
-<p>Each section lists: current IPC calls, current type usage, whether logic exceeds UI concerns, and what typed boundary should exist.</p>
+<p>Full audit available in <a href="front-end-architecture.html">front-end-architecture.html</a>. Below: just the P0 mismatches and field drift that need fixing.</p>
 
-<details open>
-  <summary>Shell, Routing, Store, Shared Hooks</summary>
-  <div class="detail-body">
-    <table>
-      <tr><th>Artifact</th><th>IPC Used</th><th>Types Used Now</th><th>Beyond UI?</th><th>Types Needed / Fix</th></tr>
-      <tr>
-        <td><code>App.tsx</code></td>
-        <td>None (routing only)</td>
-        <td>No route metadata type</td>
-        <td>Low</td>
-        <td>Add typed route config (<code>RouteId</code>, guard requirements) to avoid hidden workflow coupling.</td>
-      </tr>
-      <tr>
-        <td><code>components/AppShell.tsx</code></td>
-        <td>Indirect via store actions</td>
-        <td>No explicit app-shell contract type</td>
-        <td>Medium (auto-reopen, progress subscription, metadata refresh)</td>
-        <td>Extract to <code>appLifecycleService</code> hook with typed side-effect actions.</td>
-      </tr>
-      <tr>
-        <td><code>components/Header.tsx</code>, <code>components/ProtectedRoute.tsx</code></td>
-        <td>None</td>
-        <td>Simple props/types</td>
-        <td>No</td>
-        <td>No change beyond keeping props typed.</td>
-      </tr>
-      <tr>
-        <td><code>components/Sidebar.tsx</code></td>
-        <td>None</td>
-        <td><code>WorkflowStateContext</code> booleans</td>
-        <td>Medium (workflow gating logic)</td>
-        <td>Use typed workflow step model from store/service, not duplicated literal conditions.</td>
-      </tr>
-      <tr>
-        <td><code>components/ProjectSelector.tsx</code></td>
-        <td>Indirect via <code>loadProject/createProject/closeProject</code></td>
-        <td>No explicit result/error types for open/create flows</td>
-        <td>Medium (route decision logic)</td>
-        <td>Add <code>ProjectOpenResult</code> and centralized route resolver service.</td>
-      </tr>
-      <tr>
-        <td><code>components/SettingsDialog.tsx</code></td>
-        <td>None</td>
-        <td>Local UI state only</td>
-        <td>No</td>
-        <td>Optional: use readonly <code>LLMSettingsView</code> type from backend metadata.</td>
-      </tr>
-      <tr>
-        <td><code>stores/workflowStore.ts</code></td>
-        <td><code>project:new/open/close/getMetadata</code>, <code>transactions:stats</code>, <code>classification:progress</code></td>
-        <td><code>ProjectMetadata</code>, <code>ClassificationProgress</code>, upload draft types</td>
-        <td>High (orchestration + state derivation + event handling)</td>
-        <td>Strongly type <code>reviewFilters</code> and extracted commands (<code>WorkflowCommand</code>) to remove loose <code>Record&lt;string, string[]&gt;</code> assumptions.</td>
-      </tr>
-      <tr>
-        <td><code>hooks/useIPC.ts</code></td>
-        <td>Generic caller</td>
-        <td>Generic <code>T</code>, deps as <code>unknown[]</code></td>
-        <td>Medium</td>
-        <td>Use channel-keyed typed wrapper; move retry/error policy here, not pages.</td>
-      </tr>
-      <tr>
-        <td><code>hooks/useTransactions.ts</code></td>
-        <td><code>ipc.transactions.queryPaginated</code> (missing), <code>transactions:stats</code></td>
-        <td><code>Transaction</code>, <code>PaginatedTransactions</code></td>
-        <td>High (progressive chunk loading)</td>
-        <td>Use supported <code>transactions.query</code> with paging args, or add typed <code>queryPaginated</code> to renderer + IPC contract.</td>
-      </tr>
-      <tr>
-        <td><code>hooks/useKeyboardShortcuts.ts</code></td>
-        <td>None</td>
-        <td>Untyped <code>shortcuts</code> + event payload</td>
-        <td>Medium</td>
-        <td>Type as <code>Record&lt;ShortcutKey, (e: KeyboardEvent) =&gt; void&gt;</code> to remove implicit <code>any</code>.</td>
-      </tr>
-    </table>
-  </div>
-</details>
+<p><em>Note: the previous version of this section recommended per-page view models (<code>UploadVM</code>, <code>ImportCommand</code>, etc.), feature services, and DI contexts. Those have been removed as overengineering. Most pages use shared DTOs directly &mdash; only the Review page's <code>DashboardTransactionRow</code> transform is warranted. Pages call <code>ipc</code> directly; complex logic goes into hooks.</em></p>
+
+<!-- Audit tables removed — see front-end-architecture.html for page-by-page details.
+     The contract mismatches table below is the actionable item list. -->
 
 <details>
-  <summary>Workflow: Upload Page + Components</summary>
+  <summary><strong>Legacy audit tables (archived)</strong> &mdash; click to expand if needed</summary>
   <div class="detail-body">
-    <table>
-      <tr><th>Artifact</th><th>IPC Used</th><th>Types Used Now</th><th>Beyond UI?</th><th>Types Needed / Fix</th></tr>
-      <tr>
-        <td><code>pages/UploadPage.tsx</code></td>
-        <td><code>ingest:parseCSV</code>, <code>ingest:suggestMappings</code>, <code>ingest:importCSV</code></td>
-        <td>Mostly inferred from <code>ipc</code> return types</td>
-        <td>Yes (two-step import orchestration)</td>
-        <td>Add explicit <code>UploadVM</code>, <code>ImportCommand</code>, and error union type so page is declarative.</td>
-      </tr>
-      <tr>
-        <td><code>components/upload/FileDropZone.tsx</code></td>
-        <td><code>ingest:selectFile</code></td>
-        <td>No explicit shared type import</td>
-        <td>Low (dialog trigger)</td>
-        <td>Use typed <code>FileSelectionResult = string | null</code>, remove direct IPC logging.</td>
-      </tr>
-      <tr>
-        <td><code>components/upload/CSVPreviewTable.tsx</code></td>
-        <td>None</td>
-        <td><code>CSVPreview</code></td>
-        <td>No</td>
-        <td>Already correctly UI-only and typed.</td>
-      </tr>
-      <tr>
-        <td><code>components/upload/ColumnMappingEditor.tsx</code></td>
-        <td>None</td>
-        <td><code>ColumnMapping</code>, <code>ColumnMappingResult</code></td>
-        <td>Medium (auto-mapping rules in UI)</td>
-        <td>Move auto-map heuristic to service/hook and keep component purely presentational.</td>
-      </tr>
-    </table>
+    <p>The per-artifact audit tables that were previously here have been archived. They recommended abstractions (services, VMs, DI contexts) that we've decided against. The actionable items from those audits are captured in the P0 mismatch table above and the Tier 1/2/3 refactor plan in <a href="front-end-architecture.html#refactor-plan">front-end-architecture.html</a>.</p>
+    <p>Key decisions:</p>
+    <ul>
+      <li><code>UploadPage</code> &mdash; keep calling <code>ipc</code> directly. Two-step orchestration is fine inline.</li>
+      <li><code>DataReviewPage</code>, <code>CompanyContextPage</code>, <code>TaxonomyPage</code> &mdash; already clean, no view model wrappers needed.</li>
+      <li><code>ClassificationPage</code> &mdash; keep thin, progress comes from store.</li>
+      <li><code>SuppliersPage</code> &mdash; fix contract mismatches (Tier 1), use <code>ProjectSupplierView</code> directly.</li>
+      <li><code>OverrideRulesPage</code> &mdash; fix type imports (Tier 1), use <code>FilterCondition</code>.</li>
+      <li><code>ReviewPage</code> / <code>Dashboard.tsx</code> &mdash; extract into hooks (Tier 3). This is where 80% of complexity lives.</li>
+      <li><code>OutputPage</code> &mdash; fix P0 bugs (Tier 1).</li>
+      <li><code>VersionHistoryPage</code> &mdash; fix revert return type (Tier 1).</li>
+    </ul>
   </div>
 </details>
 
-<details>
-  <summary>Workflow: Data Review Page + Components</summary>
-  <div class="detail-body">
-    <table>
-      <tr><th>Artifact</th><th>IPC Used</th><th>Types Used Now</th><th>Beyond UI?</th><th>Types Needed / Fix</th></tr>
-      <tr>
-        <td><code>pages/DataReviewPage.tsx</code></td>
-        <td><code>transactions:stats</code>, <code>suppliers:list</code></td>
-        <td><code>TransactionStats</code>, <code>ProjectSupplierView</code></td>
-        <td>Medium (gating + workflow transition)</td>
-        <td>Good baseline; add typed page loader state (<code>Loadable&lt;T&gt;</code>) for consistency.</td>
-      </tr>
-      <tr>
-        <td><code>components/data-review/StatsCards.tsx</code></td>
-        <td>None</td>
-        <td><code>TransactionStats</code></td>
-        <td>No</td>
-        <td>No major changes.</td>
-      </tr>
-      <tr>
-        <td><code>components/data-review/SupplierTable.tsx</code></td>
-        <td>None</td>
-        <td><code>ProjectSupplierView</code></td>
-        <td>Low</td>
-        <td>Currently UI-only; remove unused <code>onUpdated</code> prop or wire it.</td>
-      </tr>
-      <tr>
-        <td><code>components/data-review/SpendDistribution.tsx</code></td>
-        <td>None</td>
-        <td><code>ProjectSupplierView</code></td>
-        <td>No</td>
-        <td>Pure view component; keep as-is.</td>
-      </tr>
-    </table>
-  </div>
-</details>
+<!-- The actual P0 mismatches table is kept above (unchanged). Field drift matrix follows. -->
 
-<details>
-  <summary>Workflow: Classification Page + Components</summary>
-  <div class="detail-body">
-    <table>
-      <tr><th>Artifact</th><th>IPC Used</th><th>Types Used Now</th><th>Beyond UI?</th><th>Types Needed / Fix</th></tr>
-      <tr>
-        <td><code>pages/ClassificationPage.tsx</code></td>
-        <td>Indirect via controls/store</td>
-        <td><code>ClassificationProgress</code></td>
-        <td>Medium (terminal-state persistence + refresh behavior)</td>
-        <td>Keep page thin; move transition logic into <code>classificationService</code>.</td>
-      </tr>
-      <tr>
-        <td><code>components/classification/ClassificationControls.tsx</code></td>
-        <td><code>classification:start</code>, <code>classification:cancel</code></td>
-        <td>No explicit command result type</td>
-        <td>Yes (writes store state directly after cancel)</td>
-        <td>Use typed command results and route all state updates through store actions only.</td>
-      </tr>
-      <tr>
-        <td><code>components/classification/ProgressDisplay.tsx</code>, <code>ClassificationBanner.tsx</code></td>
-        <td>None (banner reads store)</td>
-        <td><code>ClassificationProgress</code> (banner inferred)</td>
-        <td>No/Low</td>
-        <td>Keep purely presentational.</td>
-      </tr>
-    </table>
-  </div>
-</details>
+<!-- Old per-page audit tables removed. The actionable items are in the P0 mismatch table
+     above and the 3-tier refactor plan in front-end-architecture.html.
 
-<details open>
-  <summary>Workflow: Review Page + Components (highest fragility)</summary>
-  <div class="detail-body">
-    <table>
-      <tr><th>Artifact</th><th>IPC Used</th><th>Types Used Now</th><th>Beyond UI?</th><th>Types Needed / Fix</th></tr>
-      <tr>
-        <td><code>pages/ReviewPage.tsx</code></td>
-        <td>Indirect via <code>useTransactions</code></td>
-        <td>No explicit view-model type; uses <code>Record&lt;string, unknown&gt;[]</code></td>
-        <td>Yes (data transformation + deferred rendering strategy)</td>
-        <td>Introduce explicit <code>DashboardTransactionRow</code> type, avoid raw <code>Record&lt;string, unknown&gt;</code>.</td>
-      </tr>
-      <tr>
-        <td><code>utils/transactionTransform.ts</code></td>
-        <td>None</td>
-        <td><code>Transaction</code> input; untyped dynamic output</td>
-        <td>High (primary contract adapter)</td>
-        <td>Define typed output interface; validate required canonical fields at this boundary.</td>
-      </tr>
-      <tr>
-        <td><code>components/review/Dashboard.tsx</code></td>
-        <td><code>changelog:list/revert</code>, <code>taxonomy:getNodes</code>, <code>feedback:list/approve/reject</code> (missing), <code>transactions.reclassify</code> (missing)</td>
-        <td>Heavy <code>any</code> usage in filter state, undo stack, row models</td>
-        <td>Very high (orchestrator, undo/redo, reclassification, metrics drill-down)</td>
-        <td>Split into services/hooks; add typed <code>ReviewFilterState</code>, <code>UndoEntry</code>, <code>FeedbackSuggestion</code>, <code>ReclassifyCommand</code>; remove undefined IPC calls or implement them.</td>
-      </tr>
-      <tr>
-        <td><code>components/review/MultiTableSystem.tsx</code></td>
-        <td><code>taxonomy:getNodes</code></td>
-        <td>Largely untyped row/object flows; <code>any[]</code> map usage</td>
-        <td>High (filter engine + drag/drop semantics + selection model)</td>
-        <td>Use typed row model + typed table config; remove <code>classification_status === 'human_reviewed'</code> check (status enum mismatch).</td>
-      </tr>
-      <tr>
-        <td><code>components/review/ClassificationTree.tsx</code></td>
-        <td><code>taxonomy:getNodes/addNode/deleteNode</code></td>
-        <td>No explicit taxonomy-node UI contract; transaction rows untyped</td>
-        <td>High (taxonomy loading, local fallback, node mutation, drag reclassify targets)</td>
-        <td>Add <code>TaxonomyTreeNodeVM</code>, typed local-storage schema, and typed reclassify target contract.</td>
-      </tr>
-      <tr>
-        <td><code>components/review/CurrentFiltersPanel.tsx</code></td>
-        <td>None</td>
-        <td><code>item: any</code>, <code>Record&lt;string, any&gt;</code></td>
-        <td>Medium (filter grouping expression logic)</td>
-        <td>Type drag item union (<code>FilterDragItem</code>) and local filter map shape.</td>
-      </tr>
-      <tr>
-        <td><code>components/review/ActiveFilters.tsx</code></td>
-        <td>None</td>
-        <td>No explicit filter chip type</td>
-        <td>Low/Medium</td>
-        <td>Use shared <code>ReviewFilterChip</code> and remove duplicated key maps.</td>
-      </tr>
-      <tr>
-        <td><code>components/review/MetricsTab.tsx</code>, <code>SpendVisualizations.tsx</code>, <code>BranchDetailView.tsx</code>, <code>ExpandableMetrics.tsx</code>, <code>TopMetrics.tsx</code></td>
-        <td>None</td>
-        <td>Untyped row fields; assumes fields like <code>amount</code>, <code>vendor_name</code>, <code>classification_confidence</code>, <code>review_status</code></td>
-        <td>Medium (business calculations in UI)</td>
-        <td>Move metric computation into typed selector layer; define fallback policy for missing fields. Remove legacy field assumptions not in backend contract.</td>
-      </tr>
-      <tr>
-        <td><code>components/review/SystemFeedbackModal.tsx</code>, <code>ReclassifyConfirmModal.tsx</code>, <code>ReclassificationLoader.tsx</code></td>
-        <td>None directly (callbacks into Dashboard)</td>
-        <td>Untyped suggestion/row payloads</td>
-        <td>Low/Medium</td>
-        <td>Define <code>FeedbackSuggestionVM</code> + <code>AffectedRowRef</code> contracts.</td>
-      </tr>
-      <tr>
-        <td><code>components/review/HierarchicalPivotView.tsx</code>, <code>PivotToolbar.tsx</code>, <code>PivotFilterBar.tsx</code>, <code>hooks/useHierarchicalPivotData.ts</code>, <code>hooks/usePivotTreeState.ts</code></td>
-        <td>None</td>
-        <td>Good typed pivot internals, but input rows are generic <code>Record&lt;string, unknown&gt;</code></td>
-        <td>Medium</td>
-        <td>Type pivot input as <code>DashboardTransactionRow</code> to eliminate dynamic field key drift.</td>
-      </tr>
-      <tr>
-        <td><code>components/review/Tabs.tsx</code>, <code>FilterHelpButton.tsx</code>, <code>ErrorBoundary.tsx</code></td>
-        <td>None</td>
-        <td>Mostly untyped props/class component state</td>
-        <td>Low</td>
-        <td>Convert to typed functional components; keep them UI-only.</td>
-      </tr>
-    </table>
-  </div>
-</details>
-
-<details>
-  <summary>Workflow: Output Page</summary>
-  <div class="detail-body">
-    <table>
-      <tr><th>Artifact</th><th>IPC Used</th><th>Types Used Now</th><th>Beyond UI?</th><th>Types Needed / Fix</th></tr>
-      <tr>
-        <td><code>pages/OutputPage.tsx</code></td>
-        <td><code>transactions:stats</code>, <code>transactions:query</code>, <code>export.selectPath/export</code> (missing)</td>
-        <td><code>TransactionStats</code>; transactions inferred incorrectly as array</td>
-        <td>Yes (aggregation + export orchestration)</td>
-        <td>Use <code>PaginatedTransactions</code> properly (<code>result.rows</code>); align to one export command contract.</td>
-      </tr>
-    </table>
-  </div>
-</details>
-
-<details>
-  <summary>Project Setup Pages</summary>
-  <div class="detail-body">
-    <table>
-      <tr><th>Artifact</th><th>IPC Used</th><th>Types Used Now</th><th>Beyond UI?</th><th>Types Needed / Fix</th></tr>
-      <tr>
-        <td><code>pages/CompanyContextPage.tsx</code></td>
-        <td><code>project:updateMetadata</code></td>
-        <td><code>CompanyContext</code></td>
-        <td>Low/Medium</td>
-        <td>Good contract usage; keep as typed form DTO.</td>
-      </tr>
-      <tr>
-        <td><code>pages/TaxonomyPage.tsx</code></td>
-        <td><code>taxonomy:getNodes/addNode/deleteNode/importFromFile</code></td>
-        <td><code>TaxonomyNode</code></td>
-        <td>Medium (tree building + collapsing + mutation)</td>
-        <td><code>importFromFile('')</code> relies on empty-string behavior not declared in IPC contract; add explicit file picker flow or optional arg handling.</td>
-      </tr>
-      <tr>
-        <td><code>pages/SuppliersPage.tsx</code></td>
-        <td><code>suppliers:list/update</code></td>
-        <td><code>ProjectSupplier</code>, <code>SupplierInfo</code>, <code>SupplierType</code></td>
-        <td>High (inline editing + patch semantics)</td>
-        <td>Current page assumes fields not provided by backend contract (<code>supplierInfo</code>, <code>categoryA</code>, <code>parentName</code>). Either implement in backend or replace UI model with <code>ProjectSupplierView</code> shape.</td>
-      </tr>
-      <tr>
-        <td><code>pages/OverrideRulesPage.tsx</code></td>
-        <td><code>rules:list/create/update/delete</code>, <code>taxonomy:getNodes</code>, <code>transactions:getColumns</code></td>
-        <td>Imports missing shared types (<code>RuleCondition</code>, <code>RuleOperator</code>, <code>RuleSource</code>)</td>
-        <td>High (rule DSL editor)</td>
-        <td>Unify with shared <code>FilterCondition</code>/<code>FilterOperator</code>; remove <code>source</code> from payload unless backend schema supports it.</td>
-      </tr>
-      <tr>
-        <td><code>pages/VersionHistoryPage.tsx</code></td>
-        <td><code>changelog:list/revert</code>, <code>taxonomy:getNodes</code></td>
-        <td><code>ChangeLog</code>, <code>TaxonomyNode</code></td>
-        <td>Medium (diff rendering + revert flow)</td>
-        <td>Align <code>revert</code> return type expectation with backend (<code>void</code> vs new id).</td>
-      </tr>
-    </table>
-  </div>
-</details>
+     Summary of decisions:
+     - Upload, DataReview, Classification, CompanyContext, Taxonomy pages: clean, no changes needed
+     - SuppliersPage, OverrideRulesPage, OutputPage, VersionHistory: fix P0 contract bugs (Tier 1)
+     - Review page (Dashboard.tsx): extract into useReclassification, useUndoRedo, useReviewFilters hooks (Tier 3)
+     - All pages: use shared DTOs directly, no view model wrappers except DashboardTransactionRow
+-->
+<!-- Old per-page Review/Output/Setup audit tables removed.
+     Actionable items captured in P0 mismatch table above and front-end-architecture.html refactor plan. -->
 
 <h3>Field Drift Matrix (Renderer Row Assumptions vs Backend Contracts)</h3>
+<p>These field-level mismatches are fixed by defining <code>DashboardTransactionRow</code> (Tier 3) and using it everywhere in the Review page instead of <code>Record&lt;string, unknown&gt;</code>.</p>
 <table>
   <tr><th>Field Used in Renderer</th><th>Where Used</th><th>Backend/Shared Contract Reality</th><th>Required Fix</th></tr>
   <tr>
     <td><code>classification_path</code>, <code>taxonomy_path</code></td>
     <td>Review components, Output aggregation</td>
     <td>Shared <code>Transaction</code> exposes <code>classificationPath</code> (camelCase). Snake-case exists only in UI transform output.</td>
-    <td>Define explicit <code>DashboardTransactionRow</code> and never mix with raw <code>Transaction</code>.</td>
+    <td>Define explicit <code>DashboardTransactionRow</code> in <code>transactionTransform.ts</code>.</td>
   </tr>
   <tr>
     <td><code>L1</code>, <code>L2</code>, <code>L3</code>, <code>L4</code>, <code>L5</code></td>
     <td>Review table/tree/reclassify</td>
     <td>Not in shared backend transaction contract; <code>L5</code> is written client-side only.</td>
-    <td>Keep derived levels in a typed view model only; do not persist undocumented levels.</td>
+    <td>Keep derived levels in <code>DashboardTransactionRow</code> only; do not persist undocumented levels.</td>
   </tr>
   <tr>
     <td><code>supplier_name</code>, <code>gl_description</code>, <code>line_description</code>, <code>company</code>, <code>country</code>, <code>cost_center</code>, <code>year</code>, <code>quarter</code>, <code>month</code>, <code>invoice_date</code>, <code>invoice_number</code></td>
@@ -1731,19 +1440,15 @@ type Result&lt;K extends Channel&gt; = IPCInvokeMap[K]['result'];</code></pre>
   </tr>
 </table>
 
-<h3>Recommended Frontend Wiring (Refactor Target)</h3>
-<ol>
-  <li><strong>Single typed IPC map:</strong> define one channel map in <code>shared/types/ipc-contract.ts</code>; generate typed <code>invoke</code>/<code>on</code> wrappers in preload/renderer.</li>
-  <li><strong>Feature services in renderer:</strong> add <code>renderer/services</code> modules (<code>reviewService</code>, <code>supplierService</code>, <code>taxonomyService</code>, <code>exportService</code>) and keep page components declarative.</li>
-  <li><strong>UI view models:</strong> map wire DTOs to typed VMs once (<code>Transaction -&gt; DashboardTransactionRow</code>, <code>ProjectSupplierView -&gt; SupplierRowVM</code>).</li>
-  <li><strong>No implicit <code>any</code> state:</strong> type undo stacks, filter state, drag items, feedback suggestion payloads, and reclassify command/result objects.</li>
-  <li><strong>Contract tests:</strong> add renderer contract tests that compile-check channel args/results and fail on drift between <code>shared/types</code>, <code>renderer/lib/ipc.ts</code>, and <code>main/ipc/*</code>.</li>
-</ol>
-
-<p>Preferred data flow:</p>
-<div class="diagram">
-Page/Component → Feature Service → Typed ViewModel Mapper → Typed IPC Adapter → preload invoke/event → main IPC handler → DI service/container
-</div>
+<h3>Refactor Plan (3 Tiers)</h3>
+<p>Full details in <a href="front-end-architecture.html#refactor-plan">front-end-architecture.html</a>. Summary:</p>
+<table>
+  <tr><th>Tier</th><th>What</th><th>Effort</th></tr>
+  <tr><td><strong>1. Fix P0 bugs</strong></td><td>Fix all contract mismatches in the table above (wrong channels, wrong return types, invalid enums, missing fields)</td><td>~1 day</td></tr>
+  <tr><td><strong>2. Add <code>IPCInvokeMap</code></strong></td><td>Single shared type map in <code>shared/types/ipc-contract.ts</code>. Update <code>ipc.ts</code> facade. Prevents future drift at compile time.</td><td>~half day</td></tr>
+  <tr><td><strong>3. Tame Review page</strong></td><td>Extract Dashboard.tsx logic into <code>useReclassification</code>, <code>useUndoRedo</code>, <code>useReviewFilters</code> hooks. Define <code>DashboardTransactionRow</code> type. This is where 80% of <code>any</code> usage lives.</td><td>~2 days</td></tr>
+</table>
+<p><strong>What we don't do:</strong> no <code>renderer/services/</code> layer (IPC facade is already the abstraction), no DI via React Context (Electron IPC is the DI boundary), no per-page view model wrappers (shared DTOs map 1:1 for most pages).</p>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->

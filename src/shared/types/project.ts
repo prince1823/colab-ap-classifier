@@ -19,12 +19,10 @@ export interface ProjectMetadata {
   companyContext: CompanyContext | null;
   taxonomyName: string | null;
   tailSpendThreshold: number;
-  columnMapping: Record<string, string> | null;
 }
 
 export interface ProjectMetadataUpdate {
   companyContext?: CompanyContext | null;
   taxonomyName?: string | null;
   tailSpendThreshold?: number;
-  columnMapping?: Record<string, string> | null;
 }

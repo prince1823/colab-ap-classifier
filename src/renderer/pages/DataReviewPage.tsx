@@ -3,15 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import StatsCards from '../components/data-review/StatsCards'
 import SupplierTable from '../components/data-review/SupplierTable'
 import { ipc } from '../lib/ipc'
-import { useWorkflowStore } from '../stores/workflowStore'
 import type { TransactionStats } from '../../shared/types/transactions'
 import type { ProjectSupplierView } from '../../shared/types/suppliers'
 
 export default function DataReviewPage() {
   const navigate = useNavigate()
-  const hasTaxonomy = useWorkflowStore(s => s.hasTaxonomy)
   const [stats, setStats] = useState<TransactionStats | null>(null)
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
+  const [taxonomyNodeCount, setTaxonomyNodeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -19,12 +18,14 @@ export default function DataReviewPage() {
     setLoading(true)
     setError(null)
     try {
-      const [s, sup] = await Promise.all([
+      const [s, sup, nodeCount] = await Promise.all([
         ipc.transactions.stats(),
         ipc.suppliers.list(),
+        ipc.taxonomy.getNodeCount(),
       ])
       setStats(s)
       setSuppliers(sup)
+      setTaxonomyNodeCount(nodeCount)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
     } finally {
@@ -79,7 +80,7 @@ export default function DataReviewPage() {
       {/* Next step */}
       <div className="flex items-center justify-between border-t border-gray-200 pt-4">
         <div className="text-xs text-gray-500">
-          {!hasTaxonomy && (
+          {taxonomyNodeCount === 0 && (
             <span>
               Import a taxonomy via{' '}
               <button onClick={() => navigate('/project/taxonomy')} className="font-medium text-blue-600 hover:underline">
@@ -91,7 +92,7 @@ export default function DataReviewPage() {
         </div>
         <button
           onClick={() => navigate('/workflow/classification')}
-          disabled={!hasTaxonomy}
+          disabled={taxonomyNodeCount === 0}
           className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
         >
           Next: Classification →

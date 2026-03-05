@@ -10,11 +10,12 @@ import type { CSVPreviewWithMappings, ColumnMapping } from '../../shared/types/c
 export default function UploadPage() {
   const navigate = useNavigate()
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
-  const hasUploadedData = useWorkflowStore((s) => s.hasUploadedData)
-  const metadata = useWorkflowStore((s) => s.projectMetadata)
+
+  // Existing upload from the project (fetched on mount)
+  const [existingUpload, setExistingUpload] = useState<{ id: string; fileName: string; rowCount: number } | null>(null)
+  const [showUploader, setShowUploader] = useState(false)
 
   // Upload draft as local state — resets on navigation, which is fine
-  const [showUploader, setShowUploader] = useState(true)
   const [filePath, setFilePath] = useState<string | null>(null)
   const [preview, setPreview] = useState<CSVPreviewWithMappings | null>(null)
   const [mapping, setMapping] = useState<ColumnMapping>({})
@@ -25,17 +26,19 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null)
   const [showMappingEditor, setShowMappingEditor] = useState(false)
 
-  // Refresh metadata on mount so hasUploadedData is current
+  // Check for existing upload on mount
   useEffect(() => {
-    refreshMetadata()
-  }, [refreshMetadata])
-
-  // Sync showUploader when project changes (e.g. opening an existing project with data)
-  useEffect(() => {
-    if (hasUploadedData) {
-      setShowUploader(false)
-    }
-  }, [hasUploadedData])
+    ipc.ingest.getUpload().then((upload) => {
+      if (upload) {
+        setExistingUpload({ id: upload.id, fileName: upload.fileName, rowCount: upload.rowCount })
+        setShowUploader(false)
+      } else {
+        setShowUploader(true)
+      }
+    }).catch(() => {
+      setShowUploader(true)
+    })
+  }, [])
 
   const handleFileSelected = async (path: string) => {
     setFilePath(path)
@@ -70,7 +73,7 @@ export default function UploadPage() {
   }
 
   // If data has been uploaded already, show a summary with option to re-upload
-  if (hasUploadedData && !showUploader) {
+  if (existingUpload && !showUploader) {
     return (
       <div className="space-y-6 p-6">
         <div>
@@ -83,11 +86,9 @@ export default function UploadPage() {
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-900">Data already imported</p>
+              <p className="text-sm font-medium text-gray-900">{existingUpload.fileName}</p>
               <p className="mt-1 text-sm text-gray-500">
-                {metadata?.columnMapping
-                  ? `${Object.keys(metadata.columnMapping).length} columns mapped`
-                  : 'Column mappings configured'}
+                {existingUpload.rowCount.toLocaleString()} rows imported
               </p>
             </div>
             <div className="flex gap-3">
@@ -108,6 +109,11 @@ export default function UploadPage() {
         </div>
       </div>
     )
+  }
+
+  // While checking for existing upload, show nothing (brief flicker prevention)
+  if (!showUploader) {
+    return null
   }
 
   return (

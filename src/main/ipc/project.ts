@@ -54,7 +54,6 @@ export function registerProjectHandlers(project: ProjectStore, db: Database): vo
       companyContext: (settings.company_context as CompanyContext) ?? null,
       taxonomyName: (settings.taxonomy_name as string) ?? null,
       tailSpendThreshold: (settings.tail_spend_threshold as number) ?? 10000,
-      columnMapping: (settings.column_mapping as Record<string, string>) ?? null,
     } satisfies ProjectMetadata;
   });
 
@@ -68,9 +67,6 @@ export function registerProjectHandlers(project: ProjectStore, db: Database): vo
     }
     if (u.tailSpendThreshold !== undefined) {
       await project.setSetting('tail_spend_threshold', u.tailSpendThreshold);
-    }
-    if (u.columnMapping !== undefined) {
-      await project.setSetting('column_mapping', u.columnMapping);
     }
   });
 }

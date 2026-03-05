@@ -8,8 +8,6 @@ interface WorkflowState {
   // Core state
   projectMetadata: ProjectMetadata | null
   classificationProgress: ClassificationProgress | null
-  classifiedRows: number
-  dataReviewed: boolean
 
   // Persisted for auto-reopen only — a plain string, never a partial cast of ProjectMetadata
   projectFilePath: string | null
@@ -19,85 +17,47 @@ interface WorkflowState {
 
   // Derived booleans
   hasProject: boolean
-  hasCompanyContext: boolean
-  hasTaxonomy: boolean
-  hasUploadedData: boolean
-  hasReviewedData: boolean
   isClassifying: boolean
-  hasClassifiedData: boolean
 
   // Actions
   createProject: (name: string) => Promise<void>
   loadProject: (filePath: string) => Promise<void>
   closeProject: () => Promise<void>
   refreshMetadata: () => Promise<void>
-  refreshStats: () => Promise<void>
   subscribeToClassificationProgress: () => () => void
   setClassificationProgress: (progress: ClassificationProgress | null) => void
-  markDataReviewed: () => void
   setLastRoute: (route: string) => void
   reset: () => void
 }
 
-function deriveState(metadata: ProjectMetadata | null, classifiedRows: number, progress: ClassificationProgress | null, dataReviewed = false, taxonomyNodeCount = 0) {
-  const hasProject = metadata !== null
-  const hasCompanyContext = metadata?.companyContext !== null && metadata?.companyContext !== undefined
-  const hasTaxonomy = taxonomyNodeCount > 0
-  const hasUploadedData = metadata?.columnMapping !== null && metadata?.columnMapping !== undefined
-  const hasClassifiedData = classifiedRows > 0 || (progress !== null && progress.status === 'completed')
-  const isClassifying = progress !== null && progress.status === 'running'
-
-  return {
-    hasProject,
-    hasCompanyContext,
-    hasTaxonomy,
-    hasUploadedData,
-    hasReviewedData: dataReviewed,
-    isClassifying,
-    hasClassifiedData,
-  }
-}
-
 export const useWorkflowStore = create<WorkflowState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       projectMetadata: null,
       classificationProgress: null,
-      classifiedRows: 0,
-      dataReviewed: false,
       projectFilePath: null,
       lastRoute: null,
-
-      ...deriveState(null, 0, null, false),
+      hasProject: false,
+      isClassifying: false,
 
       createProject: async (name: string) => {
         try { await ipc.project.close() } catch { /* already closed */ }
-        set({
-          projectMetadata: null,
-          classifiedRows: 0,
-          classificationProgress: null,
-          ...deriveState(null, 0, null),
-        })
+        set({ projectMetadata: null, classificationProgress: null, hasProject: false, isClassifying: false })
 
         await ipc.project.new(name)
         const metadata = await ipc.project.getMetadata()
         set({
           projectMetadata: metadata,
           projectFilePath: metadata?.filePath ?? null,
-          classifiedRows: 0,
           classificationProgress: null,
-          ...deriveState(metadata, 0, null),
+          hasProject: metadata !== null,
+          isClassifying: false,
         })
       },
 
       loadProject: async (filePath: string) => {
         try { await ipc.project.close() } catch { /* already closed */ }
-        set({
-          projectMetadata: null,
-          classifiedRows: 0,
-          classificationProgress: null,
-          ...deriveState(null, 0, null),
-        })
+        set({ projectMetadata: null, classificationProgress: null, hasProject: false, isClassifying: false })
 
         await ipc.project.open(filePath)
 
@@ -114,35 +74,15 @@ export const useWorkflowStore = create<WorkflowState>()(
             companyContext: null,
             taxonomyName: null,
             tailSpendThreshold: 10000,
-            columnMapping: null,
           }
         }
-
-        let classifiedRows = 0
-        try {
-          const stats = await ipc.transactions.stats()
-          classifiedRows = stats.classifiedRows
-        } catch {
-          // No transactions yet
-        }
-        let taxonomyNodeCount = 0
-        try {
-          taxonomyNodeCount = await ipc.taxonomy.getNodeCount()
-        } catch {
-          // No taxonomy yet
-        }
-
-        const derived = deriveState(metadata, classifiedRows, null, false, taxonomyNodeCount)
-        console.log('[loadProject] metadata:', JSON.stringify(metadata, null, 2))
-        console.log('[loadProject] classifiedRows:', classifiedRows)
-        console.log('[loadProject] derived:', JSON.stringify(derived))
 
         set({
           projectMetadata: metadata,
           projectFilePath: metadata?.filePath ?? null,
-          classifiedRows,
           classificationProgress: null,
-          ...derived,
+          hasProject: metadata !== null,
+          isClassifying: false,
         })
       },
 
@@ -155,10 +95,10 @@ export const useWorkflowStore = create<WorkflowState>()(
         set({
           projectMetadata: null,
           projectFilePath: null,
-          classifiedRows: 0,
           classificationProgress: null,
           lastRoute: null,
-          ...deriveState(null, 0, null),
+          hasProject: false,
+          isClassifying: false,
         })
       },
 
@@ -166,41 +106,9 @@ export const useWorkflowStore = create<WorkflowState>()(
         try {
           const metadata = await ipc.project.getMetadata()
           if (!metadata) return
-
-          let classifiedRows = get().classifiedRows
-          try {
-            const stats = await ipc.transactions.stats()
-            classifiedRows = stats.classifiedRows
-          } catch {
-            // No transactions yet — keep previous value
-          }
-          let taxonomyNodeCount = 0
-          try {
-            taxonomyNodeCount = await ipc.taxonomy.getNodeCount()
-          } catch {
-            // No taxonomy yet
-          }
-          const { classificationProgress, dataReviewed } = get()
-          set({
-            projectMetadata: metadata,
-            classifiedRows,
-            ...deriveState(metadata, classifiedRows, classificationProgress, dataReviewed, taxonomyNodeCount),
-          })
+          set({ projectMetadata: metadata, hasProject: true })
         } catch {
           // IPC failed — keep existing state intact
-        }
-      },
-
-      refreshStats: async () => {
-        try {
-          const stats = await ipc.transactions.stats()
-          const { projectMetadata, classificationProgress, dataReviewed } = get()
-          set({
-            classifiedRows: stats.classifiedRows,
-            ...deriveState(projectMetadata, stats.classifiedRows, classificationProgress, dataReviewed),
-          })
-        } catch {
-          // No transactions
         }
       },
 
@@ -218,40 +126,18 @@ export const useWorkflowStore = create<WorkflowState>()(
             reachedTerminal = false
           }
 
-          const { projectMetadata, classifiedRows, dataReviewed } = get()
           set({
             classificationProgress: progress,
-            ...deriveState(projectMetadata, classifiedRows, progress, dataReviewed),
+            isClassifying: progress.status === 'running',
           })
-
-          if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
-            ipc.transactions.stats().then((stats) => {
-              console.log('[WorkflowStore] Post-classification stats:', stats)
-              set({
-                classifiedRows: stats.classifiedRows,
-                ...deriveState(get().projectMetadata, stats.classifiedRows, get().classificationProgress, get().dataReviewed),
-              })
-            }).catch((e) => {
-              console.error('[WorkflowStore] Failed to refresh stats:', e)
-            })
-          }
         })
         return unsubscribe
       },
 
       setClassificationProgress: (progress) => {
-        const { projectMetadata, classifiedRows, dataReviewed } = get()
         set({
           classificationProgress: progress,
-          ...deriveState(projectMetadata, classifiedRows, progress, dataReviewed),
-        })
-      },
-
-      markDataReviewed: () => {
-        const { projectMetadata, classifiedRows, classificationProgress } = get()
-        set({
-          dataReviewed: true,
-          ...deriveState(projectMetadata, classifiedRows, classificationProgress, true),
+          isClassifying: progress !== null && progress?.status === 'running',
         })
       },
 
@@ -263,11 +149,10 @@ export const useWorkflowStore = create<WorkflowState>()(
         set({
           projectMetadata: null,
           projectFilePath: null,
-          classifiedRows: 0,
-          dataReviewed: false,
           classificationProgress: null,
           lastRoute: null,
-          ...deriveState(null, 0, null, false),
+          hasProject: false,
+          isClassifying: false,
         })
       },
     }),

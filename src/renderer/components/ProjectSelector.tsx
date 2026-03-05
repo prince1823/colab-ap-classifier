@@ -5,17 +5,6 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { ChevronDownIcon, FolderOpenIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useWorkflowStore } from '../stores/workflowStore'
 
-/**
- * Determine the best page to navigate to based on the current project state.
- * Navigates to the furthest completed workflow step.
- */
-function getBestRoute(): string {
-  const s = useWorkflowStore.getState()
-  if (s.hasClassifiedData) return '/workflow/review'
-  if (s.hasUploadedData && s.hasTaxonomy) return '/workflow/classification'
-  if (s.hasUploadedData) return '/workflow/data-review'
-  return '/workflow/upload'
-}
 
 export default function ProjectSelector() {
   const { projectMetadata, loadProject, createProject, closeProject } = useWorkflowStore()
@@ -45,7 +34,7 @@ export default function ProjectSelector() {
     try {
       // project:open with no filePath triggers the native file dialog in the IPC handler
       await loadProject('')
-      navigate(getBestRoute())
+      navigate('/workflow/upload')
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : 'Failed to open project')
     }

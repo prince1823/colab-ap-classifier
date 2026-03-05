@@ -16,7 +16,6 @@ import {
   DocumentDuplicateIcon,
   ClockIcon,
   Cog6ToothIcon,
-  CheckIcon,
 } from '@heroicons/react/24/outline'
 import SettingsDialog from './SettingsDialog'
 import { useWorkflowStore } from '../stores/workflowStore'
@@ -36,15 +35,7 @@ const projectViews = [
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(false)
-  const ws = useWorkflowStore(s => ({
-    hasProject: s.hasProject,
-    hasCompanyContext: s.hasCompanyContext,
-    hasTaxonomy: s.hasTaxonomy,
-    hasUploadedData: s.hasUploadedData,
-    hasReviewedData: s.hasReviewedData,
-    isClassifying: s.isClassifying,
-    hasClassifiedData: s.hasClassifiedData,
-  }))
+  const hasProject = useWorkflowStore(s => s.hasProject)
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -54,45 +45,40 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       label: 'Upload',
       icon: ArrowUpTrayIcon,
       step: 1,
-      disabled: !ws.hasProject,
-      completed: ws.hasUploadedData,
-      tooltip: !ws.hasProject ? 'Open or create a project first' : '',
+      disabled: !hasProject,
+      tooltip: !hasProject ? 'Open or create a project first' : '',
     },
     {
       path: '/workflow/data-review',
       label: 'Data Review',
       icon: TableCellsIcon,
       step: 2,
-      disabled: !ws.hasUploadedData,
-      completed: ws.hasReviewedData || ws.hasClassifiedData,
-      tooltip: !ws.hasUploadedData ? 'Upload data first' : '',
+      disabled: !hasProject,
+      tooltip: !hasProject ? 'Open or create a project first' : '',
     },
     {
       path: '/workflow/classification',
       label: 'Classification',
       icon: CpuChipIcon,
       step: 3,
-      disabled: !(ws.hasUploadedData && ws.hasTaxonomy),
-      completed: ws.hasClassifiedData,
-      tooltip: !(ws.hasUploadedData && ws.hasTaxonomy) ? 'Requires uploaded data and taxonomy' : '',
+      disabled: !hasProject,
+      tooltip: !hasProject ? 'Open or create a project first' : '',
     },
     {
       path: '/workflow/review',
       label: 'Review',
       icon: MagnifyingGlassCircleIcon,
       step: 4,
-      disabled: !ws.hasClassifiedData,
-      completed: false,
-      tooltip: !ws.hasClassifiedData ? 'Classify data first' : '',
+      disabled: !hasProject,
+      tooltip: !hasProject ? 'Open or create a project first' : '',
     },
     {
       path: '/workflow/output',
       label: 'Output',
       icon: ArrowDownTrayIcon,
       step: 5,
-      disabled: !ws.hasClassifiedData,
-      completed: false,
-      tooltip: !ws.hasClassifiedData ? 'Classify data first' : '',
+      disabled: !hasProject,
+      tooltip: !hasProject ? 'Open or create a project first' : '',
     },
   ]
 
@@ -141,7 +127,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <ul className="space-y-0.5">
                 {pipelineSteps.map((step, index) => {
                   const isActive = location.pathname === step.path
-                  const isCompleted = step.completed && !isActive
                   const Icon = step.icon
                   const isLast = index === pipelineSteps.length - 1
 
@@ -164,8 +149,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                             ? 'bg-blue-50 text-blue-700'
                             : step.disabled
                             ? 'text-gray-300 cursor-not-allowed'
-                            : isCompleted
-                            ? 'text-gray-700 hover:bg-gray-100'
                             : 'text-gray-700 hover:bg-gray-100',
                           collapsed && 'justify-center px-0'
                         )}
@@ -175,16 +158,11 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                           className={clsx(
                             'relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold',
                             isActive && 'bg-blue-100 text-blue-700 ring-2 ring-blue-400',
-                            isCompleted && 'bg-green-50 text-green-600',
                             step.disabled && !isActive && 'bg-gray-100 text-gray-300',
-                            !isActive && !isCompleted && !step.disabled && 'bg-gray-100 text-gray-600'
+                            !isActive && !step.disabled && 'bg-gray-100 text-gray-600'
                           )}
                         >
-                          {isCompleted ? (
-                            <CheckIcon className="h-3.5 w-3.5" />
-                          ) : (
-                            step.step
-                          )}
+                          {step.step}
                         </div>
 
                         {/* Label + icon */}
@@ -199,7 +177,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   )
 
                   // Wrap in tooltip when collapsed or disabled
-                  if (collapsed || (step.disabled && step.tooltip)) {
+                  if (collapsed || step.disabled) {
                     const tooltipText = step.disabled && step.tooltip
                       ? step.tooltip
                       : step.label

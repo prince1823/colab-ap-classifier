@@ -3,7 +3,46 @@ import { Plus, X, Edit2, Check, Sparkles } from 'lucide-react'
 import ActiveFilters from './ActiveFilters'
 import '../../styles/Tabs.css'
 
-const Tabs = ({
+interface TabConfig {
+  id: string
+  label: string
+  [key: string]: unknown
+}
+
+interface TableConfig {
+  id: string
+  title: string
+  [key: string]: unknown
+}
+
+interface TabsProps {
+  activeTab: string
+  setActiveTab: (tab: string) => void
+  tabs: TabConfig[]
+  globalSearchTerm: string
+  setGlobalSearchTerm: (term: string) => void
+  showFilterPanel: boolean
+  setShowFilterPanel: (show: boolean) => void
+  activeFilters: Record<string, unknown>
+  filterState: Record<string, unknown>
+  filterPanelContent?: React.ReactNode
+  showAddTableMenu: boolean
+  setShowAddTableMenu: (show: boolean) => void
+  availableColumns: string[]
+  addTable: (column: string) => void
+  hasTableFilters: boolean
+  onClearAllTableFilters: () => void
+  systemFeedbackEnabled: boolean
+  setSystemFeedbackEnabled: (enabled: boolean) => void
+  hasLowConfidenceRows: boolean
+  tableLocalFilters: Record<string, Record<string, unknown>>
+  tables: TableConfig[]
+  onRemoveFilter: (key: string, value: string | null) => void
+  onClearAll: () => void
+  onRemoveLocalFilter: (tableId: string, key: string, value: string | null) => void
+}
+
+const Tabs: React.FC<TabsProps> = ({
   activeTab,
   setActiveTab,
   tabs,

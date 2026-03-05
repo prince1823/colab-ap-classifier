@@ -1,7 +1,7 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult } from '../../shared/types/ipc-contract';
 import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
-import type { SupplierConfirmationStatus } from '../../shared/types/suppliers';
+import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
@@ -101,8 +101,8 @@ export const ipc = {
   // ── Suppliers (3 channels + research) ──
   suppliers: {
     list: () => invoke('suppliers:list'),
-    update: (supplierId: string, newName: string) =>
-      invoke('suppliers:update', supplierId, newName),
+    update: (supplierName: string, updates: SupplierUpdateInput) =>
+      invoke('suppliers:update', supplierName, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
     researchAll: () => invoke('suppliers:researchAll'),

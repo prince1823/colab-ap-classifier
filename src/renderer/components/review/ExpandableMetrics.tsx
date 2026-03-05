@@ -3,22 +3,40 @@ import { X, FileText, DollarSign, AlertCircle, CheckCircle2 } from 'lucide-react
 import { fmtAbbrev } from '../../utils/formatSpend'
 import '../styles/ExpandableMetrics.css'
 
-const ExpandableMetrics = ({ transactions, filteredTransactions, isOpen, onClose }) => {
+interface TransactionRow {
+  [key: string]: unknown
+  amount?: number | string
+  invoice_amount?: number | string
+  confidence?: string
+  classification_confidence?: string
+  override_rule_applied?: string
+  reviewed?: boolean
+  review_status?: string
+}
 
-  const formatCurrency = (amount) => fmtAbbrev(amount)
+interface ExpandableMetricsProps {
+  transactions: TransactionRow[]
+  filteredTransactions: TransactionRow[]
+  isOpen: boolean
+  onClose: () => void
+}
 
-  const formatNumber = (num) => {
+const ExpandableMetrics: React.FC<ExpandableMetricsProps> = ({ transactions, filteredTransactions, isOpen, onClose }) => {
+
+  const formatCurrency = (amount: number) => fmtAbbrev(amount)
+
+  const formatNumber = (num: number) => {
     return new Intl.NumberFormat('en-US').format(num)
   }
 
   // Helper to check if confidence is low
-  const isLowConfidence = (row) => {
+  const isLowConfidence = (row: TransactionRow) => {
     const conf = (row.confidence || row.classification_confidence || 'high').toLowerCase()
     return conf === 'low' || conf === 'l'
   }
 
   // Helper to check if row has been reviewed (manually reclassified)
-  const isReviewed = (row) => {
+  const isReviewed = (row: TransactionRow) => {
     return row.override_rule_applied === 'manual_reclassification' || 
            row.reviewed === true || 
            row.review_status === 'reviewed'
@@ -27,8 +45,8 @@ const ExpandableMetrics = ({ transactions, filteredTransactions, isOpen, onClose
   // Calculate metrics from filtered transactions
   const metrics = React.useMemo(() => {
     const totalRows = filteredTransactions.length
-    const totalSpend = filteredTransactions.reduce((sum, row) => {
-      return sum + (parseFloat(row.amount || row.invoice_amount || 0) || 0)
+    const totalSpend = filteredTransactions.reduce((sum: number, row: TransactionRow) => {
+      return sum + (parseFloat(String(row.amount || row.invoice_amount || 0)) || 0)
     }, 0)
 
     // Low confidence rows
@@ -38,8 +56,8 @@ const ExpandableMetrics = ({ transactions, filteredTransactions, isOpen, onClose
 
     // Calculate comparison with all transactions
     const allTotalRows = transactions.length
-    const allTotalSpend = transactions.reduce((sum, row) => {
-      return sum + (parseFloat(row.amount || row.invoice_amount || 0) || 0)
+    const allTotalSpend = transactions.reduce((sum: number, row: TransactionRow) => {
+      return sum + (parseFloat(String(row.amount || row.invoice_amount || 0)) || 0)
     }, 0)
 
     const allLowConfidenceRows = transactions.filter(isLowConfidence)

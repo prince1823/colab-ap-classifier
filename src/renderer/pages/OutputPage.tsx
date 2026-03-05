@@ -24,13 +24,14 @@ export default function OutputPage() {
     setLoading(true)
     try {
       // Fetch stats and transactions in parallel
-      const [s, transactions] = await Promise.all([
+      const [s, paginatedResult] = await Promise.all([
         ipc.transactions.stats(),
         ipc.transactions.query(),
       ])
       setStats(s)
 
       // Build classification breakdown from transactions
+      const transactions = paginatedResult.rows
       const groups = new Map<string, { count: number; spend: number }>()
       for (const t of transactions) {
         const path = t.classificationPath || 'Unclassified'
@@ -71,13 +72,10 @@ export default function OutputPage() {
     setExported(false)
     setError(null)
     try {
-      const filePath = await ipc.export.selectPath()
-      if (!filePath) {
-        setExporting(false)
-        return
+      const result = await ipc.export.csv()
+      if (result) {
+        setExported(true)
       }
-      await ipc.export.export(filePath)
-      setExported(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Export failed')
     } finally {

@@ -7,13 +7,36 @@ import { Sparkles, TrendingUp, TrendingDown, AlertCircle, CheckCircle2, PieChart
 import { fmtAbbrev } from '../../utils/formatSpend'
 import '../../styles/MetricsTab.css'
 
-const formatCurrency = (amount) => fmtAbbrev(amount || 0)
+interface TransactionRow {
+  [key: string]: unknown
+  year?: number | string
+  month?: number | string
+  invoice_date?: string
+  spend_amount?: number | string
+  supplier_name?: string
+  classification_status?: string
+  classification_path?: string
+  taxonomy_path?: string
+  company?: string
+  cost_center?: string
+  gl_description?: string
+  line_description?: string
+  country?: string
+}
 
-const formatCurrencyShort = (amount) => fmtAbbrev(amount)
+interface Props {
+  transactions: TransactionRow[]
+  filteredTransactions: TransactionRow[]
+  onDrillToFilters?: (filters: Record<string, string[]>) => void
+}
 
-const formatNumber = (num) => new Intl.NumberFormat('en-US').format(num || 0)
+const formatCurrency = (amount: number | string) => fmtAbbrev(Number(amount) || 0)
 
-function getMonthKey(row) {
+const formatCurrencyShort = (amount: number | string) => fmtAbbrev(Number(amount))
+
+const formatNumber = (num: number) => new Intl.NumberFormat('en-US').format(num || 0)
+
+function getMonthKey(row: TransactionRow): string | null {
   const year = row.year ?? null
   const month = row.month ?? null
 
@@ -35,21 +58,21 @@ function getMonthKey(row) {
   return null
 }
 
-function getAmount(row) {
-  return parseFloat(row.spend_amount || 0) || 0
+function getAmount(row: TransactionRow): number {
+  return parseFloat(String(row.spend_amount || 0)) || 0
 }
 
-function getSupplier(row) {
+function getSupplier(row: TransactionRow): string {
   return row.supplier_name || 'Unknown'
 }
 
-function isLowConfidence(row) {
+function isLowConfidence(row: TransactionRow): boolean {
   // In v2, low confidence = unclassified or not human-reviewed
   const status = row.classification_status
   return status === 'unclassified' || !status
 }
 
-const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) => {
+const MetricsTab: React.FC<Props> = ({ transactions, filteredTransactions, onDrillToFilters }) => {
   const [selectedBenchmark, setSelectedBenchmark] = useState('overall') // overall | topSupplier
   const [particularDimension, setParticularDimension] = useState('company') // company | cost_center | gl | gl_account_desc | invoice_desc | country
   const [animateIn, setAnimateIn] = useState(false)
@@ -79,10 +102,10 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
   }, [filteredTransactions])
 
   const chartData = useMemo(() => {
-    const l1Map = new Map()
-    const particularMap = new Map()
+    const l1Map = new Map<string, number>()
+    const particularMap = new Map<string, number>()
 
-    const getDimensionKey = (row, dim) => {
+    const getDimensionKey = (row: TransactionRow, dim: string): string => {
       switch (dim) {
         case 'company': return row.company || 'Unknown'
         case 'cost_center': return row.cost_center || 'Unknown'
@@ -94,7 +117,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
       }
     }
 
-    filteredTransactions.forEach(row => {
+    filteredTransactions.forEach((row: TransactionRow) => {
       // L1 Processing
       const path = row.classification_path || row.taxonomy_path || ''
       const l1 = path.split('|')[0]?.trim() || 'Unclassified'
@@ -122,7 +145,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
   const topSuppliers = useMemo(() => {
-    const map = new Map()
+    const map = new Map<string, number>()
     for (const row of filteredTransactions) {
       const s = getSupplier(row)
       map.set(s, (map.get(s) || 0) + getAmount(row))
@@ -136,7 +159,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
   const topSupplierName = topSuppliers[0]?.name || 'Unknown'
 
   const monthlySeries = useMemo(() => {
-    const byMonth = new Map()
+    const byMonth = new Map<string, { month: string; spend: number; lowConf: number; topSupplierSpend: number }>()
     for (const row of filteredTransactions) {
       const key = getMonthKey(row)
       if (!key) continue
@@ -146,7 +169,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
       if (!byMonth.has(key)) {
         byMonth.set(key, { month: key, spend: 0, lowConf: 0, topSupplierSpend: 0 })
       }
-      const obj = byMonth.get(key)
+      const obj = byMonth.get(key)!
       obj.spend += amount
       if (isLowConfidence(row)) obj.lowConf += 1
       if (supplier === topSupplierName) obj.topSupplierSpend += amount
@@ -163,8 +186,8 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     const lastSet = new Set(lastMonths)
     const prevSet = new Set(prevMonths)
 
-    const spendBySupplierLast = new Map()
-    const spendBySupplierPrev = new Map()
+    const spendBySupplierLast = new Map<string, number>()
+    const spendBySupplierPrev = new Map<string, number>()
 
     for (const row of filteredTransactions) {
       const m = getMonthKey(row)
@@ -177,7 +200,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     }
 
     const allSuppliers = new Set([...spendBySupplierLast.keys(), ...spendBySupplierPrev.keys()])
-    const deltas = Array.from(allSuppliers).map((s) => {
+    const deltas = Array.from(allSuppliers).map((s: string) => {
       const last = spendBySupplierLast.get(s) || 0
       const prev = spendBySupplierPrev.get(s) || 0
       const delta = last - prev
@@ -199,7 +222,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
   }, [filteredTransactions, monthlySeries])
 
   const insights = useMemo(() => {
-    const result = []
+    const result: Array<{ type: string; text: string }> = []
     const series = monthlySeries
 
     // 1) Overall month-over-month spend trend
@@ -228,23 +251,23 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     })
 
     // Build spend maps for classification levels and suppliers
-    const levelMaps = {
+    const levelMaps: Record<string, Map<string, number>> = {
       L1: new Map(),
       L2: new Map(),
       L3: new Map(),
       L4: new Map(),
     }
-    const supplierSpend = new Map()
-    const lowConfBySupplier = new Map()
-    const lowConfByL1 = new Map()
+    const supplierSpend = new Map<string, number>()
+    const lowConfBySupplier = new Map<string, number>()
+    const lowConfByL1 = new Map<string, number>()
 
-    filteredTransactions.forEach((row) => {
+    filteredTransactions.forEach((row: TransactionRow) => {
       const amt = getAmount(row)
       const supplier = getSupplier(row)
       const path = row.classification_path || row.taxonomy_path || ''
       const parts = path.split('|').map(p => p.trim()).filter(Boolean)
 
-      parts.forEach((part, idx) => {
+      parts.forEach((part: string, idx: number) => {
         const levelKey = `L${idx + 1}`
         if (levelMaps[levelKey]) {
           levelMaps[levelKey].set(part, (levelMaps[levelKey].get(part) || 0) + amt)
@@ -263,7 +286,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
 
     const totalSpend = totals.totalSpend || 0
 
-    const makeTopList = (map) =>
+    const makeTopList = (map: Map<string, number>) =>
       Array.from(map.entries())
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value)
@@ -276,8 +299,8 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     const topLowConfSuppliers = makeTopList(lowConfBySupplier)
     const topLowConfL1 = makeTopList(lowConfByL1)
 
-    const addLevelInsights = (levelLabel, list, typeKey) => {
-      list.slice(0, 3).forEach((entry, idx) => {
+    const addLevelInsights = (levelLabel: string, list: Array<{ name: string; value: number }>, typeKey: string) => {
+      list.slice(0, 3).forEach((entry: { name: string; value: number }, idx: number) => {
         if (result.length >= 15) return
         const pct = totalSpend > 0 ? (entry.value / totalSpend) * 100 : 0
         result.push({
@@ -293,7 +316,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     addLevelInsights('L4 category', topL4, 'info')
 
     // Supplier concentration insights
-    topSuppliersBySpend.slice(0, 3).forEach((entry, idx) => {
+    topSuppliersBySpend.slice(0, 3).forEach((entry: { name: string; value: number }, idx: number) => {
       if (result.length >= 15) return
       const pct = totalSpend > 0 ? (entry.value / totalSpend) * 100 : 0
       result.push({
@@ -303,7 +326,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     })
 
     // Suppliers with highest low-confidence spend
-    topLowConfSuppliers.slice(0, 3).forEach((entry) => {
+    topLowConfSuppliers.slice(0, 3).forEach((entry: { name: string; value: number }) => {
       if (result.length >= 15) return
       result.push({
         type: 'down',
@@ -312,7 +335,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     })
 
     // L1 categories with highest low-confidence spend
-    topLowConfL1.slice(0, 3).forEach((entry) => {
+    topLowConfL1.slice(0, 3).forEach((entry: { name: string; value: number }) => {
       if (result.length >= 15) return
       result.push({
         type: 'down',
@@ -350,22 +373,22 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
 
   const benchmarkLabel = selectedBenchmark === 'topSupplier' ? `Top Supplier: ${topSupplierName}` : 'Overall Spend'
 
-  const handleTopSupplierClick = (entry) => {
+  const handleTopSupplierClick = (entry: { name: string }) => {
     if (!onDrillToFilters || !entry) return
     // Drill into tables board filtered by the clicked supplier
     onDrillToFilters({ supplier: [entry.name] })
   }
 
-  const handleL1CategoryClick = (entry) => {
+  const handleL1CategoryClick = (entry: { name: string }) => {
     if (!onDrillToFilters || !entry) return
     // Drill into tables board filtered by the clicked L1 category
     onDrillToFilters({ classificationL1: [entry.name] })
   }
 
-  const handleParticularClick = (entry) => {
+  const handleParticularClick = (entry: { name: string }) => {
     if (!onDrillToFilters || !entry) return
     // Map the current dimension to the appropriate filter key
-    let key = null
+    let key: string | null = null
     switch (particularDimension) {
       case 'company':
         key = 'company'
@@ -449,7 +472,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
                   <YAxis tickFormatter={(v) => fmtAbbrev(Number(v))} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip
                     contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                    formatter={(v) => [formatCurrency(v), 'Spend']}
+                    formatter={(v: number | string) => [formatCurrency(v), 'Spend']}
                   />
                   <Area
                     type="monotone"
@@ -493,7 +516,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
                 />
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                  formatter={(v) => [formatCurrency(v), 'Spend']}
+                  formatter={(v: number | string) => [formatCurrency(v), 'Spend']}
                 />
                 <Bar
                   dataKey="total"
@@ -531,7 +554,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
                   paddingAngle={5}
                   dataKey="value"
                   isAnimationActive={true}
-                  label={({ name, value }) => formatCurrencyShort(value)}
+                  label={({ value }: { name: string; value: number }) => formatCurrencyShort(value)}
                   onClick={handleL1CategoryClick}
                   style={{ cursor: onDrillToFilters ? 'pointer' : 'default' }}
                 >
@@ -541,7 +564,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
                 </Pie>
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                  formatter={(v) => formatCurrency(v)}
+                  formatter={(v: number | string) => formatCurrency(v)}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -590,7 +613,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
                 />
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                  formatter={(v) => [formatCurrency(v), 'Spend']}
+                  formatter={(v: number | string) => [formatCurrency(v), 'Spend']}
                 />
                 <Bar
                   dataKey="value"

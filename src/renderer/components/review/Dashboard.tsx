@@ -12,10 +12,22 @@ import { useGroupedTransactions } from '../../hooks/useGroupedTransactions'
 import { useReclassification } from '../../hooks/useReclassification'
 import { useUndoRedo } from '../../hooks/useUndoRedo'
 import type { TransactionFilter, FilterCondition } from '../../../shared/types/transactions'
+import type { DashboardTransactionRow } from '../../utils/transactionTransform'
 import '../../styles/Dashboard.css'
 import '../../styles/Tabs.css'
 
-const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, foldername, setFoldername, refreshTransactions }) => {
+interface DashboardProps {
+  transactions: DashboardTransactionRow[];
+  loading: boolean;
+  error: string | null;
+  datasetId: string | null;
+  setDatasetId: (id: string | null) => void;
+  foldername: string | null;
+  setFoldername: (name: string | null) => void;
+  refreshTransactions: (() => Promise<void>) | null;
+}
+
+const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, foldername, setFoldername, refreshTransactions }: DashboardProps) => {
   const [activeTab, setActiveTab] = useState('tables') // 'tables'
 
   // ── Persisted filter state (survives tab navigation, resets on project close) ──
@@ -94,7 +106,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   const [tableNav, setTableNav] = useState({ tableIndex: 0, rowIndex: 0 }) // Current table and row position
 
   // Current classification path for the latest selected supplier (shown in toolbar left)
-  const [focusedClassificationPath, setFocusedClassificationPath] = useState(null)
+  const [focusedClassificationPath, setFocusedClassificationPath] = useState<string | null>(null)
 
   // Enable page scrolling when dragging
   const dragDropManager = useDragDropManager()
@@ -153,7 +165,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   }, [storeSetReviewFilters])
   const [showAddTableMenu, setShowAddTableMenu] = useState(false)
 
-  const [expandedFilters, setExpandedFilters] = useState(new Set()) // Track which filters are expanded
+  const [expandedFilters, setExpandedFilters] = useState<Set<string>>(new Set()) // Track which filters are expanded
   // filterState is persisted in the store (survives tab navigation)
   const filterState = reviewFilters.filterState
   const setFilterState = useCallback((updater: any) => {
@@ -189,7 +201,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
 
   // ── Server-side grouped data (replaces client-side grouping for 4M+ rows) ──
   // Map filterState keys to backend column names
-  const fsKeyToCol = useMemo(() => ({
+  const fsKeyToCol = useMemo<Record<string, string>>(() => ({
     supplier: 'supplier_name',
     classificationL1: 'classification_l1',
     classificationL2: 'classification_l2',
@@ -257,12 +269,12 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     })
   }, [transactions, tables])
 
-  const addTable = (column) => {
+  const addTable = (column: string) => {
     if (!column || !availableColumns.includes(column)) return
 
     const newTable = {
       id: `table-${Date.now()}`,
-      title: column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      title: column.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
       column: column,
       isHierarchical: column.includes('classification') || column.includes('path') || column.includes('Level'),
       collapsed: false
@@ -272,7 +284,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   }
 
   // Filter options fetched from backend via distinctValues
-  const [filterOptions, setFilterOptions] = useState({
+  const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({
     suppliers: [], classificationsL1: [], classificationsL2: [],
     classificationsL3: [], classificationsL4: [], glDescriptions: [],
     companies: [], years: [], quarters: [], months: [],
@@ -324,7 +336,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       return // Store values haven't changed — don't touch activeFilters
     }
 
-    const newFilters = {}
+    const newFilters: Record<string, string[]> = {}
 
     if (Array.isArray(filterState.supplier) && filterState.supplier.length > 0) {
       newFilters.supplier_name = filterState.supplier
@@ -364,12 +376,12 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
 
     // Merge: keep existing activeFilters that don't come from filterState, add new ones
 
-    setActiveFilters(prev => {
+    setActiveFilters((prev: Record<string, string[]>) => {
       // Keys managed by filterState sync
       const fsKeys = ['supplier_name', 'gl_description', 'company', 'year', 'quarter', 'month', 'costCenter', 'country', 'lineDescription']
       // Keep non-filterState keys (e.g., double-click/drag-drop filters)
-      const kept = {}
-      Object.keys(prev).forEach(k => {
+      const kept: Record<string, string[]> = {}
+      Object.keys(prev).forEach((k: string) => {
         if (!fsKeys.includes(k)) kept[k] = prev[k]
       })
       return { ...kept, ...newFilters }
@@ -417,23 +429,23 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   }, [setActiveFilters])
 
   // Remove a single filter (from UI filters or drag/drop activeFilters)
-  const removeFilter = useCallback((filterKey, valueToRemove = null) => {
+  const removeFilter = useCallback((filterKey: string, valueToRemove: string | null = null) => {
 
-    const clearSelectedForColumn = (columnKey, value) => {
+    const clearSelectedForColumn = (columnKey: string, value: string | null) => {
       if (!columnKey) return
-      setSelectedRows(prev => {
+      setSelectedRows((prev: string[]) => {
         // If a specific value is removed, only clear that exact selection
         if (value !== null && value !== undefined) {
           const valueStr = (value || '').toString().trim()
-          return prev.filter(k => k !== `${columnKey}:${valueStr}`)
+          return prev.filter((k: string) => k !== `${columnKey}:${valueStr}`)
         }
         // Otherwise clear all selections for that column
-        return prev.filter(k => !k.startsWith(`${columnKey}:`))
+        return prev.filter((k: string) => !k.startsWith(`${columnKey}:`))
       })
     }
 
     // Map filter UI keys / backend keys to table column keys used in `selectedRows` (column:value)
-    const selectionColumnKeyMap = {
+    const selectionColumnKeyMap: Record<string, string> = {
       // UI filterState keys
       supplier: 'supplier_name',
       glDescription: 'gl_description',
@@ -470,15 +482,15 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     if (uiKeys.has(filterKey)) {
       // Remove from filterState array
       if (valueToRemove !== null && valueToRemove !== undefined) {
-        setFilterState(prev => ({
+        setFilterState((prev: Record<string, string[]>) => ({
           ...prev,
           [filterKey]: Array.isArray(prev[filterKey])
-            ? prev[filterKey].filter(v => v !== valueToRemove)
+            ? prev[filterKey].filter((v: string) => v !== valueToRemove)
             : []
         }))
       } else {
         // Clear entire filter
-        setFilterState(prev => ({
+        setFilterState((prev: Record<string, string[]>) => ({
           ...prev,
           [filterKey]: []
         }))
@@ -488,12 +500,12 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       clearSelectedForColumn(selectionColumnKeyMap[filterKey], valueToRemove)
     } else {
       // Otherwise treat as backend/activeFilters key (e.g. supplier_name, gl_description)
-      setActiveFilters(prev => {
-        const next = { ...prev }
+      setActiveFilters((prev: Record<string, string[]>) => {
+        const next: Record<string, string[]> = { ...prev }
         if (valueToRemove !== null && Array.isArray(next[filterKey])) {
           // Remove matching value (handle string comparison with trimming)
           const valueToRemoveStr = (valueToRemove || '').toString().trim()
-          next[filterKey] = next[filterKey].filter(v => {
+          next[filterKey] = next[filterKey].filter((v: string) => {
             const vStr = (v || '').toString().trim()
             return vStr !== valueToRemoveStr
           })
@@ -520,11 +532,11 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   }, [setActiveFilters])
 
   // Helper function to handle toggle selection for multiple select
-  const handleToggleFilter = useCallback((filterKey, value) => {
-    setFilterState(prev => {
+  const handleToggleFilter = useCallback((filterKey: string, value: string) => {
+    setFilterState((prev: Record<string, string[]>) => {
       const currentArray = Array.isArray(prev[filterKey]) ? prev[filterKey] : []
       if (currentArray.includes(value)) {
-        return { ...prev, [filterKey]: currentArray.filter(v => v !== value) }
+        return { ...prev, [filterKey]: currentArray.filter((v: string) => v !== value) }
       } else {
         return { ...prev, [filterKey]: [...currentArray, value] }
       }
@@ -545,7 +557,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
         <div className="filter-panel-content">
           {/* Helper function to render collapsible dropdown filter */}
           {(() => {
-            const toggleFilterExpand = (filterKey) => {
+            const toggleFilterExpand = (filterKey: string) => {
               setExpandedFilters(prev => {
                 const newSet = new Set(prev)
                 if (newSet.has(filterKey)) {
@@ -557,7 +569,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
               })
             }
 
-            const renderDropdownFilter = (filterKey, label, options) => {
+            const renderDropdownFilter = (filterKey: string, label: string, options: string[]) => {
               const currentSelected = Array.isArray(filterState[filterKey]) ? filterState[filterKey] : []
               const isExpanded = expandedFilters.has(filterKey)
               const displayLabel = label // e.g., "Supplier", "Classification L1"
@@ -576,7 +588,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                   </div>
                   {isExpanded && (
                     <div className="filter-select-multiple-wrapper">
-                      {options.slice(0, 50).map(option => {
+                      {options.slice(0, 50).map((option: string) => {
                         const isSelected = currentSelected.includes(option)
                         return (
                           <div
@@ -648,7 +660,11 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       const transactionIds = rows.map((row) => row.id).filter((id) => id != null)
       if (transactionIds.length === 0) return false
 
-      await ipc.transactions.reclassify(transactionIds, targetNode.id)
+      await ipc.transactions.update({
+        ids: transactionIds,
+        taxonomyNodeId: targetNode.id,
+        classificationStatus: 'classified_by_ai',
+      })
 
       // Push changelog entry for undo
       try {
@@ -686,19 +702,19 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   }, [pendingReclassification, executeReclassification])
 
   // Remove local filter from a table (must be declared before any early return)
-  const handleRemoveLocalFilter = useCallback((tableId, filterKey, value) => {
+  const handleRemoveLocalFilter = useCallback((tableId: string, filterKey: string, value: string | null) => {
 
-    setSelectedRows(prev => {
+    setSelectedRows((prev: string[]) => {
       if (value !== null && value !== undefined) {
         const valueStr = (value || '').toString().trim()
-        return prev.filter(k => k !== `${filterKey}:${valueStr}`)
+        return prev.filter((k: string) => k !== `${filterKey}:${valueStr}`)
       }
-      return prev.filter(k => !k.startsWith(`${filterKey}:`))
+      return prev.filter((k: string) => !k.startsWith(`${filterKey}:`))
     })
-    setTableLocalFilters(prev => {
+    setTableLocalFilters((prev: Record<string, Record<string, string[]>>) => {
       const tableFilters = prev[tableId] || {}
       if (value !== null && Array.isArray(tableFilters[filterKey])) {
-        const newValues = tableFilters[filterKey].filter(v => {
+        const newValues = tableFilters[filterKey].filter((v: string) => {
           const vStr = (v || '').toString().trim()
           const valueStr = (value || '').toString().trim()
           return vStr !== valueStr
@@ -724,7 +740,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   }, [])
 
   // Handle double-click on a table row to add as global filter
-  const handleDoubleClickFilter = useCallback((column, values) => {
+  const handleDoubleClickFilter = useCallback((column: string, values: string[]) => {
     if (!column || !values || values.length === 0) return
 
 
@@ -732,18 +748,18 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     // For simple columns (supplier_name, gl_description, line_description, company), use directly
     const filterKey = column
 
-    setActiveFilters(prev => {
+    setActiveFilters((prev: Record<string, string[]>) => {
       const existing = Array.isArray(prev[filterKey]) ? prev[filterKey] : []
       const newValues = values
-        .map(v => (typeof v === 'string' ? v : v?.toString() || '').trim())
-        .filter(v => v && !existing.includes(v))
+        .map((v: string) => v.trim())
+        .filter((v: string) => v && !existing.includes(v))
       if (newValues.length === 0) return prev
       return { ...prev, [filterKey]: [...existing, ...newValues] }
     })
   }, [])
 
   // Handle adding a filter from the CurrentFiltersPanel "Add Filter" dropdown
-  const handleAddFilter = useCallback((column, values) => {
+  const handleAddFilter = useCallback((column: string, values: string[]) => {
     handleDoubleClickFilter(column, values)
   }, [handleDoubleClickFilter])
 
@@ -751,8 +767,8 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   const handleApplySelectionAsFilter = useCallback(() => {
     if (!selectedRows || selectedRows.length === 0) return
 
-    const byColumn = {}
-    selectedRows.forEach(key => {
+    const byColumn: Record<string, string[]> = {}
+    selectedRows.forEach((key: string) => {
       const idx = key.indexOf(':')
       if (idx <= 0) return
       const col = key.slice(0, idx)
@@ -761,9 +777,9 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       if (!byColumn[col]) byColumn[col] = []
       if (!byColumn[col].includes(val)) byColumn[col].push(val)
     })
-    setActiveFilters(prev => {
-      const next = { ...prev }
-      Object.entries(byColumn).forEach(([column, values]) => {
+    setActiveFilters((prev: Record<string, string[]>) => {
+      const next: Record<string, string[]> = { ...prev }
+      Object.entries(byColumn).forEach(([column, values]: [string, string[]]) => {
         const existing = Array.isArray(next[column]) ? next[column] : next[column] ? [next[column]] : []
         next[column] = [...new Set([...existing, ...values])]
       })
@@ -787,7 +803,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
 
     // Find matching transactions for this column/value
     const normalizedValue = value.toString().trim() || 'Unknown'
-    const matching = transactions.filter(row => {
+    const matching = transactions.filter((row: DashboardTransactionRow) => {
       const raw = row[column]
       const rowVal = (raw !== null && raw !== undefined && String(raw).trim() !== '')
         ? String(raw).trim()
@@ -799,15 +815,14 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
 
     const first = matching[0]
     const supplier =
-      first.supplier_name ||
-      normalizedValue
+      String(first.supplier_name || first.supplierName || normalizedValue)
 
-    const path = first.classification_path || first.taxonomy_path || ''
-    let levels = []
+    const path = String(first.classification_path || first.taxonomy_path || '')
+    let levels: string[] = []
     if (path) {
-      levels = path.split('|').map(p => p.trim()).filter(Boolean)
+      levels = path.split('|').map((p: string) => p.trim()).filter(Boolean)
     } else {
-      levels = [first.L1, first.L2, first.L3, first.L4].filter(Boolean)
+      levels = [first.L1, first.L2, first.L3, first.L4].filter(Boolean) as string[]
     }
 
     if (levels.length === 0) {
@@ -911,7 +926,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                               setShowAddTableMenu(false)
                             }}
                           >
-                            {column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            {column.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
                           </button>
                         ))}
                       </div>
@@ -933,23 +948,23 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                     setActiveFilters={setActiveFilters}
                     selectedRows={selectedRows}
                     setSelectedRows={setSelectedRows}
-                    filterState={filterState}
+                    filterState={filterState as any}
                     setFilterState={setFilterState}
-                    tables={tables}
-                    setTables={setTables}
-                    onReorderTables={setTables}
+                    tables={tables as any}
+                    setTables={setTables as any}
+                    onReorderTables={setTables as any}
                     availableColumns={availableColumns}
                     addTable={addTable}
-                    tableLocalFilters={tableLocalFilters}
-                    setTableLocalFilters={setTableLocalFilters}
+                    tableLocalFilters={tableLocalFilters as unknown as Record<string, Record<string, string[]>>}
+                    setTableLocalFilters={setTableLocalFilters as any}
                     filterCombinator={filterCombinator}
                     filterConnectors={filterConnectors}
                     filterGroupOperators={filterGroupOperators}
-                    onSetFilterCombinator={setFilterCombinator}
-                    onSetFilterConnector={(key: string, val: 'AND' | 'OR') => setFilterConnectors(prev => ({ ...prev, [key]: val }))}
-                    onSetFilterOperator={(key: string, val: string) => setFilterGroupOperators(prev => ({ ...prev, [key]: val }))}
+                    onSetFilterCombinator={setFilterCombinator as (val: string) => void}
+                    onSetFilterConnector={(key: string, val: 'AND' | 'OR') => setFilterConnectors((prev: Record<string, 'AND' | 'OR'>) => ({ ...prev, [key]: val }))}
+                    onSetFilterOperator={(key: string, val: string) => setFilterGroupOperators((prev: Record<string, string>) => ({ ...prev, [key]: val }))}
                     onRemoveFilter={removeFilter}
-                    onRemoveLocalFilter={handleRemoveLocalFilter}
+                    onRemoveLocalFilter={(tableId: string, _key: string | undefined, _value: string | null) => handleRemoveLocalFilter(tableId, _key || '', _value)}
                     onClearAll={clearFilters}
                     onAddFilter={handleAddFilter}
                     onDoubleClickFilter={handleDoubleClickFilter}
@@ -972,12 +987,13 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                   setSelectedRows={setSelectedRows}
                   keyboardFocus={keyboardFocus}
                   setKeyboardFocus={setKeyboardFocus}
-                  onReclassify={async (rows, targetPath) => {
+                  onReclassify={async (rows: Record<string, unknown>[], targetPath: string) => {
                     if (!rows || rows.length === 0) return false
                     return await executeReclassification(rows, targetPath)
                   }}
-                  datasetId={datasetId}
-                  foldername={foldername}
+                  mode="review"
+                  datasetId={datasetId ?? undefined}
+                  foldername={foldername ?? undefined}
                 />
               </div>
             </div>
@@ -1011,9 +1027,9 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
               <MetricsTab
                 transactions={transactions}
                 filteredTransactions={transactions}
-                onDrillToFilters={(filters) => {
-                  setFilterState(prev => {
-                    const next = { ...prev }
+                onDrillToFilters={(filters: Record<string, string[]>) => {
+                  setFilterState((prev: Record<string, string[]>) => {
+                    const next: Record<string, string[]> = { ...prev }
                     if (filters.supplier) next.supplier = filters.supplier
                     if (filters.classificationL1) next.classificationL1 = filters.classificationL1
                     if (filters.glDescription) next.glDescription = filters.glDescription

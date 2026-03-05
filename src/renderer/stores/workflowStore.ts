@@ -28,7 +28,7 @@ const defaultPivotSettings: PivotSettings = {
   filterState: {},
 }
 
-interface ReviewTableConfig {
+export interface ReviewTableConfig {
   id: string
   title: string
   column: string
@@ -36,7 +36,7 @@ interface ReviewTableConfig {
   collapsed: boolean
 }
 
-interface ReviewFilterState {
+export interface ReviewFilterState {
   activeFilters: Record<string, string[]>
   filterState: Record<string, string[]>
   filterGroupOperators: Record<string, string>
@@ -211,6 +211,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           metadata = {
             id: '',
             projectName: filePath.split('/').pop()?.replace(/\.c91$/, '') ?? 'Unknown',
+            filePath,
             createdAt: '',
             companyContext: null,
             taxonomyName: null,

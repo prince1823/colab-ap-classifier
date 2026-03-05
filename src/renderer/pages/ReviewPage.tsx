@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
-import { transactionToDashboardRow } from '../utils/transactionTransform'
+import { transactionToDashboardRow, type DashboardTransactionRow } from '../utils/transactionTransform'
 import Dashboard from '../components/review/Dashboard'
 import { ipc } from '../lib/ipc'
 import type { TransactionStats } from '../../shared/types/transactions'
@@ -13,7 +13,7 @@ import { fmtAbbrev } from '../utils/formatSpend'
  * Tables use server-side grouped data exclusively (managed by Dashboard).
  */
 function useLightTransactions() {
-  const [data, setData] = useState<Record<string, unknown>[]>([])
+  const [data, setData] = useState<DashboardTransactionRow[]>([])
   const [stats, setStats] = useState<TransactionStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

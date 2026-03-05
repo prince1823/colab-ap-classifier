@@ -6,29 +6,74 @@ import { buildTaxonomyTree, populateTreeWithTransactions } from '../../utils/tax
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
 import { ipc } from '../../lib/ipc'
 import { fmtAbbrev } from '../../utils/formatSpend'
+import type { DashboardTransactionRow } from '../../utils/transactionTransform'
 import '../../styles/ClassificationTree.css'
 
-const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete, isLeaf }) => {
+interface TaxonomyTreeNode {
+  name: string;
+  path: string;
+  children: TaxonomyTreeNode[];
+  count: number;
+  amount: number;
+}
+
+interface DropItem {
+  serverSide?: boolean;
+  transactionRows?: Record<string, unknown>[];
+  selectedValues?: string[];
+  value?: string;
+  column?: string;
+  rows?: Record<string, unknown>[];
+}
+
+interface ColumnNodeProps {
+  node: TaxonomyTreeNode;
+  level: number;
+  isSelected: boolean;
+  isActivePath: boolean;
+  onSelect: ((path: string) => void) | null;
+  onDropRow: ((rows: Record<string, unknown>[], targetPath: string) => void) | null;
+  onHoverExpand: ((path: string, level: number) => void) | null;
+  isKeyboardSelected: boolean;
+  onRename: ((node: TaxonomyTreeNode) => void) | null;
+  onDelete: ((node: TaxonomyTreeNode) => void) | null;
+  isLeaf: boolean;
+}
+
+interface ClassificationTreeProps {
+  transactions: DashboardTransactionRow[];
+  activeFilters: Record<string, unknown>;
+  selectedRows: string[];
+  setSelectedRows: React.Dispatch<React.SetStateAction<string[]>>;
+  onReclassify: ((rows: Record<string, unknown>[], path: string) => Promise<boolean | void>) | null;
+  mode: string;
+  datasetId?: string;
+  foldername?: string;
+  keyboardFocus: string;
+  setKeyboardFocus: (focus: string) => void;
+}
+
+const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete, isLeaf }: ColumnNodeProps) => {
   const levelLabel = level > 0 ? `L${level}` : ''
   const isDroppableLevel = isLeaf || level >= 3
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [{ isOverShallow, itemType, canDrop }, drop] = useDrop({
     accept: [TABLE_ROW_TYPE, ITEM_TYPE],
-    drop: async (item) => {
+    drop: async (item: DropItem) => {
       if (onDropRow && node.path !== 'root' && isDroppableLevel) {
         // Server-side mode: fetch transaction IDs on-demand from DuckDB
         if (item.serverSide && (!item.transactionRows || item.transactionRows.length === 0)) {
           try {
-            const values = item.selectedValues || [item.value]
+            const values: string[] = item.selectedValues || [item.value].filter((v): v is string => !!v)
             // Fetch IDs for all selected values in parallel
             const idArrays = await Promise.all(
-              values.map(v => ipc.transactions.getIdsByValue(item.column, v))
+              values.map((v: string) => ipc.transactions.getIdsByValue(item.column!, v))
             )
             const allIds = idArrays.flat()
             if (allIds.length > 0) {
               // Create minimal row objects with just IDs for reclassification
-              const rows = allIds.map(id => ({ id }))
+              const rows = allIds.map((id: string) => ({ id }))
               onDropRow(rows, node.path)
             }
           } catch (err) {
@@ -61,9 +106,9 @@ const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect
 
   const [showActions, setShowActions] = useState(false)
 
-  const handleClick = (e) => {
+  const handleClick = (e: React.MouseEvent) => {
     // Don't trigger select if clicking on action buttons
-    if (e.target.closest('.node-actions')) {
+    if ((e.target as HTMLElement).closest('.node-actions')) {
       return
     }
     if (onSelect) {
@@ -71,14 +116,14 @@ const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect
     }
   }
 
-  const handleRename = (e) => {
+  const handleRename = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (onRename && node.path !== 'root') {
       onRename(node)
     }
   }
 
-  const handleDelete = (e) => {
+  const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (onDelete && node.path !== 'root') {
       onDelete(node)
@@ -135,10 +180,10 @@ const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect
   )
 })
 
-const ClassificationTree = ({ 
-  transactions, 
-  activeFilters, 
-  selectedRows, 
+const ClassificationTree = ({
+  transactions,
+  activeFilters,
+  selectedRows,
   setSelectedRows,
   onReclassify,
   mode,
@@ -146,15 +191,15 @@ const ClassificationTree = ({
   foldername = 'default',
   keyboardFocus,
   setKeyboardFocus
-}) => {
-  const [selectedPath, setSelectedPath] = useState(null)
-  const [drillSelection, setDrillSelection] = useState([])
-  const [taxonomyPaths, setTaxonomyPaths] = useState([])
+}: ClassificationTreeProps) => {
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [drillSelection, setDrillSelection] = useState<string[]>([])
+  const [taxonomyPaths, setTaxonomyPaths] = useState<string[]>([])
   const [loadingTaxonomy, setLoadingTaxonomy] = useState(true)
   const [zoomLevel, setZoomLevel] = useState(100) // Zoom level in percentage (50% to 200%)
-  const [localSuccess, setLocalSuccess] = useState(null)
-  const [keyboardNav, setKeyboardNav] = useState({ columnIndex: 0, nodeIndex: 0 }) // Keyboard navigation state
-  const treeRef = useRef(null) // Ref for the tree container to detect focus
+  const [localSuccess, setLocalSuccess] = useState<{ count: number; pathParts: string[] } | null>(null)
+  const [keyboardNav, setKeyboardNav] = useState<{ columnIndex: number; nodeIndex: number }>({ columnIndex: 0, nodeIndex: 0 }) // Keyboard navigation state
+  const treeRef = useRef<HTMLDivElement | null>(null) // Ref for the tree container to detect focus
 
   // UI state for creating new taxonomy nodes
   const [showAddNodeModal, setShowAddNodeModal] = useState(false)
@@ -162,20 +207,20 @@ const ClassificationTree = ({
   const [newL2, setNewL2] = useState('')
   const [newL3, setNewL3] = useState('')
   const [isSavingNode, setIsSavingNode] = useState(false)
-  const [addNodeError, setAddNodeError] = useState(null)
+  const [addNodeError, setAddNodeError] = useState<string | null>(null)
 
   // UI state for renaming nodes
   const [showRenameModal, setShowRenameModal] = useState(false)
-  const [nodeToRename, setNodeToRename] = useState(null)
+  const [nodeToRename, setNodeToRename] = useState<TaxonomyTreeNode | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [isRenaming, setIsRenaming] = useState(false)
-  const [renameError, setRenameError] = useState(null)
+  const [renameError, setRenameError] = useState<string | null>(null)
 
   // UI state for deleting nodes
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [nodeToDelete, setNodeToDelete] = useState(null)
+  const [nodeToDelete, setNodeToDelete] = useState<TaxonomyTreeNode | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // Load taxonomy paths from backend on mount
   useEffect(() => {
@@ -184,20 +229,20 @@ const ClassificationTree = ({
       try {
         const nodes = await ipc.taxonomy.getNodes()
         const paths = nodes
-          .map((n) => n.fullPath)
-          .filter((p) => p && p.trim())
+          .map((n: { fullPath: string }) => n.fullPath)
+          .filter((p: string) => p && p.trim())
         setTaxonomyPaths(paths)
       } catch (err) {
         console.error('Could not load taxonomy:', err)
         // Fallback: extract classification paths from transaction data
         const pathsFromData = new Set<string>()
-        transactions.forEach(row => {
-          const path = row.classification_path || row.taxonomy_path || ''
+        transactions.forEach((row: DashboardTransactionRow) => {
+          const path = (row.classification_path as string) || (row.taxonomy_path as string) || ''
           if (path && path.trim()) {
             pathsFromData.add(path.trim())
           }
         })
-        setTaxonomyPaths(Array.from(pathsFromData))
+        setTaxonomyPaths(Array.from(pathsFromData) as string[])
       } finally {
         setLoadingTaxonomy(false)
       }
@@ -213,8 +258,8 @@ const ClassificationTree = ({
     }
     
     // Filter transactions based on active filters
-    const filtered = transactions.filter(row => {
-      return Object.entries(activeFilters).every(([key, value]) => {
+    const filtered = transactions.filter((row: DashboardTransactionRow) => {
+      return Object.entries(activeFilters).every(([key, value]: [string, unknown]) => {
         if (!value) return true
         if (Array.isArray(value)) {
           return value.includes(row[key])
@@ -224,16 +269,16 @@ const ClassificationTree = ({
     })
 
     // Build tree from all unique classification paths in the data
-    const allPaths = new Set()
-    filtered.forEach(row => {
-      const path = row.classification_path || row.taxonomy_path || ''
+    const allPaths = new Set<string>()
+    filtered.forEach((row: DashboardTransactionRow) => {
+      const path = (row.classification_path as string) || (row.taxonomy_path as string) || ''
       if (path && path.trim()) {
         allPaths.add(path.trim())
       }
     })
 
     // If we have taxonomy paths from YAML, use those. Otherwise build from data
-    const pathsToUse = taxonomyPaths.length > 0 ? taxonomyPaths : Array.from(allPaths)
+    const pathsToUse: string[] = taxonomyPaths.length > 0 ? taxonomyPaths : Array.from(allPaths)
     
     // Build tree structure
     const tree = buildTaxonomyTree(pathsToUse)
@@ -245,8 +290,8 @@ const ClassificationTree = ({
   }, [transactions, activeFilters, taxonomyPaths, loadingTaxonomy])
   
   const pathMap = useMemo(() => {
-    const map = new Map()
-    const traverse = (node) => {
+    const map = new Map<string, TaxonomyTreeNode>()
+    const traverse = (node: TaxonomyTreeNode) => {
       map.set(node.path, node)
       if (node.children && node.children.length > 0) {
         node.children.forEach(traverse)
@@ -256,18 +301,18 @@ const ClassificationTree = ({
     return map
   }, [taxonomyTree])
 
-  const sortNodesForColumn = useCallback((nodes, level) => {
-    const safeNumber = (val) => {
+  const sortNodesForColumn = useCallback((nodes: TaxonomyTreeNode[], level: number) => {
+    const safeNumber = (val: unknown): number => {
       const n = typeof val === 'number' ? val : Number(val)
       return Number.isFinite(n) ? n : 0
     }
 
-    const byName = (a, b) => String(a?.name || '').localeCompare(String(b?.name || ''))
+    const byName = (a: TaxonomyTreeNode, b: TaxonomyTreeNode) => String(a?.name || '').localeCompare(String(b?.name || ''))
 
     // Prefer amount sorting on levels that display amount (L1 and L4),
     // otherwise keep a stable alphabetical order.
     if (level === 1 || level === 4) {
-      return [...nodes].sort((a, b) => {
+      return [...nodes].sort((a: TaxonomyTreeNode, b: TaxonomyTreeNode) => {
         const diff = safeNumber(b?.amount) - safeNumber(a?.amount)
         if (diff !== 0) return diff
         return byName(a, b)
@@ -279,8 +324,8 @@ const ClassificationTree = ({
 
   const columns = useMemo(() => {
     if (!taxonomyTree?.children) return []
-    const cols = [sortNodesForColumn(taxonomyTree.children, 1)]
-    drillSelection.forEach((path) => {
+    const cols: TaxonomyTreeNode[][] = [sortNodesForColumn(taxonomyTree.children, 1)]
+    drillSelection.forEach((path: string) => {
       const node = pathMap.get(path)
       if (node?.children?.length) {
         cols.push(sortNodesForColumn(node.children, cols.length + 1))
@@ -299,17 +344,17 @@ const ClassificationTree = ({
     }
   }, [columns, keyboardNav.columnIndex, keyboardNav.nodeIndex, selectedPath])
 
-  const setPathAtLevel = (path, level) => {
-    setDrillSelection(prev => {
+  const setPathAtLevel = (path: string, level: number) => {
+    setDrillSelection((prev: string[]) => {
       const next = prev.slice(0, level - 1)
       if (next[level - 1] === path) return prev
       next[level - 1] = path
       return next
     })
-    setSelectedPath(prev => (prev === path ? prev : path))
+    setSelectedPath((prev: string | null) => (prev === path ? prev : path))
   }
 
-  const handleDropRow = async (rows, targetPath) => {
+  const handleDropRow = async (rows: Record<string, unknown>[], targetPath: string) => {
     if (onReclassify && targetPath && targetPath !== 'root') {
       // Extract the classification path from targetPath (remove 'root|' prefix)
       const classificationPath = targetPath.replace(/^root\|/, '')
@@ -330,14 +375,14 @@ const ClassificationTree = ({
   }
 
   // Auto-navigate to a specific path by expanding all necessary levels
-  const autoNavigateToPath = useCallback((targetPath) => {
+  const autoNavigateToPath = useCallback((targetPath: string) => {
     if (!targetPath || targetPath === 'root') return
-    
-    const pathParts = targetPath.split('|').filter(p => p.trim())
+
+    const pathParts = targetPath.split('|').filter((p: string) => p.trim())
     if (pathParts.length === 0) return
-    
+
     // Build the drill selection path step by step
-    const newDrillSelection = []
+    const newDrillSelection: string[] = []
     let currentPath = 'root'
     
     // Navigate through each level
@@ -372,19 +417,19 @@ const ClassificationTree = ({
 
   // Persist a new taxonomy path via backend API.
   const addNewTaxonomyPath = useCallback(
-    async (newPath) => {
+    async (newPath: string) => {
       if (!newPath || !newPath.trim()) return
       const trimmedPath = newPath.trim()
 
       // Optimistic update in local state
-      setTaxonomyPaths(prev => (prev.includes(trimmedPath) ? prev : [...prev, trimmedPath]))
+      setTaxonomyPaths((prev: string[]) => (prev.includes(trimmedPath) ? prev : [...prev, trimmedPath]))
 
       try {
         setIsSavingNode(true)
         setAddNodeError(null)
 
         const currentNodes = await ipc.taxonomy.getNodes()
-        const existingPaths = currentNodes.map((n) => n.fullPath)
+        const existingPaths = currentNodes.map((n: { fullPath: string }) => n.fullPath)
         if (!existingPaths.includes(trimmedPath)) {
           await ipc.taxonomy.addNode(trimmedPath)
         }
@@ -408,8 +453,8 @@ const ClassificationTree = ({
 
   const handleSaveNewNode = async () => {
     const parts = [newL1, newL2, newL3]
-      .map(p => (p || '').trim())
-      .filter(p => p)
+      .map((p: string) => (p || '').trim())
+      .filter((p: string) => p)
     if (parts.length === 0) {
       setAddNodeError('Please enter at least a Level 1 name.')
       return
@@ -424,14 +469,14 @@ const ClassificationTree = ({
 
   // Delete a taxonomy node and all its children paths
   const deleteTaxonomyNode = useCallback(
-    async (nodeToDelete) => {
+    async (nodeToDelete: TaxonomyTreeNode) => {
       if (!nodeToDelete || nodeToDelete.path === 'root') return
 
       const nodePath = nodeToDelete.path.replace(/^root\|/, '')
-      const pathParts = nodePath.split('|').filter(p => p.trim())
+      const pathParts = nodePath.split('|').filter((p: string) => p.trim())
       if (pathParts.length === 0) return
 
-      const pathsToRemove = taxonomyPaths.filter(path => {
+      const pathsToRemove = taxonomyPaths.filter((path: string) => {
         const pathStr = path.trim()
         return pathStr === nodePath || pathStr.startsWith(nodePath + '|')
       })
@@ -439,14 +484,14 @@ const ClassificationTree = ({
       if (pathsToRemove.length === 0) return
 
       // Optimistic update
-      setTaxonomyPaths(prev => prev.filter(p => !pathsToRemove.includes(p)))
+      setTaxonomyPaths((prev: string[]) => prev.filter((p: string) => !pathsToRemove.includes(p)))
 
       try {
         setIsDeleting(true)
         setDeleteError(null)
 
         const currentNodes = await ipc.taxonomy.getNodes()
-        const nodesToDelete = currentNodes.filter((n) => pathsToRemove.includes(n.fullPath))
+        const nodesToDelete = currentNodes.filter((n: { fullPath: string }) => pathsToRemove.includes(n.fullPath))
         for (const node of nodesToDelete) {
           await ipc.taxonomy.deleteNode(node.id)
         }
@@ -454,7 +499,7 @@ const ClassificationTree = ({
         console.error('Failed to delete taxonomy node from backend', e)
         setDeleteError('Failed to delete taxonomy node.')
         // Revert optimistic update on error
-        setTaxonomyPaths(prev => [...prev, ...pathsToRemove])
+        setTaxonomyPaths((prev: string[]) => [...prev, ...pathsToRemove])
       } finally {
         setIsDeleting(false)
       }
@@ -464,12 +509,12 @@ const ClassificationTree = ({
 
   // Rename a taxonomy node (updates all paths containing this node name at that level)
   const renameTaxonomyNode = useCallback(
-    async (nodeToRename, newName) => {
+    async (nodeToRename: TaxonomyTreeNode, newName: string) => {
       if (!nodeToRename || !newName || !newName.trim() || nodeToRename.path === 'root') return
 
       const trimmedNewName = newName.trim()
       const nodePath = nodeToRename.path.replace(/^root\|/, '')
-      const pathParts = nodePath.split('|').filter(p => p.trim())
+      const pathParts = nodePath.split('|').filter((p: string) => p.trim())
       if (pathParts.length === 0) return
 
       const levelIndex = pathParts.length - 1
@@ -479,10 +524,10 @@ const ClassificationTree = ({
 
       const originalPaths = [...taxonomyPaths]
 
-      const updatedPaths = taxonomyPaths.map(path => {
-        const parts = path.split('|').filter(p => p.trim())
+      const updatedPaths = taxonomyPaths.map((path: string) => {
+        const parts = path.split('|').filter((p: string) => p.trim())
         if (parts.length <= levelIndex) return path
-        const matchesUpToLevel = pathParts.slice(0, levelIndex).every((part, idx) => parts[idx] === part)
+        const matchesUpToLevel = pathParts.slice(0, levelIndex).every((part: string, idx: number) => parts[idx] === part)
         if (!matchesUpToLevel) return path
         if (parts[levelIndex] !== oldName) return path
         const updatedParts = [...parts]
@@ -500,10 +545,10 @@ const ClassificationTree = ({
         const currentNodes = await ipc.taxonomy.getNodes()
         const oldPathSet = new Set(originalPaths)
         const newPathSet = new Set(updatedPaths)
-        const removedPaths = [...oldPathSet].filter(p => !newPathSet.has(p))
-        const addedPaths = [...newPathSet].filter(p => !oldPathSet.has(p))
+        const removedPaths = [...oldPathSet].filter((p: string) => !newPathSet.has(p))
+        const addedPaths = [...newPathSet].filter((p: string) => !oldPathSet.has(p))
         for (const rp of removedPaths) {
-          const node = currentNodes.find(n => n.fullPath === rp)
+          const node = currentNodes.find((n: { fullPath: string }) => n.fullPath === rp)
           if (node) await ipc.taxonomy.deleteNode(node.id)
         }
         for (const ap of addedPaths) {
@@ -520,9 +565,9 @@ const ClassificationTree = ({
     [taxonomyPaths]
   )
 
-  const handleRenameNode = (node) => {
+  const handleRenameNode = (node: TaxonomyTreeNode) => {
     const nodePath = node.path.replace(/^root\|/, '')
-    const pathParts = nodePath.split('|').filter(p => p.trim())
+    const pathParts = nodePath.split('|').filter((p: string) => p.trim())
     const currentName = pathParts[pathParts.length - 1] || ''
     setNodeToRename(node)
     setRenameValue(currentName)
@@ -543,7 +588,7 @@ const ClassificationTree = ({
     }
   }
 
-  const handleDeleteNode = (node) => {
+  const handleDeleteNode = (node: TaxonomyTreeNode) => {
     setNodeToDelete(node)
     setDeleteError(null)
     setShowDeleteConfirm(true)
@@ -564,9 +609,9 @@ const ClassificationTree = ({
       return []
     }
 
-    const transactionRows = []
-    
-    selectedRows.forEach(key => {
+    const transactionRows: DashboardTransactionRow[] = []
+
+    selectedRows.forEach((key: string) => {
       // Format: "column:value" (e.g., "supplier_name:Acme Corp")
       const [column, ...rest] = key.split(':')
       const value = rest.join(':')
@@ -574,7 +619,7 @@ const ClassificationTree = ({
       if (!column || !value) return
       
       // Find matching transactions
-      const matching = transactions.filter(row => {
+      const matching = transactions.filter((row: DashboardTransactionRow) => {
         const raw = row[column]
         const rowVal = (raw !== null && raw !== undefined && String(raw).trim() !== '')
           ? String(raw).trim()
@@ -586,11 +631,11 @@ const ClassificationTree = ({
     })
     
     // Remove duplicates based on row_index or a combination of key fields
-    const uniqueRows = []
-    const seen = new Set()
-    
-    transactionRows.forEach(row => {
-      const key = row.row_index !== undefined 
+    const uniqueRows: DashboardTransactionRow[] = []
+    const seen = new Set<string>()
+
+    transactionRows.forEach((row: DashboardTransactionRow) => {
+      const key = row.row_index !== undefined
         ? `index_${row.row_index}`
         : `${row.supplier_name || ''}_${row.invoice_number || ''}_${row.amount || ''}`
       
@@ -604,7 +649,7 @@ const ClassificationTree = ({
   }, [selectedRows, transactions])
 
   // Keyboard navigation handlers
-  const handleKeyboardNavigation = useCallback((direction) => {
+  const handleKeyboardNavigation = useCallback((direction: string) => {
     if (!columns || columns.length === 0) return
     
     setKeyboardNav(prev => {
@@ -642,7 +687,7 @@ const ClassificationTree = ({
                 // Remove last part to get parent path
                 const parentPath = pathParts.slice(0, -1).join('|')
                 // Find the parent node in the previous column
-                const parentIndex = prevColumn.findIndex(n => n.path === parentPath)
+                const parentIndex = prevColumn.findIndex((n: TaxonomyTreeNode) => n.path === parentPath)
                 if (parentIndex >= 0) {
                   newNodeIndex = parentIndex
                   // Update drill selection to collapse the current level
@@ -732,7 +777,7 @@ const ClassificationTree = ({
 
   // Set up keyboard shortcuts
   useKeyboardShortcuts({
-    'arrowup': (e) => {
+    'arrowup': (e: KeyboardEvent) => {
       // Only handle if tree is focused or visible
       if (keyboardFocus === 'tree') {
         const { columnIndex } = keyboardNav
@@ -746,27 +791,27 @@ const ClassificationTree = ({
         handleKeyboardNavigation('up')
       }
     },
-    'arrowdown': (e) => {
+    'arrowdown': (e: KeyboardEvent) => {
       if (keyboardFocus === 'tree') {
         e.preventDefault()
         handleKeyboardNavigation('down')
       }
     },
-    'arrowleft': (e) => {
+    'arrowleft': (e: KeyboardEvent) => {
       if (keyboardFocus === 'tree') {
         e.preventDefault()
         handleKeyboardNavigation('left')
       }
     },
-    'arrowright': (e) => {
+    'arrowright': (e: KeyboardEvent) => {
       if (keyboardFocus === 'tree') {
         e.preventDefault()
         handleKeyboardNavigation('right')
       }
     },
-    'enter': (e) => {
+    'enter': (e: KeyboardEvent) => {
       // Only trigger if tree is visible and we're not in an input field
-      if (keyboardFocus === 'tree' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+      if (keyboardFocus === 'tree' && (e.target as HTMLElement).tagName !== 'INPUT' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
         e.preventDefault()
         handleReclassifyWithKeyboard()
       }
@@ -853,7 +898,7 @@ const ClassificationTree = ({
               Successfully reclassified {localSuccess.count} row{localSuccess.count !== 1 ? 's' : ''}
             </span>
             <div className="toast-path">
-              {localSuccess.pathParts.map((part, idx) => (
+              {localSuccess.pathParts.map((part: string, idx: number) => (
                 <span key={idx} className="toast-path-part">
                   {idx > 0 && <span className="toast-path-separator">→</span>}
                   <span>{part}</span>
@@ -910,7 +955,7 @@ const ClassificationTree = ({
         >
           {columns.length > 0 ? (
             <div className="tree-columns">
-              {columns.map((nodes, idx) => (
+              {columns.map((nodes: TaxonomyTreeNode[], idx: number) => (
                 <div
                   key={idx}
                   className={`tree-column column-level-${idx + 1} ${drillSelection[idx] ? 'active-column' : ''}`}
@@ -920,7 +965,7 @@ const ClassificationTree = ({
                     <span className="tree-column-count">{nodes.length} items</span>
                   </div>
                   <div className="tree-column-body">
-                    {nodes.map((node, nodeIdx) => (
+                    {nodes.map((node: TaxonomyTreeNode, nodeIdx: number) => (
                       <ColumnNode
                         key={node.path}
                         node={node}

@@ -2,7 +2,7 @@ import React from 'react'
 import { Loader2 } from 'lucide-react'
 import '../../styles/ReclassificationLoader.css'
 
-const ReclassificationLoader = ({ rowCount, currentRow = 0 }) => {
+const ReclassificationLoader = ({ rowCount, currentRow = 0 }: { rowCount: number; currentRow?: number }) => {
   return (
     <div className="reclassification-loader-overlay">
       <div className="reclassification-loader">

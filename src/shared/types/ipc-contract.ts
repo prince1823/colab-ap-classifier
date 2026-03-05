@@ -10,7 +10,7 @@ import type {
 } from './transactions';
 import type { ClassificationProgress, ResearchProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
-import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo } from './suppliers';
+import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
 import type { ChangeLog } from './changelog';
 
@@ -57,7 +57,7 @@ export interface IPCInvokeMap {
 
   // Suppliers
   'suppliers:list':           { args: []; result: ProjectSupplierView[] };
-  'suppliers:update':         { args: [supplierId: string, newName: string]; result: void };
+  'suppliers:update':         { args: [supplierName: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierName: string]; result: SupplierInfo };

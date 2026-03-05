@@ -1,4 +1,5 @@
-import type { Transaction, ClassificationStatus } from '../../shared/types/transactions'
+import type { Transaction } from '../../shared/types/transactions'
+import type { ClassificationStatus } from '../../shared/types/classification'
 
 export interface DashboardTransactionRow {
   id: string;

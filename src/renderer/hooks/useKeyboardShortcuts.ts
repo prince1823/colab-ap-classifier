@@ -10,9 +10,9 @@ import { useEffect } from 'react'
  *   'cmd+shift+f': () => console.log('Filter')
  * })
  */
-export const useKeyboardShortcuts = (shortcuts) => {
+export const useKeyboardShortcuts = (shortcuts: Record<string, (event: KeyboardEvent) => void>) => {
   useEffect(() => {
-    const handleKeyDown = (event) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       const keyParts = []
       
       if (event.ctrlKey || event.metaKey) {

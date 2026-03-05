@@ -35,12 +35,17 @@ export interface Supplier {
 
 export type SupplierConfirmationStatus = 'pending' | 'confirmed' | 'rejected' | 'merged';
 
+export type SupplierType = 'company' | 'individual' | 'government';
+
 export interface ProjectSupplier {
   id: string;
   supplierName: string;
   confirmationStatus: SupplierConfirmationStatus;
   isTailSpend: boolean;
   parentSupplierName: string | null;
+  parentName: string | null;
+  categoryA: boolean;
+  supplierInfo: SupplierInfo | null;
   dataSource: 'universe' | 'web_search' | 'manual';
   universeMatch: boolean;
   createdAt: string;
@@ -57,4 +62,5 @@ export interface SupplierUpdateInput {
   parentName?: string | null;
   supplierInfo?: SupplierInfo;
   aliases?: string[] | null;
+  categoryA?: boolean;
 }

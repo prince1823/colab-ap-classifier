@@ -47,7 +47,7 @@ function buildExpressionPreview(
 }
 
 // Map backend/activeFilters keys to human-readable labels
-const allFilterLabels = {
+const allFilterLabels: Record<string, string> = {
   supplier_name: 'Supplier Name',
   classification_l1: 'Classification L1',
   classification_l2: 'Classification L2',
@@ -94,7 +94,7 @@ const filterOperators = [
 ]
 
 // Map backend keys to filterState keys
-const keyMapping = {
+const keyMapping: Record<string, string> = {
   supplier_name: 'supplier',
   classification_l1: 'classificationL1',
   classification_l2: 'classificationL2',
@@ -105,7 +105,7 @@ const keyMapping = {
 }
 
 // Reverse map: filterState keys → backend keys (for normalizing group keys)
-const fsKeyToBackendKey = {
+const fsKeyToBackendKey: Record<string, string> = {
   supplier: 'supplier_name',
   classificationL1: 'classification_l1',
   classificationL2: 'classification_l2',
@@ -115,8 +115,20 @@ const fsKeyToBackendKey = {
   lineDescription: 'line_description',
 }
 
+interface DropdownOption {
+  key: string
+  label: string
+}
+
+interface InlineDropdownProps {
+  options: DropdownOption[]
+  value: string
+  onChange: (val: string) => void
+  className?: string
+}
+
 // Small reusable dropdown component
-const InlineDropdown = ({ options, value, onChange, className = '' }) => {
+const InlineDropdown: React.FC<InlineDropdownProps> = ({ options, value, onChange, className = '' }) => {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -129,7 +141,7 @@ const InlineDropdown = ({ options, value, onChange, className = '' }) => {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const selected = options.find(o => o.key === value) || options[0]
+  const selected: DropdownOption | undefined = options.find(o => o.key === value) || options[0]
 
   return (
     <div ref={ref} className={`fibery-dropdown ${className}`}>
@@ -154,8 +166,15 @@ const InlineDropdown = ({ options, value, onChange, className = '' }) => {
   )
 }
 
+interface ValuePickerProps {
+  fieldKey: string
+  transactions: Array<Record<string, unknown>>
+  onSelect: (val: string) => void
+  onClose: () => void
+}
+
 // Value picker dropdown — shows searchable list from transaction data
-const ValuePicker = ({ fieldKey, transactions, onSelect, onClose }) => {
+const ValuePicker: React.FC<ValuePickerProps> = ({ fieldKey, transactions, onSelect, onClose }) => {
   const [search, setSearch] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
@@ -169,9 +188,9 @@ const ValuePicker = ({ fieldKey, transactions, onSelect, onClose }) => {
 
   const values = useMemo(() => {
     const vals = new Set<string>()
-    transactions.forEach(t => {
+    transactions.forEach((t: Record<string, unknown>) => {
       const v = t[fieldKey]
-      if (v && v.toString().trim()) vals.add(v.toString().trim())
+      if (v && String(v).trim()) vals.add(String(v).trim())
     })
     return Array.from(vals).sort()
   }, [fieldKey, transactions])
@@ -212,7 +231,32 @@ const ValuePicker = ({ fieldKey, transactions, onSelect, onClose }) => {
 }
 
 
-const CurrentFiltersPanel = ({
+interface TableConfig {
+  id: string
+  title: string
+  [key: string]: unknown
+}
+
+interface CurrentFiltersPanelProps {
+  activeFilters?: Record<string, unknown>
+  filterState?: Record<string, unknown>
+  tableLocalFilters?: Record<string, Record<string, unknown>>
+  tables?: TableConfig[]
+  filterCombinator?: string
+  filterConnectors?: Record<string, 'AND' | 'OR'>
+  filterGroupOperators?: Record<string, string>
+  onSetFilterCombinator?: (val: string) => void
+  onSetFilterConnector?: (key: string, val: 'AND' | 'OR') => void
+  onSetFilterOperator?: (key: string, val: string) => void
+  onRemoveFilter: (key: string, value: string | null) => void
+  onRemoveLocalFilter?: (tableId: string, key: string | undefined, value: string | null) => void
+  onClearAll: () => void
+  onAddFilter: (key: string, values: string[]) => void
+  transactions?: Array<Record<string, unknown>>
+  allTransactions?: Array<Record<string, unknown>>
+}
+
+const CurrentFiltersPanel: React.FC<CurrentFiltersPanelProps> = ({
   activeFilters = {},
   filterState = {},
   tableLocalFilters = {},
@@ -276,60 +320,60 @@ const CurrentFiltersPanel = ({
 
     // 1. filterState (UI panel filters) — normalize key to backend key
     Object.entries(filterState)
-      .filter(([, value]) => Array.isArray(value) ? value.length > 0 : value && value.toString().trim() !== '')
-      .forEach(([key, value]) => {
-        const values = Array.isArray(value) ? value : [value]
+      .filter(([, value]) => Array.isArray(value) ? value.length > 0 : value && String(value).trim() !== '')
+      .forEach(([key, value]: [string, unknown]) => {
+        const values: unknown[] = Array.isArray(value) ? value : [value]
         const label = allFilterLabels[key] || key
         const backendKey = fsKeyToBackendKey[key] || key
         const group = getOrCreateGroup(backendKey, label)
-        values.forEach(v => {
+        values.forEach((v: unknown) => {
           const id = `${backendKey}:${v}`
           if (!seen.has(id)) {
             seen.add(id)
-            group.values.push({ value: v.toString(), source: 'filterState', isArrayItem: Array.isArray(value) })
+            group.values.push({ value: String(v), source: 'filterState', isArrayItem: Array.isArray(value) })
           }
         })
       })
 
     // 2. activeFilters (backend keys — skip duplicates from filterState)
     Object.entries(activeFilters)
-      .filter(([key, value]) => {
+      .filter(([key, value]: [string, unknown]) => {
         const uiKey = keyMapping[key] || key
-        const fsVal = filterState[uiKey]
+        const fsVal = (filterState as Record<string, unknown>)[uiKey]
         if (fsVal !== undefined && fsVal !== null && fsVal !== '') {
           if (Array.isArray(fsVal) && fsVal.length > 0) return false
           if (!Array.isArray(fsVal)) return false
         }
-        return Array.isArray(value) ? value.length > 0 : value && value.toString().trim() !== ''
+        return Array.isArray(value) ? value.length > 0 : value && String(value).trim() !== ''
       })
-      .forEach(([key, value]) => {
-        const values = Array.isArray(value) ? value : [value]
+      .forEach(([key, value]: [string, unknown]) => {
+        const values: unknown[] = Array.isArray(value) ? value : [value]
         const label = allFilterLabels[key] || key
         const group = getOrCreateGroup(key, label)
-        values.forEach(v => {
+        values.forEach((v: unknown) => {
           const id = `${key}:${v}`
           if (!seen.has(id)) {
             seen.add(id)
-            group.values.push({ value: v.toString(), source: 'activeFilters', isArrayItem: Array.isArray(value) })
+            group.values.push({ value: String(v), source: 'activeFilters', isArrayItem: Array.isArray(value) })
           }
         })
       })
 
     // 3. tableLocalFilters (per-table drag-drop filters)
-    Object.entries(tableLocalFilters).forEach(([tableId, localFilters]) => {
-      const table = tables.find(t => t.id === tableId)
+    Object.entries(tableLocalFilters).forEach(([tableId, localFilters]: [string, Record<string, unknown>]) => {
+      const table = tables.find((t: TableConfig) => t.id === tableId)
       const tableTitle = table ? table.title : `Table ${tableId}`
-      Object.entries(localFilters as Record<string, any>).forEach(([key, value]) => {
+      Object.entries(localFilters).forEach(([key, value]: [string, unknown]) => {
         const label = allFilterLabels[key] || key
         const groupKey = `${tableId}:${key}`
         const group = getOrCreateGroup(groupKey, `${label} (${tableTitle})`)
-        const values = Array.isArray(value) ? value : [value]
-        values.forEach(v => {
+        const values: unknown[] = Array.isArray(value) ? value : [value]
+        values.forEach((v: unknown) => {
           if (!v) return
           const id = `${tableId}:${key}:${v}`
           if (!seen.has(id)) {
             seen.add(id)
-            group.values.push({ value: v.toString(), source: 'localFilters', isArrayItem: true, tableId })
+            group.values.push({ value: String(v), source: 'localFilters', isArrayItem: true, tableId })
           }
         })
       })
@@ -353,9 +397,9 @@ const CurrentFiltersPanel = ({
     return buildExpressionPreview(labels, keys, filterConnectors)
   }, [groupedFilters, filterConnectors])
 
-  const handleRemoveValue = (group, valueEntry) => {
+  const handleRemoveValue = (group: typeof groupedFilters[0], valueEntry: typeof groupedFilters[0]['values'][0]) => {
     if (valueEntry.source === 'localFilters' && onRemoveLocalFilter) {
-      onRemoveLocalFilter(valueEntry.tableId, group.key.split(':').pop(), valueEntry.value)
+      onRemoveLocalFilter(valueEntry.tableId!, group.key.split(':').pop(), valueEntry.value)
     } else {
       // For filterState entries, group.key is now a backend key (e.g. supplier_name).
       // The Dashboard removeFilter function needs the UI key for filterState entries,

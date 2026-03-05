@@ -4,26 +4,44 @@ import { Filter, TrendingUp } from 'lucide-react'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import '../styles/SpendVisualizations.css'
 
-const SpendVisualizations = ({ transactions, activeFilters, excludeTailSpend, setExcludeTailSpend, onQuickAction }) => {
+interface TransactionRow {
+  [key: string]: unknown
+  supplier_name?: string
+  vendor_name?: string
+  amount?: number | string
+  invoice_amount?: number | string
+  classification_path?: string
+  taxonomy_path?: string
+}
+
+interface SpendVisualizationsProps {
+  transactions: TransactionRow[]
+  activeFilters: Record<string, unknown>
+  excludeTailSpend: boolean
+  setExcludeTailSpend: (val: boolean) => void
+  onQuickAction?: (action: string, data: Record<string, string>) => void
+}
+
+const SpendVisualizations: React.FC<SpendVisualizationsProps> = ({ transactions, activeFilters, excludeTailSpend, setExcludeTailSpend, onQuickAction }) => {
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(row => {
-      return Object.entries(activeFilters).every(([key, value]) => {
+    return transactions.filter((row: TransactionRow) => {
+      return Object.entries(activeFilters).every(([key, value]: [string, unknown]) => {
         if (!value) return true
-        return row[key] === value || (Array.isArray(value) && value.includes(row[key]))
+        return row[key] === value || (Array.isArray(value) && value.includes(row[key] as string))
       })
     })
   }, [transactions, activeFilters])
 
   // Top 20 Suppliers by Spend
   const topSuppliersData = useMemo(() => {
-    const supplierMap = new Map()
-    
-    filteredTransactions.forEach(row => {
+    const supplierMap = new Map<string, number>()
+
+    filteredTransactions.forEach((row: TransactionRow) => {
       const supplier = row.supplier_name || row.vendor_name || 'Unknown'
-      const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
-      
+      const amount = parseFloat(String(row.amount || row.invoice_amount || 0)) || 0
+
       if (supplierMap.has(supplier)) {
-        supplierMap.set(supplier, supplierMap.get(supplier) + amount)
+        supplierMap.set(supplier, supplierMap.get(supplier)! + amount)
       } else {
         supplierMap.set(supplier, amount)
       }
@@ -43,14 +61,14 @@ const SpendVisualizations = ({ transactions, activeFilters, excludeTailSpend, se
 
   // Taxonomy Level Spend (L1-L5)
   const taxonomySpend = useMemo(() => {
-    const levelMap = { L1: {}, L2: {}, L3: {}, L4: {}, L5: {} }
-    
-    filteredTransactions.forEach(row => {
-      const path = row.classification_path || row.taxonomy_path || ''
-      const parts = path.split('|').filter(p => p.trim())
-      const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
+    const levelMap: Record<string, Record<string, number>> = { L1: {}, L2: {}, L3: {}, L4: {}, L5: {} }
 
-      parts.forEach((part, index) => {
+    filteredTransactions.forEach((row: TransactionRow) => {
+      const path = row.classification_path || row.taxonomy_path || ''
+      const parts = path.split('|').filter((p: string) => p.trim())
+      const amount = parseFloat(String(row.amount || row.invoice_amount || 0)) || 0
+
+      parts.forEach((part: string, index: number) => {
         const level = `L${index + 1}`
         if (levelMap[level]) {
           const key = part.trim()
@@ -109,7 +127,7 @@ const SpendVisualizations = ({ transactions, activeFilters, excludeTailSpend, se
                 tick={{ fontSize: 12 }}
               />
               <Tooltip
-                formatter={(value) => [fmtAbbrev(Number(value)), 'Spend']}
+                formatter={(value: number | string) => [fmtAbbrev(Number(value)), 'Spend']}
                 contentStyle={{ cursor: onQuickAction ? 'pointer' : 'default' }}
               />
               <Bar 
@@ -130,15 +148,15 @@ const SpendVisualizations = ({ transactions, activeFilters, excludeTailSpend, se
         <div className="chart-container">
           <h4 className="chart-subtitle">Taxonomy Level Distribution</h4>
           <div className="taxonomy-breakdown">
-            {Object.entries(taxonomySpend).map(([level, data]) => {
+            {Object.entries(taxonomySpend).map(([level, data]: [string, Record<string, number>]) => {
               const entries = Object.entries(data)
-                .map(([name, total]) => ({ name, total }))
+                .map(([name, total]: [string, number]) => ({ name, total }))
                 .sort((a, b) => b.total - a.total)
                 .slice(0, 10)
 
               if (entries.length === 0) return null
 
-              const maxTotal = Math.max(...entries.map(e => e.total))
+              const maxTotal = Math.max(...entries.map((e: { name: string; total: number }) => e.total))
 
               return (
                 <div key={level} className="taxonomy-level">

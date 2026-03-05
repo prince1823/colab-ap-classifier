@@ -6,6 +6,7 @@ import { buildWhereClause } from '../utils/query-builder';
 interface RuleRow {
   id: string;
   name: string;
+  source: string;
   conditions: string;
   target_taxonomy_node_id: string;
   priority: number;
@@ -17,6 +18,7 @@ function rowToRule(row: RuleRow): OverrideRule {
   return {
     id: row.id,
     name: row.name,
+    source: (row.source as OverrideRule['source']) || 'project',
     conditions: typeof row.conditions === 'string' ? JSON.parse(row.conditions) : row.conditions,
     targetTaxonomyNodeId: row.target_taxonomy_node_id,
     priorityScore: row.priority,

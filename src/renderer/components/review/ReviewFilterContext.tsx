@@ -17,7 +17,6 @@ export interface ReviewFilterState {
   showFilterPanel: boolean
   tables: ReviewTableConfig[]
   selectedRows: string[]
-  tableLocalFilters: Record<string, Record<string, string[]>>
 }
 
 export const defaultReviewFilters: ReviewFilterState = {
@@ -47,7 +46,6 @@ export const defaultReviewFilters: ReviewFilterState = {
     { id: 'gl', title: 'gl_description', column: 'gl_description', isHierarchical: false, collapsed: false },
   ],
   selectedRows: [],
-  tableLocalFilters: {},
 }
 
 interface ReviewFilterContextValue {

@@ -83,7 +83,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   })
 
   // Keyboard navigation state - coordinates between tree and tables
-  const [keyboardFocus, setKeyboardFocus] = useState('tree') // 'tree' or 'tables'
+  const [keyboardFocus, setKeyboardFocus] = useState<'tree' | 'tables'>('tree')
   const [tableNav, setTableNav] = useState({ tableIndex: 0, rowIndex: 0 }) // Current table and row position
 
   // Current classification path for the latest selected supplier (shown in toolbar left)
@@ -153,10 +153,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     setReviewFilters(prev => ({ tables: typeof updater === 'function' ? updater(prev.tables) : updater }))
   }, [setReviewFilters])
 
-  const tableLocalFilters = reviewFilters.tableLocalFilters
-  const setTableLocalFilters = useCallback((updater: ((prev: typeof reviewFilters.tableLocalFilters) => typeof reviewFilters.tableLocalFilters) | typeof reviewFilters.tableLocalFilters) => {
-    setReviewFilters(prev => ({ tableLocalFilters: typeof updater === 'function' ? updater(prev.tableLocalFilters) : updater }))
-  }, [setReviewFilters])
 
 
   // ── Server-side grouped data (replaces client-side grouping for 4M+ rows) ──
@@ -204,12 +200,8 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     return { conditions }
   }, [activeFilters, filterState, filterConnectors, fsKeyToCol])
 
-  // Columns to fetch grouped data for (all non-taxonomy table columns)
-  const groupedColumns = useMemo(() => {
-    return tables
-      .filter(t => t.column !== 'classification_path')
-      .map(t => t.column)
-  }, [tables])
+  // Columns to fetch grouped data for (all table columns, including classification_path)
+  const groupedColumns = useMemo(() => tables.map(t => t.column), [tables])
 
   // Server-side GROUP BY — re-runs when filters or tables change
   const { data: groupedData, refetch: refetchGrouped } = useGroupedTransactions(groupedColumns, serverSideFilter)
@@ -380,7 +372,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       lineDescription: []
     })
     setActiveFilters({})
-    setTableLocalFilters({})
     setFilterConnectors({})
     setFilterGroupOperators({})
     setSelectedRows([])
@@ -661,44 +652,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     await executeReclassification(rows, targetPath)
   }, [pendingReclassification, executeReclassification])
 
-  // Remove local filter from a table (must be declared before any early return)
-  const handleRemoveLocalFilter = useCallback((tableId: string, filterKey: string, value: string | null) => {
-
-    setSelectedRows((prev: string[]) => {
-      if (value !== null && value !== undefined) {
-        const valueStr = (value || '').toString().trim()
-        return prev.filter((k: string) => k !== `${filterKey}:${valueStr}`)
-      }
-      return prev.filter((k: string) => !k.startsWith(`${filterKey}:`))
-    })
-    setTableLocalFilters(prev => {
-      const tableFilters = prev[tableId] || {}
-      if (value !== null && Array.isArray(tableFilters[filterKey])) {
-        const newValues = tableFilters[filterKey].filter((v: string) => {
-          const vStr = (v || '').toString().trim()
-          const valueStr = (value || '').toString().trim()
-          return vStr !== valueStr
-        })
-        if (newValues.length === 0) {
-          const { [filterKey]: removed, ...rest } = tableFilters
-          if (Object.keys(rest).length === 0) {
-            const { [tableId]: removedTable, ...restTables } = prev
-            return restTables
-          }
-          return { ...prev, [tableId]: rest }
-        }
-        return { ...prev, [tableId]: { ...tableFilters, [filterKey]: newValues } }
-      } else {
-        const { [filterKey]: removed, ...rest } = tableFilters
-        if (Object.keys(rest).length === 0) {
-          const { [tableId]: removedTable, ...restTables } = prev
-          return restTables
-        }
-        return { ...prev, [tableId]: rest }
-      }
-    })
-  }, [])
-
   // Handle double-click on a table row to add as global filter
   const handleDoubleClickFilter = useCallback((column: string, values: string[]) => {
     if (!column || !values || values.length === 0) return
@@ -902,29 +855,25 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                 <div className="tables-section">
                   <MultiTableSystem
                     transactions={transactions}
-                    allTransactions={transactions}
                     groupedData={groupedData}
                     activeFilters={activeFilters}
-                    setActiveFilters={setActiveFilters as any}
+                    setActiveFilters={setActiveFilters}
                     selectedRows={selectedRows}
-                    setSelectedRows={setSelectedRows as any}
-                    filterState={filterState as any}
-                    setFilterState={setFilterState as any}
-                    tables={tables as any}
-                    setTables={setTables as any}
-                    onReorderTables={setTables as any}
+                    setSelectedRows={setSelectedRows}
+                    filterState={filterState}
+                    setFilterState={setFilterState}
+                    tables={tables}
+                    setTables={setTables}
+                    onReorderTables={setTables}
                     availableColumns={availableColumns}
                     addTable={addTable}
-                    tableLocalFilters={tableLocalFilters}
-                    setTableLocalFilters={setTableLocalFilters as any}
                     filterCombinator={filterCombinator}
                     filterConnectors={filterConnectors}
                     filterGroupOperators={filterGroupOperators}
-                    onSetFilterCombinator={setFilterCombinator as (val: string) => void}
+                    onSetFilterCombinator={setFilterCombinator}
                     onSetFilterConnector={(key: string, val: 'AND' | 'OR') => setFilterConnectors((prev: Record<string, 'AND' | 'OR'>) => ({ ...prev, [key]: val }))}
                     onSetFilterOperator={(key: string, val: string) => setFilterGroupOperators((prev: Record<string, string>) => ({ ...prev, [key]: val }))}
                     onRemoveFilter={removeFilter}
-                    onRemoveLocalFilter={(tableId: string, _key: string | undefined, _value: string | null) => handleRemoveLocalFilter(tableId, _key || '', _value)}
                     onClearAll={clearFilters}
                     onAddFilter={handleAddFilter}
                     onDoubleClickFilter={handleDoubleClickFilter}

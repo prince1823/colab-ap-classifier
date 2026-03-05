@@ -35,11 +35,9 @@ interface TabsProps {
   systemFeedbackEnabled: boolean
   setSystemFeedbackEnabled: (enabled: boolean) => void
   hasLowConfidenceRows: boolean
-  tableLocalFilters: Record<string, Record<string, unknown>>
   tables: TableConfig[]
   onRemoveFilter: (key: string, value: string | null) => void
   onClearAll: () => void
-  onRemoveLocalFilter: (tableId: string, key: string, value: string | null) => void
 }
 
 const Tabs: React.FC<TabsProps> = ({
@@ -68,11 +66,9 @@ const Tabs: React.FC<TabsProps> = ({
   setSystemFeedbackEnabled,
   hasLowConfidenceRows,
   // Active filters props
-  tableLocalFilters,
   tables,
   onRemoveFilter,
   onClearAll,
-  onRemoveLocalFilter
 }) => {
   const isTablesTab = activeTab === 'tables'
 
@@ -83,11 +79,8 @@ const Tabs: React.FC<TabsProps> = ({
         <ActiveFilters
           activeFilters={activeFilters}
           filterState={filterState}
-          tableLocalFilters={tableLocalFilters}
-          tables={tables}
           onRemoveFilter={onRemoveFilter}
           onClearAll={onClearAll}
-          onRemoveLocalFilter={onRemoveLocalFilter}
           compact={true}
         />
 

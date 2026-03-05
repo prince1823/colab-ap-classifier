@@ -2,24 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { X, ChevronDown, ChevronUp, Filter } from 'lucide-react'
 import '../../styles/ActiveFilters.css'
 
-interface TableConfig {
-  id: string
-  title: string
-  [key: string]: unknown
-}
-
 interface ActiveFiltersProps {
   activeFilters?: Record<string, unknown>
   filterState?: Record<string, unknown>
-  tableLocalFilters?: Record<string, Record<string, unknown>>
-  tables?: TableConfig[]
   onRemoveFilter: (key: string, value: string | null) => void
   onClearAll: () => void
-  onRemoveLocalFilter?: (tableId: string, key: string, value: string | null) => void
   compact?: boolean
 }
 
-const ActiveFilters: React.FC<ActiveFiltersProps> = ({ activeFilters = {}, filterState = {}, tableLocalFilters = {}, tables = [], onRemoveFilter, onClearAll, onRemoveLocalFilter, compact = false }) => {
+const ActiveFilters: React.FC<ActiveFiltersProps> = ({ activeFilters = {}, filterState = {}, onRemoveFilter, onClearAll, compact = false }) => {
   const [isExpanded, setIsExpanded] = useState(false)
   // When the user clicks a remove/clear action inside the dropdown, filters will change.
   // We don't want that change to auto-close the dropdown.
@@ -152,49 +143,8 @@ const ActiveFilters: React.FC<ActiveFiltersProps> = ({ activeFilters = {}, filte
       }
     })
 
-    // Add local filters from tables (per-table filters from drag-drop)
-    Object.entries(tableLocalFilters).forEach(([tableId, localFilters]: [string, Record<string, unknown>]) => {
-      const table = tables.find((t: TableConfig) => t.id === tableId)
-      const tableTitle = table ? table.title : `Table ${tableId}`
-
-      Object.entries(localFilters).forEach(([key, value]: [string, unknown]) => {
-        const label = backendFilterLabels[key] || key
-        
-        if (Array.isArray(value)) {
-          value.forEach((v: unknown) => {
-            const id = `${tableId}:${label}:${v}`
-            if (!seen.has(id)) {
-              seen.add(id)
-              combined.push({
-                key,
-                label: `${label} (${tableTitle})`,
-                value: String(v),
-                isArrayItem: true,
-                source: 'localFilters',
-                tableId,
-                tableTitle
-              })
-            }
-          })
-        } else if (value) {
-          const id = `${tableId}:${label}:${value}`
-          if (!seen.has(id)) {
-            seen.add(id)
-            combined.push({
-              key,
-              label: `${label} (${tableTitle})`,
-              value: String(value),
-              source: 'localFilters',
-              tableId,
-              tableTitle
-            })
-          }
-        }
-      })
-    })
-
     return combined
-  }, [activeFilters, backendFilterLabels, filterState, tableLocalFilters, tables, uiFilterLabels])
+  }, [activeFilters, backendFilterLabels, filterState, uiFilterLabels])
 
   // Prevent "click-through" / unintended opens when filters change (e.g., right after applying filters)
   const combinedKey = useMemo(() => {
@@ -261,11 +211,7 @@ const ActiveFilters: React.FC<ActiveFiltersProps> = ({ activeFilters = {}, filte
                       className="remove-filter-btn-compact"
                       onClick={() => {
                         skipNextAutoCloseRef.current = true
-                        if (filter.source === 'localFilters' && onRemoveLocalFilter) {
-                          onRemoveLocalFilter(filter.tableId!, filter.key, filter.isArrayItem ? filter.value : null)
-                        } else {
-                          onRemoveFilter(filter.key, filter.isArrayItem ? filter.value : null)
-                        }
+                        onRemoveFilter(filter.key, filter.isArrayItem ? filter.value : null)
                       }}
                       title={`Remove ${filter.label} filter`}
                     >
@@ -324,11 +270,7 @@ const ActiveFilters: React.FC<ActiveFiltersProps> = ({ activeFilters = {}, filte
               <button
                 className="remove-filter-btn"
                 onClick={() => {
-                  if (filter.source === 'localFilters' && onRemoveLocalFilter) {
-                    onRemoveLocalFilter(filter.tableId!, filter.key, filter.isArrayItem ? filter.value : null)
-                  } else {
-                    onRemoveFilter(filter.key, filter.isArrayItem ? filter.value : null)
-                  }
+                  onRemoveFilter(filter.key, filter.isArrayItem ? filter.value : null)
                 }}
                 title={`Remove ${filter.label} filter`}
               >

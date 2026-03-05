@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
 import { ipc } from '../../lib/ipc'
 import CurrentFiltersPanel from './CurrentFiltersPanel'
+import type { ReviewTableConfig } from './ReviewFilterContext'
 import type { GroupedRow, GroupedTransactionsResult } from '../../../shared/types/transactions'
 import type { DashboardTransactionRow } from '../../utils/transactionTransform'
 
@@ -27,15 +28,6 @@ interface FlatItem {
 
 type TableItem = HierarchicalItem | FlatItem;
 
-interface TableDef {
-  id: string;
-  title: string;
-  column: string;
-  isHierarchical?: boolean;
-  collapsed?: boolean;
-  [key: string]: unknown;
-}
-
 interface DragItem {
   type: string;
   column: string;
@@ -57,49 +49,6 @@ interface TableNavState {
   rowIndex: number;
 }
 
-interface FilterStateMap {
-  supplier: string[];
-  classificationL1: string[];
-  classificationL2: string[];
-  classificationL3: string[];
-  classificationL4: string[];
-  glDescription: string[];
-  company: string[];
-  year: string[];
-  quarter: string[];
-  month: string[];
-  costCenter: string[];
-  country: string[];
-  lineDescription: string[];
-  [key: string]: string[];
-}
-
-/** Evaluate filter conditions with SQL-like AND/OR precedence (AND binds tighter than OR). */
-function evaluateFilterConditions(
-  conditionEntries: Array<{ key: string; result: boolean }>,
-  filterConnectors: Record<string, 'AND' | 'OR'>,
-  filterCombinator: 'AND' | 'OR' = 'AND'
-): boolean {
-  if (conditionEntries.length === 0) return true
-  if (conditionEntries.length === 1) return conditionEntries[0].result
-  const hasPerRowConnectors = Object.keys(filterConnectors).length > 0
-  if (!hasPerRowConnectors) {
-    return filterCombinator === 'OR'
-      ? conditionEntries.some(c => c.result)
-      : conditionEntries.every(c => c.result)
-  }
-  const andGroups: boolean[][] = [[conditionEntries[0].result]]
-  for (let i = 1; i < conditionEntries.length; i++) {
-    const prevKey = conditionEntries[i - 1].key
-    const connector = filterConnectors[prevKey] || 'AND'
-    if (connector === 'OR') {
-      andGroups.push([conditionEntries[i].result])
-    } else {
-      andGroups[andGroups.length - 1].push(conditionEntries[i].result)
-    }
-  }
-  return andGroups.some(group => group.every(result => result))
-}
 import { fmtAbbrev } from '../../utils/formatSpend'
 import '../../styles/MultiTableSystem.css'
 
@@ -762,7 +711,7 @@ const FilterTable = React.memo(({
   // This replaces the O(n) data.filter() that was running inside EVERY row render,
   // turning O(rows × transactions) into O(transactions) once + O(1) per row.
   const transactionsByValue = useMemo(() => {
-    const map = new Map<string, any[]>()
+    const map = new Map<string, DashboardTransactionRow[]>()
     if (!data || !column) return map
     for (let i = 0; i < data.length; i++) {
       const row = data[i]
@@ -797,14 +746,12 @@ const FilterTable = React.memo(({
     // ── Taxonomy table: build tree from ALL taxonomy nodes, then overlay
     //    transaction amounts so every node is visible even with $0 spend.
     if (isTaxonomyTable && taxonomyNodes.length > 0) {
-      // 1. Accumulate spend per full_path from transaction data
+      // 1. Accumulate spend per full_path from server-side grouped rows
       const spendByPath: Record<string, number> = {}
-      for (const row of data) {
-        const rawPath = String(row.classification_path || row['taxonomy_path'] || '')
-        if (!rawPath) continue
-        const path = String(rawPath).trim()
-        const amount = parseFloat(String(row.spend_amount || 0)) || 0
-        spendByPath[path] = (spendByPath[path] || 0) + amount
+      if (groupedRows && groupedRows.length > 0) {
+        for (const row of groupedRows) {
+          if (row.value) spendByPath[row.value] = (spendByPath[row.value] || 0) + row.amount
+        }
       }
 
       // 2. Build nested tree from taxonomy nodes
@@ -863,120 +810,12 @@ const FilterTable = React.memo(({
       return buildHierarchy(tree)
     }
 
-    // ── Non-taxonomy tables: original grouping logic
-    const grouped: Record<string, any> = data.reduce((acc: Record<string, any>, row: DashboardTransactionRow) => {
-      const rawValue = row[column]
-      const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '')
-        ? String(rawValue).trim()
-        : 'Unknown'
-      const amount = parseFloat(String(row.spend_amount || 0)) || 0
-
-      if (effectiveHierarchical) {
-        const parts = value.includes('|')
-          ? value.split('|').filter((p: string) => p.trim())
-          : [value.trim() || 'Unknown']
-        let current: Record<string, any> = acc
-
-        parts.forEach((part: string, idx: number) => {
-          const key = part.trim()
-          if (!current || typeof current !== 'object' || Array.isArray(current)) {
-            current = acc
-          }
-          if (current[key] && typeof current[key] !== 'object') {
-            const existingAmount = typeof current[key] === 'number' ? current[key] : 0
-            current[key] = { value: key, amount: existingAmount, children: {}, fullPath: parts.slice(0, idx + 1).join('|') }
-          }
-          if (!current[key]) {
-            current[key] = { value: key, amount: 0, children: {}, fullPath: parts.slice(0, idx + 1).join('|') }
-          }
-          if (typeof current[key] !== 'object' || current[key] === null || Array.isArray(current[key])) {
-            current[key] = { value: key, amount: 0, children: {}, fullPath: parts.slice(0, idx + 1).join('|') }
-          }
-          current[key].amount = (current[key].amount || 0) + amount
-          if (!current[key].children || typeof current[key].children !== 'object' || Array.isArray(current[key].children)) {
-            current[key].children = {}
-          }
-          current = current[key].children
-        })
-      } else {
-        acc[value] = (acc[value] || 0) + amount
-      }
-
-      return acc
-    }, {})
-
-    if (effectiveHierarchical) {
-      const buildHierarchy = (obj: Record<string, any>): HierarchicalItem[] => {
-        return Object.values(obj)
-          .map((item: any) => ({
-            ...item,
-            amount: item.amount || 0,
-            children: item.children && Object.keys(item.children).length > 0
-              ? buildHierarchy(item.children)
-              : []
-          }))
-          .filter((item: HierarchicalItem) => {
-            const hasNoChildren = !item.children || item.children.length === 0
-            const isBlank = !item.value ||
-                           item.value.trim() === '' ||
-                           item.value.toLowerCase() === '[blank]' ||
-                           item.value.toLowerCase() === 'unknown' ||
-                           item.value.toLowerCase() === 'blank'
-            if (isBlank && hasNoChildren) return false
-            return true
-          })
-          .sort((a: HierarchicalItem, b: HierarchicalItem) => {
-            if (sortColumn === 'amount') {
-              return sortDirection === 'asc'
-                ? (a.amount || 0) - (b.amount || 0)
-                : (b.amount || 0) - (a.amount || 0)
-            } else {
-              return sortDirection === 'asc'
-                ? (a.value || '').localeCompare(b.value || '', undefined, { sensitivity: 'base' })
-                : (b.value || '').localeCompare(a.value || '', undefined, { sensitivity: 'base' })
-            }
-          })
-      }
-      return buildHierarchy(grouped)
-    }
-
-    // Flat structure
-    const flatData: HierarchicalItem[] = Object.entries(grouped)
-      .map(([value, amount]: [string, any]) => ({
-        value: value || 'Unknown',
-        amount: (amount as number) || 0
-      }))
-      .filter(item => {
-        // Filter out blank/empty values
-        const isBlank = !item.value ||
-                       item.value.trim() === '' ||
-                       item.value.toLowerCase() === '[blank]' ||
-                       item.value.toLowerCase() === 'unknown' ||
-                       item.value.toLowerCase() === 'blank'
-        if (isBlank) {
-          return false
-        }
-
-        return true
-      })
-      .sort((a, b) => {
-        if (sortColumn === 'amount') {
-          return sortDirection === 'asc' 
-            ? (a.amount || 0) - (b.amount || 0)
-            : (b.amount || 0) - (a.amount || 0)
-        } else {
-          return sortDirection === 'asc'
-            ? (a.value || '').localeCompare(b.value || '', undefined, { sensitivity: 'base' })
-            : (b.value || '').localeCompare(a.value || '', undefined, { sensitivity: 'base' })
-        }
-      })
-    
-    return flatData
+    // Non-taxonomy tables: server-side grouped data only.
+    // If groupedRows not yet available (loading), show empty table.
+    return []
   }, [
-    data,
     column,
     isTaxonomyTable,
-    effectiveHierarchical,
     sortColumn,
     sortDirection,
     taxonomyNodes,
@@ -1277,72 +1116,66 @@ const DraggableTableCard = ({ tableId, index, isDraggable, moveTable, children }
 }
 
 interface MultiTableSystemProps {
+  // ── Data ──────────────────────────────────────────────────────────────────
   transactions: DashboardTransactionRow[];
-  allTransactions?: DashboardTransactionRow[];
   groupedData: Map<string, GroupedTransactionsResult> | null;
-  activeFilters: Record<string, string | string[]>;
-  setActiveFilters: React.Dispatch<React.SetStateAction<Record<string, string | string[]>>>;
+
+  // ── Filter state (read-only in MultiTableSystem — for display in panels) ──
+  activeFilters: Record<string, string[]>;
+  filterState: Record<string, string[]>;
+  filterCombinator: 'AND' | 'OR';
+  filterConnectors: Record<string, 'AND' | 'OR'>;
+  filterGroupOperators: Record<string, string>;
+
+  // ── Filter state setters (plain callbacks, not Dispatch<SetStateAction>) ──
+  setActiveFilters: (updater: ((prev: Record<string, string[]>) => Record<string, string[]>) | Record<string, string[]>) => void;
+  setFilterState: (updater: ((prev: Record<string, string[]>) => Record<string, string[]>) | Record<string, string[]>) => void;
+
+  // ── Row selection ─────────────────────────────────────────────────────────
   selectedRows: string[];
-  setSelectedRows: React.Dispatch<React.SetStateAction<string[]>>;
-  filterState?: FilterStateMap;
-  setFilterState: React.Dispatch<React.SetStateAction<FilterStateMap>>;
-  tables?: TableDef[];
-  setTables: React.Dispatch<React.SetStateAction<TableDef[]>>;
-  onReorderTables?: React.Dispatch<React.SetStateAction<TableDef[]>>;
+  setSelectedRows: (updater: ((prev: string[]) => string[]) | string[]) => void;
+
+  // ── Table config ──────────────────────────────────────────────────────────
+  tables: ReviewTableConfig[];
+  setTables: (updater: ((prev: ReviewTableConfig[]) => ReviewTableConfig[]) | ReviewTableConfig[]) => void;
+  onReorderTables?: (updater: ((prev: ReviewTableConfig[]) => ReviewTableConfig[]) | ReviewTableConfig[]) => void;
   availableColumns?: string[];
   addTable: (column: string) => void;
-  tableLocalFilters?: Record<string, Record<string, string[]>>;
-  setTableLocalFilters: React.Dispatch<React.SetStateAction<Record<string, Record<string, string[]>>>>;
-  filterCombinator?: 'AND' | 'OR';
-  filterConnectors?: Record<string, 'AND' | 'OR'>;
-  filterGroupOperators?: Record<string, string>;
-  onSetFilterCombinator: (val: string) => void;
+
+  // ── Filter event callbacks ─────────────────────────────────────────────────
+  onSetFilterCombinator: (val: 'AND' | 'OR') => void;
   onSetFilterConnector: (key: string, val: 'AND' | 'OR') => void;
   onSetFilterOperator: (key: string, val: string) => void;
   onRemoveFilter: (key: string, value: string | null) => void;
-  onRemoveLocalFilter?: (tableId: string, key: string | undefined, value: string | null) => void;
   onClearAll: () => void;
   onAddFilter: (column: string, values: string[]) => void;
   onDoubleClickFilter: (column: string, values: string[]) => void;
   onApplySelectionAsFilter: () => void;
-  keyboardFocus: string;
-  setKeyboardFocus: (focus: string) => void;
+
+  // ── Keyboard navigation ───────────────────────────────────────────────────
+  keyboardFocus: 'tree' | 'tables';
+  setKeyboardFocus: (focus: 'tree' | 'tables') => void;
   tableNav: TableNavState;
-  setTableNav: React.Dispatch<React.SetStateAction<TableNavState>>;
+  setTableNav: (updater: ((prev: TableNavState) => TableNavState) | TableNavState) => void;
+
+  // ── Optional callbacks ────────────────────────────────────────────────────
   onFocusedClassificationPathChange?: ((path: string | null) => void) | null;
 }
 
 const MultiTableSystem = ({
   transactions,
-  allTransactions = [],
   groupedData,
   activeFilters,
   setActiveFilters,
   selectedRows,
   setSelectedRows,
-  filterState = {
-    supplier: [],
-    classificationL1: [],
-    classificationL2: [],
-    classificationL3: [],
-    classificationL4: [],
-    glDescription: [],
-    company: [],
-    year: [],
-    quarter: [],
-    month: [],
-    costCenter: [],
-    country: [],
-    lineDescription: []
-  },
+  filterState = {},
   setFilterState,
   tables = [],
   setTables,
   onReorderTables,
   availableColumns = [],
   addTable,
-  tableLocalFilters = {},
-  setTableLocalFilters,
   filterCombinator = 'AND',
   filterConnectors = {},
   filterGroupOperators = {},
@@ -1350,7 +1183,6 @@ const MultiTableSystem = ({
   onSetFilterConnector,
   onSetFilterOperator,
   onRemoveFilter,
-  onRemoveLocalFilter,
   onClearAll,
   onAddFilter,
   onDoubleClickFilter,
@@ -1404,7 +1236,7 @@ const MultiTableSystem = ({
   // Uses onReorderTables (raw setter) so reordering is NOT undoable
   const moveTable = useCallback((fromIndex: number, toIndex: number) => {
     const setter = onReorderTables || setTables
-    setter((prevTables: TableDef[]) => {
+    setter((prevTables: ReviewTableConfig[]) => {
       const updated = [...prevTables]
       const [moved] = updated.splice(fromIndex, 1)
       updated.splice(toIndex, 0, moved)
@@ -1413,19 +1245,10 @@ const MultiTableSystem = ({
   }, [onReorderTables, setTables])
 
   const toggleTableCollapse = (tableId: string) => {
-    setTables(tables.map((t: TableDef) =>
+    setTables(tables.map((t: ReviewTableConfig) =>
       t.id === tableId ? { ...t, collapsed: !t.collapsed } : t
     ))
   }
-
-  // Drag-drop filter functions removed — drops now go to the filter panel
-  
-  // Clear all local filters
-  const clearAllLocalFilters = useCallback(() => {
-    if (setTableLocalFilters) {
-      setTableLocalFilters({})
-    }
-  }, [setTableLocalFilters])
 
   // Clear all selected rows
   const clearSelection = useCallback(() => {
@@ -1459,183 +1282,6 @@ const MultiTableSystem = ({
     })
   }, [tables, setKeyboardFocus, setTableNav, setSelectedRows])
 
-
-  // Get unique values for filter dropdowns.
-  // Depend on transactions.length (not reference) to avoid recomputing on every chunk.
-  const txnLen = transactions.length
-  const filterOptions = useMemo(() => {
-    if (txnLen === 0) return { confidences: [], suppliers: [], classifications: [] }
-    const confidences = new Set<string>()
-    const suppliers = new Set<string>()
-    const classifications = new Set<string>()
-
-    for (let i = 0; i < transactions.length; i++) {
-      const row = transactions[i]
-      const status = String(row.classification_status || '')
-      if (row['human_reviewed'] || row.humanReviewed) confidences.add('high')
-      else if (status === 'classified_by_ai' || status === 'classified_by_rule') confidences.add('medium')
-      else confidences.add('low')
-      if (row.supplierName) suppliers.add(String(row.supplierName))
-      if (row.classificationPath) {
-        const l1 = String(row.classificationPath).split('|')[0]
-        if (l1) classifications.add(l1.trim())
-      }
-    }
-
-    return {
-      confidences: Array.from(confidences).sort(),
-      suppliers: Array.from(suppliers).sort().slice(0, 50), // Top 50
-      classifications: Array.from(classifications).sort()
-    }
-  }, [txnLen])
-
-  // Map filterState keys → backend keys (for normalizing operator/connector lookups)
-  const fsKeyToBackendKey: Record<string, string> = useMemo(() => ({
-    supplier: 'supplier_name',
-    classificationL1: 'classification_l1',
-    classificationL2: 'classification_l2',
-    classificationL3: 'classification_l3',
-    classificationL4: 'classification_l4',
-    glDescription: 'gl_description',
-    lineDescription: 'line_description',
-  }), [])
-
-  // Base filtered transactions - apply global filters (from filter panel) EXCEPT
-  // the per-level taxonomy filters (classificationL1–L4). We will apply those
-  // separately so that the Classification Path table can always show the full
-  // taxonomy while other tables respect the level filters.
-  const baseFilteredTransactions = useMemo(() => {
-    const isOrMode = filterCombinator === 'OR'
-
-    // Operator-aware match
-    const matchWithOperator = (rowVal: string, filterVal: string, operator: string): boolean => {
-      const rv = (rowVal || '').toString().trim().toLowerCase()
-      const fv = (filterVal || '').toString().trim().toLowerCase()
-      switch (operator) {
-        case 'is': return rv === fv
-        case 'is_not': return rv !== fv
-        case 'contains': return rv.includes(fv)
-        case 'not_contains': return !rv.includes(fv)
-        case 'starts_with': return rv.startsWith(fv)
-        case 'ends_with': return rv.endsWith(fv)
-        default: return rv === fv
-      }
-    }
-
-    // Helper: check if a row matches a single activeFilter category
-    // Uses backend key for operator lookup
-    const matchesActiveFilter = (row: DashboardTransactionRow, key: string, value: string | string[]) => {
-      if (!value) return true
-      const op = filterGroupOperators[key] || 'is'
-      if (Array.isArray(value)) {
-        const isNegative = op === 'is_not' || op === 'not_contains'
-        const rowVal = (row[key] || '').toString().trim()
-        if (isNegative) return value.every(v => matchWithOperator(rowVal, v, op))
-        return value.some(v => matchWithOperator(rowVal, v, op))
-      }
-      return matchWithOperator((row[key] || '').toString().trim(), (value || '').toString().trim(), op)
-    }
-
-    // Resolve actual row value for a filterState key
-    const getRowValueForFsKey = (row: DashboardTransactionRow, fsKey: string): string => {
-      switch (fsKey) {
-        case 'supplier': return String(row.supplier_name || '')
-        case 'glDescription': return String(row.gl_description || '')
-        case 'lineDescription': return String(row.line_description || '')
-        case 'company': return String(row['company'] || '')
-        case 'year': return String(row['year'] || '')
-        case 'quarter': return String(row['quarter'] || '')
-        case 'month': return String(row['month'] || '')
-        case 'costCenter': return String(row['cost_center'] || '')
-        case 'country': return String(row['country'] || '')
-        default: return ''
-      }
-    }
-
-    // Helper: check if a row matches a single filterState category
-    // Returns null if the filter is not active (skip it)
-    // Uses backend key for operator lookup
-    const matchesFilterStateEntry = (row: DashboardTransactionRow, fsKey: string, fsValues: string[]): boolean | null => {
-      if (!Array.isArray(fsValues) || fsValues.length === 0) return null
-      // Skip classificationL1–L4 in base pass (handled separately for taxonomy table)
-      if (fsKey === 'classificationL1' || fsKey === 'classificationL2' || fsKey === 'classificationL3' || fsKey === 'classificationL4') return null
-      const backendKey = fsKeyToBackendKey[fsKey] || fsKey
-      const op = filterGroupOperators[backendKey] || 'is'
-      const rowVal = getRowValueForFsKey(row, fsKey)
-      const isNegative = op === 'is_not' || op === 'not_contains'
-      if (isNegative) return fsValues.every(v => matchWithOperator(rowVal, v, op))
-      return fsValues.some(v => matchWithOperator(rowVal, v, op))
-    }
-
-    return transactions.filter((row: DashboardTransactionRow) => {
-      // Collect all filter condition results with their group keys (using backend keys)
-      const conditionEntries: Array<{ key: string; result: boolean }> = []
-      const seenBackendKeys = new Set<string>()
-
-      // filterState conditions FIRST (source of truth for UI-managed filters)
-      // Skip classificationL1–L4 in base pass
-      Object.entries(filterState).forEach(([fsKey, fsValues]: [string, string[]]) => {
-        const result = matchesFilterStateEntry(row, fsKey, fsValues)
-        if (result !== null) {
-          const backendKey = fsKeyToBackendKey[fsKey] || fsKey
-          conditionEntries.push({ key: backendKey, result })
-          seenBackendKeys.add(backendKey)
-        }
-      })
-
-      // activeFilters conditions — skip keys already covered by filterState
-      // Also skip classification_l* (handled via classificationL1–L4 filterState)
-      Object.entries(activeFilters).forEach(([key, value]: [string, string | string[]]) => {
-        if (key === 'classification_l1' || key === 'classification_l2' || key === 'classification_l3' || key === 'classification_l4') return
-        if (!value || (Array.isArray(value) && value.length === 0)) return
-        if (seenBackendKeys.has(key)) return // already handled via filterState
-        conditionEntries.push({ key, result: matchesActiveFilter(row, key, value) })
-      })
-
-      // If no filter conditions, row passes
-      if (conditionEntries.length === 0) return true
-
-      // Evaluate with SQL-like AND/OR precedence (AND binds tighter than OR)
-      return evaluateFilterConditions(conditionEntries, filterConnectors, filterCombinator)
-    })
-  }, [transactions, activeFilters, filterState, filterCombinator, filterConnectors, filterGroupOperators, fsKeyToBackendKey])
-
-  // Transactions used for the Classification Path table: use the RAW transactions
-  // so the full taxonomy always stays visible, regardless of any filters.
-  const taxonomyTransactions = transactions
-
-  // Transactions used for all other tables: apply the per-level taxonomy filters
-  // so they respect clicks in the taxonomy tree.
-  const filteredTransactions = useMemo(() => {
-    return baseFilteredTransactions.filter((row: DashboardTransactionRow) => {
-      if (Array.isArray(filterState.classificationL1) && filterState.classificationL1.length > 0) {
-        const path = String(row.classification_path || row['taxonomy_path'] || '')
-        const parts = path.split('|').map((p: string) => p.trim())
-        if (!parts[0] || !filterState.classificationL1.some(l1 => parts[0].toLowerCase() === l1.toLowerCase())) return false
-      }
-
-      if (Array.isArray(filterState.classificationL2) && filterState.classificationL2.length > 0) {
-        const path = String(row.classification_path || row['taxonomy_path'] || '')
-        const parts = path.split('|').map((p: string) => p.trim())
-        if (!parts[1] || !filterState.classificationL2.some((l2: string) => parts[1].toLowerCase() === l2.toLowerCase())) return false
-      }
-
-      if (Array.isArray(filterState.classificationL3) && filterState.classificationL3.length > 0) {
-        const path = String(row.classification_path || row['taxonomy_path'] || '')
-        const parts = path.split('|').map((p: string) => p.trim())
-        if (!parts[2] || !filterState.classificationL3.some((l3: string) => parts[2].toLowerCase() === l3.toLowerCase())) return false
-      }
-
-      if (Array.isArray(filterState.classificationL4) && filterState.classificationL4.length > 0) {
-        const path = String(row.classification_path || row['taxonomy_path'] || '')
-        const parts = path.split('|').map((p: string) => p.trim())
-        if (!parts[3] || !filterState.classificationL4.some((l4: string) => parts[3].toLowerCase() === l4.toLowerCase())) return false
-      }
-
-      return true
-    })
-  }, [baseFilteredTransactions, filterState])
-  
 
   // Helper to toggle a value within an array (add if missing, remove if present)
   const toggleValueInArray = useCallback((arr: string[], value: string): string[] => {
@@ -1841,37 +1487,9 @@ const MultiTableSystem = ({
     const rendered = renderedTableDataRef.current[idx]
     if (rendered && rendered.length > 0) return rendered
 
-    // Fallback: client-side grouping (for initial render before FilterTable reports)
-    const currentTable = tables[idx]
-    if (!currentTable) return []
-    const sourceTransactions = currentTable.column === 'classification_path'
-      ? taxonomyTransactions
-      : filteredTransactions
-
-    const grouped: Record<string, number> = sourceTransactions.reduce((acc: Record<string, number>, row: DashboardTransactionRow) => {
-      const rawValue = row[currentTable.column]
-      const value = (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '')
-        ? String(rawValue).trim()
-        : 'Unknown'
-      const amount = parseFloat(String(row.spend_amount || 0)) || 0
-      acc[value] = (acc[value] || 0) + amount
-      return acc
-    }, {} as Record<string, number>)
-
-    return Object.entries(grouped)
-      .map(([value, amount]: [string, number]) => ({ value, amount }))
-      .filter(item => {
-        if (item.amount <= 0) return false
-        // Filter out blank/unknown values (matching FilterTable logic)
-        const isBlank = !item.value ||
-                       item.value.trim() === '' ||
-                       item.value.toLowerCase() === '[blank]' ||
-                       item.value.toLowerCase() === 'unknown' ||
-                       item.value.toLowerCase() === 'blank'
-        return !isBlank
-      })
-      .sort((a, b) => b.amount - a.amount)
-  }, [tables, tableNav.tableIndex, filteredTransactions, taxonomyTransactions])
+    // Not yet populated — keyboard nav waits for FilterTable to report
+    return []
+  }, [tables, tableNav.tableIndex])
 
   // Handle keyboard navigation in tables
   const handleTableKeyboardNav = useCallback((direction: string) => {
@@ -2094,7 +1712,7 @@ const MultiTableSystem = ({
         <div className="kanban-layout">
           {/* Tables grid: max 3 columns per row, wraps to new rows */}
           <div className="kanban-tables-grid">
-            {tables.map((table: TableDef, index: number) => {
+            {tables.map((table: ReviewTableConfig, index: number) => {
               const isTaxonomy = table.column === 'classification_path'
               return (
                 <DraggableTableCard
@@ -2108,8 +1726,8 @@ const MultiTableSystem = ({
                     tableId={table.id}
                     title={table.title}
                     column={table.column}
-                    data={isTaxonomy ? taxonomyTransactions : filteredTransactions}
-                    groupedRows={!isTaxonomy && groupedData?.get(table.column)?.rows}
+                    data={transactions}
+                    groupedRows={groupedData?.get(table.column)?.rows || null}
                     activeFilters={activeFilters}
                     onClose={removeTable}
                     selectedRows={selectedRows}
@@ -2134,7 +1752,6 @@ const MultiTableSystem = ({
           <CurrentFiltersPanel
             activeFilters={activeFilters}
             filterState={filterState}
-            tableLocalFilters={{}}
             tables={tables}
             filterCombinator={filterCombinator}
             filterConnectors={filterConnectors}
@@ -2143,11 +1760,9 @@ const MultiTableSystem = ({
             onSetFilterConnector={onSetFilterConnector}
             onSetFilterOperator={onSetFilterOperator}
             onRemoveFilter={onRemoveFilter}
-            onRemoveLocalFilter={onRemoveLocalFilter}
             onClearAll={onClearAll}
             onAddFilter={onAddFilter}
             transactions={transactions}
-            allTransactions={allTransactions}
           />
         </div>
       </div>

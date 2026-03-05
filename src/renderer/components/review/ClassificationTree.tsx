@@ -49,8 +49,8 @@ interface ClassificationTreeProps {
   mode: string;
   datasetId?: string;
   foldername?: string;
-  keyboardFocus: string;
-  setKeyboardFocus: (focus: string) => void;
+  keyboardFocus: 'tree' | 'tables';
+  setKeyboardFocus: (focus: 'tree' | 'tables') => void;
 }
 
 const ColumnNode = React.memo(({ node, level, isSelected, isActivePath, onSelect, onDropRow, onHoverExpand, isKeyboardSelected, onRename, onDelete, isLeaf }: ColumnNodeProps) => {

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { X, Plus, ChevronDown } from 'lucide-react'
 import { useDrop } from 'react-dnd'
 import { ITEM_TYPE } from './MultiTableSystem'
+import type { ReviewTableConfig } from './ReviewFilterContext'
 import '../../styles/CurrentFiltersPanel.css'
 
 /** Compute AND group membership for visual grouping in the filter panel UI. */
@@ -231,36 +232,26 @@ const ValuePicker: React.FC<ValuePickerProps> = ({ fieldKey, transactions, onSel
 }
 
 
-interface TableConfig {
-  id: string
-  title: string
-  [key: string]: unknown
-}
-
 interface CurrentFiltersPanelProps {
   activeFilters?: Record<string, unknown>
   filterState?: Record<string, unknown>
-  tableLocalFilters?: Record<string, Record<string, unknown>>
-  tables?: TableConfig[]
+  tables?: ReviewTableConfig[]
   filterCombinator?: string
   filterConnectors?: Record<string, 'AND' | 'OR'>
   filterGroupOperators?: Record<string, string>
-  onSetFilterCombinator?: (val: string) => void
+  onSetFilterCombinator?: (val: 'AND' | 'OR') => void
   onSetFilterConnector?: (key: string, val: 'AND' | 'OR') => void
   onSetFilterOperator?: (key: string, val: string) => void
   onRemoveFilter: (key: string, value: string | null) => void
-  onRemoveLocalFilter?: (tableId: string, key: string | undefined, value: string | null) => void
   onClearAll: () => void
   onAddFilter: (key: string, values: string[]) => void
   transactions?: Array<Record<string, unknown>>
-  allTransactions?: Array<Record<string, unknown>>
 }
 
 const CurrentFiltersPanel: React.FC<CurrentFiltersPanelProps> = ({
   activeFilters = {},
   filterState = {},
-  tableLocalFilters = {},
-  tables = [],
+  tables = [] as ReviewTableConfig[],
   filterCombinator = 'AND',
   filterConnectors = {} as Record<string, 'AND' | 'OR'>,
   filterGroupOperators = {} as Record<string, string>,
@@ -268,11 +259,9 @@ const CurrentFiltersPanel: React.FC<CurrentFiltersPanelProps> = ({
   onSetFilterConnector,
   onSetFilterOperator,
   onRemoveFilter,
-  onRemoveLocalFilter,
   onClearAll,
   onAddFilter,
   transactions = [],
-  allTransactions = []
 }) => {
   // Track which value picker is open (by group key)
   const [activeValuePicker, setActiveValuePicker] = useState<string | null>(null)
@@ -300,9 +289,8 @@ const CurrentFiltersPanel: React.FC<CurrentFiltersPanelProps> = ({
       label: string          // human-readable (e.g. Supplier Name)
       values: Array<{
         value: string
-        source: 'filterState' | 'activeFilters' | 'localFilters'
+        source: 'filterState' | 'activeFilters'
         isArrayItem: boolean
-        tableId?: string
       }>
     }> = []
     const groupMap = new Map<string, typeof groups[0]>()
@@ -330,7 +318,7 @@ const CurrentFiltersPanel: React.FC<CurrentFiltersPanelProps> = ({
           const id = `${backendKey}:${v}`
           if (!seen.has(id)) {
             seen.add(id)
-            group.values.push({ value: String(v), source: 'filterState', isArrayItem: Array.isArray(value) })
+            group.values.push({ value: String(v), source: 'filterState' as const, isArrayItem: Array.isArray(value) })
           }
         })
       })
@@ -354,33 +342,13 @@ const CurrentFiltersPanel: React.FC<CurrentFiltersPanelProps> = ({
           const id = `${key}:${v}`
           if (!seen.has(id)) {
             seen.add(id)
-            group.values.push({ value: String(v), source: 'activeFilters', isArrayItem: Array.isArray(value) })
+            group.values.push({ value: String(v), source: 'activeFilters' as const, isArrayItem: Array.isArray(value) })
           }
         })
       })
-
-    // 3. tableLocalFilters (per-table drag-drop filters)
-    Object.entries(tableLocalFilters).forEach(([tableId, localFilters]: [string, Record<string, unknown>]) => {
-      const table = tables.find((t: TableConfig) => t.id === tableId)
-      const tableTitle = table ? table.title : `Table ${tableId}`
-      Object.entries(localFilters).forEach(([key, value]: [string, unknown]) => {
-        const label = allFilterLabels[key] || key
-        const groupKey = `${tableId}:${key}`
-        const group = getOrCreateGroup(groupKey, `${label} (${tableTitle})`)
-        const values: unknown[] = Array.isArray(value) ? value : [value]
-        values.forEach((v: unknown) => {
-          if (!v) return
-          const id = `${tableId}:${key}:${v}`
-          if (!seen.has(id)) {
-            seen.add(id)
-            group.values.push({ value: String(v), source: 'localFilters', isArrayItem: true, tableId })
-          }
-        })
-      })
-    })
 
     return groups
-  }, [activeFilters, filterState, tableLocalFilters, tables])
+  }, [activeFilters, filterState, tables])
 
   const totalFilterCount = groupedFilters.reduce((sum, g) => sum + g.values.length, 0)
 
@@ -398,17 +366,12 @@ const CurrentFiltersPanel: React.FC<CurrentFiltersPanelProps> = ({
   }, [groupedFilters, filterConnectors])
 
   const handleRemoveValue = (group: typeof groupedFilters[0], valueEntry: typeof groupedFilters[0]['values'][0]) => {
-    if (valueEntry.source === 'localFilters' && onRemoveLocalFilter) {
-      onRemoveLocalFilter(valueEntry.tableId!, group.key.split(':').pop(), valueEntry.value)
-    } else {
-      // For filterState entries, group.key is now a backend key (e.g. supplier_name).
-      // The Dashboard removeFilter function needs the UI key for filterState entries,
-      // so map backend key back to UI key if the source is filterState.
-      const removeKey = valueEntry.source === 'filterState'
-        ? (keyMapping[group.key] || group.key)
-        : group.key
-      onRemoveFilter(removeKey, valueEntry.isArrayItem ? valueEntry.value : null)
-    }
+    // For filterState entries, group.key is a backend key (e.g. supplier_name).
+    // Dashboard's removeFilter needs the UI key for filterState entries.
+    const removeKey = valueEntry.source === 'filterState'
+      ? (keyMapping[group.key] || group.key)
+      : group.key
+    onRemoveFilter(removeKey, valueEntry.isArrayItem ? valueEntry.value : null)
   }
 
   // Add a new filter row
@@ -545,7 +508,7 @@ const CurrentFiltersPanel: React.FC<CurrentFiltersPanelProps> = ({
                   <div className="fibery-picker-overlay">
                     <ValuePicker
                       fieldKey={newRowField || filterableFields[0].key}
-                      transactions={allTransactions.length > 0 ? allTransactions : transactions}
+                      transactions={transactions}
                       onSelect={(val) => handleAddNewFilter(newRowField || filterableFields[0].key, val)}
                       onClose={() => setActiveValuePicker(null)}
                     />

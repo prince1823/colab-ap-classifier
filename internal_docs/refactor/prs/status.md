@@ -207,6 +207,46 @@ Code review of PR 1 commit revealed two bugs:
 
 ---
 
+## PR 3: Dashboard Decomposition — COMPLETED
+**Date:** 2026-03-05
+
+### Changes Made
+
+1. **Created `TablesTab.tsx`** — extracted the entire tables tab content from Dashboard. Calls `useReviewFilterContext()` directly. Owns: filter callbacks, filter options fetching, filterState→activeFilters sync, currentSelection, dragDropManager scroll effect, `useGroupedTransactions`, all filter panel JSX, `MultiTableSystem`, `ClassificationTree`. Exposes `refetchGrouped` back to Dashboard via `onRegisterRefetchGrouped` ref-registration pattern.
+
+2. **Created `MetricsTabContainer.tsx`** — new IPC container for metrics modal. Calls `ipc.transactions.stats()` (global stats), `ipc.transactions.pivotAggregation(['classification_l1'], ...)`, `pivotAggregation(['supplier_name'], ...)`, `pivotAggregation(['year', 'month'], ...)` — all with active filter conditions. Transforms pivot results to typed shapes (l1Data, supplierData, monthlyData). Implements `handleDrillToFilters` via `setFilters()` from context + `onClose()`.
+
+3. **Refactored `MetricsTab.tsx`** — props now `{ stats, l1Data, supplierData, monthlyData, onDrillToFilters }` — no `TransactionRow[]`. Removed all client-side aggregation (totals, chartData, topSuppliers, monthlySeries useMemos on raw rows). Calls own IPC for `particularDimension` data via `useReviewFilters().toFilterConditions()` + `useIPC`. Simplified `insights` to use aggregated props (l1Data, supplierData, monthlyData, stats). Fixes D9.
+
+4. **Refactored `SpendVisualizations.tsx`** — removed `transactions` prop, `activeFilters` prop, client-side `filteredTransactions` useMemo, and Map-based `topSuppliersData`/`taxonomySpend` grouping. Now calls `ipc.transactions.pivotAggregation` for supplier and L1/L2/L3 taxonomy data. Fixed pre-existing wrong CSS import path (`../styles/` → `../../styles/`). Fixes D10.
+
+5. **Slimmed `Dashboard.tsx`** — from ~975 lines to ~165 lines. Keeps: `executeReclassification`, `useUndoRedo`, reclassify toast, MetricsTabContainer modal, `ReclassifyConfirmModal`. All filter/table logic moved to `TablesTab`.
+
+### Deviations from Plan
+
+- **`useHierarchicalPivotData.ts` NOT deleted** — the hook function has no callers (confirmed via grep), but the file exports 4 types (`PivotTreeNode`, `HierarchicalPivotData`, `FlattenedPivotRow`, `Aggregation`) that are still imported by `useServerPivotData.ts`, `HierarchicalPivotView.tsx`, `usePivotTreeState.ts`, `PivotToolbar.tsx`, and `exportPivotToExcel.ts`. Deleting the file would require migrating those type imports to another location — out of scope for this PR. Function body is dead code but the types are still needed.
+
+- **`supplierGainersDecliners` removed from MetricsTab** — the spec didn't mention this, but it depended on per-supplier-per-month data from raw rows. Not available via the current IPC endpoints without a cross-dimensional pivot query. Removed rather than implemented incorrectly.
+
+- **Global stats, not filtered stats** — `ipc.transactions.stats()` has no filter parameter; MetricsTab header shows global totals (total rows, total spend, etc.) regardless of active filters. Chart data (l1Data, supplierData, monthlyData) is filtered correctly. A `filteredStats` approach from l1Result.totalAmount was considered but stats are intentionally global per the spec's dep array `[]`.
+
+- **`selectedBenchmark` (overall vs top supplier toggle) removed** — previously toggled the area chart between total spend and top-supplier spend per month. The monthly pivot only returns total spend per month (not per-supplier monthly data). Removed rather than faking it.
+
+- **`refetchGrouped` registration pattern** — TablesTab owns `useGroupedTransactions` (as spec intends), but Dashboard's `executeReclassification` needs to call `refetchGrouped` after reclassification. Used a `useRef<() => void>` in Dashboard + `onRegisterRefetchGrouped` prop to TablesTab, which calls it in a `useEffect` when `refetchGrouped` changes. Cleaner than moving groupedData ownership back to Dashboard.
+
+- **`tsc --noEmit` passes** — zero errors.
+
+### Files Modified
+- `src/renderer/components/review/Dashboard.tsx` — slimmed to ~165 lines
+- `src/renderer/components/review/MetricsTab.tsx` — refactored props + IPC
+- `src/renderer/components/review/SpendVisualizations.tsx` — IPC-only, fixed CSS path
+
+### Files Created
+- `src/renderer/components/review/TablesTab.tsx`
+- `src/renderer/components/review/MetricsTabContainer.tsx`
+
+---
+
 ## PR 3: Dashboard Decomposition — SPEC REWRITTEN (v2), NOT STARTED
 
 ### Spec rewrite reason

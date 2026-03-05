@@ -10,7 +10,11 @@ export default function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const autoReopenAttempted = useRef(false)
-  const [reopening, setReopening] = useState(false)
+  // Initialize synchronously so the first render already shows the spinner
+  // if a project filePath was persisted — prevents flash of wrong UI state.
+  const [reopening, setReopening] = useState(
+    () => !!useWorkflowStore.getState().projectFilePath
+  )
 
   const isReviewTab = location.pathname === '/workflow/review'
   const [reviewSidebarCollapsed, setReviewSidebarCollapsed] = useState(true)
@@ -20,11 +24,10 @@ export default function AppShell() {
     if (autoReopenAttempted.current) return
     autoReopenAttempted.current = true
 
-    const { projectMetadata, lastRoute } = useWorkflowStore.getState()
-    if (!projectMetadata?.filePath) return
+    const { projectFilePath, lastRoute } = useWorkflowStore.getState()
+    if (!projectFilePath) return
 
-    setReopening(true)
-    loadProject(projectMetadata.filePath)
+    loadProject(projectFilePath)
       .then(() => {
         // Navigate to the persisted route (or fallback to upload)
         const target = lastRoute || '/workflow/upload'

@@ -11,6 +11,9 @@ interface WorkflowState {
   classifiedRows: number
   dataReviewed: boolean
 
+  // Persisted for auto-reopen only — a plain string, never a partial cast of ProjectMetadata
+  projectFilePath: string | null
+
   // Persisted route — restored on reload
   lastRoute: string | null
 
@@ -62,6 +65,7 @@ export const useWorkflowStore = create<WorkflowState>()(
       classificationProgress: null,
       classifiedRows: 0,
       dataReviewed: false,
+      projectFilePath: null,
       lastRoute: null,
 
       ...deriveState(null, 0, null, false),
@@ -79,6 +83,7 @@ export const useWorkflowStore = create<WorkflowState>()(
         const metadata = await ipc.project.getMetadata()
         set({
           projectMetadata: metadata,
+          projectFilePath: metadata?.filePath ?? null,
           classifiedRows: 0,
           classificationProgress: null,
           ...deriveState(metadata, 0, null),
@@ -134,6 +139,7 @@ export const useWorkflowStore = create<WorkflowState>()(
 
         set({
           projectMetadata: metadata,
+          projectFilePath: metadata?.filePath ?? null,
           classifiedRows,
           classificationProgress: null,
           ...derived,
@@ -148,6 +154,7 @@ export const useWorkflowStore = create<WorkflowState>()(
         }
         set({
           projectMetadata: null,
+          projectFilePath: null,
           classifiedRows: 0,
           classificationProgress: null,
           lastRoute: null,
@@ -255,6 +262,7 @@ export const useWorkflowStore = create<WorkflowState>()(
       reset: () => {
         set({
           projectMetadata: null,
+          projectFilePath: null,
           classifiedRows: 0,
           dataReviewed: false,
           classificationProgress: null,
@@ -265,11 +273,9 @@ export const useWorkflowStore = create<WorkflowState>()(
     }),
     {
       name: 'c91-workflow',
-      version: 3,
+      version: 4,
       partialize: (state) => ({
-        projectMetadata: state.projectMetadata
-          ? ({ filePath: state.projectMetadata.filePath } as ProjectMetadata)
-          : null,
+        projectFilePath: state.projectFilePath,
         lastRoute: state.lastRoute,
       }),
     }

@@ -28,10 +28,10 @@ Renderer (React + Zustand) <-- IPC --> Main Process (Node.js)
                                   (DuckDB)     universe.db  / Exa APIs
 ```
 
-- **Renderer:** React UI with workflow pages — Upload → DataReview → Suppliers → Classification → Review → Output. State managed via Zustand (`workflowStore`) and `useIPC<T>` hook.
+- **Renderer:** React UI with two route groups — **workflow steps** (Upload → DataReview → Classification → Review → Output) and **project views** (CompanyContext, Taxonomy, Suppliers, OverrideRules, VersionHistory). State managed via Zustand (`workflowStore`) and `useIPC<T>` hook.
 - **Main process:** DI container (`container.ts`), IPC handlers, orchestrators, DB access. No git sync.
 - **3 LLM agents:** ClassificationAgent, ResearchAgent, ColumnMappingAgent
-- **DI Container:** `createContainer()` in `src/main/container.ts` — lightweight factory (~60 lines), no framework. All services receive dependencies via constructor.
+- **DI Container:** `createContainer()` in `src/main/container.ts` — lightweight factory, no framework. All services receive dependencies via constructor.
 - **EventBus:** single typed event emitter for async progress (classification, supplier research). Services emit events; entry point forwards to renderer via `webContents.send`.
 - **Storage:** each project is a single `.c91` DuckDB file (portable, self-contained). Default location: `./projects/` (gitignored). Recent projects tracked in `~/.config/Colab91 Classifier/recent-projects.json`. Shared `supplier_universe.db` in `colabip/` holds global supplier data across projects.
 - **ColabIP:** local directory with master taxonomy files imported into projects. No runtime sync or git integration in the app.
@@ -42,8 +42,7 @@ Renderer (React + Zustand) <-- IPC --> Main Process (Node.js)
 colab-ap-classifier/
 ├── CLAUDE.md
 ├── .gitignore
-├── .claude/                # Claude Code skills
-│   └── skills/             # Slash command skills (/implement-issue)
+├── .claude/                # Claude Code config (settings, launch)
 ├── .github/                # GitHub config
 │   └── issues/             # Archive only (S1 artifacts in archive/sprint-1/)
 ├── internal_docs/          # Architecture docs, refactor notes
@@ -60,10 +59,12 @@ colab-ap-classifier/
 │   │   └── utils/          # Pure functions (query-builder, text)
 │   ├── renderer/           # React frontend
 │   │   ├── components/
-│   │   ├── pages/          # Workflow pages
+│   │   ├── pages/          # Workflow + project view pages
+│   │   ├── stores/         # Zustand stores (workflowStore)
 │   │   └── hooks/
 │   ├── shared/             # Shared types, constants
-│   │   └── types/          # TypeScript interfaces (IPC, DB models, services)
+│   │   ├── types/          # TypeScript interfaces (IPC, DB models, services)
+│   │   └── canonical-columns.ts  # Canonical column name definitions
 │   └── preload.ts          # Electron preload (contextBridge)
 ├── package.json
 └── tsconfig.json
@@ -106,34 +107,39 @@ colab-ap-classifier/
 - `SupplierUniverse` (`colabip/supplier_universe.db`) is a shared DB with global supplier data, aliases, and research info
 
 ### LLM Configuration
-- Default model: `claude-3-5-haiku-latest`
-- Env vars (loaded from `.env` at startup via `src/main/load-env.ts`): `CLASSIFIER_LLM_PROVIDER`, `CLASSIFIER_MODEL`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+- Default model: `claude-3-5-haiku-latest`, default provider: `openrouter`
+- **Primary:** Settings UI writes to `llm-config.json` (via `LLMConfigService`, stored in `app.getPath('userData')`). Keys are encrypted via Electron `safeStorage`.
+- **Fallback env vars** (loaded from `.env` via `src/main/load-env.ts`): `CLASSIFIER_LLM_PROVIDER`, `CLASSIFIER_MODEL`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`
 - LLM response parsing is hardened: column mapping agent auto-corrects inverted mappings, classification agent unwraps `{"transactions": [...]}` envelopes
 - Agent prompt builders and parsers are exported as pure functions alongside classes for standalone test use
 
 ## Development
 
 ### Branches
-- `dev` — active development (feature PRs target here)
-- `main` — stable (release PRs from dev)
-- Feature/fix/docs branches: follow naming conventions in skill files
+- `main` — stable
+- `dev` — integration branch (remote); PRs may target here or directly to main
+- `v2-merge` — current active development branch
+- Feature/fix/docs branches: short descriptive names
 
 ### Development Workflow
 
-Skills-based, issue-driven development.
+Issue-driven development via GitHub.
 
-```
-/create-issue  →  /implement-issue  →  /close-session  →  /update-docs  →  /merge-pr
-  (define)         (build + PR)       (log session)  (sync specs)     (merge + track)
-```
-
-- `/create-issue` — reads specs, plans scope with user, creates GitHub issue with board fields
-- `/implement-issue` — reads issue + board fields, implements on branch, presents summary, creates PR to `dev` after user approval
-- `/close-session` — classifies session (Feature/Scratchpad), captures verbatim summary with session link
-- `/update-docs <PR_number>` — reads PR diff + connected daily logs/sessions, detects spec drift, proposes doc updates
-- `/merge-pr` — merges PR into `dev`, posts cross-impact comments on affected issues
 - All issue metadata lives on the GitHub Project board (Thread, Track, Type, Priority, Size)
 - Issues support sub-issues for decomposing large features
+- PRs describe changes with test plan; merge into `dev` or directly to `main`
+
+### Debug Logging
+
+Logging is opt-in via `LOG_FILE` env var. Noop by default — no I/O overhead in normal dev.
+
+```bash
+npm run dev          # no logging
+npm run dev:log      # logs to /tmp/c91-debug.log
+LOG_FILE=/custom/path.log npm run dev  # logs to custom path
+```
+
+`tail -f /tmp/c91-debug.log` to follow live. Implementation: `src/main/utils/debug-log.ts`.
 
 ### GitHub Setup
 

@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
 import { ipc } from '../lib/ipc'
-import type { OverrideRule, RuleCondition, RuleOperator, RuleSource } from '../../shared/types/rules'
+import type { OverrideRule } from '../../shared/types/rules'
+import type { FilterCondition, FilterOperator } from '../../shared/types/transactions'
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
 
-const OPERATORS: RuleOperator[] = [
+const OPERATORS: FilterOperator[] = [
   'equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with',
   'regex', 'in_list', 'greater_than', 'less_than', 'greater_than_or_equal', 'less_than_or_equal',
 ]
 
-const OPERATOR_LABELS: Record<RuleOperator, string> = {
+const OPERATOR_LABELS: Record<FilterOperator, string> = {
   equals: 'equals',
   not_equals: 'not equals',
   contains: 'contains',
@@ -34,7 +35,7 @@ export default function OverrideRulesPage() {
   const [showEditor, setShowEditor] = useState(false)
   const [editingRule, setEditingRule] = useState<OverrideRule | null>(null)
   const [name, setName] = useState('')
-  const [conditions, setConditions] = useState<RuleCondition[]>([{ field: '', operator: 'equals', value: '', connector: 'AND' }])
+  const [conditions, setConditions] = useState<FilterCondition[]>([{ field: '', operator: 'equals', value: '', connector: 'AND' }])
   const [targetNodeId, setTargetNodeId] = useState('')
   const [priority, setPriority] = useState(100)
   const [saving, setSaving] = useState(false)
@@ -45,8 +46,8 @@ export default function OverrideRulesPage() {
     try {
       const [r, n, cols] = await Promise.all([
         ipc.rules.list(),
-        ipc.taxonomy.getNodes().catch(() => [] as TaxonomyNode[]),
-        ipc.transactions.getColumns().catch(() => [] as string[]),
+        ipc.taxonomy.getNodes(),
+        ipc.transactions.getColumns(),
       ])
       setRules(r)
       setTaxonomyNodes(n)
@@ -114,12 +115,12 @@ export default function OverrideRulesPage() {
     }
   }
 
-  const updateCondition = (index: number, field: keyof RuleCondition, value: string) => {
+  const updateCondition = (index: number, field: keyof FilterCondition, value: string) => {
     setConditions((prev) => prev.map((c, i) => (i === index ? { ...c, [field]: value } : c)))
   }
 
   const addCondition = () => {
-    setConditions((prev) => [...prev, { field: '', operator: 'equals' as RuleOperator, value: '', connector: 'AND' }])
+    setConditions((prev) => [...prev, { field: '', operator: 'equals' as FilterOperator, value: '', connector: 'AND' }])
   }
 
   const toggleConnector = (index: number) => {
@@ -132,7 +133,7 @@ export default function OverrideRulesPage() {
 
   const getNodePath = (nodeId: string) => taxonomyNodes.find((n) => n.id === nodeId)?.fullPath || nodeId
 
-  const formatConditionSummary = (conds: RuleCondition[]) => {
+  const formatConditionSummary = (conds: FilterCondition[]) => {
     if (conds.length === 0) return 'No conditions'
     return conds.map((c, i) => {
       const parts = `${c.field} ${OPERATOR_LABELS[c.operator]} "${c.value}"`

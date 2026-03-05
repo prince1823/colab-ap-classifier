@@ -1262,7 +1262,7 @@ const MultiTableSystem = ({
     for (let i = 0; i < transactions.length; i++) {
       const row = transactions[i]
       const status = row.classification_status as string
-      if (status === 'human_reviewed') confidences.add('high')
+      if (row.human_reviewed || row.humanReviewed) confidences.add('high')
       else if (status === 'classified_by_ai' || status === 'classified_by_rule') confidences.add('medium')
       else confidences.add('low')
       if (row.supplier_name) suppliers.add(row.supplier_name)

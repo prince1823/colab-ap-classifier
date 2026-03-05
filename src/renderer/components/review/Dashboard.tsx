@@ -12,7 +12,7 @@ import MetricsTab from './MetricsTab'
 import { evaluateFilterConditions } from '../../utils/filterEvaluation'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { useGroupedTransactions } from '../../hooks/useGroupedTransactions'
-import type { TransactionFilter, ColumnFilter } from '../../../shared/types/transactions'
+import type { TransactionFilter, FilterCondition } from '../../../shared/types/transactions'
 import '../../styles/Dashboard.css'
 import '../../styles/Tabs.css'
 
@@ -388,18 +388,17 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     country: 'country',
   }), [])
 
-  // Convert activeFilters + filterState to TransactionFilter.columnFilters for server-side WHERE
-  // Passes per-pair filterConnectors to the backend for SQL-like AND/OR precedence
+  // Convert activeFilters + filterState to TransactionFilter.conditions for server-side WHERE
   const serverSideFilter = useMemo<TransactionFilter | undefined>(() => {
-    const columnFilters: ColumnFilter[] = []
+    const conditions: FilterCondition[] = []
     const seenColumns = new Set<string>()
 
     // filterState entries (dropdown filters)
     Object.entries(filterState).forEach(([fsKey, fsValues]) => {
       if (!Array.isArray(fsValues) || fsValues.length === 0) return
       const col = fsKeyToCol[fsKey] || fsKey
-      const op = filterGroupOperators[col] || 'is'
-      columnFilters.push({ column: col, operator: op as ColumnFilter['operator'], values: fsValues.map(String) })
+      const connector = filterConnectors[col] || 'AND'
+      conditions.push({ field: col, operator: 'in_list', value: fsValues.map(String), connector })
       seenColumns.add(col)
     })
 
@@ -408,19 +407,13 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       if (!value || (Array.isArray(value) && value.length === 0)) return
       if (seenColumns.has(key)) return // already covered by filterState
       const values = Array.isArray(value) ? value : [value]
-      const op = filterGroupOperators[key] || 'is'
-      columnFilters.push({ column: key, operator: op as ColumnFilter['operator'], values: values.map(String) })
+      conditions.push({ field: key, operator: 'in_list', value: values.map(String) })
     })
 
-    if (columnFilters.length === 0) return undefined
+    if (conditions.length === 0) return undefined
 
-    // Pass per-pair connectors directly — backend builds SQL with AND/OR precedence
-    return {
-      columnFilters,
-      filterCombinator: (filterCombinator as 'AND' | 'OR') || 'AND',
-      filterConnectors: filterConnectors as Record<string, 'AND' | 'OR'>,
-    }
-  }, [activeFilters, filterState, filterGroupOperators, filterCombinator, filterConnectors, fsKeyToCol])
+    return { conditions }
+  }, [activeFilters, filterState, filterConnectors, fsKeyToCol])
 
   // Columns to fetch grouped data for (all non-taxonomy table columns)
   const groupedColumns = useMemo(() => {

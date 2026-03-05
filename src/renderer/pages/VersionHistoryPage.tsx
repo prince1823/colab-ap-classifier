@@ -81,7 +81,7 @@ export default function VersionHistoryPage() {
     try {
       const [data, nodes] = await Promise.all([
         ipc.changelog.list(),
-        ipc.taxonomy.getNodes().catch(() => [] as TaxonomyNode[]),
+        ipc.taxonomy.getNodes(),
       ])
       setEntries(data)
       setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))

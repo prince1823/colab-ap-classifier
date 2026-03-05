@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
+import path from 'path';
+import { dialog, BrowserWindow } from 'electron';
 import type {
   Database,
   TaxonomyStore as ITaxonomyStore,
@@ -68,6 +70,11 @@ export class TaxonomyStore implements ITaxonomyStore {
     private db: Database,
     private project: IProjectStore
   ) {}
+
+  async getNodeCount(): Promise<number> {
+    const [row] = await this.db.all<{ cnt: number }>('SELECT COUNT(*) as cnt FROM taxonomy');
+    return row?.cnt ?? 0;
+  }
 
   async getNodes(): Promise<TaxonomyNode[]> {
     const rows = await this.db.all<TaxonomyRow>(
@@ -270,13 +277,33 @@ export class TaxonomyStore implements ITaxonomyStore {
     return { transactionsMoved };
   }
 
-  async importFromFile(filePath: string): Promise<{ nodeCount: number }> {
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`Taxonomy file not found: ${filePath}`);
+  async importFromFile(filePath: string): Promise<{ nodeCount: number; fileName: string }> {
+    let resolvedPath = filePath;
+
+    if (!resolvedPath || resolvedPath.trim().length === 0) {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      const result = await dialog.showOpenDialog(win!, {
+        title: 'Select Taxonomy File',
+        filters: [
+          { name: 'Text Files', extensions: ['txt', 'csv', 'tsv'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+        properties: ['openFile'],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        throw new Error('No file selected');
+      }
+      resolvedPath = result.filePaths[0];
     }
 
-    const content = fs.readFileSync(filePath, 'utf-8');
-    return this.createFromText(content);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`Taxonomy file not found: ${resolvedPath}`);
+    }
+
+    const content = fs.readFileSync(resolvedPath, 'utf-8');
+    const { nodeCount } = await this.createFromText(content);
+    const fileName = path.basename(resolvedPath, path.extname(resolvedPath));
+    return { nodeCount, fileName };
   }
 
   async createFromText(text: string): Promise<{ nodeCount: number }> {

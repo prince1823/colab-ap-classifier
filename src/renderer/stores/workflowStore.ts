@@ -124,10 +124,10 @@ interface WorkflowState {
   reset: () => void
 }
 
-function deriveState(metadata: ProjectMetadata | null, classifiedRows: number, progress: ClassificationProgress | null, dataReviewed = false) {
+function deriveState(metadata: ProjectMetadata | null, classifiedRows: number, progress: ClassificationProgress | null, dataReviewed = false, taxonomyNodeCount = 0) {
   const hasProject = metadata !== null
   const hasCompanyContext = metadata?.companyContext !== null && metadata?.companyContext !== undefined
-  const hasTaxonomy = metadata?.taxonomyName !== null && metadata?.taxonomyName !== undefined
+  const hasTaxonomy = taxonomyNodeCount > 0
   const hasUploadedData = metadata?.columnMapping !== null && metadata?.columnMapping !== undefined
   const hasClassifiedData = classifiedRows > 0 || (progress !== null && progress.status === 'completed')
   const isClassifying = progress !== null && progress.status === 'running'
@@ -226,8 +226,14 @@ export const useWorkflowStore = create<WorkflowState>()(
         } catch {
           // No transactions yet
         }
+        let taxonomyNodeCount = 0
+        try {
+          taxonomyNodeCount = await ipc.taxonomy.getNodeCount()
+        } catch {
+          // No taxonomy yet
+        }
 
-        const derived = deriveState(metadata, classifiedRows, null)
+        const derived = deriveState(metadata, classifiedRows, null, false, taxonomyNodeCount)
         console.log('[loadProject] metadata:', JSON.stringify(metadata, null, 2))
         console.log('[loadProject] classifiedRows:', classifiedRows)
         console.log('[loadProject] derived:', JSON.stringify(derived))
@@ -270,11 +276,17 @@ export const useWorkflowStore = create<WorkflowState>()(
           } catch {
             // No transactions yet — keep previous value
           }
+          let taxonomyNodeCount = 0
+          try {
+            taxonomyNodeCount = await ipc.taxonomy.getNodeCount()
+          } catch {
+            // No taxonomy yet
+          }
           const { classificationProgress, dataReviewed } = get()
           set({
             projectMetadata: metadata,
             classifiedRows,
-            ...deriveState(metadata, classifiedRows, classificationProgress, dataReviewed),
+            ...deriveState(metadata, classifiedRows, classificationProgress, dataReviewed, taxonomyNodeCount),
           })
         } catch {
           // IPC failed — keep existing state intact

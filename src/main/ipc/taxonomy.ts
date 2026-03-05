@@ -2,6 +2,10 @@ import { registerHandler } from './register';
 import type { TaxonomyStore } from '../../shared/types/services';
 
 export function registerTaxonomyHandlers(taxonomy: TaxonomyStore): void {
+  registerHandler('taxonomy:getNodeCount', async () => {
+    return taxonomy.getNodeCount();
+  });
+
   registerHandler('taxonomy:getNodes', async () => {
     return taxonomy.getNodes();
   });

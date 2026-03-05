@@ -48,11 +48,12 @@ export interface IPCInvokeMap {
   'classification:cancel': { args: []; result: void };
 
   // Taxonomy
+  'taxonomy:getNodeCount':   { args: []; result: number };
   'taxonomy:getNodes':       { args: []; result: TaxonomyNode[] };
   'taxonomy:addNode':        { args: [fullPath: string, description?: string]; result: TaxonomyNode };
   'taxonomy:updateNode':     { args: [nodeId: string, updates: Partial<TaxonomyNode>]; result: void };
   'taxonomy:deleteNode':     { args: [nodeId: string]; result: void };
-  'taxonomy:importFromFile': { args: [filePath: string]; result: { nodeCount: number } };
+  'taxonomy:importFromFile': { args: [filePath: string]; result: { nodeCount: number; fileName: string } };
 
   // Suppliers
   'suppliers:list':           { args: []; result: ProjectSupplierView[] };

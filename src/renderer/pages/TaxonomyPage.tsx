@@ -96,14 +96,19 @@ export default function TaxonomyPage() {
     }
   }
 
-  const handleImport = async (taxonomyName: string) => {
+  const handleImport = async () => {
     setImporting(true)
     setError(null)
     try {
-      await ipc.taxonomy.importFromFile(taxonomyName)
+      const result = await ipc.taxonomy.importFromFile('')
+      await ipc.project.updateMetadata({ taxonomyName: `${result.fileName} (${result.nodeCount} nodes)` })
       await loadData()
       await refreshMetadata()
     } catch (e) {
+      if ((e as Error).message === 'No file selected') {
+        setImporting(false)
+        return
+      }
       setError(e instanceof Error ? e.message : 'Failed to import taxonomy')
     } finally {
       setImporting(false)
@@ -144,7 +149,7 @@ export default function TaxonomyPage() {
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
             <button
-              onClick={() => handleImport('')}
+              onClick={() => handleImport()}
               disabled={importing}
               className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
             >

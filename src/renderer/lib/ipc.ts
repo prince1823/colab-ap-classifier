@@ -1,13 +1,11 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult } from '../../shared/types/ipc-contract';
-import type { ProjectMetadata, ProjectMetadataUpdate } from '../../shared/types/project';
-import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority } from '../../shared/types/column-mapping';
 import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
-import type { TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult } from '../../shared/types/transactions';
-import type { TaxonomyNode } from '../../shared/types/taxonomy';
-import type { ProjectSupplierView, SupplierConfirmationStatus } from '../../shared/types/suppliers';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
-import type { ChangeLog } from '../../shared/types/changelog';
+import type { SupplierConfirmationStatus } from '../../shared/types/suppliers';
+import type { TransactionFilter, TransactionUpdate } from '../../shared/types/transactions';
+import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
+import type { ProjectMetadataUpdate } from '../../shared/types/project';
+import type { ColumnMapping } from '../../shared/types/column-mapping';
 
 /**
  * Typed invoke wrapper that unwraps the IPCResponse envelope.
@@ -29,43 +27,41 @@ function on<T>(channel: string, callback: (data: T) => void): () => void {
 }
 
 /**
- * Typed IPC client aligned to new architecture.
+ * Typed IPC client — all types inferred from IPCInvokeMap via channel string.
  */
 export const ipc = {
   // ── Project (9 channels) ──
   project: {
     new: (name: string, filePath?: string) =>
-      invoke<{ filePath: string; name: string } | null>('project:new', name, filePath),
+      invoke('project:new', name, filePath),
     open: (filePath?: string) =>
-      invoke<{ filePath: string; name: string } | null>('project:open', filePath),
-    close: () => invoke<void>('project:close'),
-    getSetting: (key: string) => invoke<unknown>('project:getSetting', key),
-    setSetting: (key: string, value: unknown) => invoke<void>('project:setSetting', key, value),
-    deleteSetting: (key: string) => invoke<void>('project:deleteSetting', key),
-    getAllSettings: () => invoke<Record<string, unknown>>('project:getAllSettings'),
-    // Compatibility shims
-    getMetadata: () => invoke<ProjectMetadata>('project:getMetadata'),
+      invoke('project:open', filePath),
+    close: () => invoke('project:close'),
+    getSetting: (key: string) => invoke('project:getSetting', key),
+    setSetting: (key: string, value: unknown) => invoke('project:setSetting', key, value),
+    deleteSetting: (key: string) => invoke('project:deleteSetting', key),
+    getAllSettings: () => invoke('project:getAllSettings'),
+    getMetadata: () => invoke('project:getMetadata'),
     updateMetadata: (updates: ProjectMetadataUpdate) =>
-      invoke<void>('project:updateMetadata', updates),
+      invoke('project:updateMetadata', updates),
   },
 
   // ── Ingest (5 channels) ──
   ingest: {
-    selectFile: () => invoke<string | null>('ingest:selectFile'),
+    selectFile: () => invoke('ingest:selectFile'),
     parseCSV: (filePath: string) =>
-      invoke<CSVPreview>('ingest:parseCSV', filePath),
+      invoke('ingest:parseCSV', filePath),
     suggestMappings: (columns: string[], sampleRows: Record<string, string>[]) =>
-      invoke<ColumnMappingResult>('ingest:suggestMappings', columns, sampleRows),
+      invoke('ingest:suggestMappings', columns, sampleRows),
     importCSV: (filePath: string, mapping?: ColumnMapping) =>
-      invoke<{ rowsInserted: number; uploadId: string }>('ingest:importCSV', filePath, mapping),
-    getUpload: () =>
-      invoke<{ id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null>('ingest:getUpload'),
+      invoke('ingest:importCSV', filePath, mapping),
+    getUpload: () => invoke('ingest:getUpload'),
   },
 
   // ── Classification (2 channels + 1 event) ──
   classification: {
-    start: () => invoke<void>('classification:start'),
-    cancel: () => invoke<void>('classification:cancel'),
+    start: () => invoke('classification:start'),
+    cancel: () => invoke('classification:cancel'),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on<ClassificationProgress>('classification:progress', callback),
   },
@@ -73,68 +69,67 @@ export const ipc = {
   // ── Transactions (8 channels) ──
   transactions: {
     query: (filters?: TransactionFilter) =>
-      invoke<PaginatedTransactions>('transactions:query', filters),
-    stats: () => invoke<TransactionStats>('transactions:stats'),
-    getColumns: () => invoke<string[]>('transactions:getColumns'),
+      invoke('transactions:query', filters),
+    stats: () => invoke('transactions:stats'),
+    getColumns: () => invoke('transactions:getColumns'),
     update: (update: TransactionUpdate) =>
-      invoke<void>('transactions:update', update),
+      invoke('transactions:update', update),
     queryGrouped: (column: string, filters?: TransactionFilter) =>
-      invoke<GroupedTransactionsResult>('transactions:queryGrouped', column, filters),
+      invoke('transactions:queryGrouped', column, filters),
     distinctValues: (column: string, limit?: number) =>
-      invoke<string[]>('transactions:distinctValues', column, limit),
+      invoke('transactions:distinctValues', column, limit),
     getIdsByValue: (column: string, value: string, filters?: TransactionFilter) =>
-      invoke<string[]>('transactions:getIdsByValue', column, value, filters),
+      invoke('transactions:getIdsByValue', column, value, filters),
     pivotAggregation: (dimensions: string[], valueDimension: string, filters?: TransactionFilter) =>
-      invoke<PivotAggregationResult>(
-        'transactions:pivotAggregation', dimensions, valueDimension, filters
-      ),
+      invoke('transactions:pivotAggregation', dimensions, valueDimension, filters),
   },
 
-  // ── Taxonomy (5 channels) ──
+  // ── Taxonomy (6 channels) ──
   taxonomy: {
-    getNodes: () => invoke<TaxonomyNode[]>('taxonomy:getNodes'),
+    getNodeCount: () => invoke('taxonomy:getNodeCount'),
+    getNodes: () => invoke('taxonomy:getNodes'),
     addNode: (fullPath: string, description?: string) =>
-      invoke<TaxonomyNode>('taxonomy:addNode', fullPath, description),
+      invoke('taxonomy:addNode', fullPath, description),
     updateNode: (nodeId: string, updates: { description?: string }) =>
-      invoke<void>('taxonomy:updateNode', nodeId, updates),
+      invoke('taxonomy:updateNode', nodeId, updates),
     deleteNode: (nodeId: string) =>
-      invoke<void>('taxonomy:deleteNode', nodeId),
+      invoke('taxonomy:deleteNode', nodeId),
     importFromFile: (filePath: string) =>
-      invoke<{ nodeCount: number }>('taxonomy:importFromFile', filePath),
+      invoke('taxonomy:importFromFile', filePath),
   },
 
   // ── Suppliers (3 channels + research) ──
   suppliers: {
-    list: () => invoke<ProjectSupplierView[]>('suppliers:list'),
+    list: () => invoke('suppliers:list'),
     update: (supplierId: string, newName: string) =>
-      invoke<void>('suppliers:update', supplierId, newName),
+      invoke('suppliers:update', supplierId, newName),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
-      invoke<void>('suppliers:confirm', id, status),
-    researchAll: () => invoke<void>('suppliers:researchAll'),
+      invoke('suppliers:confirm', id, status),
+    researchAll: () => invoke('suppliers:researchAll'),
     researchSingle: (supplierName: string) =>
-      invoke<unknown>('suppliers:researchSingle', supplierName),
+      invoke('suppliers:researchSingle', supplierName),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
       on<ResearchProgress>('suppliers:research:progress', callback),
   },
 
   // ── Rules (4 channels) ──
   rules: {
-    list: () => invoke<OverrideRule[]>('rules:list'),
+    list: () => invoke('rules:list'),
     create: (input: OverrideRuleCreate) =>
-      invoke<{ id: string }>('rules:create', input),
+      invoke('rules:create', input),
     update: (ruleId: string, updates: OverrideRuleUpdate) =>
-      invoke<void>('rules:update', ruleId, updates),
-    delete: (ruleId: string) => invoke<void>('rules:delete', ruleId),
+      invoke('rules:update', ruleId, updates),
+    delete: (ruleId: string) => invoke('rules:delete', ruleId),
   },
 
   // ── Changelog (2 channels) ──
   changelog: {
-    list: () => invoke<ChangeLog[]>('changelog:list'),
-    revert: (changeId: string) => invoke<void>('changelog:revert', changeId),
+    list: () => invoke('changelog:list'),
+    revert: (changeId: string) => invoke('changelog:revert', changeId),
   },
 
   // ── Export (1 channel) ──
   export: {
-    csv: () => invoke<{ rowsExported: number } | null>('export:csv'),
+    csv: () => invoke('export:csv'),
   },
 };

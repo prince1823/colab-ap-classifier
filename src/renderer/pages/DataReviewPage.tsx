@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import StatsCards from '../components/data-review/StatsCards'
 import SupplierTable from '../components/data-review/SupplierTable'
 import { ipc } from '../lib/ipc'
+import { useWorkflowStore } from '../stores/workflowStore'
 import type { TransactionStats } from '../../shared/types/transactions'
 import type { ProjectSupplierView } from '../../shared/types/suppliers'
 
 export default function DataReviewPage() {
+  const navigate = useNavigate()
+  const hasTaxonomy = useWorkflowStore(s => s.hasTaxonomy)
   const [stats, setStats] = useState<TransactionStats | null>(null)
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [loading, setLoading] = useState(true)
@@ -72,6 +76,27 @@ export default function DataReviewPage() {
         <SupplierTable suppliers={suppliers} onUpdated={loadData} />
       </div>
 
+      {/* Next step */}
+      <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+        <div className="text-xs text-gray-500">
+          {!hasTaxonomy && (
+            <span>
+              Import a taxonomy via{' '}
+              <button onClick={() => navigate('/project/taxonomy')} className="font-medium text-blue-600 hover:underline">
+                Project Setup → Taxonomy
+              </button>{' '}
+              to enable classification.
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => navigate('/workflow/classification')}
+          disabled={!hasTaxonomy}
+          className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+        >
+          Next: Classification →
+        </button>
+      </div>
     </div>
   )
 }

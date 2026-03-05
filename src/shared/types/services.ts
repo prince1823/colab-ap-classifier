@@ -95,13 +95,14 @@ export interface TransactionStore {
 }
 
 export interface TaxonomyStore {
+  getNodeCount(): Promise<number>;
   getNodes(): Promise<TaxonomyNode[]>;
   addNode(fullPath: string, description?: string): Promise<TaxonomyNode>;
   updateNode(nodeId: string, updates: { description?: string }): Promise<void>;
   deleteNode(nodeId: string, reassignTo?: string): Promise<void>;
   renameNode(nodeId: string, newName: string): Promise<void>;
   mergeNodes(sourceId: string, targetId: string): Promise<{ transactionsMoved: number }>;
-  importFromFile(filePath: string): Promise<{ nodeCount: number }>;
+  importFromFile(filePath: string): Promise<{ nodeCount: number; fileName: string }>;
   createFromText(text: string): Promise<{ nodeCount: number }>;
 }
 

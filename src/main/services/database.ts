@@ -44,6 +44,14 @@ export class DuckDBDatabase implements Database {
   private instance: DuckDBInstance | null = null;
   private connection: DuckDBConnection | null = null;
   private currentFilePath: string | null = null;
+  // Serialize all queries — DuckDB single connection does not support concurrency
+  private queue: Promise<unknown> = Promise.resolve();
+
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(fn, fn) as Promise<T>;
+    this.queue = next.catch(() => {});
+    return next;
+  }
 
   async openDatabase(filePath: string): Promise<void> {
     if (this.instance) {
@@ -149,30 +157,36 @@ export class DuckDBDatabase implements Database {
   }
 
   async run(sql: string, ...params: unknown[]): Promise<void> {
-    const conn = this.getConnection();
-    if (params.length > 0) {
-      const converted = convertPlaceholders(sql);
-      await conn.run(converted, params as (string | number | boolean | null)[]);
-    } else {
-      await conn.run(sql);
-    }
+    return this.serialize(async () => {
+      const conn = this.getConnection();
+      if (params.length > 0) {
+        const converted = convertPlaceholders(sql);
+        await conn.run(converted, params as (string | number | boolean | null)[]);
+      } else {
+        await conn.run(sql);
+      }
+    });
   }
 
   async exec(sql: string): Promise<void> {
-    const conn = this.getConnection();
-    await conn.run(sql);
+    return this.serialize(async () => {
+      const conn = this.getConnection();
+      await conn.run(sql);
+    });
   }
 
   async all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T[]> {
-    const conn = this.getConnection();
-    let reader;
-    if (params.length > 0) {
-      const converted = convertPlaceholders(sql);
-      reader = await conn.runAndReadAll(converted, params as (string | number | boolean | null)[]);
-    } else {
-      reader = await conn.runAndReadAll(sql);
-    }
-    return reader.getRowObjectsJson() as T[];
+    return this.serialize(async () => {
+      const conn = this.getConnection();
+      let reader;
+      if (params.length > 0) {
+        const converted = convertPlaceholders(sql);
+        reader = await conn.runAndReadAll(converted, params as (string | number | boolean | null)[]);
+      } else {
+        reader = await conn.runAndReadAll(sql);
+      }
+      return reader.getRowObjectsJson() as T[];
+    });
   }
 
   async get<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T | undefined> {

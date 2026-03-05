@@ -1,4 +1,5 @@
 import type { LLMClient, ILLMConfigService } from '../../shared/types/services';
+import { debugLog } from '../utils/debug-log';
 
 export interface ChatOptions {
   model?: string;
@@ -156,6 +157,7 @@ export class OpenRouterLLMClient implements LLMClient {
 
     const apiKey = this.configService.getApiKey(provider);
     if (!apiKey) {
+      debugLog('ERROR', `[LLM] No API key for provider="${provider}"`);
       throw new LLMClientError(`No API key configured for provider "${provider}". Set the appropriate environment variable in .env.`, 'MISSING_API_KEY');
     }
 
@@ -168,12 +170,15 @@ export class OpenRouterLLMClient implements LLMClient {
       : buildOpenAIBody(systemPrompt, userPrompt, model, maxTokens, temperature);
 
     const headers = buildHeaders(provider, apiKey, config.format);
+    debugLog('INFO', `[LLM] chat provider=${provider} model=${model}`);
     let lastError: LLMClientError | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const t0 = Date.now();
 
+      debugLog('INFO', `[LLM] fetch attempt=${attempt + 1}/${MAX_RETRIES + 1} url=${config.url}`);
       let response: Response;
       try {
         response = await fetch(config.url, {
@@ -181,6 +186,10 @@ export class OpenRouterLLMClient implements LLMClient {
         });
       } catch (error: unknown) {
         clearTimeout(timeoutId);
+        const msg = error instanceof DOMException && error.name === 'AbortError'
+          ? `timed out after ${REQUEST_TIMEOUT_MS}ms`
+          : `network error: ${error instanceof Error ? error.message : String(error)}`;
+        debugLog('ERROR', `[LLM] fetch failed attempt=${attempt + 1} ${msg}`);
         if (error instanceof DOMException && error.name === 'AbortError') {
           throw new LLMClientError(`Request to ${provider} timed out after ${REQUEST_TIMEOUT_MS}ms`, 'TIMEOUT');
         }
@@ -195,23 +204,28 @@ export class OpenRouterLLMClient implements LLMClient {
 
         if (isRetryableStatus(response.status, errorBody) && attempt < MAX_RETRIES) {
           const delay = retryDelay(attempt, response.headers.get('retry-after'));
+          debugLog('WARN', `[LLM] HTTP ${response.status} — retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`, errorBody.slice(0, 200));
           console.warn(`[LLM] ${provider} returned HTTP ${response.status}, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
           lastError = new LLMClientError(`${provider} API returned HTTP ${response.status}: ${errorBody}`, 'API_ERROR', response.status);
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
 
+        debugLog('ERROR', `[LLM] HTTP ${response.status} non-retryable`, errorBody.slice(0, 400));
         throw new LLMClientError(`${provider} API returned HTTP ${response.status}: ${errorBody}`, 'API_ERROR', response.status);
       }
 
       let data: unknown;
       try { data = await response.json(); } catch {
+        debugLog('ERROR', '[LLM] failed to parse JSON response');
         throw new LLMClientError(`Failed to parse JSON response from ${provider}`, 'INVALID_RESPONSE');
       }
 
+      debugLog('INFO', `[LLM] success attempt=${attempt + 1} (${Date.now() - t0}ms)`);
       return config.format === 'anthropic' ? extractAnthropicText(data) : extractOpenAIText(data);
     }
 
+    debugLog('ERROR', `[LLM] exhausted all ${MAX_RETRIES} retries`);
     throw lastError ?? new LLMClientError(`${provider} API failed after ${MAX_RETRIES} retries`, 'API_ERROR');
   }
 }

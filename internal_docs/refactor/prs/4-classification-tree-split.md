@@ -1,160 +1,212 @@
 # PR 4: ClassificationTree Split — Break Up 1,205-Line Component
 
 ## Problem
+
 `ClassificationTree.tsx` (1,205 lines) mixes taxonomy tree rendering, drag-drop
-for reclassification, and keyboard shortcuts in one file.
+for reclassification, keyboard shortcuts, and CRUD modals in one file. It also
+does client-side filtering of transactions — wrong per architecture.
 
 ## Core Type Rules (apply everywhere in this PR)
 
 - No `React.Dispatch<SetStateAction<X>>` in hook return types or component props.
-  All callbacks that set state use: `(updater: ((prev: X) => X) | X) => void`
-- No `any` for drag items, tree nodes, or row data.
-- `DashboardTransactionRow` (from `src/renderer/utils/transactionTransform.ts`) is the
-  row type for any transactions passed to the tree — not `any[]`, not `Record<string, unknown>[]`.
-- `humanReviewed` is a `boolean` on `DashboardTransactionRow`. Do NOT check
-  `classification_status === 'human_reviewed'` — that value does not exist in the union.
+  Use plain updater callbacks: `(updater: ((prev: X) => X) | X) => void`
+- No `Record<string, unknown>[]` blobs for transaction data — use IDs (`string[]`)
+- `DashboardTransactionRow` (from `src/renderer/utils/transactionTransform.ts`) is
+  the row type — not `any[]`, not `Record<string, unknown>[]`
+- No client-side filtering of transactions in ClassificationTree — `activeFilters`
+  prop is removed entirely. The tree receives pre-loaded paths and server-side counts.
 
 ---
 
 ## Changes
 
-### 1. Define typed drag items
+### 1. Define shared drag item type (`src/renderer/types/dragItems.ts`)
 
-The tree has two drag directions:
-- **From tree node → table row** (apply classification filter)
-- **From table row → tree node** (reclassify transaction)
-
-Define these as a discriminated union in `src/renderer/types/dragItems.ts`:
+The `DropItem` interface inside `ClassificationTree` and the `DragItem` inside
+`MultiTableSystem` are local duplicates with loose typing. Extract a shared type:
 
 ```typescript
-export type DragItem =
-  | { type: 'tree-node'; path: string; label: string }
-  | { type: 'transaction-row'; transactionId: string; currentPath: string }
+// Matches what MultiTableSystem emits as react-dnd drag payload
+export interface DragItem {
+  type: string                    // TABLE_ROW_TYPE | ITEM_TYPE
+  column: string
+  value: string
+  selectedValues: string[]
+  transactionRows: Record<string, unknown>[]  // kept for compat; IDs extracted server-side
+  serverSide: boolean
+  isSelected: boolean
+  isMultiSelect: boolean
+}
 ```
 
-All drag handlers receive `DragItem`, not `any` or `unknown`.
+ClassificationTree's `ColumnNode` imports `DragItem` from here instead of the
+local `DropItem`. `MultiTableSystem` can import and re-use this type for its local
+`DragItem` (the two are currently duplicates).
 
-### 2. Extract drag-drop logic: `useTreeDragDrop.ts`
+### 2. Extract drag-drop hook: `useTreeDragDrop.ts`
+
+Move the `useDrop` call and ID-resolution logic out of `ColumnNode` into a hook:
 
 ```typescript
+import { useDrop } from 'react-dnd'
 import type { DragItem } from '../../types/dragItems'
+import { TABLE_ROW_TYPE, ITEM_TYPE } from '../components/review/MultiTableSystem'
 
-interface UseTreeDragDropOptions {
-  onReclassify: (transactionId: string, newPath: string) => void
+interface UseNodeDropOptions {
+  nodePath: string
+  isDroppableLevel: boolean
+  onDropIds: (transactionIds: string[], targetPath: string) => void
 }
 
-function useTreeDragDrop(options: UseTreeDragDropOptions): {
-  dragItem: DragItem | null
-  isDragging: boolean
-  getNodeDropProps: (nodePath: string) => {
-    onDragOver: React.DragEventHandler
-    onDrop: React.DragEventHandler
-  }
-  getRowDragProps: (transactionId: string, currentPath: string) => {
-    draggable: true
-    onDragStart: React.DragEventHandler
-  }
+function useNodeDrop(options: UseNodeDropOptions): {
+  dropRef: React.RefObject<HTMLDivElement | null>
+  isOverShallow: boolean
+  canDrop: boolean
 }
 ```
 
-- Manages `dragItem: DragItem | null` state internally
-- `getNodeDropProps` — returns handlers for tree node drop zones
-- `getRowDragProps` — returns handlers for draggable transaction rows
-- Calls `options.onReclassify` when a row is dropped on a node
-- No `any` in drag event data — use `DragItem` serialized through `dataTransfer.setData` / `JSON.parse`
+- Wraps the `useDrop({ accept: [TABLE_ROW_TYPE, ITEM_TYPE], drop, collect })` call
+- When `item.serverSide`, fetches IDs via `ipc.transactions.getIdsByValue` (as now)
+- Resolves to `string[]` of transaction IDs before calling `onDropIds`
+- Returns `dropRef` to attach to the node DOM element
 
-### 3. Extract keyboard shortcuts: `useTreeKeyboard.ts`
+`ColumnNode` calls `useNodeDrop` instead of `useDrop` directly.
+
+### 3. Extract keyboard navigation: `useTreeKeyboard.ts`
+
+Move `handleKeyboardNavigation`, `handleReclassifyWithKeyboard`, and the
+`useKeyboardShortcuts` registration out of ClassificationTree:
 
 ```typescript
 interface UseTreeKeyboardOptions {
-  expandedNodes: Set<string>
-  setExpandedNodes: (updater: ((prev: Set<string>) => Set<string>) | Set<string>) => void
-  focusedPath: string | null
-  setFocusedPath: (path: string | null) => void
-  onReclassify: (transactionId: string, newPath: string) => void
-  selectedRows: string[]  // transaction IDs
+  columns: TaxonomyTreeNode[][]
+  keyboardNav: { columnIndex: number; nodeIndex: number }
+  setKeyboardNav: (updater: ((prev: { columnIndex: number; nodeIndex: number }) => { columnIndex: number; nodeIndex: number }) | { columnIndex: number; nodeIndex: number }) => void
+  selectedPath: string | null
+  setSelectedPath: (path: string | null) => void
+  setPathAtLevel: (path: string, level: number) => void
+  setDrillSelection: (updater: ((prev: string[]) => string[]) | string[]) => void
+  keyboardFocus: 'tree' | 'tables'
+  setKeyboardFocus: (focus: 'tree' | 'tables') => void
+  onReclassifyWithKeyboard: () => void
 }
 
-function useTreeKeyboard(options: UseTreeKeyboardOptions): {
-  handleKeyDown: React.KeyboardEventHandler
-}
+function useTreeKeyboard(options: UseTreeKeyboardOptions): void
+// Registers keyboard shortcuts via useKeyboardShortcuts; no return value needed
 ```
 
-- Arrow keys: navigate tree nodes
-- Enter: expand/collapse focused node
-- Keyboard-driven reclassification when a row is focused
-- `setExpandedNodes` and `setFocusedPath` use the functional updater pattern, not `Dispatch`
+`handleKeyboardNavigation` and `handleReclassifyWithKeyboard` move into the hook.
+`ClassificationTree` passes `onReclassifyWithKeyboard` as a stable callback that
+reads `keyboardNav` and `columns` from its own scope.
 
-### 4. Extract tree data building into `taxonomyLoader.ts`
+### 4. Fix ClassificationTree props
 
-Move path parsing, parent-child linking, and node count computation to
-`src/renderer/utils/taxonomyLoader.ts`. Define typed return types:
-
-```typescript
-export interface TaxonomyNode {
-  path: string
-  label: string
-  level: number
-  children: TaxonomyNode[]
-  transactionCount: number
-  parentPath: string | null
-}
-
-export function buildTaxonomyTree(
-  paths: string[],
-  transactionCountByPath: Record<string, number>
-): TaxonomyNode[]
-```
-
-- `paths` are pipe-delimited strings: `"Corporate Services|IT|Software"`
-- `transactionCountByPath` maps full path to count (fetched via IPC)
-- No `any` in the tree structure
-
-### 5. Simplify ClassificationTree to rendering only
-
-After extraction, `ClassificationTree` receives:
+Remove props that enable client-side filtering or are unused:
 
 ```typescript
 interface ClassificationTreeProps {
-  nodes: TaxonomyNode[]
-  expandedNodes: Set<string>
-  setExpandedNodes: (updater: ((prev: Set<string>) => Set<string>) | Set<string>) => void
-  focusedPath: string | null
-  setFocusedPath: (path: string | null) => void
-  onReclassify: (transactionId: string, newPath: string) => void
+  // REMOVED: transactions — tree builds counts from groupedRows (see below)
+  // REMOVED: activeFilters — no client-side filtering
+  // REMOVED: mode, datasetId, foldername — unused
+  groupedRows: GroupedRow[]          // classification_path rows from server (count + spend)
   selectedRows: string[]
+  setSelectedRows: (updater: ((prev: string[]) => string[]) | string[]) => void  // plain callback, not Dispatch
+  onReclassify: (transactionIds: string[], targetPath: string) => Promise<boolean>
   keyboardFocus: 'tree' | 'tables'
+  setKeyboardFocus: (focus: 'tree' | 'tables') => void
 }
 ```
 
-- Renders `TaxonomyNode[]` recursively
-- Delegates drag events to `useTreeDragDrop`
-- Delegates keyboard to `useTreeKeyboard`
-- ~300-400 lines
+`groupedRows` is `GroupedRow[]` (from `src/shared/types/transactions.ts`) for the
+`classification_path` column — already fetched by `useGroupedTransactions` in
+TablesTab. TablesTab adds `'classification_path'` to `groupedColumns` and passes
+`groupedData.get('classification_path') ?? []` to ClassificationTree.
 
-### 6. Dashboard wires it together
+Tree counts are populated from `groupedRows` (server-aggregated, filter-aware):
 
-Dashboard calls `useReclassification()` and `useUndoRedo()` (per PR 3).
-The `onReclassify` callback is passed from Dashboard → ClassificationTree.
-Dashboard owns the `selectedRows` string from `ReviewFilterContext`.
+```typescript
+// In ClassificationTree useMemo:
+const pathCounts = useMemo(() => {
+  const map: Record<string, { count: number; amount: number }> = {}
+  groupedRows.forEach(r => { map[r.value] = { count: r.count, amount: r.spend } })
+  return map
+}, [groupedRows])
+
+const taxonomyTree = useMemo(() =>
+  buildTaxonomyTree(taxonomyPaths, pathCounts),
+  [taxonomyPaths, pathCounts]
+)
+```
+
+### 5. Update `buildTaxonomyTree` in `taxonomyLoader.ts`
+
+Add an overload that accepts pre-computed counts instead of raw transactions:
+
+```typescript
+// Existing signature kept for any other callers
+export function buildTaxonomyTree(paths: string[]): TaxonomyTreeNode
+
+// New signature used by ClassificationTree
+export function buildTaxonomyTree(
+  paths: string[],
+  pathCounts: Record<string, { count: number; amount: number }>
+): TaxonomyTreeNode
+```
+
+Or just update the single function to accept an optional second argument. No need
+for `populateTreeWithTransactions` call when pathCounts is provided.
+
+### 6. Fix reclassification chain
+
+`onReclassify` receives `transactionIds: string[]` (resolved inside `useNodeDrop`
+and `handleDropRow`), not `Record<string, unknown>[]`. Update Dashboard:
+
+```typescript
+// Dashboard.executeReclassification
+async (transactionIds: string[], targetPath: string): Promise<boolean>
+// No more rows.map(r => r.id as string) — IDs arrive directly
+```
+
+TablesTab passes the callback through without wrapping in rows:
+
+```typescript
+onReclassify={async (ids, targetPath) => executeReclassification(ids, targetPath)}
+```
+
+### 7. Result: ClassificationTree ~400 lines
+
+After extraction, ClassificationTree contains:
+- `taxonomyPaths` IPC load (`useEffect`)
+- `taxonomyTree` + `pathMap` + `columns` + `drillSelection` useMemos
+- `setPathAtLevel`, `handleDropRow`, `autoNavigateToPath`
+- CRUD modal state + handlers (add/rename/delete — ~200 lines of JSX)
+- `useNodeDrop` call in `ColumnNode`
+- `useTreeKeyboard` call in main component
+- Render JSX
 
 ---
 
-## Type Checklist for New Files
-Before opening the PR, verify:
-- [ ] No `React.Dispatch<SetStateAction<X>>` in hook interfaces or component props
-- [ ] No `any` for drag items — use `DragItem` discriminated union
-- [ ] `DashboardTransactionRow` used for transaction data, not `any[]`
-- [ ] No `classification_status === 'human_reviewed'` — use `row.humanReviewed` boolean
-- [ ] `tsc --noEmit` passes with zero errors (no `as any` workarounds)
+## Type Checklist Before PR
+
+- [ ] No `React.Dispatch<SetStateAction<X>>` in ClassificationTree or TablesTab props
+- [ ] No `Record<string, unknown>[]` blobs passed through onReclassify chain
+- [ ] `DragItem` imported from `src/renderer/types/dragItems.ts` in ClassificationTree
+- [ ] `activeFilters` removed from ClassificationTree props entirely
+- [ ] `groupedData.get('classification_path')` wired in TablesTab
+- [ ] `tsc --noEmit` passes with zero errors
 
 ## Dependencies
-- PR 3 (Dashboard Decomposition) — Dashboard wires `onReclassify` from `useReclassification()`
-- Independent of PRs 1-2 (tree doesn't own filter state)
 
-## Files touched
-- `src/renderer/components/review/ClassificationTree.tsx` (major refactor)
-- New: `src/renderer/types/dragItems.ts`
-- New: `src/renderer/hooks/useTreeDragDrop.ts`
-- New: `src/renderer/hooks/useTreeKeyboard.ts`
-- `src/renderer/utils/taxonomyLoader.ts` (extend with `buildTaxonomyTree`)
+- PR 3 (Dashboard Decomposition) — Dashboard owns `executeReclassification`
+- `classification_path` must be a valid groupable column in `useGroupedTransactions`
+
+## Files Touched
+
+- `src/renderer/types/dragItems.ts` — new
+- `src/renderer/hooks/useTreeDragDrop.ts` — new
+- `src/renderer/hooks/useTreeKeyboard.ts` — new
+- `src/renderer/utils/taxonomyLoader.ts` — extend `buildTaxonomyTree`
+- `src/renderer/components/review/ClassificationTree.tsx` — major refactor
+- `src/renderer/components/review/TablesTab.tsx` — add classification_path column, fix callback types
+- `src/renderer/components/review/Dashboard.tsx` — fix executeReclassification signature
+- `src/renderer/components/review/MultiTableSystem.tsx` — import DragItem from shared type (minor)

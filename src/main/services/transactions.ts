@@ -352,8 +352,16 @@ export class TransactionStore implements ITransactionStore {
       return { dimensionColumns: [], rows: [], totalAmount: 0, totalCount: 0 };
     }
 
+    const VIRTUAL_DIMS: Record<string, string> = {
+      classification_l1: "COALESCE(tax.l1, '(Unclassified)')",
+      classification_l2: "COALESCE(tax.l2, '(Unclassified)')",
+      classification_l3: "COALESCE(tax.l3, '(Unclassified)')",
+    };
+
     const validCols = await this.getColumns();
-    const safeDimensions = dimensions.filter((d) => validCols.includes(d));
+    const safeDimensions = dimensions.filter(
+      (d) => validCols.includes(d) || d in VIRTUAL_DIMS
+    );
     if (!safeDimensions.length) {
       return { dimensionColumns: dimensions, rows: [], totalAmount: 0, totalCount: 0 };
     }
@@ -365,9 +373,15 @@ export class TransactionStore implements ITransactionStore {
       ? `COALESCE(SUM(TRY_CAST(t.${valueDimension} AS DOUBLE)), 0)`
       : '0';
 
-    const dimSelects = safeDimensions.map(
-      (d, i) => `COALESCE(CAST(t.${d} AS VARCHAR), '') as dim_${i}`
-    );
+    const needsTaxonomyJoin = safeDimensions.some((d) => d in VIRTUAL_DIMS);
+    const taxonomyJoin = needsTaxonomyJoin
+      ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
+      : '';
+
+    const dimSelects = safeDimensions.map((d, i) => {
+      const expr = VIRTUAL_DIMS[d] ?? `COALESCE(CAST(t.${d} AS VARCHAR), '')`;
+      return `${expr} as dim_${i}`;
+    });
     const dimGroupBy = safeDimensions.map((_, i) => `dim_${i}`);
 
     const sql = `
@@ -376,6 +390,7 @@ export class TransactionStore implements ITransactionStore {
         ${amountExpr} as amount,
         COUNT(*) as count
       FROM transactions t
+      ${taxonomyJoin}
       ${whereSQL}
       GROUP BY ${dimGroupBy.join(', ')}
       ORDER BY amount DESC

@@ -40,7 +40,17 @@ export default function PivotPage() {
     filter
   )
 
-  const availableColumns = columns ?? []
+  const INTERNAL_COLS = new Set([
+    'id', 'row_index', 'upload_id', 'taxonomy_node_id',
+    'classification_status', 'human_reviewed', 'classification_reasoning',
+    'original_supplier_name', 'project_supplier_id',
+    'created_at', 'updated_at',
+  ])
+
+  const availableColumns = [
+    'classification_l1', 'classification_l2', 'classification_l3',
+    ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c)),
+  ]
 
   const handleExport = () => {
     if (!pivotData) return

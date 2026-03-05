@@ -10,6 +10,7 @@ import { registerClassificationHandlers } from './classification';
 import { registerRulesHandlers } from './rules';
 import { registerTransactionsHandlers } from './transactions';
 import { registerExportHandlers } from './export';
+import { registerSettingsHandlers } from './settings';
 
 export function registerAllHandlers(services: ServiceContainer): void {
   // Test channel
@@ -26,4 +27,5 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerRulesHandlers(services.rules);
   registerTransactionsHandlers(services.transactions);
   registerExportHandlers(services.export);
+  registerSettingsHandlers(services.llmConfig);
 }

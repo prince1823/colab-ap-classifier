@@ -7,6 +7,17 @@ import type { ChangeLog, ChangeSource } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
 
+// ─── LLM Config ──────────────────────────────────────────────────────────────
+
+export interface ILLMConfigService {
+  getApiKey(provider: string): string | null;
+  setApiKey(provider: string, key: string): Promise<void>;
+  getProvider(): string;
+  setProvider(provider: string): Promise<void>;
+  getModel(): string;
+  setModel(model: string): Promise<void>;
+}
+
 // ─── Database Layer ──────────────────────────────────────────────────────────
 
 export interface Database {

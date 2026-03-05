@@ -1,4 +1,12 @@
 import type { ProjectMetadata, ProjectMetadataUpdate } from './project';
+
+export interface LLMConfigResponse {
+  provider: string;
+  model: string;
+  hasOpenRouterKey: boolean;
+  hasAnthropicKey: boolean;
+  hasOpenAIKey: boolean;
+}
 import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority } from './column-mapping';
 import type {
   TransactionFilter,
@@ -74,6 +82,13 @@ export interface IPCInvokeMap {
 
   // Export
   'export:csv': { args: []; result: { rowsExported: number } | null };
+
+  // Settings
+  'settings:getLLMConfig':   { args: []; result: LLMConfigResponse };
+  'settings:setApiKey':      { args: [provider: string, key: string]; result: void };
+  'settings:setProvider':    { args: [provider: string]; result: void };
+  'settings:setModel':       { args: [model: string]; result: void };
+  'settings:validateApiKey': { args: [provider: string, key: string]; result: { valid: boolean; error?: string } };
 }
 
 export interface IPCEventMap {

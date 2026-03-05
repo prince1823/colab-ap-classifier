@@ -1,4 +1,4 @@
-import type { LLMClient } from '../../shared/types/services';
+import type { LLMClient, ILLMConfigService } from '../../shared/types/services';
 
 export interface ChatOptions {
   model?: string;
@@ -49,20 +49,25 @@ const MAX_RETRIES = 6;
 const INITIAL_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
-function getEnvSettings(): { provider: string; model: string } {
-  return {
-    provider: process.env.CLASSIFIER_LLM_PROVIDER || 'openrouter',
-    model: process.env.CLASSIFIER_MODEL || 'claude-3-5-haiku-latest',
-  };
-}
-
-function getApiKeyForProvider(provider: string): string | undefined {
-  switch (provider) {
-    case 'anthropic': return process.env.ANTHROPIC_API_KEY;
-    case 'openai': return process.env.OPENAI_API_KEY;
-    case 'openrouter': return process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
-    default: return undefined;
+/**
+ * Minimal env-only config service used by the backward-compat standalone chat() function.
+ * In production, LLMConfigService (which also reads a persisted config file) is injected.
+ */
+class EnvLLMConfigService implements ILLMConfigService {
+  getApiKey(provider: string): string | null {
+    switch (provider) {
+      case 'anthropic': return process.env.ANTHROPIC_API_KEY || null;
+      case 'openai':    return process.env.OPENAI_API_KEY || null;
+      case 'openrouter':
+        return process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || null;
+      default:          return null;
+    }
   }
+  async setApiKey(): Promise<void> {}
+  getProvider(): string { return process.env.CLASSIFIER_LLM_PROVIDER || 'openrouter'; }
+  async setProvider(): Promise<void> {}
+  getModel(): string { return process.env.CLASSIFIER_MODEL || 'claude-3-5-haiku-latest'; }
+  async setModel(): Promise<void> {}
 }
 
 function isRetryableStatus(status: number, errorBody?: string): boolean {
@@ -139,21 +144,22 @@ function extractOpenAIText(data: unknown): string {
 }
 
 export class OpenRouterLLMClient implements LLMClient {
+  constructor(private readonly configService: ILLMConfigService = new EnvLLMConfigService()) {}
+
   async chat(systemPrompt: string, userPrompt: string, options?: ChatOptions): Promise<string> {
-    const envSettings = getEnvSettings();
-    const provider = options?.provider ?? envSettings.provider;
+    const provider = options?.provider ?? this.configService.getProvider();
     const config = PROVIDER_CONFIGS[provider];
 
     if (!config) {
       throw new LLMClientError(`Unknown provider: ${provider}`, 'API_ERROR');
     }
 
-    const apiKey = getApiKeyForProvider(provider);
+    const apiKey = this.configService.getApiKey(provider);
     if (!apiKey) {
       throw new LLMClientError(`No API key configured for provider "${provider}". Set the appropriate environment variable in .env.`, 'MISSING_API_KEY');
     }
 
-    const model = options?.model ?? envSettings.model ?? config.defaultModel;
+    const model = options?.model ?? this.configService.getModel() ?? config.defaultModel;
     const maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
     const temperature = options?.temperature ?? DEFAULT_TEMPERATURE;
 

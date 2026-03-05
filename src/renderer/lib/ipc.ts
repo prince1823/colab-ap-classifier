@@ -133,4 +133,13 @@ export const ipc = {
   export: {
     csv: () => invoke('export:csv'),
   },
+
+  // ── Settings (5 channels) ──
+  settings: {
+    getLLMConfig: () => invoke('settings:getLLMConfig'),
+    setApiKey: (provider: string, key: string) => invoke('settings:setApiKey', provider, key),
+    setProvider: (provider: string) => invoke('settings:setProvider', provider),
+    setModel: (model: string) => invoke('settings:setModel', model),
+    validateApiKey: (provider: string, key: string) => invoke('settings:validateApiKey', provider, key),
+  },
 };

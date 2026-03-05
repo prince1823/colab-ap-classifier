@@ -108,8 +108,12 @@ Key notes from spec:
 - `vi.fn()` needs explicit generic type parameters
 - Test data uses `FilterCondition[]`, `DashboardTransactionRow` — no `as any`
 
-## PR 7: LLM Key UI — SPEC UPDATED, NOT STARTED
+## PR 7: LLM Key UI — COMPLETED
+**Date:** 2026-03-05
 
-Key notes from spec:
-- Define `LLMConfigResponse` in `ipc-contract.ts` and `ILLMConfigService` in `services.ts` before implementation
-- `SettingsFormState` typed interface, form event handlers typed as `React.ChangeEvent<HTMLInputElement>`
+Added runtime LLM key management. Created `LLMConfigService` (persists keys encrypted via Electron `safeStorage` in `<userData>/llm-config.json`; falls back to env vars). `OpenRouterLLMClient` now receives `ILLMConfigService` via constructor — no direct `process.env` reads. Added 5 settings IPC channels (`settings:getLLMConfig`, `settings:setApiKey`, `settings:setProvider`, `settings:setModel`, `settings:validateApiKey`). Rewrote `SettingsDialog` with typed `SettingsFormState`, radio-button provider select, model input, API key input with per-provider "currently set" indicator, inline validate button, and save with toast feedback. Keys never leave main process — renderer only sees boolean `hasXxxKey` flags.
+
+### Deviations
+- `EnvLLMConfigService` private class added in `llm-client.ts` as backward-compat adapter for the standalone exported `chat()` function (used by agent standalone test helpers). The class is not exported and is invisible to the DI system.
+- `validateApiKey` implementation lives in `ipc/settings.ts` as a module-level function, not on `ILLMConfigService` interface (spec didn't include it on the interface; putting it in the handler keeps the interface minimal).
+- Provider selector uses radio buttons (fits 3 options cleanly) rather than a `<select>` dropdown.

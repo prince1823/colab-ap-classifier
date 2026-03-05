@@ -10,6 +10,7 @@ import CompanyContextPage from './pages/CompanyContextPage'
 import SuppliersPage from './pages/SuppliersPage'
 import OverrideRulesPage from './pages/OverrideRulesPage'
 import VersionHistoryPage from './pages/VersionHistoryPage'
+import PivotPage from './pages/PivotPage'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
@@ -99,6 +100,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <VersionHistoryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="workflow/pivot"
+            element={
+              <ProtectedRoute>
+                <PivotPage />
               </ProtectedRoute>
             }
           />

@@ -16,6 +16,7 @@ import {
   DocumentDuplicateIcon,
   ClockIcon,
   Cog6ToothIcon,
+  PresentationChartBarIcon,
 } from '@heroicons/react/24/outline'
 import SettingsDialog from './SettingsDialog'
 import { useWorkflowStore } from '../stores/workflowStore'
@@ -31,6 +32,7 @@ const projectViews = [
   { path: '/project/suppliers', label: 'Suppliers', icon: TruckIcon },
   { path: '/project/override-rules', label: 'Override Rules', icon: DocumentDuplicateIcon },
   { path: '/project/version-history', label: 'Version History', icon: ClockIcon },
+  { path: '/workflow/pivot', label: 'Pivot View', icon: PresentationChartBarIcon },
 ]
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {

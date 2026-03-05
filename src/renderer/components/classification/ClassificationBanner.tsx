@@ -19,7 +19,7 @@ export default function ClassificationBanner() {
           />
         </svg>
         <span className="font-medium text-blue-700">
-          {progress.phase === 'researching' ? 'Researching suppliers' : 'Classifying transactions'}
+          Classifying transactions
         </span>
       </div>
       <div className="flex-1">
@@ -31,7 +31,7 @@ export default function ClassificationBanner() {
         </div>
       </div>
       <span className="text-xs text-blue-600">
-        {progress.processed}/{progress.total} ({pct}%)
+        {progress.processedSuppliers}/{progress.totalSuppliers} ({pct}%)
       </span>
       {progress.currentStep && (
         <span className="max-w-xs truncate text-xs text-blue-500">{progress.currentStep}</span>

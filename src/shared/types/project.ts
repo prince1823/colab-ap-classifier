@@ -1,32 +1,30 @@
-import type { CanonicalColumnMapping } from './canonicalization';
-
 export interface CompanyContext {
   companyName?: string;
-  industry: string;
+  industry?: string;
   sector?: string;
   description?: string;
   businessFocus?: string;
   procurementNuances?: string;
 }
 
+/**
+ * Convenience view assembled from project_settings KV store.
+ * Used by the renderer to display project state.
+ */
 export interface ProjectMetadata {
-  name: string;
-  filePath: string;
+  id: string;
+  projectName: string;
+  filePath: string | null;
+  createdAt: string;
   companyContext: CompanyContext | null;
-  columnMappings: CanonicalColumnMapping | null;
-  invoiceGroupingColumns: string[] | null;
-  tailSpendThreshold: number;
   taxonomyName: string | null;
-  createdAt: string | null;
+  tailSpendThreshold: number;
+  columnMapping: Record<string, string> | null;
 }
 
 export interface ProjectMetadataUpdate {
-  companyContext?: CompanyContext;
+  companyContext?: CompanyContext | null;
+  taxonomyName?: string | null;
   tailSpendThreshold?: number;
-}
-
-export interface RecentProject {
-  path: string;
-  name: string;
-  lastOpened: string;
+  columnMapping?: Record<string, string> | null;
 }

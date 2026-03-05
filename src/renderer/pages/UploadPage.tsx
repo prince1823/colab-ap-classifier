@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import FileDropZone from '../components/upload/FileDropZone'
 import CSVPreviewTable from '../components/upload/CSVPreviewTable'
+import ColumnMappingEditor from '../components/upload/ColumnMappingEditor'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
 
@@ -17,7 +18,9 @@ export default function UploadPage() {
 
   // Local-only transient state
   const [loading, setLoading] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showMappingEditor, setShowMappingEditor] = useState(false)
 
   // Refresh metadata on mount so hasUploadedData is current
   useEffect(() => {
@@ -35,13 +38,31 @@ export default function UploadPage() {
     setUploadDraft({ filePath: path })
     setLoading(true)
     setError(null)
+    setShowMappingEditor(false)
     try {
-      const result = await ipc.upload.parsePreview(path)
-      setUploadDraft({ preview: result, mapping: result.mappingSuggestion.mappings })
+      const preview = await ipc.ingest.parseCSV(path)
+      const mappingSuggestion = await ipc.ingest.suggestMappings(preview.columns, preview.sampleRows)
+      const result = { ...preview, mappingSuggestion }
+      setUploadDraft({ preview: result, mapping: mappingSuggestion.mappings })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to parse file')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleImport = async () => {
+    if (!uploadDraft.filePath) return
+    setImporting(true)
+    setError(null)
+    try {
+      await ipc.ingest.importCSV(uploadDraft.filePath, uploadDraft.mapping)
+      await refreshMetadata()
+      navigate('/workflow/data-review')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to import CSV')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -61,17 +82,17 @@ export default function UploadPage() {
             <div>
               <p className="text-sm font-medium text-gray-900">Data already imported</p>
               <p className="mt-1 text-sm text-gray-500">
-                {metadata?.columnMappings
-                  ? `${Object.keys(metadata.columnMappings).length} columns mapped`
+                {metadata?.columnMapping
+                  ? `${Object.keys(metadata.columnMapping).length} columns mapped`
                   : 'Column mappings configured'}
               </p>
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => navigate('/workflow/canonicalization')}
+                onClick={() => navigate('/workflow/data-review')}
                 className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
-                Edit Mappings
+                View Data
               </button>
               <button
                 onClick={() => setUploadDraft({ showUploader: true })}
@@ -91,7 +112,9 @@ export default function UploadPage() {
       <div>
         <h2 className="text-lg font-semibold text-gray-900">Upload CSV</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Select a CSV file to upload and preview the data.
+          {showMappingEditor
+            ? 'Review and adjust column mappings, then import.'
+            : 'Select a CSV file to upload and preview the data.'}
         </p>
       </div>
 
@@ -113,7 +136,8 @@ export default function UploadPage() {
         </div>
       )}
 
-      {uploadDraft.preview && !loading && (
+      {/* Step 1: CSV preview — show before mapping editor */}
+      {uploadDraft.preview && !loading && !showMappingEditor && (
         <>
           <CSVPreviewTable preview={uploadDraft.preview} />
 
@@ -127,10 +151,47 @@ export default function UploadPage() {
               Choose Different File
             </button>
             <button
-              onClick={() => navigate('/workflow/canonicalization')}
+              onClick={() => setShowMappingEditor(true)}
               className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700"
             >
               Next: Configure Mappings →
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Step 2: Column mapping editor + import */}
+      {uploadDraft.preview && !loading && showMappingEditor && (
+        <>
+          <ColumnMappingEditor
+            suggestion={uploadDraft.preview.mappingSuggestion}
+            csvColumns={uploadDraft.preview.columns}
+            onMappingChange={(mapping) => setUploadDraft({ mapping })}
+          />
+
+          <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+            <button
+              onClick={() => setShowMappingEditor(false)}
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              ← Back to Preview
+            </button>
+            <button
+              onClick={handleImport}
+              disabled={importing}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+            >
+              {importing ? (
+                <>
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Importing...
+                </>
+              ) : (
+                'Import Data →'
+              )}
             </button>
           </div>
         </>

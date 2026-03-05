@@ -44,9 +44,9 @@ function getSupplier(row) {
 }
 
 function isLowConfidence(row) {
-  const score = typeof row.review_score === 'number' ? row.review_score : null
-  if (score !== null) return score < 50
-  return false
+  // In v2, low confidence = unclassified or not human-reviewed
+  const status = row.classification_status
+  return status === 'unclassified' || !status
 }
 
 const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) => {

@@ -1261,12 +1261,10 @@ const MultiTableSystem = ({
 
     for (let i = 0; i < transactions.length; i++) {
       const row = transactions[i]
-      const score = typeof row.review_score === 'number' ? row.review_score : null
-      if (score !== null) {
-        if (score >= 80) confidences.add('high')
-        else if (score >= 50) confidences.add('medium')
-        else confidences.add('low')
-      }
+      const status = row.classification_status as string
+      if (status === 'human_reviewed') confidences.add('high')
+      else if (status === 'classified_by_ai' || status === 'classified_by_rule') confidences.add('medium')
+      else confidences.add('low')
       if (row.supplier_name) suppliers.add(row.supplier_name)
       if (row.classification_path) {
         const l1 = row.classification_path.split('|')[0]

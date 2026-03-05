@@ -53,7 +53,7 @@ interface PivotToolbarProps {
 /** Columns to exclude from the filter list (non-filterable) */
 const FILTER_EXCLUDE = new Set([
   'id', 'row_index', 'taxonomy_node_id', 'classification_reasoning',
-  'invoice_group_key', 'spend_amount', 'amount', 'invoice_amount',
+  'classification_status', 'spend_amount', 'amount', 'invoice_amount',
 ])
 
 export default function PivotToolbar({

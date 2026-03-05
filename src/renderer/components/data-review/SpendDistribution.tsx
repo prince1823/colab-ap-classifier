@@ -1,8 +1,8 @@
-import type { ProjectSupplier } from '../../../shared/types/suppliers'
+import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import { fmtAbbrev } from '../../utils/formatSpend'
 
 interface Props {
-  suppliers: ProjectSupplier[]
+  suppliers: ProjectSupplierView[]
 }
 
 export default function SpendDistribution({ suppliers }: Props) {

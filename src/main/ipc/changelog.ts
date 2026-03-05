@@ -1,13 +1,13 @@
 import { registerHandler } from './register';
-import { listChanges, revertChange } from '../services/changelog';
+import type { ChangelogStore } from '../../shared/types/services';
 
-export function registerChangelogHandlers(): void {
+export function registerChangelogHandlers(changelog: ChangelogStore): void {
   registerHandler('changelog:list', async () => {
-    return listChanges();
+    return changelog.listChanges();
   });
 
   registerHandler('changelog:revert', async (_event, ...args: unknown[]) => {
     const changeId = args[0] as string;
-    return revertChange(changeId);
+    return changelog.revertChange(changeId);
   });
 }

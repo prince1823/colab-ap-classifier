@@ -1,4 +1,4 @@
-import type { CSVPreview } from '../../../shared/types/canonicalization'
+import type { CSVPreview } from '../../../shared/types/column-mapping'
 
 interface Props {
   preview: CSVPreview

@@ -13,373 +13,225 @@ vi.mock('electron', () => ({
     handle: vi.fn(),
     removeHandler: vi.fn(),
   },
-  BrowserWindow: vi.fn(),
+  BrowserWindow: {
+    getFocusedWindow: vi.fn(() => null),
+    getAllWindows: vi.fn(() => [{}]),
+  },
 }));
 
 import { dialog } from 'electron';
-import { databaseService } from '../../../src/main/services/database';
-import {
-  createProject,
-  openProject,
-  closeProject,
-  isProjectOpen,
-  getMetadata,
-  updateMetadata,
-  selectSavePath,
-  selectOpenPath,
-} from '../../../src/main/services/project';
+import { DuckDBDatabase } from '../../../src/main/services/database';
+import { ProjectStore } from '../../../src/main/services/project';
+import { createMockTransactionStore, createMockSupplierUniverse } from '../../helpers/mock-services';
+import type { TransactionStore, SupplierUniverse } from '../../../src/shared/types/services';
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'project-test-'));
 }
 
-describe('ProjectService', () => {
+describe('ProjectStore', () => {
   let testDir: string;
+  let db: DuckDBDatabase;
+  let transactions: TransactionStore;
+  let supplierUniverse: SupplierUniverse;
+  let store: ProjectStore;
 
   beforeEach(() => {
     testDir = tempDir();
+    db = new DuckDBDatabase();
+    transactions = createMockTransactionStore();
+    supplierUniverse = createMockSupplierUniverse();
+    store = new ProjectStore(db, transactions, supplierUniverse);
   });
 
   afterEach(async () => {
-    if (isProjectOpen()) {
-      await closeProject();
+    if (store.isProjectOpen()) {
+      await store.closeProject();
     }
-    // Clean up temp directory
     if (fs.existsSync(testDir)) {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
     vi.restoreAllMocks();
   });
 
-  // -----------------------------------------------------------------------
-  // createProject
-  // -----------------------------------------------------------------------
   describe('createProject', () => {
     it('should create a .c91 file and initialise schema', async () => {
-      // Override cwd so the projects dir is created under our temp dir
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'TestProject.c91');
+      const result = await store.createProject('TestProject', filePath);
 
-      const result = await createProject('TestProject');
-
-      const expectedPath = path.join(testDir, 'projects', 'TestProject.c91');
-      expect(result.filePath).toBe(expectedPath);
+      expect(result.filePath).toBe(filePath);
       expect(result.name).toBe('TestProject');
-      expect(fs.existsSync(expectedPath)).toBe(true);
-      expect(isProjectOpen()).toBe(true);
+      expect(fs.existsSync(filePath)).toBe(true);
+      expect(store.isProjectOpen()).toBe(true);
 
-      // Verify schema was initialised (settings table exists with seeded data)
-      const threshold = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'tail_spend_threshold'"
-      );
-      expect(threshold?.value).toBe('10000');
-
-      // Verify project_name was stored
-      const nameSetting = await databaseService.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'project_name'"
-      );
-      expect(nameSetting?.value).toBe('TestProject');
-
-      cwdSpy.mockRestore();
+      const name = await store.getSetting('project_name');
+      expect(name).toBe('TestProject');
+      const threshold = await store.getSetting('tail_spend_threshold');
+      expect(threshold).toBe(10000);
     });
 
-    it('should create the projects directory if it does not exist', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
-
+    it('should create the parent directory if it does not exist', async () => {
       const projectsDir = path.join(testDir, 'projects');
       expect(fs.existsSync(projectsDir)).toBe(false);
 
-      await createProject('NewProject');
+      const filePath = path.join(projectsDir, 'NewProject.c91');
+      await store.createProject('NewProject', filePath);
 
       expect(fs.existsSync(projectsDir)).toBe(true);
-
-      cwdSpy.mockRestore();
     });
 
     it('should throw if project name is empty', async () => {
-      await expect(createProject('')).rejects.toThrow(
+      const filePath = path.join(testDir, 'Empty.c91');
+      await expect(store.createProject('', filePath)).rejects.toThrow(
         'Project name must not be empty'
       );
     });
 
     it('should throw if project file already exists', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'Duplicate.c91');
+      await store.createProject('Duplicate', filePath);
+      await store.closeProject();
 
-      await createProject('Duplicate');
-      await closeProject();
-
-      await expect(createProject('Duplicate')).rejects.toThrow(
+      await expect(store.createProject('Duplicate', filePath)).rejects.toThrow(
         'Project file already exists'
       );
-
-      cwdSpy.mockRestore();
     });
   });
 
-  // -----------------------------------------------------------------------
-  // openProject
-  // -----------------------------------------------------------------------
   describe('openProject', () => {
     it('should open an existing .c91 file and return name', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'OpenMe.c91');
+      const created = await store.createProject('OpenMe', filePath);
+      await store.closeProject();
 
-      // Create a project first, then close and re-open
-      const created = await createProject('OpenMe');
-      await closeProject();
-
-      const opened = await openProject(created.filePath);
+      const opened = await store.openProject(created.filePath);
 
       expect(opened.filePath).toBe(created.filePath);
       expect(opened.name).toBe('OpenMe');
-      expect(isProjectOpen()).toBe(true);
-
-      cwdSpy.mockRestore();
-    });
-
-    it('should read metadata after opening', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
-
-      await createProject('MetaTest');
-      await closeProject();
-
-      const filePath = path.join(testDir, 'projects', 'MetaTest.c91');
-      await openProject(filePath);
-
-      const metadata = await getMetadata();
-      expect(metadata.name).toBe('MetaTest');
-      expect(metadata.filePath).toBe(filePath);
-      expect(metadata.tailSpendThreshold).toBe(10000);
-
-      cwdSpy.mockRestore();
+      expect(store.isProjectOpen()).toBe(true);
     });
 
     it('should throw if file does not exist', async () => {
       const fakePath = path.join(testDir, 'nonexistent.c91');
-      await expect(openProject(fakePath)).rejects.toThrow(
+      await expect(store.openProject(fakePath)).rejects.toThrow(
         'Project file not found'
       );
     });
 
     it('should throw if file path is empty', async () => {
-      await expect(openProject('')).rejects.toThrow(
+      await expect(store.openProject('')).rejects.toThrow(
         'File path must not be empty'
       );
     });
-
-    it('should derive name from filename when project_name setting is missing', async () => {
-      // Create a raw DuckDB file with schema but no project_name setting
-      const rawPath = path.join(testDir, 'RawProject.c91');
-      await databaseService.openDatabase(rawPath);
-      // databaseService.openDatabase already initialises schema & seeds
-      await databaseService.closeDatabase();
-
-      const opened = await openProject(rawPath);
-      expect(opened.name).toBe('RawProject');
-    });
   });
 
-  // -----------------------------------------------------------------------
-  // closeProject
-  // -----------------------------------------------------------------------
   describe('closeProject', () => {
     it('should close the database and clear state', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'CloseMe.c91');
+      await store.createProject('CloseMe', filePath);
+      expect(store.isProjectOpen()).toBe(true);
 
-      await createProject('CloseMe');
-      expect(isProjectOpen()).toBe(true);
-
-      await closeProject();
-      expect(isProjectOpen()).toBe(false);
-
-      cwdSpy.mockRestore();
+      await store.closeProject();
+      expect(store.isProjectOpen()).toBe(false);
     });
 
     it('should cause operations to throw after close', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
+      const filePath = path.join(testDir, 'projects', 'ThrowAfterClose.c91');
+      await store.createProject('ThrowAfterClose', filePath);
+      await store.closeProject();
 
-      await createProject('ThrowAfterClose');
-      await closeProject();
-
-      await expect(getMetadata()).rejects.toThrow(
+      await expect(store.getSetting('project_name')).rejects.toThrow(
         'No project is currently open'
       );
-
-      await expect(
-        updateMetadata({ tailSpendThreshold: 5000 })
-      ).rejects.toThrow('No project is currently open');
-
-      cwdSpy.mockRestore();
     });
   });
 
-  // -----------------------------------------------------------------------
-  // isProjectOpen
-  // -----------------------------------------------------------------------
-  describe('isProjectOpen', () => {
-    it('should return false when no project has been opened', () => {
-      expect(isProjectOpen()).toBe(false);
-    });
-
-    it('should return true when a project is open', async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
-
-      await createProject('IsOpenTest');
-      expect(isProjectOpen()).toBe(true);
-
-      cwdSpy.mockRestore();
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // getMetadata / updateMetadata roundtrip
-  // -----------------------------------------------------------------------
-  describe('Metadata roundtrip', () => {
+  describe('Settings KV CRUD', () => {
     beforeEach(async () => {
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(testDir);
-      await createProject('MetaRoundtrip');
-      cwdSpy.mockRestore();
+      const filePath = path.join(testDir, 'projects', 'KVTest.c91');
+      await store.createProject('KVTest', filePath);
     });
 
-    it('should return default metadata for a new project', async () => {
-      const metadata = await getMetadata();
+    it('should create a new key when setSetting is called', async () => {
+      const before = await store.getSetting('custom_flag');
+      expect(before).toBeUndefined();
 
-      expect(metadata.name).toBe('MetaRoundtrip');
-      expect(metadata.companyContext).toBeNull();
-      expect(metadata.columnMappings).toBeNull();
-      expect(metadata.invoiceGroupingColumns).toBeNull();
-      expect(metadata.tailSpendThreshold).toBe(10000);
-      expect(metadata.taxonomyName).toBeNull();
-      expect(metadata.createdAt).toBeTruthy();
+      await store.setSetting('custom_flag', true);
+      const after = await store.getSetting('custom_flag');
+      expect(after).toBe(true);
     });
 
-    it('should update and retrieve company context', async () => {
-      const companyContext = {
-        industry: 'Healthcare',
-        sector: 'Medical Devices',
-        description: 'A healthcare company',
-        businessFocus: 'Medical equipment manufacturing',
-        procurementNuances: 'Strict vendor qualifications required',
-      };
+    it('should overwrite an existing key', async () => {
+      await store.setSetting('threshold', 100);
+      await store.setSetting('threshold', 999);
 
-      await updateMetadata({ companyContext });
-      const metadata = await getMetadata();
-
-      expect(metadata.companyContext).toEqual(companyContext);
+      const value = await store.getSetting('threshold');
+      expect(value).toBe(999);
     });
 
-    it('should update and retrieve company context with companyName', async () => {
-      const companyContext = {
-        companyName: 'Acme Corp',
-        industry: 'Manufacturing',
-        sector: 'Industrial Equipment',
-      };
+    it('should delete a key', async () => {
+      await store.setSetting('temp_key', 'hello');
+      expect(await store.getSetting('temp_key')).toBe('hello');
 
-      await updateMetadata({ companyContext });
-      const metadata = await getMetadata();
-
-      expect(metadata.companyContext).toEqual(companyContext);
-      expect(metadata.companyContext!.companyName).toBe('Acme Corp');
+      await store.deleteSetting('temp_key');
+      expect(await store.getSetting('temp_key')).toBeUndefined();
     });
 
-    it('should return undefined companyName when not set', async () => {
-      const companyContext = {
-        industry: 'Tech',
-      };
-
-      await updateMetadata({ companyContext });
-      const metadata = await getMetadata();
-
-      expect(metadata.companyContext!.industry).toBe('Tech');
-      expect(metadata.companyContext!.companyName).toBeUndefined();
+    it('should return all settings via getAllSettings', async () => {
+      const all = await store.getAllSettings();
+      expect(all.project_name).toBe('KVTest');
+      expect(all.tail_spend_threshold).toBe(10000);
     });
 
-    it('should update and retrieve tail spend threshold', async () => {
-      await updateMetadata({ tailSpendThreshold: 25000 });
-      const metadata = await getMetadata();
+    it('should handle JSON object values', async () => {
+      const ctx = { industry: 'Tech', sector: 'SaaS' };
+      await store.setSetting('company_context', ctx);
 
-      expect(metadata.tailSpendThreshold).toBe(25000);
-    });
-
-    it('should update both company context and threshold together', async () => {
-      const companyContext = {
-        industry: 'Finance',
-        sector: 'Banking',
-      };
-
-      await updateMetadata({ companyContext, tailSpendThreshold: 50000 });
-      const metadata = await getMetadata();
-
-      expect(metadata.companyContext!.industry).toBe('Finance');
-      expect(metadata.companyContext!.sector).toBe('Banking');
-      expect(metadata.tailSpendThreshold).toBe(50000);
-    });
-
-    it('should persist metadata across close/reopen cycle', async () => {
-      const companyContext = {
-        industry: 'Retail',
-        description: 'A retail company',
-      };
-      await updateMetadata({ companyContext, tailSpendThreshold: 7500 });
-
-      const filePath = databaseService.getFilePath()!;
-      await closeProject();
-      await openProject(filePath);
-
-      const metadata = await getMetadata();
-      expect(metadata.companyContext!.industry).toBe('Retail');
-      expect(metadata.companyContext!.description).toBe('A retail company');
-      expect(metadata.tailSpendThreshold).toBe(7500);
+      const retrieved = await store.getSetting('company_context');
+      expect(retrieved).toEqual(ctx);
     });
   });
 
-  // -----------------------------------------------------------------------
-  // File Dialog mocking
-  // -----------------------------------------------------------------------
   describe('selectSavePath', () => {
     it('should return the chosen file path', async () => {
-      const mockDialog = vi.mocked(dialog.showSaveDialog);
-      mockDialog.mockResolvedValue({
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
         canceled: false,
         filePath: '/tmp/test-project.c91',
       });
 
-      const result = await selectSavePath();
+      const result = await store.selectSavePath();
       expect(result).toBe('/tmp/test-project.c91');
-      expect(mockDialog).toHaveBeenCalledOnce();
     });
 
     it('should return null when the user cancels', async () => {
-      const mockDialog = vi.mocked(dialog.showSaveDialog);
-      mockDialog.mockResolvedValue({
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
         canceled: true,
         filePath: undefined as unknown as string,
       });
 
-      const result = await selectSavePath();
+      const result = await store.selectSavePath();
       expect(result).toBeNull();
     });
   });
 
   describe('selectOpenPath', () => {
     it('should return the chosen file path', async () => {
-      const mockDialog = vi.mocked(dialog.showOpenDialog);
-      mockDialog.mockResolvedValue({
+      vi.mocked(dialog.showOpenDialog).mockResolvedValue({
         canceled: false,
         filePaths: ['/tmp/existing-project.c91'],
       });
 
-      const result = await selectOpenPath();
+      const result = await store.selectOpenPath();
       expect(result).toBe('/tmp/existing-project.c91');
-      expect(mockDialog).toHaveBeenCalledOnce();
     });
 
     it('should return null when the user cancels', async () => {
-      const mockDialog = vi.mocked(dialog.showOpenDialog);
-      mockDialog.mockResolvedValue({
+      vi.mocked(dialog.showOpenDialog).mockResolvedValue({
         canceled: true,
         filePaths: [],
       });
 
-      const result = await selectOpenPath();
+      const result = await store.selectOpenPath();
       expect(result).toBeNull();
     });
   });

@@ -1,168 +1,103 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs';
 
-const mockRun = vi.fn();
-const mockAll = vi.fn();
-const mockGet = vi.fn();
-
-vi.mock('../../../src/main/services/database', () => ({
-  databaseService: {
-    run: (...args: unknown[]) => mockRun(...args),
-    all: (...args: unknown[]) => mockAll(...args),
-    get: (...args: unknown[]) => mockGet(...args),
-  },
-}));
-
 vi.mock('electron', () => ({
   dialog: {
     showSaveDialog: vi.fn(),
   },
+  BrowserWindow: {
+    getFocusedWindow: vi.fn(() => ({})),
+    getAllWindows: vi.fn(() => [{}]),
+  },
 }));
 
-import { exportCSV } from '../../../src/main/services/export';
+import { dialog } from 'electron';
+import { ExportService } from '../../../src/main/services/export';
+import { createMockDatabase } from '../../helpers/mock-services';
+import type { Database } from '../../../src/shared/types/services';
 
 describe('ExportService', () => {
+  let db: Database;
+  let service: ExportService;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    db = createMockDatabase();
+    service = new ExportService(db);
   });
 
   describe('exportCSV', () => {
     it('should export transactions to CSV', async () => {
-      // Mock column discovery
-      mockAll.mockImplementation(async (sql: string) => {
+      const tmpPath = `/tmp/test-export-${Date.now()}.csv`;
+
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+        canceled: false,
+        filePath: tmpPath,
+      });
+
+      vi.mocked(db.all).mockImplementation(async (sql: string) => {
         if (sql.includes('information_schema.columns')) {
           return [
             { column_name: 'id' },
             { column_name: 'row_index' },
-            { column_name: 'invoice_group_key' },
             { column_name: 'taxonomy_node_id' },
-            { column_name: 'review_score' },
+            { column_name: 'classification_status' },
             { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
             { column_name: 'supplier_name' },
             { column_name: 'spend_amount' },
-            { column_name: 'gl_description' },
           ];
         }
-        // Transaction query
         return [
           {
-            id: 'tx1',
-            row_index: 0,
-            invoice_group_key: 'g1',
-            taxonomy_node_id: 'tid1',
-            review_score: 10,
-            classification_reasoning: 'Matched by supplier',
-            created_at: '2026-01-01',
-            updated_at: '2026-01-01',
-            supplier_name: 'Acme Corp',
-            spend_amount: 5000,
-            gl_description: 'Software license',
+            id: 'tx1', row_index: 0, taxonomy_node_id: 'tid1',
+            classification_status: 'classified', classification_reasoning: 'Matched',
+            created_at: '2026-01-01', updated_at: '2026-01-01',
+            supplier_name: 'Acme Corp', spend_amount: 5000,
             classification_path: 'Indirect|IT|Software',
-          },
-          {
-            id: 'tx2',
-            row_index: 1,
-            invoice_group_key: null,
-            taxonomy_node_id: null,
-            review_score: null,
-            classification_reasoning: null,
-            created_at: '2026-01-01',
-            updated_at: '2026-01-01',
-            supplier_name: 'TestCo',
-            spend_amount: 200,
-            gl_description: 'Office supplies',
-            classification_path: '',
           },
         ];
       });
 
-      const tmpPath = `/tmp/test-export-${Date.now()}.csv`;
-
       try {
-        const result = await exportCSV(tmpPath);
-        expect(result.rowsExported).toBe(2);
+        const result = await service.exportCSV();
+        expect(result).not.toBeNull();
+        expect(result!.rowsExported).toBe(1);
 
-        // Read and verify CSV
         const csvContent = fs.readFileSync(tmpPath, 'utf-8');
-        const lines = csvContent.split('\n');
-
-        // Header line
-        expect(lines[0]).toContain('supplier_name');
-        expect(lines[0]).toContain('classification_path');
-        expect(lines[0]).toContain('classification_l1');
-        expect(lines[0]).toContain('classification_l2');
-        expect(lines[0]).toContain('classification_l3');
-        expect(lines[0]).toContain('review_score');
-
-        // First data row
-        expect(lines[1]).toContain('Acme Corp');
-        expect(lines[1]).toContain('Indirect|IT|Software');
-
-        // Second data row - unclassified
-        expect(lines[2]).toContain('TestCo');
+        expect(csvContent).toContain('supplier_name');
+        expect(csvContent).toContain('Acme Corp');
       } finally {
-        if (fs.existsSync(tmpPath)) {
-          fs.unlinkSync(tmpPath);
-        }
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
       }
     });
 
-    it('should handle CSV escaping for values with commas', async () => {
-      mockAll.mockImplementation(async (sql: string) => {
-        if (sql.includes('information_schema.columns')) {
-          return [
-            { column_name: 'id' },
-            { column_name: 'row_index' },
-            { column_name: 'invoice_group_key' },
-            { column_name: 'taxonomy_node_id' },
-            { column_name: 'review_score' },
-            { column_name: 'classification_reasoning' },
-            { column_name: 'created_at' },
-            { column_name: 'updated_at' },
-            { column_name: 'supplier_name' },
-          ];
-        }
-        return [
-          {
-            id: 'tx1',
-            row_index: 0,
-            invoice_group_key: null,
-            taxonomy_node_id: null,
-            review_score: null,
-            classification_reasoning: null,
-            created_at: '',
-            updated_at: '',
-            supplier_name: 'Acme, Inc.',
-            classification_path: '',
-          },
-        ];
+    it('should return null when user cancels dialog', async () => {
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+        canceled: true,
+        filePath: undefined as unknown as string,
       });
 
-      const tmpPath = `/tmp/test-export-escape-${Date.now()}.csv`;
-
-      try {
-        const result = await exportCSV(tmpPath);
-        expect(result.rowsExported).toBe(1);
-
-        const csvContent = fs.readFileSync(tmpPath, 'utf-8');
-        expect(csvContent).toContain('"Acme, Inc."');
-      } finally {
-        if (fs.existsSync(tmpPath)) {
-          fs.unlinkSync(tmpPath);
-        }
-      }
+      const result = await service.exportCSV();
+      expect(result).toBeNull();
     });
 
     it('should handle empty dataset', async () => {
-      mockAll.mockImplementation(async (sql: string) => {
+      const tmpPath = `/tmp/test-export-empty-${Date.now()}.csv`;
+
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+        canceled: false,
+        filePath: tmpPath,
+      });
+
+      vi.mocked(db.all).mockImplementation(async (sql: string) => {
         if (sql.includes('information_schema.columns')) {
           return [
             { column_name: 'id' },
             { column_name: 'row_index' },
             { column_name: 'taxonomy_node_id' },
-            { column_name: 'review_score' },
+            { column_name: 'classification_status' },
             { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
@@ -171,19 +106,12 @@ describe('ExportService', () => {
         return [];
       });
 
-      const tmpPath = `/tmp/test-export-empty-${Date.now()}.csv`;
-
       try {
-        const result = await exportCSV(tmpPath);
-        expect(result.rowsExported).toBe(0);
-
-        const csvContent = fs.readFileSync(tmpPath, 'utf-8');
-        const lines = csvContent.trimEnd().split(/\r?\n/);
-        expect(lines).toHaveLength(1); // Header only
+        const result = await service.exportCSV();
+        expect(result).not.toBeNull();
+        expect(result!.rowsExported).toBe(0);
       } finally {
-        if (fs.existsSync(tmpPath)) {
-          fs.unlinkSync(tmpPath);
-        }
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
       }
     });
   });

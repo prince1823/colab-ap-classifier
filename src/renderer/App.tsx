@@ -2,7 +2,6 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import AppShell from './components/AppShell'
 import ReviewPage from './pages/ReviewPage'
 import UploadPage from './pages/UploadPage'
-import CanonicalizationPage from './pages/CanonicalizationPage'
 import DataReviewPage from './pages/DataReviewPage'
 import ClassificationPage from './pages/ClassificationPage'
 import OutputPage from './pages/OutputPage'
@@ -11,8 +10,6 @@ import CompanyContextPage from './pages/CompanyContextPage'
 import SuppliersPage from './pages/SuppliersPage'
 import OverrideRulesPage from './pages/OverrideRulesPage'
 import VersionHistoryPage from './pages/VersionHistoryPage'
-import FeedbackDashboardPage from './pages/FeedbackDashboardPage'
-import PivotPage from './pages/PivotPage'
 import { WorkflowStateProvider } from './contexts/WorkflowStateContext'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -21,21 +18,15 @@ function App() {
     <WorkflowStateProvider>
       <Routes>
         <Route path="/" element={<AppShell />}>
-          {/* Workflow tabs */}
+          {/* Default → Upload (step 3) */}
           <Route index element={<Navigate to="/workflow/upload" replace />} />
+
+          {/* Workflow steps */}
           <Route
             path="workflow/upload"
             element={
               <ProtectedRoute>
                 <UploadPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="workflow/canonicalization"
-            element={
-              <ProtectedRoute>
-                <CanonicalizationPage />
               </ProtectedRoute>
             }
           />
@@ -74,18 +65,18 @@ function App() {
 
           {/* Project views */}
           <Route
-            path="project/taxonomy"
+            path="project/details"
             element={
               <ProtectedRoute>
-                <TaxonomyPage />
+                <CompanyContextPage />
               </ProtectedRoute>
             }
           />
           <Route
-            path="project/company-context"
+            path="project/taxonomy"
             element={
               <ProtectedRoute>
-                <CompanyContextPage />
+                <TaxonomyPage />
               </ProtectedRoute>
             }
           />
@@ -110,22 +101,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <VersionHistoryPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="project/feedback"
-            element={
-              <ProtectedRoute>
-                <FeedbackDashboardPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="project/pivot"
-            element={
-              <ProtectedRoute>
-                <PivotPage />
               </ProtectedRoute>
             }
           />

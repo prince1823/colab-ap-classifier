@@ -6,8 +6,8 @@ import type { TaxonomyNode } from '../../shared/types/taxonomy'
 /** Friendly labels for known fields */
 const FIELD_LABELS: Record<string, string> = {
   taxonomy_node_id: 'Classification',
+  classification_status: 'Classification Status',
   status: 'Status',
-  review_score: 'Review Score',
   suggestion: 'Suggestion',
 }
 

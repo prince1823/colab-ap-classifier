@@ -1,61 +1,74 @@
+import type { ClassificationStatus } from './classification';
+
 export interface Transaction {
   id: string;
   rowIndex: number;
-  invoiceGroupKey: string | null;
-
   taxonomyNodeId: string | null;
   classificationPath: string | null;
-  reviewScore: number | null;
+  classificationStatus: ClassificationStatus;
   classificationReasoning: string | null;
-
+  humanReviewed: boolean;
   canonicalFields: Record<string, unknown>;
-
   createdAt: string;
   updatedAt: string;
-}
-
-export interface ColumnFilter {
-  column: string;
-  operator: 'is' | 'is_not' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with';
-  values: string[];
 }
 
 export interface TransactionFilter {
   supplierName?: string;
   taxonomyNodeId?: string;
-  reviewScoreMin?: number;
-  reviewScoreMax?: number;
+  classificationStatus?: ClassificationStatus;
   spendMin?: number;
   spendMax?: number;
-  excludeTailSpend?: boolean;
+  /** Generic conditions using the same shape as override rules */
+  conditions?: FilterCondition[];
   page?: number;
   pageSize?: number;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
-  /** Arbitrary column-value filters for server-side filtering */
-  columnFilters?: ColumnFilter[];
-  /** Global combinator for column filters: AND (default) or OR */
-  filterCombinator?: 'AND' | 'OR';
-  /** Per-pair connectors between column filters (keyed by column name, value is connector AFTER that filter) */
-  filterConnectors?: Record<string, 'AND' | 'OR'>;
 }
+
+export interface FilterCondition {
+  field: string;
+  operator: FilterOperator;
+  value: string | number | string[];
+  /** How this condition joins to the next. Default: 'AND'. Ignored on last condition. */
+  connector?: 'AND' | 'OR';
+}
+
+export type FilterOperator =
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'not_contains'
+  | 'starts_with'
+  | 'ends_with'
+  | 'regex'
+  | 'in_list'
+  | 'greater_than'
+  | 'less_than'
+  | 'greater_than_or_equal'
+  | 'less_than_or_equal';
 
 export interface TransactionStats {
   totalRows: number;
   totalSpend: number;
   uniqueSuppliers: number;
   classifiedRows: number;
-  flaggedForReviewRows: number;
+  unclassifiedRows: number;
 }
 
-/**
- * Paginated response for large dataset queries.
- */
 export interface PaginatedTransactions {
   rows: Transaction[];
   totalCount: number;
   page: number;
   pageSize: number;
+}
+
+export interface TransactionUpdate {
+  ids: string[];
+  taxonomyNodeId?: string;
+  classificationStatus?: ClassificationStatus;
+  classificationReasoning?: string;
 }
 
 /**

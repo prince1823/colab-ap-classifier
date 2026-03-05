@@ -466,18 +466,11 @@ const ClassificationTree = ({
           setIsSavingNode(true)
           setAddNodeError(null)
 
-          // Get current nodes, add the new path, and save all
+          // Add the new path if it doesn't already exist
           const currentNodes = await ipc.taxonomy.getNodes()
           const existingPaths = currentNodes.map((n) => n.fullPath)
           if (!existingPaths.includes(trimmedPath)) {
-            const meta = await ipc.taxonomy.get()
-            await ipc.taxonomy.set({
-              name: meta.name || 'custom',
-              nodes: [
-                ...currentNodes.map((n) => ({ path: n.fullPath, description: n.description || undefined })),
-                { path: trimmedPath },
-              ],
-            })
+            await ipc.taxonomy.addNode(trimmedPath)
           }
         } catch (e) {
           console.error('Failed to persist taxonomy path to backend', e)
@@ -555,13 +548,12 @@ const ClassificationTree = ({
           setIsDeleting(true)
           setDeleteError(null)
 
+          // Delete matching nodes from backend
           const currentNodes = await ipc.taxonomy.getNodes()
-          const remainingNodes = currentNodes.filter((n) => !pathsToRemove.includes(n.fullPath))
-          const meta = await ipc.taxonomy.get()
-          await ipc.taxonomy.set({
-            name: meta.name || 'custom',
-            nodes: remainingNodes.map((n) => ({ path: n.fullPath, description: n.description || undefined })),
-          })
+          const nodesToDelete = currentNodes.filter((n) => pathsToRemove.includes(n.fullPath))
+          for (const node of nodesToDelete) {
+            await ipc.taxonomy.deleteNode(node.id)
+          }
         } catch (e) {
           console.error('Failed to delete taxonomy node from backend', e)
           setDeleteError('Deleted locally, but failed to update backend.')
@@ -631,11 +623,20 @@ const ClassificationTree = ({
           setIsRenaming(true)
           setRenameError(null)
 
-          const meta = await ipc.taxonomy.get()
-          await ipc.taxonomy.set({
-            name: meta.name || 'custom',
-            nodes: updatedPaths.map((p) => ({ path: p })),
-          })
+          // Delete old nodes and re-add with updated paths
+          const currentNodes = await ipc.taxonomy.getNodes()
+          // Delete nodes whose paths were changed
+          const oldPaths = new Set(originalPaths)
+          const newPaths = new Set(updatedPaths)
+          const removedPaths = [...oldPaths].filter(p => !newPaths.has(p))
+          const addedPaths = [...newPaths].filter(p => !oldPaths.has(p))
+          for (const rp of removedPaths) {
+            const node = currentNodes.find(n => n.fullPath === rp)
+            if (node) await ipc.taxonomy.deleteNode(node.id)
+          }
+          for (const ap of addedPaths) {
+            await ipc.taxonomy.addNode(ap)
+          }
         } catch (e) {
           console.error('Failed to rename taxonomy node in backend', e)
           setRenameError('Renamed locally, but failed to update backend.')

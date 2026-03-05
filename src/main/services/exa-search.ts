@@ -1,8 +1,6 @@
 import Exa from 'exa-js';
+import type { WebSearch } from '../../shared/types/services';
 
-/**
- * A single search result from Exa, trimmed to what we need.
- */
 export interface ExaSearchResult {
   title: string;
   url: string;
@@ -10,67 +8,58 @@ export interface ExaSearchResult {
   publishedDate?: string;
 }
 
-let exaClient: Exa | null = null;
+export class ExaWebSearch implements WebSearch {
+  private client: Exa | null = null;
 
-/**
- * Return a configured Exa client, or null if no API key is set.
- */
-function getClient(): Exa | null {
-  if (exaClient) return exaClient;
-  const apiKey = process.env.EXA_API_KEY;
-  if (!apiKey) return null;
-  exaClient = new Exa(apiKey);
-  return exaClient;
+  private getClient(): Exa | null {
+    if (this.client) return this.client;
+    const apiKey = process.env.EXA_API_KEY;
+    if (!apiKey) return null;
+    this.client = new Exa(apiKey);
+    return this.client;
+  }
+
+  isAvailable(): boolean {
+    return !!process.env.EXA_API_KEY;
+  }
+
+  async searchSupplier(
+    supplierName: string,
+    supplierAddress?: string,
+    numResults = 5
+  ): Promise<ExaSearchResult[]> {
+    const client = this.getClient();
+    if (!client) return [];
+
+    const query = supplierAddress
+      ? `${supplierName} ${supplierAddress} company information linkedin`
+      : `${supplierName} company information business linkedin`;
+
+    const response = await client.search(query, {
+      numResults,
+      type: 'auto',
+      contents: { text: { maxCharacters: 3000 } },
+    });
+
+    return response.results
+      .filter((r) => r.text)
+      .map((r) => ({
+        title: r.title || 'Untitled',
+        url: r.url,
+        text: r.text as string,
+        publishedDate: r.publishedDate,
+      }));
+  }
+
+  resetClient(): void {
+    this.client = null;
+  }
 }
 
-/**
- * Check whether Exa search is available (API key configured).
- */
-export function isAvailable(): boolean {
-  return !!process.env.EXA_API_KEY;
+// Backward compatibility exports
+const defaultInstance = new ExaWebSearch();
+export function isAvailable(): boolean { return defaultInstance.isAvailable(); }
+export async function searchSupplier(supplierName: string, supplierAddress?: string, numResults = 5): Promise<ExaSearchResult[]> {
+  return defaultInstance.searchSupplier(supplierName, supplierAddress, numResults);
 }
-
-/**
- * Search Exa for information about a supplier.
- *
- * @param supplierName - The supplier name to search for
- * @param supplierAddress - Optional address for more specific results
- * @param numResults - Number of results to request (default 5)
- * @returns Array of search results, or empty array if Exa is unavailable
- */
-export async function searchSupplier(
-  supplierName: string,
-  supplierAddress?: string,
-  numResults = 5
-): Promise<ExaSearchResult[]> {
-  const client = getClient();
-  if (!client) return [];
-
-  const query = supplierAddress
-    ? `${supplierName} ${supplierAddress} company information linkedin`
-    : `${supplierName} company information business linkedin`;
-
-  const response = await client.search(query, {
-    numResults,
-    type: 'auto',
-    contents: {
-      text: { maxCharacters: 3000 },
-    },
-  });
-
-  return response.results
-    .filter((r) => r.text)
-    .map((r) => ({
-      title: r.title || 'Untitled',
-      url: r.url,
-      text: r.text as string,
-      publishedDate: r.publishedDate,
-    }));
-}
-
-/**
- * Reset the cached Exa client (useful for testing).
- */
-export function resetClient(): void {
-  exaClient = null;
-}
+export function resetClient(): void { defaultInstance.resetClient(); }

@@ -1,0 +1,10 @@
+[
+  {
+    "name": "McKesson Medical Supplies Rule",
+    "conditions": [
+      { "field": "supplier_name", "operator": "contains", "value": "mckesson" }
+    ],
+    "targetTaxonomyPath": "clinical|clinical supplies|medical-surgical supplies",
+    "priorityScore": 300
+  }
+]

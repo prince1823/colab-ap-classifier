@@ -3,13 +3,14 @@ import { persist } from 'zustand/middleware'
 import { ipc } from '../lib/ipc'
 import type { ProjectMetadata } from '../../shared/types/project'
 import type { ClassificationProgress } from '../../shared/types/classification'
-import type { CSVPreviewWithMappings, CanonicalColumnMapping } from '../../shared/types/canonicalization'
+import type { CSVPreviewWithMappings, ColumnMapping } from '../../shared/types/column-mapping'
+import type { FilterCondition } from '../../shared/types/transactions'
+import type { ProjectSupplierView } from '../../shared/types/suppliers'
 
 interface UploadDraft {
   filePath: string | null
   preview: CSVPreviewWithMappings | null
-  mapping: CanonicalColumnMapping
-  groupingColumns: string[]
+  mapping: ColumnMapping
   showUploader: boolean
 }
 
@@ -44,7 +45,7 @@ interface ReviewFilterState {
   showFilterPanel: boolean
   tables: ReviewTableConfig[]
   selectedRows: string[]
-  tableLocalFilters: Record<string, any>
+  tableLocalFilters: Record<string, FilterCondition[]>
 }
 
 const defaultReviewFilters: ReviewFilterState = {
@@ -87,14 +88,11 @@ interface WorkflowState {
   // Upload draft (persists across tab navigation)
   uploadDraft: UploadDraft
 
-  // Pivot table settings (persists across tab navigation)
-  pivotSettings: PivotSettings
-
   // Review tab filter state (persists across tab navigation, resets on project close)
   reviewFilters: ReviewFilterState
 
   // Cached page data (survives tab navigation, resets on project close)
-  cachedSuppliers: any[] | null
+  cachedSuppliers: ProjectSupplierView[] | null
 
   // Persisted route — restored on reload
   lastRoute: string | null
@@ -104,7 +102,6 @@ interface WorkflowState {
   hasCompanyContext: boolean
   hasTaxonomy: boolean
   hasUploadedData: boolean
-  hasCanonicalizedData: boolean
   hasReviewedData: boolean
   isClassifying: boolean
   hasClassifiedData: boolean
@@ -119,10 +116,9 @@ interface WorkflowState {
   setClassificationProgress: (progress: ClassificationProgress | null) => void
   setUploadDraft: (draft: Partial<UploadDraft>) => void
   clearUploadDraft: () => void
-  setPivotSettings: (settings: Partial<PivotSettings>) => void
   setReviewFilters: (filters: Partial<ReviewFilterState>) => void
   clearReviewFilters: () => void
-  setCachedSuppliers: (suppliers: any[] | null) => void
+  setCachedSuppliers: (suppliers: ProjectSupplierView[] | null) => void
   markDataReviewed: () => void
   setLastRoute: (route: string) => void
   reset: () => void
@@ -132,19 +128,15 @@ function deriveState(metadata: ProjectMetadata | null, classifiedRows: number, p
   const hasProject = metadata !== null
   const hasCompanyContext = metadata?.companyContext !== null && metadata?.companyContext !== undefined
   const hasTaxonomy = metadata?.taxonomyName !== null && metadata?.taxonomyName !== undefined
-  const hasUploadedData = metadata?.columnMappings !== null && metadata?.columnMappings !== undefined
-  const hasCanonicalizedData = hasUploadedData
-  // Consider classified if we have rows OR if the pipeline just completed
+  const hasUploadedData = metadata?.columnMapping !== null && metadata?.columnMapping !== undefined
   const hasClassifiedData = classifiedRows > 0 || (progress !== null && progress.status === 'completed')
-  const isClassifying = progress !== null &&
-    (progress.status === 'pending' || progress.status === 'researching' || progress.status === 'classifying')
+  const isClassifying = progress !== null && progress.status === 'running'
 
   return {
     hasProject,
     hasCompanyContext,
     hasTaxonomy,
     hasUploadedData,
-    hasCanonicalizedData,
     hasReviewedData: dataReviewed,
     isClassifying,
     hasClassifiedData,
@@ -155,7 +147,6 @@ const defaultUploadDraft: UploadDraft = {
   filePath: null,
   preview: null,
   mapping: {},
-  groupingColumns: [],
   showUploader: true,
 }
 
@@ -167,7 +158,6 @@ export const useWorkflowStore = create<WorkflowState>()(
       classifiedRows: 0,
       dataReviewed: false,
       uploadDraft: { ...defaultUploadDraft },
-      pivotSettings: { ...defaultPivotSettings },
       reviewFilters: { ...defaultReviewFilters },
       cachedSuppliers: null,
       lastRoute: null,
@@ -182,7 +172,6 @@ export const useWorkflowStore = create<WorkflowState>()(
           classifiedRows: 0,
           classificationProgress: null,
           uploadDraft: { ...defaultUploadDraft },
-          pivotSettings: { ...defaultPivotSettings },
           reviewFilters: { ...defaultReviewFilters },
           cachedSuppliers: null,
           ...deriveState(null, 0, null),
@@ -206,7 +195,6 @@ export const useWorkflowStore = create<WorkflowState>()(
           classifiedRows: 0,
           classificationProgress: null,
           uploadDraft: { ...defaultUploadDraft },
-          pivotSettings: { ...defaultPivotSettings },
           reviewFilters: { ...defaultReviewFilters },
           cachedSuppliers: null,
           ...deriveState(null, 0, null),
@@ -220,17 +208,14 @@ export const useWorkflowStore = create<WorkflowState>()(
           metadata = await ipc.project.getMetadata()
         } catch (e) {
           console.warn('[loadProject] getMetadata failed, using fallback:', e)
-          // Build a minimal metadata object so the project still opens
-          const name = filePath.split('/').pop()?.replace(/\.c91$/, '') ?? 'Unknown'
           metadata = {
-            name,
-            filePath,
+            id: '',
+            projectName: filePath.split('/').pop()?.replace(/\.c91$/, '') ?? 'Unknown',
+            createdAt: '',
             companyContext: null,
-            columnMappings: null,
-            invoiceGroupingColumns: null,
-            tailSpendThreshold: 10000,
             taxonomyName: null,
-            createdAt: null,
+            tailSpendThreshold: 10000,
+            columnMapping: null,
           }
         }
 
@@ -242,25 +227,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           // No transactions yet
         }
 
-        let progress: ClassificationProgress | null = null
-        try {
-          const run = await ipc.classification.getStatus()
-          if (run && (run.status === 'pending' || run.status === 'researching' || run.status === 'classifying')) {
-            progress = {
-              runId: run.id,
-              status: run.status,
-              phase: run.status === 'researching' ? 'researching' : 'classifying',
-              total: run.progressTotal,
-              processed: run.progressProcessed,
-              percentage: run.progressPercentage,
-              currentStep: '',
-            }
-          }
-        } catch {
-          // No classification running
-        }
-
-        const derived = deriveState(metadata, classifiedRows, progress)
+        const derived = deriveState(metadata, classifiedRows, null)
         console.log('[loadProject] metadata:', JSON.stringify(metadata, null, 2))
         console.log('[loadProject] classifiedRows:', classifiedRows)
         console.log('[loadProject] derived:', JSON.stringify(derived))
@@ -268,7 +235,7 @@ export const useWorkflowStore = create<WorkflowState>()(
         set({
           projectMetadata: metadata,
           classifiedRows,
-          classificationProgress: progress,
+          classificationProgress: null,
           ...derived,
         })
       },
@@ -284,7 +251,6 @@ export const useWorkflowStore = create<WorkflowState>()(
           classifiedRows: 0,
           classificationProgress: null,
           uploadDraft: { ...defaultUploadDraft },
-          pivotSettings: { ...defaultPivotSettings },
           reviewFilters: { ...defaultReviewFilters },
           cachedSuppliers: null,
           lastRoute: null,
@@ -294,14 +260,9 @@ export const useWorkflowStore = create<WorkflowState>()(
 
       refreshMetadata: async () => {
         try {
-          // Guard: only refresh if a project is actually open
-          const isOpen = await ipc.project.isOpen()
-          if (!isOpen) return
-
           const metadata = await ipc.project.getMetadata()
-          if (!metadata) return // Keep existing state if metadata comes back null
+          if (!metadata) return
 
-          // Refresh stats — keep previous classifiedRows if stats call fails
           let classifiedRows = get().classifiedRows
           try {
             const stats = await ipc.transactions.stats()
@@ -316,7 +277,7 @@ export const useWorkflowStore = create<WorkflowState>()(
             ...deriveState(metadata, classifiedRows, classificationProgress, dataReviewed),
           })
         } catch {
-          // IPC failed — keep existing state intact, don't reset anything
+          // IPC failed — keep existing state intact
         }
       },
 
@@ -334,22 +295,18 @@ export const useWorkflowStore = create<WorkflowState>()(
       },
 
       subscribeToClassificationProgress: () => {
-        // Track cancelled/failed runIds so stale in-flight progress events
-        // (from research or classification callbacks completing after cancel)
-        // don't overwrite the reset UI state.
-        const terminalRunIds = new Set<string>()
+        let reachedTerminal = false
 
         const unsubscribe = ipc.classification.onProgress((progress) => {
-          // If this runId already reached a terminal state, ignore any active-status events
-          if (terminalRunIds.has(progress.runId)) {
-            if (progress.status === 'pending' || progress.status === 'researching' || progress.status === 'classifying') {
-              return // Drop stale event
-            }
+          // If we already reached a terminal state, ignore running events
+          if (reachedTerminal && progress.status === 'running') {
+            return
           }
 
-          // Remember when a run reaches a terminal state
           if (progress.status === 'cancelled' || progress.status === 'failed' || progress.status === 'completed') {
-            terminalRunIds.add(progress.runId)
+            reachedTerminal = true
+          } else {
+            reachedTerminal = false
           }
 
           const { projectMetadata, classifiedRows, dataReviewed } = get()
@@ -359,8 +316,6 @@ export const useWorkflowStore = create<WorkflowState>()(
           })
 
           if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
-            // Refresh stats so classifiedRows updates (hasClassifiedData derives from it)
-            // Progress stays set so the UI can show the completed/failed banner
             ipc.transactions.stats().then((stats) => {
               console.log('[WorkflowStore] Post-classification stats:', stats)
               set({
@@ -370,9 +325,6 @@ export const useWorkflowStore = create<WorkflowState>()(
             }).catch((e) => {
               console.error('[WorkflowStore] Failed to refresh stats:', e)
             })
-
-            // Clean up after a delay to avoid accumulating stale runIds
-            setTimeout(() => terminalRunIds.delete(progress.runId), 60_000)
           }
         })
         return unsubscribe
@@ -392,10 +344,6 @@ export const useWorkflowStore = create<WorkflowState>()(
 
       clearUploadDraft: () => {
         set({ uploadDraft: { ...defaultUploadDraft } })
-      },
-
-      setPivotSettings: (settings) => {
-        set({ pivotSettings: { ...get().pivotSettings, ...settings } })
       },
 
       setReviewFilters: (filters) => {
@@ -429,7 +377,6 @@ export const useWorkflowStore = create<WorkflowState>()(
           dataReviewed: false,
           classificationProgress: null,
           uploadDraft: { ...defaultUploadDraft },
-          pivotSettings: { ...defaultPivotSettings },
           reviewFilters: { ...defaultReviewFilters },
           cachedSuppliers: null,
           lastRoute: null,
@@ -439,7 +386,7 @@ export const useWorkflowStore = create<WorkflowState>()(
     }),
     {
       name: 'c91-workflow',
-      version: 1,
+      version: 2,
       partialize: (state) => ({
         projectMetadata: state.projectMetadata,
         lastRoute: state.lastRoute,

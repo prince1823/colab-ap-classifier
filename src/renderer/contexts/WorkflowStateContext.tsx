@@ -6,7 +6,6 @@ interface WorkflowStateContextType {
   hasCompanyContext: boolean
   hasTaxonomy: boolean
   hasUploadedData: boolean
-  hasCanonicalizedData: boolean
   hasReviewedData: boolean
   isClassifying: boolean
   hasClassifiedData: boolean
@@ -20,7 +19,6 @@ export function WorkflowStateProvider({ children }: { children: ReactNode }) {
     hasCompanyContext: s.hasCompanyContext,
     hasTaxonomy: s.hasTaxonomy,
     hasUploadedData: s.hasUploadedData,
-    hasCanonicalizedData: s.hasCanonicalizedData,
     hasReviewedData: s.hasReviewedData,
     isClassifying: s.isClassifying,
     hasClassifiedData: s.hasClassifiedData,

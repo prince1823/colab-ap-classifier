@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
-import type { PivotTreeNode, FlattenedPivotRow } from './useHierarchicalPivotData'
+import type { PivotTreeNode, FlattenedPivotRow } from '../types/pivot'
 
 /**
  * Manages expand/collapse state for the hierarchical pivot tree

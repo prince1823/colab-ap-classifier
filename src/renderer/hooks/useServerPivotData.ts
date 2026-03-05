@@ -1,11 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
 import type { TransactionFilter } from '../../shared/types/transactions'
-import type {
-  HierarchicalPivotData,
-  PivotTreeNode,
-  Aggregation,
-} from './useHierarchicalPivotData'
+import type { HierarchicalPivotData, PivotTreeNode, Aggregation } from '../types/pivot'
 
 interface UseServerPivotDataResult {
   pivotData: HierarchicalPivotData | null

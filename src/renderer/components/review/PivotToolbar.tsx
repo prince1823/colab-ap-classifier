@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { Plus, X, ChevronUp, ChevronDown, Maximize2, Minimize2, Filter, ExternalLink } from 'lucide-react'
 import * as Popover from '@radix-ui/react-popover'
-import type { Aggregation } from '../../hooks/useHierarchicalPivotData'
+import type { Aggregation } from '../../types/pivot'
 import type { PivotFilterState } from './PivotFilterBar'
 import '../../styles/PivotHierarchy.css'
 

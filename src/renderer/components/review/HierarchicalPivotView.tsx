@@ -2,11 +2,7 @@ import React, { useState, useRef, useMemo } from 'react'
 import { ChevronRight, ChevronDown, X } from 'lucide-react'
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import {
-  type Aggregation,
-  type HierarchicalPivotData,
-  type FlattenedPivotRow,
-} from '../../hooks/useHierarchicalPivotData'
+import type { Aggregation, HierarchicalPivotData, FlattenedPivotRow } from '../../types/pivot'
 import { usePivotTreeState, filterRowsBySearch } from '../../hooks/usePivotTreeState'
 import PivotToolbar from './PivotToolbar'
 import type { PivotFilterState } from './PivotFilterBar'

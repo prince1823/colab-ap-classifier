@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import type { HierarchicalPivotData, PivotTreeNode } from '../hooks/useHierarchicalPivotData'
+import type { HierarchicalPivotData, PivotTreeNode } from '../types/pivot'
 
 function triggerDownload(buffer: ArrayBuffer, filename: string): void {
   const blob = new Blob([buffer], {

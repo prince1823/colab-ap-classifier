@@ -19,7 +19,7 @@ import {
   CheckIcon,
 } from '@heroicons/react/24/outline'
 import SettingsDialog from './SettingsDialog'
-import { useWorkflowState } from '../contexts/WorkflowStateContext'
+import { useWorkflowStore } from '../stores/workflowStore'
 
 interface SidebarProps {
   collapsed: boolean
@@ -36,7 +36,15 @@ const projectViews = [
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(false)
-  const ws = useWorkflowState()
+  const ws = useWorkflowStore(s => ({
+    hasProject: s.hasProject,
+    hasCompanyContext: s.hasCompanyContext,
+    hasTaxonomy: s.hasTaxonomy,
+    hasUploadedData: s.hasUploadedData,
+    hasReviewedData: s.hasReviewedData,
+    isClassifying: s.isClassifying,
+    hasClassifiedData: s.hasClassifiedData,
+  }))
   const navigate = useNavigate()
   const location = useLocation()
 

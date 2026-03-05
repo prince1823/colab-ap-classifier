@@ -1,22 +1,21 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react'
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useDragDropManager } from 'react-dnd'
 import MultiTableSystem from './MultiTableSystem'
 import ClassificationTree from './ClassificationTree'
-import ReclassificationLoader from './ReclassificationLoader'
-import SystemFeedbackModal from './SystemFeedbackModal'
 import ReclassifyConfirmModal from './ReclassifyConfirmModal'
-import { Table, X, ChevronDown, Sparkles, Plus, CheckCircle, BarChart3 } from 'lucide-react'
+import { Table, X, ChevronDown, Plus, CheckCircle, BarChart3 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import MetricsTab from './MetricsTab'
-import { evaluateFilterConditions } from '../../utils/filterEvaluation'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { useGroupedTransactions } from '../../hooks/useGroupedTransactions'
+import { useReclassification } from '../../hooks/useReclassification'
+import { useUndoRedo } from '../../hooks/useUndoRedo'
 import type { TransactionFilter, FilterCondition } from '../../../shared/types/transactions'
 import '../../styles/Dashboard.css'
 import '../../styles/Tabs.css'
 
-const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, foldername, setFoldername, refreshTransactions, setTransactions }) => {
+const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, foldername, setFoldername, refreshTransactions }) => {
   const [activeTab, setActiveTab] = useState('tables') // 'tables'
 
   // ── Persisted filter state (survives tab navigation, resets on project close) ──
@@ -69,40 +68,26 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     }
   }, [storeSetReviewFilters])
 
-  const [isReclassifying, setIsReclassifying] = useState(false)
-  const [reclassificationProgress, setReclassificationProgress] = useState({ current: 0, total: 0 })
-
-  // System feedback generation
-  const [systemFeedbackEnabled, setSystemFeedbackEnabled] = useState(false)
-  const [feedbackSuggestions, setFeedbackSuggestions] = useState([])
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false)
-  const [reclassificationHistory, setReclassificationHistory] = useState(new Map()) // Track row reclassification history
-  const [showFeedbackNotification, setShowFeedbackNotification] = useState(false)
-  const [newFeedbackCount, setNewFeedbackCount] = useState(0)
-  const [highlightFeedback, setHighlightFeedback] = useState(false)
   const [reclassToast, setReclassToast] = useState<{ show: boolean; rowCount: number; targetPath: string; undoable: boolean }>({ show: false, rowCount: 0, targetPath: '', undoable: false })
   const reclassToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showDashboardModal, setShowDashboardModal] = useState(false)
   const [pendingReclassification, setPendingReclassification] = useState<{ rows: any[]; targetPath: string } | null>(null)
 
-  // ── Undo / Redo stacks ──
-  type UndoEntry =
-    | { type: 'filter'; activeFilters: any; selectedRows: any[]; tableLocalFilters: any; filterCombinator: 'AND' | 'OR'; filterConnectors: Record<string, 'AND' | 'OR'>; filterGroupOperators: Record<string, string> }
-    | { type: 'reclassify'; changelogId: string }
-    | { type: 'table'; tables: any[] }
-  const MAX_UNDO_SIZE = 20
-  const undoStackRef = useRef<UndoEntry[]>([])
-  const redoStackRef = useRef<UndoEntry[]>([])
-  const [undoToast, setUndoToast] = useState<{ show: boolean; message: string }>({ show: false, message: '' })
-  const undoToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  /** Cap a stack to MAX_UNDO_SIZE by dropping the oldest entries. */
-  const capStack = (stack: UndoEntry[]) => {
-    while (stack.length > MAX_UNDO_SIZE) stack.shift()
-  }
-
-  // Classification status filter (v2 — replaces review score filter)
-  const [_classificationStatusFilter] = useState<string | null>(null)
+  // ── Hooks ──
+  // Use ref for refetchGrouped since it's declared later (after useGroupedTransactions)
+  const refetchGroupedRef = useRef<() => void>(() => {})
+  const { reclassify, isReclassifying } = useReclassification({
+    onSuccess: async () => {
+      if (refreshTransactions) await refreshTransactions()
+      refetchGroupedRef.current()
+    },
+  })
+  const undoRedo = useUndoRedo({
+    onUndoRedo: async () => {
+      if (refreshTransactions) await refreshTransactions()
+      refetchGroupedRef.current()
+    },
+  })
 
   // Keyboard navigation state - coordinates between tree and tables
   const [keyboardFocus, setKeyboardFocus] = useState('tree') // 'tree' or 'tables'
@@ -110,172 +95,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
 
   // Current classification path for the latest selected supplier (shown in toolbar left)
   const [focusedClassificationPath, setFocusedClassificationPath] = useState(null)
-
-  // Refs to track current filter/selection state for undo snapshots
-  const activeFiltersRef = useRef(activeFilters)
-  const selectedRowsRef = useRef(selectedRows)
-  const tableLocalFiltersRef = useRef({})
-  const filterCombinatorRef = useRef(filterCombinator)
-  const filterConnectorsRef = useRef(filterConnectors)
-  const filterGroupOperatorsRef = useRef(filterGroupOperators)
-  useEffect(() => { activeFiltersRef.current = activeFilters }, [activeFilters])
-  useEffect(() => { selectedRowsRef.current = selectedRows }, [selectedRows])
-  useEffect(() => { filterCombinatorRef.current = filterCombinator }, [filterCombinator])
-  useEffect(() => { filterConnectorsRef.current = filterConnectors }, [filterConnectors])
-  useEffect(() => { filterGroupOperatorsRef.current = filterGroupOperators }, [filterGroupOperators])
-
-  // Ref for current tables state (synced after tables useState below)
-  const tablesRef = useRef<any[]>([])
-
-  /** Snapshot current filter state. */
-  const snapshotFilter = useCallback((): UndoEntry => ({
-    type: 'filter',
-    activeFilters: { ...activeFiltersRef.current },
-    selectedRows: [...selectedRowsRef.current],
-    tableLocalFilters: JSON.parse(JSON.stringify(tableLocalFiltersRef.current)),
-    filterCombinator: filterCombinatorRef.current,
-    filterConnectors: { ...filterConnectorsRef.current },
-    filterGroupOperators: { ...filterGroupOperatorsRef.current },
-  }), [])
-
-  /** Snapshot current tables state. */
-  const snapshotTables = useCallback((): UndoEntry => ({
-    type: 'table',
-    tables: [...tablesRef.current],
-  }), [])
-
-  // Show a toast message for undo/redo
-  const showUndoRedoToast = useCallback((message: string) => {
-    if (undoToastTimer.current) clearTimeout(undoToastTimer.current)
-    setUndoToast({ show: true, message })
-    undoToastTimer.current = setTimeout(() => setUndoToast({ show: false, message: '' }), 3000)
-  }, [])
-
-  // Ctrl+Z / Cmd+Z undo and Ctrl+Shift+Z / Cmd+Shift+Z redo handler
-  useEffect(() => {
-    const handleUndoRedo = async (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      if (!(e.key === 'z' || e.key === 'Z' || e.code === 'KeyZ')) return
-
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
-
-      const isRedo = e.shiftKey
-      e.preventDefault()
-      e.stopPropagation()
-
-      if (isRedo) {
-        // ── Redo ──
-        const entry = redoStackRef.current.pop()
-        if (!entry) {
-          console.log('[Redo] Nothing to redo')
-          return
-        }
-        console.log('[Redo] Re-applying:', entry.type)
-
-        if (entry.type === 'filter') {
-          // Push current state to undo before applying redo
-          undoStackRef.current.push(snapshotFilter())
-          capStack(undoStackRef.current)
-          setActiveFilters(entry.activeFilters)
-          setSelectedRows(entry.selectedRows)
-          setTableLocalFilters(entry.tableLocalFilters)
-          setFilterCombinator(entry.filterCombinator)
-          setFilterConnectors(entry.filterConnectors || {})
-          setFilterGroupOperators(entry.filterGroupOperators || {})
-          showUndoRedoToast('Filter change redone')
-        } else if (entry.type === 'table') {
-          undoStackRef.current.push(snapshotTables())
-          capStack(undoStackRef.current)
-          setTables(entry.tables)
-          showUndoRedoToast('Table change redone')
-        } else if (entry.type === 'reclassify') {
-          try {
-            // Reverting the revert = redo
-            const newRevertId = await ipc.changelog.revert(entry.changelogId)
-            undoStackRef.current.push({ type: 'reclassify', changelogId: newRevertId })
-            capStack(undoStackRef.current)
-            if (refreshTransactions) await refreshTransactions()
-            showUndoRedoToast('Reclassification redone')
-          } catch (err) {
-            console.error('[Redo] Failed:', err)
-            redoStackRef.current.push(entry)
-          }
-        }
-      } else {
-        // ── Undo ──
-        const entry = undoStackRef.current.pop()
-        if (!entry) {
-          console.log('[Undo] Nothing to undo')
-          return
-        }
-        console.log('[Undo] Reverting:', entry.type)
-
-        if (entry.type === 'filter') {
-          // Push current state to redo before applying undo
-          redoStackRef.current.push(snapshotFilter())
-          capStack(redoStackRef.current)
-          setActiveFilters(entry.activeFilters)
-          setSelectedRows(entry.selectedRows)
-          setTableLocalFilters(entry.tableLocalFilters)
-          setFilterCombinator(entry.filterCombinator)
-          setFilterConnectors(entry.filterConnectors || {})
-          setFilterGroupOperators(entry.filterGroupOperators || {})
-          showUndoRedoToast('Filter change undone')
-        } else if (entry.type === 'table') {
-          redoStackRef.current.push(snapshotTables())
-          capStack(redoStackRef.current)
-          setTables(entry.tables)
-          showUndoRedoToast('Table change undone')
-        } else if (entry.type === 'reclassify') {
-          try {
-            const newRevertId = await ipc.changelog.revert(entry.changelogId)
-            // Push the revert entry to redo so Shift+Z can undo the undo
-            redoStackRef.current.push({ type: 'reclassify', changelogId: newRevertId })
-            capStack(redoStackRef.current)
-            if (refreshTransactions) await refreshTransactions()
-            showUndoRedoToast('Reclassification undone')
-          } catch (err) {
-            console.error('[Undo] Failed to revert:', err)
-            undoStackRef.current.push(entry)
-          }
-        }
-      }
-    }
-    // Use capture phase to intercept before other handlers
-    window.addEventListener('keydown', handleUndoRedo, true)
-    return () => window.removeEventListener('keydown', handleUndoRedo, true)
-  }, [refreshTransactions, snapshotFilter, snapshotTables, showUndoRedoToast])
-
-  // Push a UI filter snapshot to the undo stack (clears redo — new action)
-  const pushFilterUndo = useCallback(() => {
-    undoStackRef.current.push(snapshotFilter())
-    capStack(undoStackRef.current)
-    redoStackRef.current = [] // new action invalidates redo
-  }, [snapshotFilter])
-
-  // Wrapped setters that auto-snapshot before changes
-  const setActiveFiltersWithUndo = useCallback((filtersOrUpdater: any) => {
-    pushFilterUndo()
-    setActiveFilters(filtersOrUpdater)
-  }, [pushFilterUndo])
-
-  const setSelectedRowsWithUndo = useCallback((rowsOrUpdater: any) => {
-    pushFilterUndo()
-    setSelectedRows(rowsOrUpdater)
-  }, [pushFilterUndo])
-
-  const setTableLocalFiltersWithUndo = useCallback((filtersOrUpdater: any) => {
-    pushFilterUndo()
-    setTableLocalFilters(filtersOrUpdater)
-  }, [pushFilterUndo])
-
-  const setTablesWithUndo = useCallback((tablesOrUpdater: any) => {
-    undoStackRef.current.push(snapshotTables())
-    capStack(undoStackRef.current)
-    redoStackRef.current = [] // new action invalidates redo
-    setTables(tablesOrUpdater)
-  }, [snapshotTables])
 
   // Enable page scrolling when dragging
   const dragDropManager = useDragDropManager()
@@ -357,7 +176,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       storeSetReviewFilters({ tables: updater })
     }
   }, [storeSetReviewFilters])
-  useEffect(() => { tablesRef.current = tables }, [tables])
   // Per-table local filters - only applied to specific tables via drag-drop
   const tableLocalFilters = reviewFilters.tableLocalFilters || {}
   const setTableLocalFilters = useCallback((updater: any) => {
@@ -367,7 +185,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       storeSetReviewFilters({ tableLocalFilters: updater })
     }
   }, [storeSetReviewFilters])
-  useEffect(() => { tableLocalFiltersRef.current = tableLocalFilters }, [tableLocalFilters])
 
 
   // ── Server-side grouped data (replaces client-side grouping for 4M+ rows) ──
@@ -424,6 +241,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
 
   // Server-side GROUP BY — re-runs when filters or tables change
   const { data: groupedData, refetch: refetchGrouped } = useGroupedTransactions(groupedColumns, serverSideFilter)
+  refetchGroupedRef.current = refetchGrouped
 
   const tabs = [
     { id: 'tables', label: 'Review', icon: Table },
@@ -449,72 +267,47 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       isHierarchical: column.includes('classification') || column.includes('path') || column.includes('Level'),
       collapsed: false
     }
-    setTablesWithUndo([...tables, newTable])
+    setTables([...tables, newTable])
     setShowAddTableMenu(false)
   }
 
-  // Filter options for filter panel — computed from transactions.
-  // Use a length-based dependency so it only recomputes when the row count
-  // changes (i.e., after each chunk load or reclassification) instead of on
-  // every reference change.
+  // Filter options fetched from backend via distinctValues
+  const [filterOptions, setFilterOptions] = useState({
+    suppliers: [], classificationsL1: [], classificationsL2: [],
+    classificationsL3: [], classificationsL4: [], glDescriptions: [],
+    companies: [], years: [], quarters: [], months: [],
+    costCenters: [], countries: [], lineDescriptions: []
+  })
   const txnLength = transactions.length
-  const filterOptions = useMemo(() => {
-    if (txnLength === 0) return {
-      suppliers: [], classificationsL1: [], classificationsL2: [],
-      classificationsL3: [], classificationsL4: [], glDescriptions: [],
-      companies: [], years: [], quarters: [], months: [],
-      costCenters: [], countries: [], lineDescriptions: []
-    }
-
-    const suppliers = new Set()
-    const classificationsL1 = new Set()
-    const classificationsL2 = new Set()
-    const classificationsL3 = new Set()
-    const classificationsL4 = new Set()
-    const glDescriptions = new Set()
-    const companies = new Set()
-    const years = new Set()
-    const quarters = new Set()
-    const months = new Set()
-    const costCenters = new Set()
-    const countries = new Set()
-    const lineDescriptions = new Set()
-
-    for (let i = 0; i < transactions.length; i++) {
-      const row = transactions[i]
-      if (row.supplier_name) suppliers.add(row.supplier_name)
-      if (row.classification_path) {
-        const parts = row.classification_path.split('|').map(p => p.trim()).filter(p => p)
-        if (parts[0]) classificationsL1.add(parts[0])
-        if (parts[1]) classificationsL2.add(parts[1])
-        if (parts[2]) classificationsL3.add(parts[2])
-        if (parts[3]) classificationsL4.add(parts[3])
+  useEffect(() => {
+    if (txnLength === 0) return
+    const fetchDistinct = async () => {
+      try {
+        const [suppliers, l1, l2, l3, glDescriptions, companies, years, quarters, months, costCenters, countries, lineDescriptions] = await Promise.all([
+          ipc.transactions.distinctValues('supplier_name', 50),
+          ipc.transactions.distinctValues('L1'),
+          ipc.transactions.distinctValues('L2'),
+          ipc.transactions.distinctValues('L3'),
+          ipc.transactions.distinctValues('gl_description', 50),
+          ipc.transactions.distinctValues('company'),
+          ipc.transactions.distinctValues('year'),
+          ipc.transactions.distinctValues('quarter'),
+          ipc.transactions.distinctValues('month'),
+          ipc.transactions.distinctValues('cost_center', 50),
+          ipc.transactions.distinctValues('country'),
+          ipc.transactions.distinctValues('line_description', 50),
+        ])
+        setFilterOptions({
+          suppliers, classificationsL1: l1, classificationsL2: l2,
+          classificationsL3: l3, classificationsL4: [],
+          glDescriptions, companies, years, quarters, months,
+          costCenters, countries, lineDescriptions,
+        })
+      } catch (err) {
+        console.error('Failed to fetch filter options:', err)
       }
-      if (row.gl_description) glDescriptions.add(row.gl_description)
-      if (row.company) companies.add(row.company)
-      if (row.year) years.add(row.year)
-      if (row.quarter) quarters.add(row.quarter)
-      if (row.month) months.add(row.month)
-      if (row.cost_center) costCenters.add(row.cost_center)
-      if (row.country) countries.add(row.country)
-      if (row.line_description) lineDescriptions.add(row.line_description)
     }
-
-    return {
-      suppliers: Array.from(suppliers).sort().slice(0, 50),
-      classificationsL1: Array.from(classificationsL1).sort(),
-      classificationsL2: Array.from(classificationsL2).sort(),
-      classificationsL3: Array.from(classificationsL3).sort(),
-      classificationsL4: Array.from(classificationsL4).sort(),
-      glDescriptions: Array.from(glDescriptions).sort().slice(0, 50),
-      companies: Array.from(companies).sort(),
-      years: Array.from(years).sort(),
-      quarters: Array.from(quarters).sort(),
-      months: Array.from(months).sort(),
-      costCenters: Array.from(costCenters).sort().slice(0, 50),
-      countries: Array.from(countries).sort(),
-      lineDescriptions: Array.from(lineDescriptions).sort().slice(0, 50)
-    }
+    fetchDistinct()
   }, [txnLength])
 
   // Sync filterState → activeFilters when filterState changes.
@@ -570,7 +363,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     }
 
     // Merge: keep existing activeFilters that don't come from filterState, add new ones
-    pushFilterUndo()
+
     setActiveFilters(prev => {
       // Keys managed by filterState sync
       const fsKeys = ['supplier_name', 'gl_description', 'company', 'year', 'quarter', 'month', 'costCenter', 'country', 'lineDescription']
@@ -598,7 +391,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   ])
 
   const clearFilters = useCallback(() => {
-    pushFilterUndo()
+
     setFilterState({
       supplier: [],
       classificationL1: [],
@@ -621,11 +414,11 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     setSelectedRows([])
     setFocusedClassificationPath(null)
     setShowFilterPanel(false)
-  }, [setActiveFilters, pushFilterUndo])
+  }, [setActiveFilters])
 
   // Remove a single filter (from UI filters or drag/drop activeFilters)
   const removeFilter = useCallback((filterKey, valueToRemove = null) => {
-    pushFilterUndo()
+
     const clearSelectedForColumn = (columnKey, value) => {
       if (!columnKey) return
       setSelectedRows(prev => {
@@ -724,7 +517,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       // Clear selection only for the related table column (not all)
       clearSelectedForColumn(selectionColumnKeyMap[filterKey] || filterKey, valueToRemove)
     }
-  }, [setActiveFilters, pushFilterUndo])
+  }, [setActiveFilters])
 
   // Helper function to handle toggle selection for multiple select
   const handleToggleFilter = useCallback((filterKey, value) => {
@@ -838,401 +631,63 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
     </>
   ) : null
 
-  // Map filterState keys → backend keys (used for normalizing operator/connector lookups)
-  const fsKeyToBackendKey = useMemo(() => ({
-    supplier: 'supplier_name',
-    classificationL1: 'classification_l1',
-    classificationL2: 'classification_l2',
-    classificationL3: 'classification_l3',
-    classificationL4: 'classification_l4',
-    glDescription: 'gl_description',
-    lineDescription: 'line_description',
-  }), [])
-
-  // Calculate filtered transactions for metrics (same logic as MultiTableSystem)
-  const filteredTransactions = useMemo(() => {
-    const isOrMode = filterCombinator === 'OR'
-
-    // Operator-aware match: compares rowVal against filterVal using the given operator
-    const matchWithOperator = (rowVal: string, filterVal: string, operator: string): boolean => {
-      const rv = (rowVal || '').toString().trim().toLowerCase()
-      const fv = (filterVal || '').toString().trim().toLowerCase()
-      switch (operator) {
-        case 'is': return rv === fv
-        case 'is_not': return rv !== fv
-        case 'contains': return rv.includes(fv)
-        case 'not_contains': return !rv.includes(fv)
-        case 'starts_with': return rv.startsWith(fv)
-        case 'ends_with': return rv.endsWith(fv)
-        default: return rv === fv
-      }
-    }
-
-    // Helper: check if a row matches a single filter category
-    // Uses backend key for operator lookup (filterGroupOperators is keyed by backend key)
-    const matchesActiveFilter = (row, key, value) => {
-      if (!value) return true
-      const op = filterGroupOperators[key] || 'is'
-      if (Array.isArray(value)) {
-        const isNegative = op === 'is_not' || op === 'not_contains'
-        const rowVal = (row[key] || '').toString().trim()
-        if (isNegative) {
-          return value.every(v => matchWithOperator(rowVal, v, op))
-        }
-        return value.some(v => matchWithOperator(rowVal, v, op))
-      }
-      return matchWithOperator((row[key] || '').toString().trim(), (value || '').toString().trim(), op)
-    }
-
-    // Resolve the actual row value for a filterState key
-    const getRowValueForFsKey = (row, fsKey) => {
-      const path = row.classification_path || row.taxonomy_path || ''
-      const parts = path.split('|').map(p => p.trim())
-      switch (fsKey) {
-        case 'supplier': return row.supplier_name || ''
-        case 'classificationL1': return parts[0] || ''
-        case 'classificationL2': return parts[1] || ''
-        case 'classificationL3': return parts[2] || ''
-        case 'classificationL4': return parts[3] || ''
-        case 'glDescription': return row.gl_description || ''
-        case 'company': return row.company || ''
-        case 'year': return row.year || ''
-        case 'quarter': return row.quarter || ''
-        case 'month': return row.month || ''
-        case 'costCenter': return row.cost_center || ''
-        case 'country': return row.country || ''
-        case 'lineDescription': return row.line_description || ''
-        default: return ''
-      }
-    }
-
-    // Helper: check if a row matches a single filterState category
-    // Uses backend key for operator lookup
-    const matchesFilterStateEntry = (row, fsKey, fsValues) => {
-      if (!Array.isArray(fsValues) || fsValues.length === 0) return null // not active — skip
-      const backendKey = fsKeyToBackendKey[fsKey] || fsKey
-      const op = filterGroupOperators[backendKey] || 'is'
-      const rowVal = getRowValueForFsKey(row, fsKey)
-      const isNegative = op === 'is_not' || op === 'not_contains'
-      if (isNegative) {
-        return fsValues.every(v => matchWithOperator(rowVal, v, op))
-      }
-      return fsValues.some(v => matchWithOperator(rowVal, v, op))
-    }
-
-    const filtered = transactions.filter(row => {
-      // Collect all filter condition results with their group keys (using backend keys)
-      const conditionEntries: Array<{ key: string; result: boolean }> = []
-      const seenBackendKeys = new Set<string>()
-
-      // filterState conditions FIRST (these are the source of truth for UI-managed filters)
-      Object.entries(filterState).forEach(([fsKey, fsValues]) => {
-        const result = matchesFilterStateEntry(row, fsKey, fsValues)
-        if (result !== null) {
-          const backendKey = fsKeyToBackendKey[fsKey] || fsKey
-          conditionEntries.push({ key: backendKey, result })
-          seenBackendKeys.add(backendKey)
-        }
-      })
-
-      // activeFilters conditions — skip keys already covered by filterState to avoid duplicates
-      Object.entries(activeFilters).forEach(([key, value]) => {
-        if (!value || (Array.isArray(value) && value.length === 0)) return
-        if (seenBackendKeys.has(key)) return // already handled via filterState
-        conditionEntries.push({ key, result: matchesActiveFilter(row, key, value) })
-      })
-
-      // If no filter conditions, row passes
-      if (conditionEntries.length === 0) return true
-
-      // Evaluate with SQL-like AND/OR precedence (AND binds tighter than OR)
-      const passesFilters = evaluateFilterConditions(conditionEntries, filterConnectors, filterCombinator)
-      if (!passesFilters) return false
-
-      return true
-    })
-
-    return filtered
-  }, [transactions, activeFilters, filterState, filterCombinator, filterConnectors, filterGroupOperators, fsKeyToBackendKey])
-
-  // Defer filtered result so React keeps UI responsive while filtering runs.
-  const deferredFilteredTransactions = useDeferredValue(filteredTransactions)
-
-  // Check if there are unclassified rows
-  const hasLowConfidenceRows = useMemo(() => {
-    if (!transactions || transactions.length === 0) return false
-    return transactions.some(row => {
-      const status = row.classification_status as string
-      return !status || status === 'unclassified'
-    })
-  }, [txnLength])
-
-  // Check if rows are controlled by Category A supplier rules
-  const checkCategoryASuppliers = useCallback((rows) => {
-    // In a real implementation, this would check against a Category A supplier mapping
-    // For now, we'll check if rows have a specific indicator or check against known Category A suppliers
-    // This is a placeholder - you may need to integrate with your backend API to check Category A status
-    const categoryASuppliers = new Set() // This would come from your backend/state
-    return rows.filter(row => {
-      const supplier = row.supplier_name || ''
-      return categoryASuppliers.has(supplier)
-    })
-  }, [])
-
-  // Fetch feedback suggestions from backend
-  const refreshFeedbackSuggestions = useCallback(async () => {
-    try {
-      const feedbackList = await ipc.feedback.list()
-      const pending = feedbackList.filter(f => f.status === 'pending')
-      const mapped = pending.map(f => ({
-        id: f.id,
-        type: f.feedbackType,
-        affectedRows: f.affectedTransactionIds || [],
-        proposedChange: f.suggestion?.proposedDescription || f.suggestion?.proposedValue || JSON.stringify(f.suggestion),
-        createdAt: f.createdAt,
-      }))
-      setFeedbackSuggestions(mapped)
-      if (mapped.length > 0) {
-        setNewFeedbackCount(mapped.length)
-        setShowFeedbackNotification(true)
-        setTimeout(() => setShowFeedbackNotification(false), 5000)
-      }
-    } catch (err) {
-      console.error('Failed to fetch feedback suggestions:', err)
-    }
-  }, [])
-
-  // Handle feedback approval via IPC
-  const handleApproveFeedback = useCallback(async (suggestion) => {
-    try {
-      await ipc.feedback.approve(suggestion.id)
-      setFeedbackSuggestions(prev => {
-        const remaining = prev.filter(s => s.id !== suggestion.id)
-        if (remaining.length === 0) {
-          setShowFeedbackModal(false)
-        }
-        return remaining
-      })
-    } catch (err) {
-      console.error('Failed to approve feedback:', err)
-    }
-  }, [])
-
-  // Handle feedback rejection via IPC
-  const handleRejectFeedback = useCallback(async (suggestion) => {
-    try {
-      await ipc.feedback.reject(suggestion.id)
-      setFeedbackSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
-    } catch (err) {
-      console.error('Failed to reject feedback:', err)
-    }
-  }, [])
-
-  // Handle feedback edit
-  const handleEditFeedback = useCallback((suggestionId, newText) => {
-    setFeedbackSuggestions(prev => prev.map(s =>
-      s.id === suggestionId
-        ? { ...s, proposedChange: newText, proposal_text: newText }
-        : s
-    ))
-  }, [])
-
-  // Core reclassification logic — extracted so it can be called directly or from the feedback modal
-  const executeReclassification = useCallback(async (rows: any[], targetPath: string, feedbackText?: string) => {
-    // Show loader
-    setIsReclassifying(true)
-    setReclassificationProgress({ current: 0, total: rows.length })
+  // Reclassification via hook → resolve taxonomy node → call reclassify → push undo
+  const executeReclassification = useCallback(async (rows: any[], targetPath: string) => {
+    if (rows.length === 0) return false
 
     try {
-      // Get row indices to update
-      const rowIndices = rows.map(row => {
-        return row.row_index !== undefined
-          ? row.row_index
-          : row.index !== undefined
-            ? row.index
-            : row.__index !== undefined
-              ? row.__index
-              : undefined
-      }).filter(idx => idx !== undefined)
+      const taxonomyNodes = await ipc.taxonomy.getNodes()
+      const cleanPath = targetPath.replace(/^root\|/, '')
+      const targetNode = taxonomyNodes.find((n) => n.fullPath === cleanPath)
 
-      // Store previous classifications for feedback generation
-      const previousClassifications = new Map()
-      rows.forEach(row => {
-        const rowId = row.row_index !== undefined ? row.row_index : row.index
-        if (rowId !== undefined) {
-          previousClassifications.set(rowId, row.classification_path || row.taxonomy_path || '')
-        }
-      })
-
-      // Use rows.length as fallback if no indices found
-      const rowCount = rowIndices.length > 0 ? rowIndices.length : rows.length
-
-      // Update transactions in memory (client-side only)
-      setReclassificationProgress({ current: 0, total: rows.length })
-
-      // Update the transactions state directly
-      if (setTransactions) {
-        setTransactions(prevTransactions => {
-          const updated = prevTransactions.map((t, idx) => {
-            if (rowIndices.length > 0) {
-              // Use row indices if available
-              if (rowIndices.includes(t.row_index) || rowIndices.includes(idx)) {
-                // Parse target path and update L1-L4
-                const pathParts = targetPath.split('|').filter(p => p.trim())
-                const updatedRow = {
-                  ...t,
-                  classification_path: targetPath,
-                  taxonomy_path: targetPath,
-                  L1: pathParts[0] || '',
-                  L2: pathParts[1] || '',
-                  L3: pathParts[2] || '',
-                  L4: pathParts[3] || '',
-                  L5: pathParts[4] || '',
-                  override_rule_applied: 'manual_reclassification'
-                }
-                // Update reclassification history
-                const rowId = t.row_index !== undefined ? t.row_index : idx
-                if (rowId !== undefined) {
-                  setReclassificationHistory(prev => new Map(prev).set(rowId, targetPath))
-                }
-                setReclassificationProgress(prev => ({
-                  current: prev.current + 1,
-                  total: prev.total
-                }))
-                return updatedRow
-              }
-            } else {
-              // Fallback: match by comparing row data
-              const matches = rows.some(r => {
-                // Try to match by key fields
-                return (r.supplier_name && r.supplier_name === t.supplier_name) ||
-                  (r.spend_amount && r.spend_amount === t.spend_amount && r.supplier_name === t.supplier_name)
-              })
-              if (matches) {
-                const pathParts = targetPath.split('|').filter(p => p.trim())
-                const updatedRow = {
-                  ...t,
-                  classification_path: targetPath,
-                  taxonomy_path: targetPath,
-                  L1: pathParts[0] || '',
-                  L2: pathParts[1] || '',
-                  L3: pathParts[2] || '',
-                  L4: pathParts[3] || '',
-                  L5: pathParts[4] || '',
-                  override_rule_applied: 'manual_reclassification'
-                }
-                // Update reclassification history
-                const rowId = t.row_index !== undefined ? t.row_index : idx
-                if (rowId !== undefined) {
-                  setReclassificationHistory(prev => new Map(prev).set(rowId, targetPath))
-                }
-                setReclassificationProgress(prev => ({
-                  current: prev.current + 1,
-                  total: prev.total
-                }))
-                return updatedRow
-              }
-            }
-            return t
-          })
-          return updated
-        })
+      if (!targetNode) {
+        console.warn(`[Reclassify] No taxonomy node found for path: ${cleanPath}`)
+        return false
       }
 
-      // Persist reclassification to backend via IPC
+      const transactionIds = rows.map((row) => row.id).filter((id) => id != null)
+      if (transactionIds.length === 0) return false
+
+      await ipc.transactions.reclassify(transactionIds, targetNode.id)
+
+      // Push changelog entry for undo
       try {
-        // Resolve taxonomy node ID from the target path
-        const taxonomyNodes = await ipc.taxonomy.getNodes()
-        // The ClassificationTree prepends 'root|' — strip it for matching
-        const cleanPath = targetPath.replace(/^root\|/, '')
-        const targetNode = taxonomyNodes.find((n) => n.fullPath === cleanPath)
-
-        if (targetNode) {
-          // Extract transaction IDs from the rows being reclassified
-          const transactionIds = rows
-            .map((row) => row.id)
-            .filter((id) => id != null)
-
-          if (transactionIds.length > 0) {
-            await ipc.transactions.reclassify(transactionIds, targetNode.id, feedbackText)
-            console.log(`[Reclassify] Persisted ${transactionIds.length} rows to backend (node: ${targetNode.id}, feedback: ${feedbackText ? 'yes' : 'no'})`)
-
-            // Push latest changelog entry to undo stack for Ctrl+Z
-            // Skip undo when system feedback was provided — feedback agent creates
-            // side-effects (system_feedback rows) that changelog.revert() won't undo.
-            if (!feedbackText) {
-              try {
-                const changelog = await ipc.changelog.list()
-                if (changelog.length > 0) {
-                  undoStackRef.current.push({ type: 'reclassify', changelogId: changelog[0].id })
-                  capStack(undoStackRef.current)
-                  redoStackRef.current = [] // new action invalidates redo
-                }
-              } catch (e) {
-                console.warn('[Undo] Failed to capture changelog entry:', e)
-              }
-            }
-          }
-        } else {
-          console.warn(`[Reclassify] No taxonomy node found for path: ${cleanPath}`)
+        const changelog = await ipc.changelog.list()
+        if (changelog.length > 0) {
+          undoRedo.push({ type: 'reclassify', changelogId: changelog[0].id })
         }
-      } catch (persistErr) {
-        console.error('[Reclassify] Failed to persist to backend:', persistErr)
+      } catch (e) {
+        console.warn('[Undo] Failed to capture changelog entry:', e)
       }
 
-      // Refresh transactions + grouped data from backend to get updated classification paths
-      if (refreshTransactions) {
-        try {
-          await refreshTransactions()
-        } catch (refreshErr) {
-          console.error('[Reclassify] Failed to refresh transactions:', refreshErr)
-        }
-      }
-      refetchGrouped()
-
-      // Refresh feedback suggestions from backend if enabled
-      // The backend now awaits the feedback agent, so suggestions are ready immediately
-      if (systemFeedbackEnabled && feedbackText) {
-        refreshFeedbackSuggestions()
-      }
-
-      console.log(`✓ Successfully reclassified ${rowCount} rows`)
+      // Refresh data from backend
+      if (refreshTransactions) await refreshTransactions()
+      refetchGroupedRef.current()
 
       // Show success toast
-      const displayPath = targetPath.replace(/^root\|/, '').replace(/\|/g, ' → ')
+      const displayPath = cleanPath.replace(/\|/g, ' → ')
       if (reclassToastTimer.current) clearTimeout(reclassToastTimer.current)
-      setReclassToast({ show: true, rowCount, targetPath: displayPath, undoable: !feedbackText })
-      reclassToastTimer.current = setTimeout(() => setReclassToast({ show: false, rowCount: 0, targetPath: '', undoable: false }), 5000)
-
-      return true // Return true to indicate successful reclassification
-
-    } catch (err: any) {
-      console.error('Failed to reclassify rows:', err)
-
-      // Still show toast even on partial failure (rows updated locally)
-      const displayPath = targetPath.replace(/^root\|/, '').replace(/\|/g, ' → ')
-      if (reclassToastTimer.current) clearTimeout(reclassToastTimer.current)
-      setReclassToast({ show: true, rowCount: rows.length, targetPath: displayPath, undoable: !feedbackText })
+      setReclassToast({ show: true, rowCount: transactionIds.length, targetPath: displayPath, undoable: true })
       reclassToastTimer.current = setTimeout(() => setReclassToast({ show: false, rowCount: 0, targetPath: '', undoable: false }), 5000)
 
       return true
-    } finally {
-      setIsReclassifying(false)
-      setReclassificationProgress({ current: 0, total: 0 })
+    } catch (err) {
+      console.error('Failed to reclassify:', err)
+      return false
     }
-  }, [setTransactions, refreshTransactions, systemFeedbackEnabled, refreshFeedbackSuggestions, refetchGrouped])
+  }, [refreshTransactions, undoRedo])
 
-  // Handle reclassification confirmation from the feedback modal
-  const handleConfirmReclassify = useCallback(async (feedbackText?: string) => {
+  // Handle reclassification confirmation from the confirm modal
+  const handleConfirmReclassify = useCallback(async () => {
     if (!pendingReclassification) return
     const { rows, targetPath } = pendingReclassification
     setPendingReclassification(null)
-    await executeReclassification(rows, targetPath, feedbackText)
+    await executeReclassification(rows, targetPath)
   }, [pendingReclassification, executeReclassification])
 
   // Remove local filter from a table (must be declared before any early return)
   const handleRemoveLocalFilter = useCallback((tableId, filterKey, value) => {
-    pushFilterUndo()
+
     setSelectedRows(prev => {
       if (value !== null && value !== undefined) {
         const valueStr = (value || '').toString().trim()
@@ -1266,12 +721,12 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
         return { ...prev, [tableId]: rest }
       }
     })
-  }, [pushFilterUndo])
+  }, [])
 
   // Handle double-click on a table row to add as global filter
   const handleDoubleClickFilter = useCallback((column, values) => {
     if (!column || !values || values.length === 0) return
-    pushFilterUndo()
+
 
     // Map table column to the backend activeFilters key
     // For simple columns (supplier_name, gl_description, line_description, company), use directly
@@ -1285,7 +740,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       if (newValues.length === 0) return prev
       return { ...prev, [filterKey]: [...existing, ...newValues] }
     })
-  }, [pushFilterUndo])
+  }, [])
 
   // Handle adding a filter from the CurrentFiltersPanel "Add Filter" dropdown
   const handleAddFilter = useCallback((column, values) => {
@@ -1295,7 +750,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   // Apply all currently selected rows (across tables) as global filters
   const handleApplySelectionAsFilter = useCallback(() => {
     if (!selectedRows || selectedRows.length === 0) return
-    pushFilterUndo()
+
     const byColumn = {}
     selectedRows.forEach(key => {
       const idx = key.indexOf(':')
@@ -1314,7 +769,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       })
       return next
     })
-  }, [selectedRows, pushFilterUndo])
+  }, [selectedRows])
 
   // Derive current selection info for compact classification card
   const currentSelection = useMemo(() => {
@@ -1430,19 +885,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                 >
                   <BarChart3 size={14} />
                 </button>
-                <button
-                  type="button"
-                  className={`compact-control system-feedback-compact ${systemFeedbackEnabled ? 'active' : ''}`}
-                  onClick={() => setSystemFeedbackEnabled(!systemFeedbackEnabled)}
-                  title="System feedback on reclassification"
-                  role="switch"
-                  aria-checked={systemFeedbackEnabled}
-                >
-                  <Sparkles size={14} className="system-feedback-icon" />
-                  <span className="toggle-switch compact" aria-hidden="true">
-                    <span className="toggle-knob" />
-                  </span>
-                </button>
                 <div className="add-table-wrapper" style={{ position: 'relative' }}>
                   <button
                     type="button"
@@ -1484,22 +926,22 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                 {/* Multi-Table System (full width, sidebar removed) */}
                 <div className="tables-section">
                   <MultiTableSystem
-                    transactions={deferredFilteredTransactions}
+                    transactions={transactions}
                     allTransactions={transactions}
                     groupedData={groupedData}
                     activeFilters={activeFilters}
-                    setActiveFilters={setActiveFiltersWithUndo}
+                    setActiveFilters={setActiveFilters}
                     selectedRows={selectedRows}
-                    setSelectedRows={setSelectedRowsWithUndo}
+                    setSelectedRows={setSelectedRows}
                     filterState={filterState}
                     setFilterState={setFilterState}
                     tables={tables}
-                    setTables={setTablesWithUndo}
+                    setTables={setTables}
                     onReorderTables={setTables}
                     availableColumns={availableColumns}
                     addTable={addTable}
                     tableLocalFilters={tableLocalFilters}
-                    setTableLocalFilters={setTableLocalFiltersWithUndo}
+                    setTableLocalFilters={setTableLocalFilters}
                     filterCombinator={filterCombinator}
                     filterConnectors={filterConnectors}
                     filterGroupOperators={filterGroupOperators}
@@ -1527,68 +969,11 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                   transactions={transactions}
                   activeFilters={activeFilters}
                   selectedRows={selectedRows}
-                  setSelectedRows={setSelectedRowsWithUndo}
+                  setSelectedRows={setSelectedRows}
                   keyboardFocus={keyboardFocus}
                   setKeyboardFocus={setKeyboardFocus}
                   onReclassify={async (rows, targetPath) => {
-                    // Handle reclassification - batch update CSV
-                    console.log(`Reclassifying ${rows.length} rows to path: ${targetPath}`)
-
-                    if (!rows || rows.length === 0) {
-                      console.warn('No rows to reclassify')
-                      return false
-                    }
-
-                    // Check for Category A supplier rows
-                    const categoryARows = checkCategoryASuppliers(rows)
-                    if (categoryARows.length > 0) {
-                      const proceed = window.confirm(
-                        `These ${categoryARows.length} row(s) are controlled by Category A rules. ` +
-                        `Are you sure you want to continue with this action?`
-                      )
-                      if (!proceed) {
-                        return false
-                      }
-                    }
-
-                    // Check for conflict: rows that were already reclassified with different changes
-                    const conflictingRows = []
-                    rows.forEach(row => {
-                      const rowId = row.row_index !== undefined ? row.row_index : row.index
-                      if (rowId !== undefined && reclassificationHistory.has(rowId)) {
-                        const previousPath = reclassificationHistory.get(rowId)
-                        if (previousPath !== targetPath) {
-                          conflictingRows.push({ row, previousPath })
-                        }
-                      }
-                    })
-
-                    if (conflictingRows.length > 0 && systemFeedbackEnabled) {
-                      const override = window.confirm(
-                        `${conflictingRows.length} row(s) were previously reclassified to a different path. ` +
-                        `This will override existing feedback. Continue?`
-                      )
-                      if (!override) {
-                        return false
-                      }
-                      // Remove existing feedback for these rows
-                      setFeedbackSuggestions(prev => prev.filter(s => {
-                        return !s.affectedRows?.some(ar =>
-                          conflictingRows.some(cr =>
-                            (ar.row_index !== undefined && ar.row_index === cr.row.row_index) ||
-                            (ar.index !== undefined && ar.index === cr.row.index)
-                          )
-                        )
-                      }))
-                    }
-
-                    // If system feedback is enabled, show the confirm modal to collect feedback text
-                    if (systemFeedbackEnabled) {
-                      setPendingReclassification({ rows, targetPath })
-                      return true
-                    }
-
-                    // Feedback disabled — reclassify immediately without feedback text
+                    if (!rows || rows.length === 0) return false
                     return await executeReclassification(rows, targetPath)
                   }}
                   datasetId={datasetId}
@@ -1601,32 +986,13 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
 
       </div>
 
-      {/* Reclassification Loader */}
-      {isReclassifying && (
-        <ReclassificationLoader
-          rowCount={reclassificationProgress.total}
-          currentRow={reclassificationProgress.current}
-        />
-      )}
-
-      {/* Reclassify Confirm Modal — collects feedback text when system feedback is enabled */}
+      {/* Reclassify Confirm Modal */}
       {pendingReclassification && (
         <ReclassifyConfirmModal
           rowCount={pendingReclassification.rows.length}
           targetPath={pendingReclassification.targetPath}
           onConfirm={handleConfirmReclassify}
           onCancel={() => setPendingReclassification(null)}
-        />
-      )}
-
-      {/* System Feedback Modal */}
-      {showFeedbackModal && (
-        <SystemFeedbackModal
-          feedbackSuggestions={feedbackSuggestions}
-          onClose={() => setShowFeedbackModal(false)}
-          onApprove={handleApproveFeedback}
-          onReject={handleRejectFeedback}
-          onEdit={handleEditFeedback}
         />
       )}
 
@@ -1644,7 +1010,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
             <div className="dashboard-modal-content">
               <MetricsTab
                 transactions={transactions}
-                filteredTransactions={deferredFilteredTransactions}
+                filteredTransactions={transactions}
                 onDrillToFilters={(filters) => {
                   setFilterState(prev => {
                     const next = { ...prev }
@@ -1664,33 +1030,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
         </>
       )}
 
-      {/* System Feedback Notification */}
-      {showFeedbackNotification && (
-        <div className="feedback-notification">
-          <Sparkles size={20} />
-          <span>
-            {newFeedbackCount} new feedback suggestion{newFeedbackCount !== 1 ? 's' : ''} generated
-          </span>
-            <button
-              className="notification-link"
-              onClick={() => {
-                setShowFeedbackNotification(false)
-                // Trigger highlight effect on System Feedback section
-                setHighlightFeedback(true)
-              }}
-            >
-              View
-            </button>
-          <button
-            className="notification-close"
-            onClick={() => setShowFeedbackNotification(false)}
-            title="Dismiss"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
       {/* Reclassification Success Toast */}
       {reclassToast.show && createPortal(
         <div className="reclass-toast">
@@ -1700,18 +1039,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
           </span>
           {reclassToast.undoable && <span style={{ fontSize: '11px', color: '#9ca3af', marginLeft: '8px' }}>Ctrl+Z to undo</span>}
           <button className="reclass-toast-close" onClick={() => setReclassToast({ show: false, rowCount: 0, targetPath: '', undoable: false })}>
-            <X size={14} />
-          </button>
-        </div>,
-        document.body
-      )}
-
-      {/* Undo Toast */}
-      {undoToast.show && createPortal(
-        <div className="reclass-toast">
-          <CheckCircle size={16} />
-          <span>{undoToast.message}</span>
-          <button className="reclass-toast-close" onClick={() => setUndoToast({ show: false, message: '' })}>
             <X size={14} />
           </button>
         </div>,

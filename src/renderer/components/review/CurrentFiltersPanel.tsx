@@ -2,8 +2,49 @@ import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { X, Plus, ChevronDown } from 'lucide-react'
 import { useDrop } from 'react-dnd'
 import { ITEM_TYPE } from './MultiTableSystem'
-import { computeAndGroupIndices, buildExpressionPreview } from '../../utils/filterEvaluation'
 import '../../styles/CurrentFiltersPanel.css'
+
+/** Compute AND group membership for visual grouping in the filter panel UI. */
+function computeAndGroupIndices(
+  conditionKeys: string[],
+  filterConnectors: Record<string, 'AND' | 'OR'>
+): number[] {
+  if (conditionKeys.length === 0) return []
+  const groupIndices: number[] = [0]
+  let currentGroup = 0
+  for (let i = 1; i < conditionKeys.length; i++) {
+    const prevKey = conditionKeys[i - 1]
+    const connector = filterConnectors[prevKey] || 'AND'
+    if (connector === 'OR') currentGroup++
+    groupIndices.push(currentGroup)
+  }
+  return groupIndices
+}
+
+/** Build a human-readable expression preview showing how conditions are grouped. */
+function buildExpressionPreview(
+  labels: string[],
+  conditionKeys: string[],
+  filterConnectors: Record<string, 'AND' | 'OR'>
+): string | null {
+  if (labels.length < 2) return null
+  const connectors: string[] = []
+  for (let i = 0; i < conditionKeys.length - 1; i++) {
+    connectors.push(filterConnectors[conditionKeys[i]] || 'AND')
+  }
+  const hasAnd = connectors.includes('AND')
+  const hasOr = connectors.includes('OR')
+  if (!hasAnd || !hasOr) return null
+  const groups: string[][] = [[labels[0]]]
+  for (let i = 1; i < labels.length; i++) {
+    if (connectors[i - 1] === 'OR') {
+      groups.push([labels[i]])
+    } else {
+      groups[groups.length - 1].push(labels[i])
+    }
+  }
+  return groups.map(g => g.length === 1 ? g[0] : `(${g.join(' AND ')})`).join(' OR ')
+}
 
 // Map backend/activeFilters keys to human-readable labels
 const allFilterLabels = {

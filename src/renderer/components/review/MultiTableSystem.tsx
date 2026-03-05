@@ -5,8 +5,34 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts'
 import { ipc } from '../../lib/ipc'
 import CurrentFiltersPanel from './CurrentFiltersPanel'
-import { evaluateFilterConditions } from '../../utils/filterEvaluation'
 import type { GroupedRow } from '../../../shared/types/transactions'
+
+/** Evaluate filter conditions with SQL-like AND/OR precedence (AND binds tighter than OR). */
+function evaluateFilterConditions(
+  conditionEntries: Array<{ key: string; result: boolean }>,
+  filterConnectors: Record<string, 'AND' | 'OR'>,
+  filterCombinator: 'AND' | 'OR' = 'AND'
+): boolean {
+  if (conditionEntries.length === 0) return true
+  if (conditionEntries.length === 1) return conditionEntries[0].result
+  const hasPerRowConnectors = Object.keys(filterConnectors).length > 0
+  if (!hasPerRowConnectors) {
+    return filterCombinator === 'OR'
+      ? conditionEntries.some(c => c.result)
+      : conditionEntries.every(c => c.result)
+  }
+  const andGroups: boolean[][] = [[conditionEntries[0].result]]
+  for (let i = 1; i < conditionEntries.length; i++) {
+    const prevKey = conditionEntries[i - 1].key
+    const connector = filterConnectors[prevKey] || 'AND'
+    if (connector === 'OR') {
+      andGroups.push([conditionEntries[i].result])
+    } else {
+      andGroups[andGroups.length - 1].push(conditionEntries[i].result)
+    }
+  }
+  return andGroups.some(group => group.every(result => result))
+}
 import { fmtAbbrev } from '../../utils/formatSpend'
 import '../../styles/MultiTableSystem.css'
 

@@ -156,16 +156,11 @@ const ClassificationTree = ({
   const [keyboardNav, setKeyboardNav] = useState({ columnIndex: 0, nodeIndex: 0 }) // Keyboard navigation state
   const treeRef = useRef(null) // Ref for the tree container to detect focus
 
-  // Backend and taxonomy YAML state (when available)
-  const [backendAvailable, setBackendAvailable] = useState(false)
-  const [taxonomyData, setTaxonomyData] = useState(null)
-
   // UI state for creating new taxonomy nodes
   const [showAddNodeModal, setShowAddNodeModal] = useState(false)
   const [newL1, setNewL1] = useState('')
   const [newL2, setNewL2] = useState('')
   const [newL3, setNewL3] = useState('')
-  const [newL4, setNewL4] = useState('')
   const [isSavingNode, setIsSavingNode] = useState(false)
   const [addNodeError, setAddNodeError] = useState(null)
 
@@ -182,90 +177,28 @@ const ClassificationTree = ({
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState(null)
 
-  // Local-storage key for custom taxonomy nodes when backend isn't available
-  const getLocalStorageKey = useCallback(() => {
-    return `taxonomy_paths_${datasetId || 'default'}_${foldername || 'default'}`
-  }, [datasetId, foldername])
-
-  // Merge base taxonomy paths with any locally-stored custom paths
-  const mergeWithLocalCustomPaths = useCallback((basePaths) => {
-    try {
-      if (typeof window === 'undefined') return basePaths
-      const key = getLocalStorageKey()
-      const stored = window.localStorage.getItem(key)
-      if (!stored) return basePaths
-      const custom = JSON.parse(stored)
-      if (!Array.isArray(custom)) return basePaths
-      const merged = new Set(basePaths)
-      custom.forEach((p) => {
-        if (typeof p === 'string' && p.trim()) {
-          merged.add(p.trim())
-        }
-      })
-      return Array.from(merged)
-    } catch (e) {
-      console.warn('Failed to merge custom taxonomy paths from localStorage', e)
-      return basePaths
-    }
-  }, [getLocalStorageKey])
-
-  // Load taxonomy paths:
-  // 1. Try IPC backend (Electron) to get taxonomy nodes
-  // 2. Fall back to extracting paths from transaction data
-  // 3. Merge with any custom paths stored locally in this browser
+  // Load taxonomy paths from backend on mount
   useEffect(() => {
     const loadTaxonomy = async () => {
       setLoadingTaxonomy(true)
       try {
-        let basePaths: string[] = []
-
-        // Try loading taxonomy nodes from IPC backend
-        try {
-          const nodes = await ipc.taxonomy.getNodes()
-          if (nodes && nodes.length > 0) {
-            basePaths = nodes.map((n) => n.fullPath).filter((p) => p && p.trim())
-            setBackendAvailable(true)
-          }
-        } catch (e) {
-          setBackendAvailable(false)
-        }
-
-        // Fallback: extract classification paths from transaction data
-        if (basePaths.length === 0) {
-          const pathsFromData = new Set<string>()
-          transactions.forEach(row => {
-            const path = row.classification_path || row.taxonomy_path || ''
-            if (path && path.trim()) {
-              pathsFromData.add(path.trim())
-            } else {
-              const parts: string[] = []
-              if (row.L1) parts.push(row.L1)
-              if (row.L2) parts.push(row.L2)
-              if (row.L3) parts.push(row.L3)
-              if (row.L4) parts.push(row.L4)
-
-              if (parts.length > 0) {
-                pathsFromData.add(parts.join('|'))
-              }
-            }
-          })
-          basePaths = Array.from(pathsFromData)
-        }
-
-        const merged = mergeWithLocalCustomPaths(basePaths)
-        setTaxonomyPaths(merged)
-        setLoadingTaxonomy(false)
+        const nodes = await ipc.taxonomy.getNodes()
+        const paths = nodes
+          .map((n) => n.fullPath)
+          .filter((p) => p && p.trim())
+        setTaxonomyPaths(paths)
       } catch (err) {
         console.error('Could not load taxonomy:', err)
-        const paths = new Set<string>()
+        // Fallback: extract classification paths from transaction data
+        const pathsFromData = new Set<string>()
         transactions.forEach(row => {
           const path = row.classification_path || row.taxonomy_path || ''
           if (path && path.trim()) {
-            paths.add(path.trim())
+            pathsFromData.add(path.trim())
           }
         })
-        const merged = mergeWithLocalCustomPaths(Array.from(paths))
-        setTaxonomyPaths(merged)
+        setTaxonomyPaths(Array.from(pathsFromData))
+      } finally {
         setLoadingTaxonomy(false)
       }
     }
@@ -437,7 +370,7 @@ const ClassificationTree = ({
     setZoomLevel(prev => Math.max(prev - 10, 50)) // Min 50%
   }
 
-  // Persist a new taxonomy path both locally (for the UI view) and, when possible, via backend API.
+  // Persist a new taxonomy path via backend API.
   const addNewTaxonomyPath = useCallback(
     async (newPath) => {
       if (!newPath || !newPath.trim()) return
@@ -446,41 +379,23 @@ const ClassificationTree = ({
       // Optimistic update in local state
       setTaxonomyPaths(prev => (prev.includes(trimmedPath) ? prev : [...prev, trimmedPath]))
 
-      // Persist to localStorage so it shows up on future reloads even without backend
       try {
-        if (typeof window !== 'undefined') {
-          const key = getLocalStorageKey()
-          const raw = window.localStorage.getItem(key)
-          const existing = raw ? JSON.parse(raw) : []
-          const set = new Set(Array.isArray(existing) ? existing : [])
-          set.add(trimmedPath)
-          window.localStorage.setItem(key, JSON.stringify(Array.from(set)))
+        setIsSavingNode(true)
+        setAddNodeError(null)
+
+        const currentNodes = await ipc.taxonomy.getNodes()
+        const existingPaths = currentNodes.map((n) => n.fullPath)
+        if (!existingPaths.includes(trimmedPath)) {
+          await ipc.taxonomy.addNode(trimmedPath)
         }
       } catch (e) {
-        console.warn('Failed to persist taxonomy path to localStorage', e)
-      }
-
-      // Persist to backend via IPC
-      if (backendAvailable) {
-        try {
-          setIsSavingNode(true)
-          setAddNodeError(null)
-
-          // Add the new path if it doesn't already exist
-          const currentNodes = await ipc.taxonomy.getNodes()
-          const existingPaths = currentNodes.map((n) => n.fullPath)
-          if (!existingPaths.includes(trimmedPath)) {
-            await ipc.taxonomy.addNode(trimmedPath)
-          }
-        } catch (e) {
-          console.error('Failed to persist taxonomy path to backend', e)
-          setAddNodeError('Saved locally, but failed to persist to backend.')
-        } finally {
-          setIsSavingNode(false)
-        }
+        console.error('Failed to persist taxonomy path to backend', e)
+        setAddNodeError('Failed to save taxonomy node.')
+      } finally {
+        setIsSavingNode(false)
       }
     },
-    [backendAvailable, datasetId, foldername, getLocalStorageKey]
+    []
   )
 
   const handleOpenAddNodeModal = () => {
@@ -488,12 +403,11 @@ const ClassificationTree = ({
     setNewL1('')
     setNewL2('')
     setNewL3('')
-    setNewL4('')
     setShowAddNodeModal(true)
   }
 
   const handleSaveNewNode = async () => {
-    const parts = [newL1, newL2, newL3, newL4]
+    const parts = [newL1, newL2, newL3]
       .map(p => (p || '').trim())
       .filter(p => p)
     if (parts.length === 0) {
@@ -513,12 +427,10 @@ const ClassificationTree = ({
     async (nodeToDelete) => {
       if (!nodeToDelete || nodeToDelete.path === 'root') return
 
-      // Extract the classification path (remove 'root|' prefix)
       const nodePath = nodeToDelete.path.replace(/^root\|/, '')
       const pathParts = nodePath.split('|').filter(p => p.trim())
       if (pathParts.length === 0) return
 
-      // Find all paths that start with this node's path (including the node itself and all children)
       const pathsToRemove = taxonomyPaths.filter(path => {
         const pathStr = path.trim()
         return pathStr === nodePath || pathStr.startsWith(nodePath + '|')
@@ -526,45 +438,28 @@ const ClassificationTree = ({
 
       if (pathsToRemove.length === 0) return
 
-      // Optimistic update: remove paths from local state
+      // Optimistic update
       setTaxonomyPaths(prev => prev.filter(p => !pathsToRemove.includes(p)))
 
-      // Update localStorage
       try {
-        if (typeof window !== 'undefined') {
-          const key = getLocalStorageKey()
-          const raw = window.localStorage.getItem(key)
-          const existing = raw ? JSON.parse(raw) : []
-          const updated = existing.filter(p => !pathsToRemove.includes(p))
-          window.localStorage.setItem(key, JSON.stringify(updated))
+        setIsDeleting(true)
+        setDeleteError(null)
+
+        const currentNodes = await ipc.taxonomy.getNodes()
+        const nodesToDelete = currentNodes.filter((n) => pathsToRemove.includes(n.fullPath))
+        for (const node of nodesToDelete) {
+          await ipc.taxonomy.deleteNode(node.id)
         }
       } catch (e) {
-        console.warn('Failed to update localStorage after delete', e)
-      }
-
-      // Update backend via IPC if available
-      if (backendAvailable) {
-        try {
-          setIsDeleting(true)
-          setDeleteError(null)
-
-          // Delete matching nodes from backend
-          const currentNodes = await ipc.taxonomy.getNodes()
-          const nodesToDelete = currentNodes.filter((n) => pathsToRemove.includes(n.fullPath))
-          for (const node of nodesToDelete) {
-            await ipc.taxonomy.deleteNode(node.id)
-          }
-        } catch (e) {
-          console.error('Failed to delete taxonomy node from backend', e)
-          setDeleteError('Deleted locally, but failed to update backend.')
-          // Revert optimistic update on error
-          setTaxonomyPaths(prev => [...prev, ...pathsToRemove])
-        } finally {
-          setIsDeleting(false)
-        }
+        console.error('Failed to delete taxonomy node from backend', e)
+        setDeleteError('Failed to delete taxonomy node.')
+        // Revert optimistic update on error
+        setTaxonomyPaths(prev => [...prev, ...pathsToRemove])
+      } finally {
+        setIsDeleting(false)
       }
     },
-    [taxonomyPaths, backendAvailable, taxonomyData, datasetId, foldername, getLocalStorageKey]
+    [taxonomyPaths]
   )
 
   // Rename a taxonomy node (updates all paths containing this node name at that level)
@@ -577,27 +472,19 @@ const ClassificationTree = ({
       const pathParts = nodePath.split('|').filter(p => p.trim())
       if (pathParts.length === 0) return
 
-      const levelIndex = pathParts.length - 1 // 0-based index of the level being renamed
+      const levelIndex = pathParts.length - 1
       const oldName = pathParts[levelIndex]
 
-      if (oldName === trimmedNewName) return // No change
+      if (oldName === trimmedNewName) return
 
-      // Store original paths for potential revert
       const originalPaths = [...taxonomyPaths]
 
-      // Find all paths that contain this node name at this level and update them
       const updatedPaths = taxonomyPaths.map(path => {
         const parts = path.split('|').filter(p => p.trim())
-        if (parts.length <= levelIndex) return path // Path too short
-
-        // Check if this path matches up to and including the node being renamed
+        if (parts.length <= levelIndex) return path
         const matchesUpToLevel = pathParts.slice(0, levelIndex).every((part, idx) => parts[idx] === part)
-        if (!matchesUpToLevel) return path // Path doesn't match parent structure
-
-        // Check if the name at this level matches
-        if (parts[levelIndex] !== oldName) return path // Name doesn't match
-
-        // Update the name at this level
+        if (!matchesUpToLevel) return path
+        if (parts[levelIndex] !== oldName) return path
         const updatedParts = [...parts]
         updatedParts[levelIndex] = trimmedNewName
         return updatedParts.join('|')
@@ -606,48 +493,31 @@ const ClassificationTree = ({
       // Optimistic update
       setTaxonomyPaths(updatedPaths)
 
-      // Update localStorage
       try {
-        if (typeof window !== 'undefined') {
-          const key = getLocalStorageKey()
-          // Store all paths (including base paths) so rename persists
-          window.localStorage.setItem(key, JSON.stringify(updatedPaths))
+        setIsRenaming(true)
+        setRenameError(null)
+
+        const currentNodes = await ipc.taxonomy.getNodes()
+        const oldPathSet = new Set(originalPaths)
+        const newPathSet = new Set(updatedPaths)
+        const removedPaths = [...oldPathSet].filter(p => !newPathSet.has(p))
+        const addedPaths = [...newPathSet].filter(p => !oldPathSet.has(p))
+        for (const rp of removedPaths) {
+          const node = currentNodes.find(n => n.fullPath === rp)
+          if (node) await ipc.taxonomy.deleteNode(node.id)
+        }
+        for (const ap of addedPaths) {
+          await ipc.taxonomy.addNode(ap)
         }
       } catch (e) {
-        console.warn('Failed to update localStorage after rename', e)
-      }
-
-      // Update backend via IPC if available
-      if (backendAvailable) {
-        try {
-          setIsRenaming(true)
-          setRenameError(null)
-
-          // Delete old nodes and re-add with updated paths
-          const currentNodes = await ipc.taxonomy.getNodes()
-          // Delete nodes whose paths were changed
-          const oldPaths = new Set(originalPaths)
-          const newPaths = new Set(updatedPaths)
-          const removedPaths = [...oldPaths].filter(p => !newPaths.has(p))
-          const addedPaths = [...newPaths].filter(p => !oldPaths.has(p))
-          for (const rp of removedPaths) {
-            const node = currentNodes.find(n => n.fullPath === rp)
-            if (node) await ipc.taxonomy.deleteNode(node.id)
-          }
-          for (const ap of addedPaths) {
-            await ipc.taxonomy.addNode(ap)
-          }
-        } catch (e) {
-          console.error('Failed to rename taxonomy node in backend', e)
-          setRenameError('Renamed locally, but failed to update backend.')
-          // Revert optimistic update on error
-          setTaxonomyPaths(originalPaths)
-        } finally {
-          setIsRenaming(false)
-        }
+        console.error('Failed to rename taxonomy node in backend', e)
+        setRenameError('Failed to rename taxonomy node.')
+        setTaxonomyPaths(originalPaths)
+      } finally {
+        setIsRenaming(false)
       }
     },
-    [taxonomyPaths, backendAvailable, taxonomyData, datasetId, foldername, getLocalStorageKey]
+    [taxonomyPaths]
   )
 
   const handleRenameNode = (node) => {
@@ -1125,15 +995,6 @@ const ClassificationTree = ({
                   placeholder="e.g. patient care"
                 />
               </div>
-              <div className="add-node-row">
-                <label>Level 4 (optional)</label>
-                <input
-                  type="text"
-                  value={newL4}
-                  onChange={(e) => setNewL4(e.target.value)}
-                  placeholder="e.g. inpatient services"
-                />
-              </div>
               {addNodeError && (
                 <div className="add-node-error">
                   {addNodeError}
@@ -1161,11 +1022,6 @@ const ClassificationTree = ({
                   {isSavingNode ? 'Saving…' : 'Save'}
                 </button>
               </div>
-              {!backendAvailable && (
-                <p style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>
-                  Backend API not detected – new nodes are stored locally in this browser only.
-                </p>
-              )}
             </div>
           </div>
         </div>
@@ -1235,11 +1091,6 @@ const ClassificationTree = ({
                   {isRenaming ? 'Renaming…' : 'Rename'}
                 </button>
               </div>
-              {!backendAvailable && (
-                <p style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>
-                  Backend API not detected – rename is stored locally in this browser only.
-                </p>
-              )}
             </div>
           </div>
         </div>
@@ -1297,11 +1148,6 @@ const ClassificationTree = ({
                   {isDeleting ? 'Deleting…' : 'Delete'}
                 </button>
               </div>
-              {!backendAvailable && (
-                <p style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>
-                  Backend API not detected – deletion is stored locally in this browser only.
-                </p>
-              )}
             </div>
           </div>
         </div>

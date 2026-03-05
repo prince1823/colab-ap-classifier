@@ -25,7 +25,7 @@ function useLightTransactions() {
     try {
       const [statsResult, pageResult] = await Promise.all([
         ipc.transactions.stats(),
-        ipc.transactions.queryPaginated({ page: 1, pageSize: 5000 }),
+        ipc.transactions.query(),
       ])
       if (!mountedRef.current) return
       const transformed = pageResult.rows.map((t, idx) => transactionToDashboardRow(t, idx))
@@ -45,11 +45,11 @@ function useLightTransactions() {
     return () => { mountedRef.current = false }
   }, [fetchData])
 
-  return { data, stats, loading, error, refetch: fetchData, setData }
+  return { data, stats, loading, error, refetch: fetchData }
 }
 
 const DashboardContent = () => {
-  const { data: transactions, stats, loading, error, refetch, setData: setTransactions } = useLightTransactions()
+  const { data: transactions, stats, loading, error, refetch } = useLightTransactions()
 
   return (
     <div className="flex flex-col h-full">
@@ -72,7 +72,6 @@ const DashboardContent = () => {
           foldername="default"
           setFoldername={() => {}}
           refreshTransactions={refetch}
-          setTransactions={setTransactions}
         />
       </div>
     </div>

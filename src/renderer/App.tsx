@@ -10,12 +10,10 @@ import CompanyContextPage from './pages/CompanyContextPage'
 import SuppliersPage from './pages/SuppliersPage'
 import OverrideRulesPage from './pages/OverrideRulesPage'
 import VersionHistoryPage from './pages/VersionHistoryPage'
-import { WorkflowStateProvider } from './contexts/WorkflowStateContext'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
   return (
-    <WorkflowStateProvider>
       <Routes>
         <Route path="/" element={<AppShell />}>
           {/* Default → Upload (step 3) */}
@@ -106,7 +104,6 @@ function App() {
           />
         </Route>
       </Routes>
-    </WorkflowStateProvider>
   )
 }
 

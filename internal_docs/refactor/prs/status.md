@@ -74,13 +74,16 @@ Extracted `TablesTab.tsx` (all filter logic, grouped data, filter panel, MultiTa
 
 ---
 
-## PR 4: Classification Tree Split — SPEC UPDATED, NOT STARTED
+## PR 4: Classification Tree Split — COMPLETED
+**Date:** 2026-03-05
 
-Key notes from spec:
-- `src/renderer/types/dragItems.ts` — typed `DragItem` discriminated union, no `any` for drag events
-- Plain updater callbacks in hook interfaces — no `Dispatch<SetStateAction>`
-- `DashboardTransactionRow` for any transaction data passed to the tree
-- `humanReviewed` is `boolean` — `classification_status === 'human_reviewed'` does not exist
+Split 1205-line ClassificationTree into focused pieces. Created `src/renderer/types/dragItems.ts` (shared DragItem), `useTreeDragDrop.ts` (useDrop + server ID resolution), `useTreeKeyboard.ts` (keyboard nav + shortcuts). ClassificationTree reduced from 1205 → 684 lines (target was ~400, difference is CRUD modal verbosity). Extended `buildTaxonomyTree` with optional `pathCounts` for bottom-up count aggregation from server data. Added `queryGroupedByClassificationPath` to backend so `classification_path` is a valid groupable column.
+
+### Deviations
+- `DragItem` was not actually referenced in MultiTableSystem.tsx (the interface was defined but unused), so no import was added there — just removed the dead local interface.
+- ClassificationTree is 684 lines not ~400; the difference is CRUD modals (add/rename/delete) which are JSX-heavy. Architectural concerns are all addressed.
+- `queryGroupedByClassificationPath` added to `src/main/services/transactions.ts` to handle the `classification_path` virtual column (JOIN with taxonomy table), matching the pattern of `queryGroupedByClassificationLevel` for L1-L4.
+- `localSuccess` toast state removed (was dead code — never wired up in the original).
 
 ## PR 5: Type Safety Fixes — SPEC UPDATED, NOT STARTED
 

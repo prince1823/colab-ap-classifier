@@ -149,8 +149,8 @@ export class TransactionStore implements ITransactionStore {
         COUNT(*) as total_rows,
         ${spendExpr} as total_spend,
         COUNT(DISTINCT project_supplier_id) as unique_suppliers,
-        COUNT(CASE WHEN classification_status != 'unclassified' THEN 1 END) as classified_rows,
-        COUNT(CASE WHEN classification_status = 'unclassified' THEN 1 END) as unclassified_rows
+        COUNT(CASE WHEN classification_status IN ('classified_by_ai', 'classified_by_rule') THEN 1 END) as classified_rows,
+        COUNT(CASE WHEN classification_status = 'unclassified' OR classification_status = 'classification_failed' THEN 1 END) as unclassified_rows
       FROM transactions`
     );
 

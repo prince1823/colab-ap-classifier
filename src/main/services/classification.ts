@@ -142,6 +142,7 @@ export class ClassificationRunner implements IClassificationRunner {
             await this.transactions.updateTransactions(
               {
                 ids: failedTxns.map((t) => t.id),
+                classificationStatus: 'classification_failed',
                 classificationReasoning: `Classification failed: ${errMsg}`,
               },
               'pipeline'
@@ -280,14 +281,24 @@ export class ClassificationRunner implements IClassificationRunner {
       (n) => n.fullPath === result.classificationPath
     );
 
+    if (!taxonomyNode) {
+      console.warn(
+        `[Classification] Taxonomy node not found for path "${result.classificationPath}" — transaction(s) will be classified without a node`
+      );
+    }
+
     // Apply classification
     const unmatchedIds = unmatchedTxns.map((r) => String(r.id));
+    const reasoning = taxonomyNode
+      ? result.reasoning
+      : `${result.reasoning}\n[Warning: LLM returned path "${result.classificationPath}" which did not match any taxonomy node]`;
+
     await this.transactions.updateTransactions(
       {
         ids: unmatchedIds,
         taxonomyNodeId: taxonomyNode?.id ?? undefined,
         classificationStatus: 'classified_by_ai',
-        classificationReasoning: result.reasoning,
+        classificationReasoning: reasoning,
       },
       'pipeline'
     );

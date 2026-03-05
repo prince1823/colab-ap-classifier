@@ -5,7 +5,8 @@ import type { SupplierInfo } from './suppliers';
 export type ClassificationStatus =
   | 'unclassified'
   | 'classified_by_rule'
-  | 'classified_by_ai';
+  | 'classified_by_ai'
+  | 'classification_failed';
 
 export interface ResearchProgress {
   status: 'running' | 'completed' | 'failed' | 'cancelled';

@@ -1,5 +1,5 @@
 import type { IPCResponse } from '../../shared/types/ipc';
-import type { IPCChannel, IPCArgs, IPCResult } from '../../shared/types/ipc-contract';
+import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
 import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate } from '../../shared/types/transactions';
@@ -20,10 +20,11 @@ async function invoke<K extends IPCChannel>(channel: K, ...args: IPCArgs<K>): Pr
 }
 
 /**
- * Event listener wrapper. Returns an unsubscribe function.
+ * Typed event listener wrapper. Channel and callback type are compile-checked via IPCEventMap.
+ * Returns an unsubscribe function.
  */
-function on<T>(channel: string, callback: (data: T) => void): () => void {
-  return window.electronAPI.on(channel, (data: unknown) => callback(data as T));
+function on<K extends keyof IPCEventMap>(channel: K, callback: (data: IPCEventMap[K]) => void): () => void {
+  return window.electronAPI.on(channel, (data: unknown) => callback(data as IPCEventMap[K]));
 }
 
 /**
@@ -63,7 +64,7 @@ export const ipc = {
     start: () => invoke('classification:start'),
     cancel: () => invoke('classification:cancel'),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
-      on<ClassificationProgress>('classification:progress', callback),
+      on('classification:progress', callback),
   },
 
   // ── Transactions (8 channels) ──
@@ -109,7 +110,7 @@ export const ipc = {
     researchSingle: (supplierName: string) =>
       invoke('suppliers:researchSingle', supplierName),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
-      on<ResearchProgress>('suppliers:research:progress', callback),
+      on('suppliers:research:progress', callback),
   },
 
   // ── Rules (4 channels) ──

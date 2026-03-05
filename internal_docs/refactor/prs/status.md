@@ -85,12 +85,21 @@ Split 1205-line ClassificationTree into focused pieces. Created `src/renderer/ty
 - `queryGroupedByClassificationPath` added to `src/main/services/transactions.ts` to handle the `classification_path` virtual column (JOIN with taxonomy table), matching the pattern of `queryGroupedByClassificationLevel` for L1-L4.
 - `localSuccess` toast state removed (was dead code — never wired up in the original).
 
-## PR 5: Type Safety Fixes — SPEC UPDATED, NOT STARTED
+## PR 5: Type Safety Fixes — COMPLETED
+**Date:** 2026-03-05
 
-Key notes from spec:
-- `tableLocalFilters` already deleted in PR 2 — skip that item
-- Audit remaining renderer components for `Dispatch<SetStateAction<X>>` and `Record<string, Record<string, string[]>>`
-- Sweep for `classification_status === 'human_reviewed'` silent bugs
+Typed the `on()` event listener in `src/renderer/lib/ipc.ts` using `K extends keyof IPCEventMap` so channel names and callback types are compile-checked. Updated two call sites (`classification:progress`, `suppliers:research:progress`) to drop now-redundant explicit type parameters — TypeScript infers the correct payload type from the channel key. Both tsconfig targets (`tsconfig.renderer.json`, `tsconfig.main.json`) compile with zero errors.
+
+### Deviations
+- The bulk of the spec was already satisfied by PRs 2-4:
+  - `tableLocalFilters` removed entirely in PR 2 (spec said fix type; reality: the field is gone)
+  - `Dispatch<SetStateAction>` — zero occurrences in prop interfaces; only a comment in MultiTableSystem.tsx
+  - `Record<string, Record<string, string[]>>` — zero occurrences in renderer
+  - `classification_status === 'human_reviewed'` — zero occurrences
+  - `useHierarchicalPivotData.ts` — already deleted in PR 3
+  - IPC handler casts — no `as any` in `src/main/ipc/`
+  - `humanReviewed` on `Transaction` type and `DashboardTransactionRow` — already correct
+- PR 5 net change: 3 lines in `ipc.ts`
 
 ## PR 6: Test Infrastructure — SPEC UPDATED, NOT STARTED
 

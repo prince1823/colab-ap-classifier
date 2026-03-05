@@ -61,6 +61,7 @@ interface TestConfig {
   projectName: string;
   companyContext: Record<string, string>;
   columnMapping: Record<string, string>;
+  columnPriorities: string[];
 }
 
 interface RuleFixture {
@@ -192,6 +193,9 @@ describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
 
     // Set company context
     await project.setSetting('company_context', testConfig.companyContext);
+
+    // Set column priorities (columns sent to LLM, in classification priority order)
+    await project.setSetting('column_priorities', testConfig.columnPriorities);
 
     console.log('  Project created:', DB_PATH);
   });

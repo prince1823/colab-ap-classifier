@@ -18,5 +18,9 @@
     "company": "Company",
     "cost_center": "Cost Center Name",
     "memo": "Memo"
-  }
+  },
+  "columnPriorities": [
+    "supplier_name", "line_description", "spend_amount",
+    "gl_description", "invoice_date", "company", "cost_center", "memo"
+  ]
 }

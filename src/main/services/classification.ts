@@ -102,6 +102,20 @@ export class ClassificationRunner implements IClassificationRunner {
         companyContext = { industry: 'Unknown' };
       }
 
+      // Load and validate column priorities
+      const columnPriorities = await this.project.getSetting('column_priorities') as string[] | null;
+      if (!columnPriorities || columnPriorities.length === 0) {
+        throw new Error('Column priorities must be configured before classification. Set column_priorities in project settings.');
+      }
+
+      const availableColumns = await this.transactions.getColumns();
+      const invalidColumns = columnPriorities.filter((col) => !availableColumns.includes(col));
+      if (invalidColumns.length > 0) {
+        throw new Error(
+          `Column priorities contain columns not found in transactions table: ${invalidColumns.join(', ')}`
+        );
+      }
+
       for (const supplier of supplierRows) {
         if (this.isCancelled) break;
 
@@ -115,7 +129,7 @@ export class ClassificationRunner implements IClassificationRunner {
         });
 
         try {
-          await this.classifySupplier(supplier.id, taxonomyNodes, companyContext);
+          await this.classifySupplier(supplier.id, taxonomyNodes, companyContext, columnPriorities);
         } catch (err) {
           console.error(`[Classification] Failed for "${supplier.supplier_name}":`, err);
           // Mark failed transactions
@@ -183,7 +197,8 @@ export class ClassificationRunner implements IClassificationRunner {
   async classifySupplier(
     projectSupplierId: string,
     taxonomy: TaxonomyNode[],
-    companyContext: CompanyContext
+    companyContext: CompanyContext,
+    columnPriorities: string[]
   ): Promise<void> {
     // Step 1: Get unclassified transactions for this supplier
     const txnRows = await this.db.all<Record<string, unknown>>(
@@ -258,6 +273,7 @@ export class ClassificationRunner implements IClassificationRunner {
       supplierResearch,
       parentName,
       historicalClassifications: [],
+      columnPriorities,
     });
 
     const taxonomyNode = taxonomy.find(

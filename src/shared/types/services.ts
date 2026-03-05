@@ -158,7 +158,7 @@ export interface SupplierResearcher {
 
 export interface ClassificationRunner {
   classifyAll(): Promise<void>;
-  classifySupplier(projectSupplierId: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void>;
+  classifySupplier(projectSupplierId: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[]): Promise<void>;
   getIsRunning(): boolean;
   cancel(): Promise<void>;
 }

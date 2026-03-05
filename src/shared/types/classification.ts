@@ -32,6 +32,7 @@ export interface ClassificationInput {
   supplierResearch: SupplierInfo | null;
   parentName?: string | null;
   historicalClassifications: { l1: string; l2: string; l3: string; count: number }[];
+  columnPriorities: string[];
 }
 
 export interface ClassificationResult {

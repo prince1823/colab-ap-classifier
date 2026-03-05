@@ -107,6 +107,8 @@ const SAMPLE_HISTORICAL: { l1: string; l2: string; l3: string; count: number }[]
   { l1: 'Indirect', l2: 'IT Services', l3: 'Cloud Hosting', count: 8 },
 ];
 
+const SAMPLE_COLUMN_PRIORITIES = ['supplier_name', 'line_description', 'spend_amount', 'gl_code', 'invoice_date'];
+
 function makeInput(overrides?: Partial<ClassificationInput>): ClassificationInput {
   return {
     transactions: overrides?.transactions ?? SAMPLE_TRANSACTIONS,
@@ -118,6 +120,7 @@ function makeInput(overrides?: Partial<ClassificationInput>): ClassificationInpu
         : SAMPLE_SUPPLIER_RESEARCH,
     parentName: overrides?.parentName ?? undefined,
     historicalClassifications: overrides?.historicalClassifications ?? SAMPLE_HISTORICAL,
+    columnPriorities: overrides?.columnPriorities ?? SAMPLE_COLUMN_PRIORITIES,
   };
 }
 
@@ -140,9 +143,25 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('L1|L2|L3');
   });
 
-  it('should mention supplier research prioritization', () => {
+  it('should mention priority-order field weighting', () => {
     const prompt = buildSystemPrompt();
-    expect(prompt).toContain('supplier research');
+    expect(prompt).toContain('priority order');
+    expect(prompt).toContain('Weight earlier fields');
+  });
+
+  it('should not hardcode specific column priorities', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).not.toContain('GL Code: VERY LOW priority');
+    expect(prompt).not.toContain('USE TRANSACTION AMOUNT');
+    expect(prompt).not.toContain('USE PO NUMBER');
+    expect(prompt).not.toContain('USE COST CENTER');
+    expect(prompt).not.toContain('GL code only as last resort');
+  });
+
+  it('should not contain outdated invoice-level classification section', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).not.toContain('Invoice-Level Classification');
+    expect(prompt).not.toContain('Return JSON list');
   });
 
   it('should include JSON response format', () => {
@@ -226,6 +245,17 @@ describe('buildUserPrompt', () => {
   it('should not include parent company in prompt when parentName is null', () => {
     const prompt = buildUserPrompt(makeInput({ parentName: null }));
     expect(prompt).not.toContain('Parent Company');
+  });
+
+  it('should include column priority and dedup note when columnPriorities is set', () => {
+    const prompt = buildUserPrompt(makeInput({ columnPriorities: ['supplier_name', 'spend_amount'] }));
+    expect(prompt).toContain('classification priority');
+    expect(prompt).toContain('Identical rows are grouped');
+  });
+
+  it('should not include column priority note when columnPriorities is empty', () => {
+    const prompt = buildUserPrompt(makeInput({ columnPriorities: [] }));
+    expect(prompt).not.toContain('classification priority');
   });
 });
 
@@ -347,6 +377,105 @@ describe('formatTransactions', () => {
   it('should handle empty array', () => {
     const result = formatTransactions([]);
     expect(result).toContain('No transactions provided');
+  });
+
+  it('should filter and order by column priorities when provided', () => {
+    const txns = [
+      { supplier_name: 'Acme', gl_code: '1234', spend_amount: 500, department: 'IT', memo: 'test note' },
+    ];
+    const result = formatTransactions(txns, ['spend_amount', 'supplier_name']);
+    // Only priority columns should appear, in priority order
+    expect(result).toContain('spend_amount: 500');
+    expect(result).toContain('supplier_name: Acme');
+    expect(result).not.toContain('gl_code');
+    expect(result).not.toContain('department');
+    expect(result).not.toContain('memo');
+    // spend_amount should appear before supplier_name (priority order)
+    const spendIdx = result.indexOf('spend_amount');
+    const supplierIdx = result.indexOf('supplier_name');
+    expect(spendIdx).toBeLessThan(supplierIdx);
+  });
+
+  it('should skip null/empty values even with column priorities', () => {
+    const txns = [
+      { supplier_name: 'Acme', line_description: '', spend_amount: null },
+    ];
+    const result = formatTransactions(txns, ['supplier_name', 'line_description', 'spend_amount']);
+    expect(result).toContain('supplier_name: Acme');
+    expect(result).not.toContain('line_description');
+    expect(result).not.toContain('spend_amount');
+  });
+
+  it('should fall back to all columns when columnPriorities is undefined', () => {
+    const txns = [{ supplier_name: 'Acme', gl_code: '1234', spend_amount: 500 }];
+    const result = formatTransactions(txns);
+    expect(result).toContain('Transaction 1:');
+    expect(result).toContain('supplier_name: Acme');
+    expect(result).toContain('gl_code: 1234');
+    expect(result).toContain('spend_amount: 500');
+  });
+
+  it('should fall back to all columns when columnPriorities is empty', () => {
+    const txns = [{ supplier_name: 'Acme', gl_code: '1234' }];
+    const result = formatTransactions(txns, []);
+    expect(result).toContain('Transaction 1:');
+    expect(result).toContain('supplier_name: Acme');
+    expect(result).toContain('gl_code: 1234');
+  });
+
+  it('should deduplicate identical rows when columnPriorities is provided', () => {
+    const txns = [
+      { supplier_name: 'Acme', line_description: 'License', spend_amount: 500 },
+      { supplier_name: 'Acme', line_description: 'License', spend_amount: 500 },
+      { supplier_name: 'Acme', line_description: 'License', spend_amount: 500 },
+    ];
+    const result = formatTransactions(txns, ['supplier_name', 'line_description', 'spend_amount']);
+    expect(result).toContain('Group 1 (3 rows):');
+    expect(result).toContain('supplier_name: Acme');
+    expect(result).toContain('line_description: License');
+    // Should not have multiple groups for identical rows
+    expect(result).not.toContain('Group 2');
+  });
+
+  it('should keep different rows as separate groups', () => {
+    const txns = [
+      { supplier_name: 'Acme', spend_amount: 500 },
+      { supplier_name: 'Acme', spend_amount: 500 },
+      { supplier_name: 'Acme', spend_amount: 1200 },
+    ];
+    const result = formatTransactions(txns, ['supplier_name', 'spend_amount']);
+    expect(result).toContain('Group 1 (2 rows):');
+    expect(result).toContain('Group 2 (1 row):');
+    expect(result).toContain('spend_amount: 500');
+    expect(result).toContain('spend_amount: 1200');
+  });
+
+  it('should show singular row label for single-row groups', () => {
+    const txns = [
+      { supplier_name: 'Acme', spend_amount: 100 },
+    ];
+    const result = formatTransactions(txns, ['supplier_name', 'spend_amount']);
+    expect(result).toContain('Group 1 (1 row):');
+  });
+
+  it('should not deduplicate when columnPriorities is not provided', () => {
+    const txns = [
+      { supplier_name: 'Acme', spend_amount: 500 },
+      { supplier_name: 'Acme', spend_amount: 500 },
+    ];
+    const result = formatTransactions(txns);
+    expect(result).toContain('Transaction 1:');
+    expect(result).toContain('Transaction 2:');
+    expect(result).not.toContain('Group');
+  });
+
+  it('should use Group format with column priorities', () => {
+    const txns = [
+      { supplier_name: 'Acme', spend_amount: 500 },
+    ];
+    const result = formatTransactions(txns, ['supplier_name', 'spend_amount']);
+    expect(result).toContain('Group 1');
+    expect(result).not.toContain('Transaction 1');
   });
 });
 
@@ -614,7 +743,7 @@ describe('classifyInvoiceGroup', () => {
 
     // System prompt requirements
     expect(systemPrompt).toContain('exactly 3 levels');
-    expect(systemPrompt).toContain('Supplier research info');
+    expect(systemPrompt).toContain('priority order');
 
     // User prompt requirements
     expect(userPrompt).toContain('## Taxonomy');

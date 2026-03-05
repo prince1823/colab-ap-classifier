@@ -60,6 +60,7 @@ interface TestConfig {
   projectName: string;
   companyContext: Record<string, string>;
   columnMapping: Record<string, string>;
+  columnPriorities: string[];
 }
 
 interface RuleFixture {
@@ -248,6 +249,9 @@ describe('Classifier Mock Pipeline Test', () => {
 
     const companyContext = await project.getSetting('company_context') as Record<string, string> | undefined;
     expect(companyContext?.industry).toBe('Healthcare Services');
+
+    // Set column priorities (columns sent to LLM, in classification priority order)
+    await project.setSetting('column_priorities', testConfig.columnPriorities);
 
     console.log('  Project created:', dbPath);
   });

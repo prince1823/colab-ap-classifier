@@ -130,7 +130,14 @@ describe('ClassificationRunner', () => {
         l1: 'Indirect', l2: 'IT', l3: 'Software',
         depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
       }]);
-      vi.mocked(project.getSetting).mockResolvedValue({ industry: 'Tech' });
+      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
+        if (key === 'company_context') return { industry: 'Tech' };
+        if (key === 'column_priorities') return ['spend_amount', 'gl_description'];
+        return null;
+      });
+      vi.mocked(transactions.getColumns).mockResolvedValue([
+        'id', 'row_index', 'spend_amount', 'gl_description', 'classification_status',
+      ]);
       vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
       vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
         classificationPath: 'Indirect|IT|Software',
@@ -169,7 +176,14 @@ describe('ClassificationRunner', () => {
         l1: 'Indirect', l2: 'IT', l3: 'Software',
         depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
       }]);
-      vi.mocked(project.getSetting).mockResolvedValue({ industry: 'Tech' });
+      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
+        if (key === 'company_context') return { industry: 'Tech' };
+        if (key === 'column_priorities') return ['spend_amount', 'gl_description'];
+        return null;
+      });
+      vi.mocked(transactions.getColumns).mockResolvedValue([
+        'id', 'row_index', 'spend_amount', 'gl_description', 'classification_status',
+      ]);
 
       // Rule matches tx1 only
       vi.mocked(rules.evaluateRules).mockResolvedValue(
@@ -197,6 +211,97 @@ describe('ClassificationRunner', () => {
 
       // AI classification should be called for remaining tx
       expect(classificationAgent.classifyInvoiceGroup).toHaveBeenCalled();
+    });
+
+    it('should throw when column_priorities setting is missing', async () => {
+      vi.mocked(db.all).mockResolvedValue([{ id: 'sup1', supplier_name: 'Acme' }]);
+      vi.mocked(taxonomy.getNodes).mockResolvedValue([]);
+      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
+        if (key === 'company_context') return { industry: 'Tech' };
+        if (key === 'column_priorities') return null;
+        return null;
+      });
+
+      await expect(runner.classifyAll()).rejects.toThrow(
+        'Column priorities must be configured'
+      );
+    });
+
+    it('should throw when column_priorities is an empty array', async () => {
+      vi.mocked(db.all).mockResolvedValue([{ id: 'sup1', supplier_name: 'Acme' }]);
+      vi.mocked(taxonomy.getNodes).mockResolvedValue([]);
+      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
+        if (key === 'company_context') return { industry: 'Tech' };
+        if (key === 'column_priorities') return [];
+        return null;
+      });
+
+      await expect(runner.classifyAll()).rejects.toThrow(
+        'Column priorities must be configured'
+      );
+    });
+
+    it('should throw when column_priorities contains non-existent columns', async () => {
+      vi.mocked(db.all).mockResolvedValue([{ id: 'sup1', supplier_name: 'Acme' }]);
+      vi.mocked(taxonomy.getNodes).mockResolvedValue([]);
+      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
+        if (key === 'company_context') return { industry: 'Tech' };
+        if (key === 'column_priorities') return ['spend_amount', 'nonexistent_col'];
+        return null;
+      });
+      vi.mocked(transactions.getColumns).mockResolvedValue([
+        'id', 'row_index', 'spend_amount', 'classification_status',
+      ]);
+
+      await expect(runner.classifyAll()).rejects.toThrow(
+        'Column priorities contain columns not found in transactions table: nonexistent_col'
+      );
+    });
+
+    it('should pass column priorities through to classification agent', async () => {
+      vi.mocked(db.all).mockImplementation(async (sql: string) => {
+        if (sql.includes('project_suppliers') || sql.includes('DISTINCT')) {
+          return [{ id: 'sup1', supplier_name: 'Acme' }];
+        }
+        if (sql.includes('FROM transactions')) {
+          return [{
+            id: 'tx1',
+            project_supplier_id: 'sup1',
+            row_index: 0,
+            spend_amount: 1000,
+            classification_status: 'unclassified',
+          }];
+        }
+        return [];
+      });
+
+      vi.mocked(taxonomy.getNodes).mockResolvedValue([{
+        id: 'tid1', fullPath: 'Indirect|IT|Software',
+        l1: 'Indirect', l2: 'IT', l3: 'Software',
+        depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
+      }]);
+      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
+        if (key === 'company_context') return { industry: 'Tech' };
+        if (key === 'column_priorities') return ['spend_amount'];
+        return null;
+      });
+      vi.mocked(transactions.getColumns).mockResolvedValue([
+        'id', 'row_index', 'spend_amount', 'classification_status',
+      ]);
+      vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
+      vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
+        classificationPath: 'Indirect|IT|Software',
+        reasoning: 'Test',
+        descriptionSupplierAligned: true,
+      });
+
+      await runner.classifyAll();
+
+      expect(classificationAgent.classifyInvoiceGroup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          columnPriorities: ['spend_amount'],
+        })
+      );
     });
   });
 

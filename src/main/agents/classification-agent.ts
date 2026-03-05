@@ -26,13 +26,12 @@ export function buildSystemPrompt(): string {
    - Use supplierType as one signal among many — evaluate contextually
 
 3. INTERCOMPANY SPEND:
-   - Check if the supplier appears to be a subsidiary of the client company (from domain_context)
+   - Check if the supplier appears to be a subsidiary of the client company (from company_context)
    - If the supplier is a subsidiary/affiliate of the client → classify under Exempt
 
-## Use Taxonomy Descriptions and Company Context
+## Taxonomy Descriptions and Company Context
 
 The taxonomy includes paths WITH descriptions (when available).
-The domain_context provides company-specific context.
 
 YOU MUST:
 1. READ taxonomy descriptions carefully — they define what each category includes/excludes
@@ -44,71 +43,36 @@ Taxonomy descriptions are AUTHORITATIVE — they define category boundaries.
 
 ## Signal Prioritization
 
-- Supplier research info (type, offerings, website, industry) takes PRECEDENCE over
-  line/GL descriptions. When they conflict, supplier info wins.
+- Transaction fields are listed in priority order (most important first). Weight earlier fields more heavily in your classification decision.
+- Supplier research info (type, offerings, website, industry) provides strong context about what the supplier does.
 - Taxonomy descriptions (when available) > Generic keyword matching
 - Specific, detailed information > Generic, vague information (regardless of field type)
 - Company context helps interpret signals in domain-specific ways
 
-## Contextual Pattern Recognition
-
-- Supplier Profile: PRIMARY signal. Understand what the supplier typically provides.
-- Supplier Historical Classifications: If provided, strong signal for consistency.
-  Deviations should be flagged via review score.
-- Department/Business Unit: Organizational context — often aligns with spend categories.
-- GL Code: VERY LOW priority — accounting constructs rarely indicate spend category.
-  Only use if there's nothing else.
-- Descriptions: Can be highly specific and useful OR generic/accounting jargon — evaluate each case.
-  Accounting references ("accounts payable", "accrued invoices") are usually less useful.
-
 ## Process
 
-1. CHECK CRITICAL RULES FIRST:
-   a. Is supplier a subsidiary of the client company? → Exempt (STOP)
-   b. Is supplierType "government"? → Strong signal for Exempt, UNLESS it's a utility payment
-
-2. REVIEW COMPANY CONTEXT:
+1. REVIEW COMPANY CONTEXT:
    a. Read the company_context provided — it describes the business domain
    b. Use industry/sector/business_focus/procurement_nuances to understand operational priorities
    c. Use it to understand domain-specific terminology
 
-3. EXAMINE TAXONOMY PATHS WITH DESCRIPTIONS:
+2. EXAMINE TAXONOMY PATHS WITH DESCRIPTIONS:
    a. Start from deepest taxonomy levels (L3)
    b. READ the Description field for each candidate path (if provided)
    c. Match transaction context to what the description says the category includes
    d. Use similarity scores as one signal, but descriptions are authoritative
 
-4. MATCH TRANSACTION TO TAXONOMY:
-   a. Supplier research info is the PRIMARY signal — match supplier offerings to categories
-   b. Line/GL descriptions are SECONDARY — use only when they align with supplier info
-   c. If multiple categories seem similar, choose the one whose description best matches
-
-5. USE TRANSACTION AMOUNT FOR PATTERNS:
-   - Large one-time amounts (>$50k) → Capital equipment, major services, infrastructure
-   - Small recurring amounts → Subscriptions, utilities, recurring services
-   - Variable amounts → Usage-based services, one-time purchases
-
-6. USE PO NUMBER:
-   - Same PO across multiple transactions → Related purchases, same project/category
-
-7. USE COST CENTER:
-   - Organizational alignment with departments → Spend category context
+3. MATCH TRANSACTION TO TAXONOMY:
+   a. Use the transaction fields in the order provided (higher-priority fields first)
+   b. If multiple categories seem similar, choose the one whose description best matches
 
 ## Edge Cases
 - Zero or very small amounts: Evaluate if this is an adjustment, refund, or actual purchase
-- Missing/blank descriptions: Rely on supplier profile and department first; GL code only as last resort
+- Missing/blank fields: Rely on higher-priority fields first
 - Supplier profile mismatch: If supplier typically provides X but transaction suggests Y,
-  prioritize supplier info (supplier info wins per spec)
-
-## Invoice-Level Classification
-- For invoices with multiple line items, you will be shown all line items together
-- Return ONE classification per line item in the order provided
-- Response format options:
-  * If ALL rows get the SAME classification → Return single path: "Technology|Software|Cloud Services"
-  * If rows need DIFFERENT classifications → Return JSON list: ["path1", "path2", "path3"]
+  evaluate contextually using all available signals
 
 ## General Rules
-- NEVER return just L1 or L1|L2 — must return L1|L2|L3 (exactly 3 levels)
 - Prefer specific categories over "Other" when confident
 - Distinguish consumption expenses (meals, services consumed) from operational purchases
 
@@ -203,19 +167,68 @@ const EXCLUDED_FIELDS = new Set([
 ]);
 
 /**
- * Format transaction details into a readable block for the prompt.
- * Excludes system/metadata columns to reduce token usage.
+ * Extract the display fields for a transaction row based on column priorities.
+ * Returns an array of [key, stringValue] pairs.
  */
-export function formatTransactions(transactions: Array<Record<string, unknown>>): string {
+function extractFields(
+  txn: Record<string, unknown>,
+  columnPriorities?: string[]
+): Array<[string, string]> {
+  if (columnPriorities && columnPriorities.length > 0) {
+    return columnPriorities
+      .filter((k) => !EXCLUDED_FIELDS.has(k))
+      .filter((k) => txn[k] !== null && txn[k] !== undefined && txn[k] !== '')
+      .map((k) => [k, String(txn[k])] as [string, string]);
+  }
+  return Object.entries(txn)
+    .filter(([k, v]) => v !== null && v !== undefined && v !== '' && !EXCLUDED_FIELDS.has(k))
+    .map(([k, v]) => [k, String(v)] as [string, string]);
+}
+
+/**
+ * Format transaction details into a readable block for the prompt.
+ * When columnPriorities is provided, rows are deduplicated by their priority column values
+ * and grouped with a count. Otherwise falls back to all columns, no dedup.
+ */
+export function formatTransactions(
+  transactions: Array<Record<string, unknown>>,
+  columnPriorities?: string[]
+): string {
   if (transactions.length === 0) {
     return '(No transactions provided)';
   }
 
+  // Deduplicate when column priorities are set
+  if (columnPriorities && columnPriorities.length > 0) {
+    const groups = new Map<string, { fields: Array<[string, string]>; count: number }>();
+
+    for (const txn of transactions) {
+      const fields = extractFields(txn, columnPriorities);
+      const key = JSON.stringify(fields);
+      const existing = groups.get(key);
+      if (existing) {
+        existing.count++;
+      } else {
+        groups.set(key, { fields, count: 1 });
+      }
+    }
+
+    let groupIdx = 0;
+    const parts: string[] = [];
+    for (const { fields, count } of groups.values()) {
+      groupIdx++;
+      const label = count === 1 ? '1 row' : `${count} rows`;
+      const fieldStr = fields.map(([k, v]) => `  ${k}: ${v}`).join('\n');
+      parts.push(`Group ${groupIdx} (${label}):\n${fieldStr}`);
+    }
+    return parts.join('\n\n');
+  }
+
+  // No priorities: send all columns, no dedup
   return transactions
     .map((txn, i) => {
-      const fields = Object.entries(txn)
-        .filter(([k, v]) => v !== null && v !== undefined && v !== '' && !EXCLUDED_FIELDS.has(k))
-        .map(([k, v]) => `  ${k}: ${String(v)}`)
+      const fields = extractFields(txn)
+        .map(([k, v]) => `  ${k}: ${v}`)
         .join('\n');
       return `Transaction ${i + 1}:\n${fields}`;
     })
@@ -226,7 +239,7 @@ export function formatTransactions(transactions: Array<Record<string, unknown>>)
  * Build the user prompt with all classification context.
  */
 export function buildUserPrompt(input: ClassificationInput): string {
-  const { taxonomy, companyContext, supplierResearch, parentName, historicalClassifications, transactions } = input;
+  const { taxonomy, companyContext, supplierResearch, parentName, historicalClassifications, transactions, columnPriorities } = input;
 
   const contextParts: string[] = [];
   contextParts.push(`Industry: ${companyContext.industry}`);
@@ -234,6 +247,10 @@ export function buildUserPrompt(input: ClassificationInput): string {
   if (companyContext.description) contextParts.push(`Description: ${companyContext.description}`);
   if (companyContext.businessFocus) contextParts.push(`Business Focus: ${companyContext.businessFocus}`);
   if (companyContext.procurementNuances) contextParts.push(`Procurement Nuances: ${companyContext.procurementNuances}`);
+
+  const columnPriorityNote = columnPriorities && columnPriorities.length > 0
+    ? '\nTransaction fields are listed in order of classification priority (most important first). Identical rows are grouped with a count.\n'
+    : '';
 
   return `## Taxonomy
 ${formatTaxonomyTree(taxonomy)}
@@ -248,7 +265,7 @@ ${formatSupplierResearch(supplierResearch, parentName)}
 ${formatHistoricalClassifications(historicalClassifications)}
 
 ## Transactions
-${formatTransactions(transactions)}
+${columnPriorityNote}${formatTransactions(transactions, columnPriorities)}
 
 Classify the above transactions into the taxonomy. Respond with JSON only.`;
 }

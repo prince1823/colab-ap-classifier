@@ -1,4 +1,5 @@
 import type { IPCResponse } from '../../shared/types/ipc';
+import type { IPCChannel, IPCArgs, IPCResult } from '../../shared/types/ipc-contract';
 import type { ProjectMetadata, ProjectMetadataUpdate } from '../../shared/types/project';
 import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority } from '../../shared/types/column-mapping';
 import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
@@ -9,15 +10,15 @@ import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from '../..
 import type { ChangeLog } from '../../shared/types/changelog';
 
 /**
- * Generic invoke wrapper that unwraps the IPCResponse envelope.
- * Throws on `success: false`.
+ * Typed invoke wrapper that unwraps the IPCResponse envelope.
+ * Channel name, args, and return type are compile-checked via IPCInvokeMap.
  */
-async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-  const result: IPCResponse<T> = await window.electronAPI.invoke(channel, ...args);
+async function invoke<K extends IPCChannel>(channel: K, ...args: IPCArgs<K>): Promise<IPCResult<K>> {
+  const result: IPCResponse<IPCResult<K>> = await window.electronAPI.invoke(channel, ...args);
   if (!result.success) {
     throw new Error(result.error || `IPC call failed: ${channel}`);
   }
-  return result.data as T;
+  return result.data as IPCResult<K>;
 }
 
 /**

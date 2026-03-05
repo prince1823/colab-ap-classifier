@@ -7,4 +7,5 @@ export * from './rules';
 export * from './transactions';
 export * from './classification';
 export * from './changelog';
+export * from './ipc-contract';
 export * from './services';

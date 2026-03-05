@@ -5,6 +5,7 @@ import CSVPreviewTable from '../components/upload/CSVPreviewTable'
 import ColumnMappingEditor from '../components/upload/ColumnMappingEditor'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
+import type { CSVPreviewWithMappings, ColumnMapping } from '../../shared/types/column-mapping'
 
 export default function UploadPage() {
   const navigate = useNavigate()
@@ -12,11 +13,13 @@ export default function UploadPage() {
   const hasUploadedData = useWorkflowStore((s) => s.hasUploadedData)
   const metadata = useWorkflowStore((s) => s.projectMetadata)
 
-  // Upload draft from global store — survives tab navigation
-  const uploadDraft = useWorkflowStore((s) => s.uploadDraft)
-  const setUploadDraft = useWorkflowStore((s) => s.setUploadDraft)
+  // Upload draft as local state — resets on navigation, which is fine
+  const [showUploader, setShowUploader] = useState(true)
+  const [filePath, setFilePath] = useState<string | null>(null)
+  const [preview, setPreview] = useState<CSVPreviewWithMappings | null>(null)
+  const [mapping, setMapping] = useState<ColumnMapping>({})
 
-  // Local-only transient state
+  // Transient UI state
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -30,20 +33,20 @@ export default function UploadPage() {
   // Sync showUploader when project changes (e.g. opening an existing project with data)
   useEffect(() => {
     if (hasUploadedData) {
-      setUploadDraft({ showUploader: false })
+      setShowUploader(false)
     }
   }, [hasUploadedData])
 
   const handleFileSelected = async (path: string) => {
-    setUploadDraft({ filePath: path })
+    setFilePath(path)
     setLoading(true)
     setError(null)
     setShowMappingEditor(false)
     try {
-      const preview = await ipc.ingest.parseCSV(path)
-      const mappingSuggestion = await ipc.ingest.suggestMappings(preview.columns, preview.sampleRows)
-      const result = { ...preview, mappingSuggestion }
-      setUploadDraft({ preview: result, mapping: mappingSuggestion.mappings })
+      const parsed = await ipc.ingest.parseCSV(path)
+      const mappingSuggestion = await ipc.ingest.suggestMappings(parsed.columns, parsed.sampleRows)
+      setPreview({ ...parsed, mappingSuggestion })
+      setMapping(mappingSuggestion.mappings)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to parse file')
     } finally {
@@ -52,11 +55,11 @@ export default function UploadPage() {
   }
 
   const handleImport = async () => {
-    if (!uploadDraft.filePath) return
+    if (!filePath) return
     setImporting(true)
     setError(null)
     try {
-      await ipc.ingest.importCSV(uploadDraft.filePath, uploadDraft.mapping)
+      await ipc.ingest.importCSV(filePath, mapping)
       await refreshMetadata()
       navigate('/workflow/data-review')
     } catch (e) {
@@ -67,7 +70,7 @@ export default function UploadPage() {
   }
 
   // If data has been uploaded already, show a summary with option to re-upload
-  if (hasUploadedData && !uploadDraft.showUploader) {
+  if (hasUploadedData && !showUploader) {
     return (
       <div className="space-y-6 p-6">
         <div>
@@ -95,7 +98,7 @@ export default function UploadPage() {
                 View Data
               </button>
               <button
-                onClick={() => setUploadDraft({ showUploader: true })}
+                onClick={() => setShowUploader(true)}
                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
               >
                 Upload New File
@@ -122,7 +125,7 @@ export default function UploadPage() {
         <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>
       )}
 
-      {!uploadDraft.preview && !loading && <FileDropZone onFileSelected={handleFileSelected} />}
+      {!preview && !loading && <FileDropZone onFileSelected={handleFileSelected} />}
 
       {loading && (
         <div className="flex items-center justify-center py-12">
@@ -137,14 +140,15 @@ export default function UploadPage() {
       )}
 
       {/* Step 1: CSV preview — show before mapping editor */}
-      {uploadDraft.preview && !loading && !showMappingEditor && (
+      {preview && !loading && !showMappingEditor && (
         <>
-          <CSVPreviewTable preview={uploadDraft.preview} />
+          <CSVPreviewTable preview={preview} />
 
           <div className="flex items-center justify-between border-t border-gray-200 pt-4">
             <button
               onClick={() => {
-                setUploadDraft({ preview: null, filePath: null })
+                setPreview(null)
+                setFilePath(null)
               }}
               className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
@@ -161,12 +165,12 @@ export default function UploadPage() {
       )}
 
       {/* Step 2: Column mapping editor + import */}
-      {uploadDraft.preview && !loading && showMappingEditor && (
+      {preview && !loading && showMappingEditor && (
         <>
           <ColumnMappingEditor
-            suggestion={uploadDraft.preview.mappingSuggestion}
-            csvColumns={uploadDraft.preview.columns}
-            onMappingChange={(mapping) => setUploadDraft({ mapping })}
+            suggestion={preview.mappingSuggestion}
+            csvColumns={preview.columns}
+            onMappingChange={setMapping}
           />
 
           <div className="flex items-center justify-between border-t border-gray-200 pt-4">

@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react'
-import { useWorkflowStore } from '../stores/workflowStore'
+import { useReviewFilterContext } from '../components/review/ReviewFilterContext'
 import type { FilterCondition } from '../../shared/types/transactions'
+
 
 export interface ReviewFilterChip {
   field: string;
@@ -26,20 +27,13 @@ const FILTER_KEY_TO_COLUMN: Record<string, string> = {
 }
 
 export function useReviewFilters() {
-  const reviewFilters = useWorkflowStore(s => s.reviewFilters)
-  const storeSetReviewFilters = useWorkflowStore(s => s.setReviewFilters)
-  const clearReviewFilters = useWorkflowStore(s => s.clearReviewFilters)
+  const { filters, setFilters, clearFilters } = useReviewFilterContext()
 
   const setFilter = useCallback((field: string, values: string[]) => {
-    const currentFilterState = useWorkflowStore.getState().reviewFilters.filterState
-    storeSetReviewFilters({
-      filterState: { ...currentFilterState, [field]: values },
-    })
-  }, [storeSetReviewFilters])
-
-  const clearFilters = useCallback(() => {
-    clearReviewFilters()
-  }, [clearReviewFilters])
+    setFilters(prev => ({
+      filterState: { ...prev.filterState, [field]: values },
+    }))
+  }, [setFilters])
 
   /**
    * Convert current UI filter state into FilterCondition[] ready for IPC calls.
@@ -47,16 +41,14 @@ export function useReviewFilters() {
    */
   const toFilterConditions = useCallback((): FilterCondition[] => {
     const conditions: FilterCondition[] = []
-    const { filterState, activeFilters, filterConnectors } = useWorkflowStore.getState().reviewFilters
     const seenColumns = new Set<string>()
 
-    // filterState entries (dropdown filters)
-    for (const [key, values] of Object.entries(filterState)) {
+    for (const [key, values] of Object.entries(filters.filterState)) {
       if (!Array.isArray(values) || values.length === 0) continue
       const column = FILTER_KEY_TO_COLUMN[key] || key
       seenColumns.add(column)
 
-      const connector = filterConnectors[column] || 'AND'
+      const connector = filters.filterConnectors[column] || 'AND'
       conditions.push({
         field: column,
         operator: 'in_list',
@@ -65,8 +57,7 @@ export function useReviewFilters() {
       })
     }
 
-    // activeFilters (programmatic filters from tree clicks, etc.)
-    for (const [key, value] of Object.entries(activeFilters)) {
+    for (const [key, value] of Object.entries(filters.activeFilters)) {
       if (!value || (Array.isArray(value) && value.length === 0)) continue
       if (seenColumns.has(key)) continue
       const values = Array.isArray(value) ? value : [value]
@@ -78,12 +69,12 @@ export function useReviewFilters() {
     }
 
     return conditions
-  }, [])
+  }, [filters.filterState, filters.activeFilters, filters.filterConnectors])
 
   const activeChips = useMemo((): ReviewFilterChip[] => {
     const chips: ReviewFilterChip[] = []
 
-    for (const [key, values] of Object.entries(reviewFilters.filterState)) {
+    for (const [key, values] of Object.entries(filters.filterState)) {
       if (!Array.isArray(values) || values.length === 0) continue
       chips.push({
         field: key,
@@ -92,10 +83,9 @@ export function useReviewFilters() {
       })
     }
 
-    for (const [key, value] of Object.entries(reviewFilters.activeFilters)) {
+    for (const [key, value] of Object.entries(filters.activeFilters)) {
       if (!value || (Array.isArray(value) && value.length === 0)) continue
-      // Skip if already in filterState
-      if (reviewFilters.filterState[key]?.length > 0) continue
+      if (filters.filterState[key]?.length > 0) continue
       const values = Array.isArray(value) ? value : [value]
       chips.push({
         field: key,
@@ -105,10 +95,10 @@ export function useReviewFilters() {
     }
 
     return chips
-  }, [reviewFilters.filterState, reviewFilters.activeFilters])
+  }, [filters.filterState, filters.activeFilters])
 
   return {
-    filters: reviewFilters,
+    filters,
     setFilter,
     clearFilters,
     toFilterConditions,

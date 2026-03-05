@@ -3,6 +3,8 @@ import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { transactionToDashboardRow, type DashboardTransactionRow } from '../utils/transactionTransform'
 import Dashboard from '../components/review/Dashboard'
+import { ReviewFilterProvider } from '../components/review/ReviewFilterContext'
+import { useWorkflowStore } from '../stores/workflowStore'
 import { ipc } from '../lib/ipc'
 import type { TransactionStats } from '../../shared/types/transactions'
 import { fmtAbbrev } from '../utils/formatSpend'
@@ -79,9 +81,13 @@ const DashboardContent = () => {
 }
 
 export default function ReviewPage() {
+  // key resets filter state when the project changes
+  const projectFilePath = useWorkflowStore(s => s.projectMetadata?.filePath)
   return (
-    <DndProvider backend={HTML5Backend}>
-      <DashboardContent />
-    </DndProvider>
+    <ReviewFilterProvider key={projectFilePath ?? 'no-project'}>
+      <DndProvider backend={HTML5Backend}>
+        <DashboardContent />
+      </DndProvider>
+    </ReviewFilterProvider>
   )
 }

@@ -3,80 +3,6 @@ import { persist } from 'zustand/middleware'
 import { ipc } from '../lib/ipc'
 import type { ProjectMetadata } from '../../shared/types/project'
 import type { ClassificationProgress } from '../../shared/types/classification'
-import type { CSVPreviewWithMappings, ColumnMapping } from '../../shared/types/column-mapping'
-import type { FilterCondition } from '../../shared/types/transactions'
-import type { ProjectSupplierView } from '../../shared/types/suppliers'
-
-interface UploadDraft {
-  filePath: string | null
-  preview: CSVPreviewWithMappings | null
-  mapping: ColumnMapping
-  showUploader: boolean
-}
-
-interface PivotSettings {
-  rowDimensions: string[]
-  valueDimension: string
-  aggregation: 'sum' | 'count' | 'average'
-  filterState: Record<string, string[]>
-}
-
-const defaultPivotSettings: PivotSettings = {
-  rowDimensions: ['supplier_name', 'gl_description'],
-  valueDimension: 'spend_amount',
-  aggregation: 'sum',
-  filterState: {},
-}
-
-export interface ReviewTableConfig {
-  id: string
-  title: string
-  column: string
-  isHierarchical: boolean
-  collapsed: boolean
-}
-
-export interface ReviewFilterState {
-  activeFilters: Record<string, string[]>
-  filterState: Record<string, string[]>
-  filterGroupOperators: Record<string, string>
-  filterConnectors: Record<string, 'AND' | 'OR'>
-  filterCombinator: 'AND' | 'OR'
-  showFilterPanel: boolean
-  tables: ReviewTableConfig[]
-  selectedRows: string[]
-  tableLocalFilters: Record<string, FilterCondition[]>
-}
-
-const defaultReviewFilters: ReviewFilterState = {
-  activeFilters: {},
-  filterState: {
-    supplier: [],
-    classificationL1: [],
-    classificationL2: [],
-    classificationL3: [],
-    classificationL4: [],
-    glDescription: [],
-    company: [],
-    year: [],
-    quarter: [],
-    month: [],
-    costCenter: [],
-    country: [],
-    lineDescription: [],
-  },
-  filterGroupOperators: {},
-  filterConnectors: {},
-  filterCombinator: 'AND',
-  showFilterPanel: false,
-  tables: [
-    { id: 'vendor', title: 'supplier_name', column: 'supplier_name', isHierarchical: false, collapsed: false },
-    { id: 'commodity', title: 'line_description', column: 'line_description', isHierarchical: false, collapsed: false },
-    { id: 'gl', title: 'gl_description', column: 'gl_description', isHierarchical: false, collapsed: false },
-  ],
-  selectedRows: [],
-  tableLocalFilters: {},
-}
 
 interface WorkflowState {
   // Core state
@@ -84,15 +10,6 @@ interface WorkflowState {
   classificationProgress: ClassificationProgress | null
   classifiedRows: number
   dataReviewed: boolean
-
-  // Upload draft (persists across tab navigation)
-  uploadDraft: UploadDraft
-
-  // Review tab filter state (persists across tab navigation, resets on project close)
-  reviewFilters: ReviewFilterState
-
-  // Cached page data (survives tab navigation, resets on project close)
-  cachedSuppliers: ProjectSupplierView[] | null
 
   // Persisted route — restored on reload
   lastRoute: string | null
@@ -114,11 +31,6 @@ interface WorkflowState {
   refreshStats: () => Promise<void>
   subscribeToClassificationProgress: () => () => void
   setClassificationProgress: (progress: ClassificationProgress | null) => void
-  setUploadDraft: (draft: Partial<UploadDraft>) => void
-  clearUploadDraft: () => void
-  setReviewFilters: (filters: Partial<ReviewFilterState>) => void
-  clearReviewFilters: () => void
-  setCachedSuppliers: (suppliers: ProjectSupplierView[] | null) => void
   markDataReviewed: () => void
   setLastRoute: (route: string) => void
   reset: () => void
@@ -143,13 +55,6 @@ function deriveState(metadata: ProjectMetadata | null, classifiedRows: number, p
   }
 }
 
-const defaultUploadDraft: UploadDraft = {
-  filePath: null,
-  preview: null,
-  mapping: {},
-  showUploader: true,
-}
-
 export const useWorkflowStore = create<WorkflowState>()(
   persist(
     (set, get) => ({
@@ -157,23 +62,16 @@ export const useWorkflowStore = create<WorkflowState>()(
       classificationProgress: null,
       classifiedRows: 0,
       dataReviewed: false,
-      uploadDraft: { ...defaultUploadDraft },
-      reviewFilters: { ...defaultReviewFilters },
-      cachedSuppliers: null,
       lastRoute: null,
 
       ...deriveState(null, 0, null, false),
 
       createProject: async (name: string) => {
-        // Always close backend project (may be open even if frontend metadata was never set)
         try { await ipc.project.close() } catch { /* already closed */ }
         set({
           projectMetadata: null,
           classifiedRows: 0,
           classificationProgress: null,
-          uploadDraft: { ...defaultUploadDraft },
-          reviewFilters: { ...defaultReviewFilters },
-          cachedSuppliers: null,
           ...deriveState(null, 0, null),
         })
 
@@ -188,21 +86,16 @@ export const useWorkflowStore = create<WorkflowState>()(
       },
 
       loadProject: async (filePath: string) => {
-        // Always close backend project (may be open even if frontend metadata was never set)
         try { await ipc.project.close() } catch { /* already closed */ }
         set({
           projectMetadata: null,
           classifiedRows: 0,
           classificationProgress: null,
-          uploadDraft: { ...defaultUploadDraft },
-          reviewFilters: { ...defaultReviewFilters },
-          cachedSuppliers: null,
           ...deriveState(null, 0, null),
         })
 
         await ipc.project.open(filePath)
 
-        // Fetch metadata — may fail on older DBs with schema mismatches
         let metadata: ProjectMetadata | null = null
         try {
           metadata = await ipc.project.getMetadata()
@@ -257,9 +150,6 @@ export const useWorkflowStore = create<WorkflowState>()(
           projectMetadata: null,
           classifiedRows: 0,
           classificationProgress: null,
-          uploadDraft: { ...defaultUploadDraft },
-          reviewFilters: { ...defaultReviewFilters },
-          cachedSuppliers: null,
           lastRoute: null,
           ...deriveState(null, 0, null),
         })
@@ -311,7 +201,6 @@ export const useWorkflowStore = create<WorkflowState>()(
         let reachedTerminal = false
 
         const unsubscribe = ipc.classification.onProgress((progress) => {
-          // If we already reached a terminal state, ignore running events
           if (reachedTerminal && progress.status === 'running') {
             return
           }
@@ -351,26 +240,6 @@ export const useWorkflowStore = create<WorkflowState>()(
         })
       },
 
-      setUploadDraft: (draft) => {
-        set({ uploadDraft: { ...get().uploadDraft, ...draft } })
-      },
-
-      clearUploadDraft: () => {
-        set({ uploadDraft: { ...defaultUploadDraft } })
-      },
-
-      setReviewFilters: (filters) => {
-        set({ reviewFilters: { ...get().reviewFilters, ...filters } })
-      },
-
-      clearReviewFilters: () => {
-        set({ reviewFilters: { ...defaultReviewFilters } })
-      },
-
-      setCachedSuppliers: (suppliers) => {
-        set({ cachedSuppliers: suppliers })
-      },
-
       markDataReviewed: () => {
         const { projectMetadata, classifiedRows, classificationProgress } = get()
         set({
@@ -389,9 +258,6 @@ export const useWorkflowStore = create<WorkflowState>()(
           classifiedRows: 0,
           dataReviewed: false,
           classificationProgress: null,
-          uploadDraft: { ...defaultUploadDraft },
-          reviewFilters: { ...defaultReviewFilters },
-          cachedSuppliers: null,
           lastRoute: null,
           ...deriveState(null, 0, null, false),
         })
@@ -399,9 +265,11 @@ export const useWorkflowStore = create<WorkflowState>()(
     }),
     {
       name: 'c91-workflow',
-      version: 2,
+      version: 3,
       partialize: (state) => ({
-        projectMetadata: state.projectMetadata,
+        projectMetadata: state.projectMetadata
+          ? ({ filePath: state.projectMetadata.filePath } as ProjectMetadata)
+          : null,
         lastRoute: state.lastRoute,
       }),
     }

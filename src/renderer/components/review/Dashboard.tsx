@@ -7,7 +7,7 @@ import ReclassifyConfirmModal from './ReclassifyConfirmModal'
 import { Table, X, ChevronDown, Plus, CheckCircle, BarChart3 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import MetricsTab from './MetricsTab'
-import { useWorkflowStore } from '../../stores/workflowStore'
+import { useReviewFilterContext } from './ReviewFilterContext'
 import { useGroupedTransactions } from '../../hooks/useGroupedTransactions'
 import { useReclassification } from '../../hooks/useReclassification'
 import { useUndoRedo } from '../../hooks/useUndoRedo'
@@ -30,55 +30,36 @@ interface DashboardProps {
 const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, foldername, setFoldername, refreshTransactions }: DashboardProps) => {
   const [activeTab, setActiveTab] = useState('tables') // 'tables'
 
-  // ── Persisted filter state (survives tab navigation, resets on project close) ──
-  const reviewFilters = useWorkflowStore(s => s.reviewFilters)
-  const storeSetReviewFilters = useWorkflowStore(s => s.setReviewFilters)
+  // ── Filter state (survives tab navigation, resets on project close via provider key) ──
+  const { filters: reviewFilters, setFilters: setReviewFilters } = useReviewFilterContext()
 
-  // Derive individual filter values from the store
   const activeFilters = reviewFilters.activeFilters
   const filterCombinator = reviewFilters.filterCombinator
   const filterConnectors = reviewFilters.filterConnectors
   const filterGroupOperators = reviewFilters.filterGroupOperators
   const showFilterPanel = reviewFilters.showFilterPanel
 
-  // Setter wrappers that write to the store
-  const setActiveFilters = useCallback((updater: any) => {
-    if (typeof updater === 'function') {
-      storeSetReviewFilters({ activeFilters: updater(useWorkflowStore.getState().reviewFilters.activeFilters) })
-    } else {
-      storeSetReviewFilters({ activeFilters: updater })
-    }
-  }, [storeSetReviewFilters])
+  const setActiveFilters = useCallback((updater: ((prev: Record<string, string[]>) => Record<string, string[]>) | Record<string, string[]>) => {
+    setReviewFilters(prev => ({ activeFilters: typeof updater === 'function' ? updater(prev.activeFilters) : updater }))
+  }, [setReviewFilters])
 
   const setFilterCombinator = useCallback((val: 'AND' | 'OR') => {
-    storeSetReviewFilters({ filterCombinator: val })
-  }, [storeSetReviewFilters])
+    setReviewFilters({ filterCombinator: val })
+  }, [setReviewFilters])
 
-  const setFilterConnectors = useCallback((updater: any) => {
-    if (typeof updater === 'function') {
-      storeSetReviewFilters({ filterConnectors: updater(useWorkflowStore.getState().reviewFilters.filterConnectors) })
-    } else {
-      storeSetReviewFilters({ filterConnectors: updater })
-    }
-  }, [storeSetReviewFilters])
+  const setFilterConnectors = useCallback((updater: ((prev: Record<string, 'AND' | 'OR'>) => Record<string, 'AND' | 'OR'>) | Record<string, 'AND' | 'OR'>) => {
+    setReviewFilters(prev => ({ filterConnectors: typeof updater === 'function' ? updater(prev.filterConnectors) : updater }))
+  }, [setReviewFilters])
 
-  const setFilterGroupOperators = useCallback((updater: any) => {
-    if (typeof updater === 'function') {
-      storeSetReviewFilters({ filterGroupOperators: updater(useWorkflowStore.getState().reviewFilters.filterGroupOperators) })
-    } else {
-      storeSetReviewFilters({ filterGroupOperators: updater })
-    }
-  }, [storeSetReviewFilters])
+  const setFilterGroupOperators = useCallback((updater: ((prev: Record<string, string>) => Record<string, string>) | Record<string, string>) => {
+    setReviewFilters(prev => ({ filterGroupOperators: typeof updater === 'function' ? updater(prev.filterGroupOperators) : updater }))
+  }, [setReviewFilters])
 
-  // ── Persisted table/selection state (survives tab navigation) ──
+  // ── Table/selection state ──
   const selectedRows = reviewFilters.selectedRows || []
-  const setSelectedRows = useCallback((updater: any) => {
-    if (typeof updater === 'function') {
-      storeSetReviewFilters({ selectedRows: updater(useWorkflowStore.getState().reviewFilters.selectedRows || []) })
-    } else {
-      storeSetReviewFilters({ selectedRows: updater })
-    }
-  }, [storeSetReviewFilters])
+  const setSelectedRows = useCallback((updater: ((prev: string[]) => string[]) | string[]) => {
+    setReviewFilters(prev => ({ selectedRows: typeof updater === 'function' ? updater(prev.selectedRows || []) : updater }))
+  }, [setReviewFilters])
 
   const [reclassToast, setReclassToast] = useState<{ show: boolean; rowCount: number; targetPath: string; undoable: boolean }>({ show: false, rowCount: 0, targetPath: '', undoable: false })
   const reclassToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -155,48 +136,27 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
   }, [dragDropManager])
 
   // State for filter and add table
-  // showFilterPanel is persisted in the store (survives tab navigation)
   const setShowFilterPanel = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
-    if (typeof val === 'function') {
-      storeSetReviewFilters({ showFilterPanel: val(useWorkflowStore.getState().reviewFilters.showFilterPanel) })
-    } else {
-      storeSetReviewFilters({ showFilterPanel: val })
-    }
-  }, [storeSetReviewFilters])
+    setReviewFilters(prev => ({ showFilterPanel: typeof val === 'function' ? val(prev.showFilterPanel) : val }))
+  }, [setReviewFilters])
   const [showAddTableMenu, setShowAddTableMenu] = useState(false)
 
-  const [expandedFilters, setExpandedFilters] = useState<Set<string>>(new Set()) // Track which filters are expanded
-  // filterState is persisted in the store (survives tab navigation)
+  const [expandedFilters, setExpandedFilters] = useState<Set<string>>(new Set())
   const filterState = reviewFilters.filterState
-  const setFilterState = useCallback((updater: any) => {
-    if (typeof updater === 'function') {
-      storeSetReviewFilters({ filterState: updater(useWorkflowStore.getState().reviewFilters.filterState) })
-    } else {
-      storeSetReviewFilters({ filterState: updater })
-    }
-  }, [storeSetReviewFilters])
-  // ── Persisted table config & local filters (survives tab navigation) ──
-  const tables = reviewFilters.tables || [
-    { id: 'vendor', title: 'supplier_name', column: 'supplier_name', isHierarchical: false, collapsed: false },
-    { id: 'commodity', title: 'line_description', column: 'line_description', isHierarchical: false, collapsed: false },
-    { id: 'gl', title: 'gl_description', column: 'gl_description', isHierarchical: false, collapsed: false },
-  ]
-  const setTables = useCallback((updater: any) => {
-    if (typeof updater === 'function') {
-      storeSetReviewFilters({ tables: updater(useWorkflowStore.getState().reviewFilters.tables) })
-    } else {
-      storeSetReviewFilters({ tables: updater })
-    }
-  }, [storeSetReviewFilters])
-  // Per-table local filters - only applied to specific tables via drag-drop
-  const tableLocalFilters = reviewFilters.tableLocalFilters || {}
-  const setTableLocalFilters = useCallback((updater: any) => {
-    if (typeof updater === 'function') {
-      storeSetReviewFilters({ tableLocalFilters: updater(useWorkflowStore.getState().reviewFilters.tableLocalFilters || {}) })
-    } else {
-      storeSetReviewFilters({ tableLocalFilters: updater })
-    }
-  }, [storeSetReviewFilters])
+  const setFilterState = useCallback((updater: ((prev: Record<string, string[]>) => Record<string, string[]>) | Record<string, string[]>) => {
+    setReviewFilters(prev => ({ filterState: typeof updater === 'function' ? updater(prev.filterState) : updater }))
+  }, [setReviewFilters])
+
+  // ── Table config & local filters ──
+  const tables = reviewFilters.tables
+  const setTables = useCallback((updater: ((prev: typeof reviewFilters.tables) => typeof reviewFilters.tables) | typeof reviewFilters.tables) => {
+    setReviewFilters(prev => ({ tables: typeof updater === 'function' ? updater(prev.tables) : updater }))
+  }, [setReviewFilters])
+
+  const tableLocalFilters = reviewFilters.tableLocalFilters
+  const setTableLocalFilters = useCallback((updater: ((prev: typeof reviewFilters.tableLocalFilters) => typeof reviewFilters.tableLocalFilters) | typeof reviewFilters.tableLocalFilters) => {
+    setReviewFilters(prev => ({ tableLocalFilters: typeof updater === 'function' ? updater(prev.tableLocalFilters) : updater }))
+  }, [setReviewFilters])
 
 
   // ── Server-side grouped data (replaces client-side grouping for 4M+ rows) ──
@@ -711,7 +671,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
       }
       return prev.filter((k: string) => !k.startsWith(`${filterKey}:`))
     })
-    setTableLocalFilters((prev: Record<string, Record<string, string[]>>) => {
+    setTableLocalFilters(prev => {
       const tableFilters = prev[tableId] || {}
       if (value !== null && Array.isArray(tableFilters[filterKey])) {
         const newValues = tableFilters[filterKey].filter((v: string) => {
@@ -945,17 +905,17 @@ const Dashboard = ({ transactions, loading, error, datasetId, setDatasetId, fold
                     allTransactions={transactions}
                     groupedData={groupedData}
                     activeFilters={activeFilters}
-                    setActiveFilters={setActiveFilters}
+                    setActiveFilters={setActiveFilters as any}
                     selectedRows={selectedRows}
-                    setSelectedRows={setSelectedRows}
+                    setSelectedRows={setSelectedRows as any}
                     filterState={filterState as any}
-                    setFilterState={setFilterState}
+                    setFilterState={setFilterState as any}
                     tables={tables as any}
                     setTables={setTables as any}
                     onReorderTables={setTables as any}
                     availableColumns={availableColumns}
                     addTable={addTable}
-                    tableLocalFilters={tableLocalFilters as unknown as Record<string, Record<string, string[]>>}
+                    tableLocalFilters={tableLocalFilters}
                     setTableLocalFilters={setTableLocalFilters as any}
                     filterCombinator={filterCombinator}
                     filterConnectors={filterConnectors}

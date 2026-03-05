@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
-import { useWorkflowStore } from '../stores/workflowStore'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
 
@@ -118,11 +117,8 @@ function EditableCell({
 
 
 export default function SuppliersPage() {
-  const cachedSuppliers = useWorkflowStore((s) => s.cachedSuppliers)
-  const setCachedSuppliers = useWorkflowStore((s) => s.setCachedSuppliers)
-
-  const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>(cachedSuppliers ?? [])
-  const [loading, setLoading] = useState(cachedSuppliers === null)
+  const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
@@ -170,7 +166,6 @@ export default function SuppliersPage() {
         ipc.transactions.query(),
       ])
       setSuppliers(data as ProjectSupplierView[])
-      setCachedSuppliers(data as ProjectSupplierView[])
       setClassificationMap(buildClassificationMap(paginatedResult.rows))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load suppliers')
@@ -181,14 +176,10 @@ export default function SuppliersPage() {
 
   useEffect(() => { loadData() }, [])
 
-  /** Update both local state and cache */
+  /** Update local state */
   const updateSuppliers = useCallback((updater: (prev: ProjectSupplierView[]) => ProjectSupplierView[]) => {
-    setSuppliers(prev => {
-      const next = updater(prev)
-      setCachedSuppliers(next)
-      return next
-    })
-  }, [setCachedSuppliers])
+    setSuppliers(prev => updater(prev))
+  }, [])
 
   /** Save a single supplierInfo field for a supplier */
   const saveField = useCallback(async (supplier: ProjectSupplierView, field: keyof SupplierInfo, newValue: string) => {

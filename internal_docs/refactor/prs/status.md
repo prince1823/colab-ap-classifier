@@ -26,7 +26,37 @@ All 4 bugs from the PR spec were fixed:
 - `src/shared/types/classification.ts` — add `classification_failed` status
 - `src/main/services/transactions.ts` — fix stats query for new status
 
-## PR 1: Store Cleanup — NOT STARTED
+## PR 1: Store Cleanup — COMPLETED
+**Date:** 2026-03-05
+
+### Agent Guidance (learned during planning)
+**DO NOT reach for a separate Zustand store as a "safe" alternative to React context.**
+
+When moving state out of `workflowStore`, the temptation is to create a second Zustand store (e.g., `reviewFilterStore.ts`) because it preserves the `.getState()` pattern used in Dashboard's functional updater callbacks. This reasoning is flawed:
+- It just moves the problem rather than solving it — two global stores is not "local state"
+- The `.getState()` pattern in Dashboard exists because of the store; removing the store removes the need for `.getState()`
+- The correct fix is to refactor Dashboard's callbacks to use functional `setState` from React context: `setFilters(prev => ({ fieldName: typeof updater === 'function' ? updater(prev.fieldName) : updater }))`
+- React's `useState` functional updater always receives the current state — no `.getState()` needed
+
+Follow the PR spec: use React context (`ReviewFilterContext.tsx`), proper `useCallback` with deps, and functional setState. The refactor is more invasive but cleaner.
+
+### Changes Made
+1. **Created `src/renderer/components/review/ReviewFilterContext.tsx`** — React context with `useState`, exports `ReviewFilterProvider` + `useReviewFilterContext`. Holds `ReviewFilterState` (moved from store). `ReviewFilterProvider` mounted in `ReviewPage` with `key={projectFilePath}` so state resets when project changes.
+
+2. **Slimmed `workflowStore.ts`** — removed `uploadDraft`, `reviewFilters`, `cachedSuppliers`, `PivotSettings` (dead code). Removed 8 actions. Fixed `partialize` to only persist `{ filePath }` from metadata + `lastRoute`. Bumped persist version to 3.
+
+3. **Updated `useReviewFilters.ts`** — reads from context. Fixed `toFilterConditions` to include filter values as `useCallback` deps.
+
+4. **Updated `Dashboard.tsx`** — all filter reads/writes via `useReviewFilterContext`. All setters use functional `setFilters(prev => ...)` — no `getState()` anywhere.
+
+5. **Updated `UploadPage.tsx`** — `uploadDraft` replaced with individual `useState` hooks. Resets on navigation (accepted per spec).
+
+6. **Updated `SuppliersPage.tsx`** — removed `cachedSuppliers`. Always loads fresh on mount.
+
+### Deviations from Plan
+- `tableLocalFilters` was typed as `Record<string, FilterCondition[]>` in old store but actually used as `Record<string, Record<string, string[]>>`. Fixed type in context to match actual usage.
+- `PivotSettings` was dead code (not in `WorkflowState`). Deleted.
+
 ## PR 2: MultiTable Decomposition — NOT STARTED
 ## PR 3: Dashboard Decomposition — NOT STARTED
 ## PR 4: Classification Tree Split — NOT STARTED

@@ -1,0 +1,1623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Colab91 AP Classifier — Frontend Architecture v2 (Target State)</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f8f9fb;
+    --surface2: #f0f1f4;
+    --border: #d4d7e0;
+    --text: #1a1d27;
+    --text-muted: #5f6478;
+    --accent: #4a56c9;
+    --accent-dim: #3b46a8;
+    --green: #16a34a;
+    --amber: #b45309;
+    --red: #dc2626;
+    --cyan: #0e7490;
+    --purple: #7c3aed;
+    --pink: #db2777;
+    --orange: #c2410c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+  }
+  pre {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; }
+  pre code { background: none; padding: 0; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+  header { border-bottom: 1px solid var(--border); padding: 32px 0; margin-bottom: 32px; }
+  header h1 { font-size: 2em; margin-bottom: 8px; }
+  header p { color: var(--text-muted); font-size: 1.1em; }
+  .date-tag {
+    display: inline-block; background: var(--surface2); border: 1px solid var(--border);
+    padding: 3px 10px; border-radius: 4px; font-size: 0.85em; color: var(--text-muted); margin-top: 8px;
+  }
+
+  nav {
+    position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--border);
+    z-index: 100; padding: 12px 0; margin-bottom: 32px;
+  }
+  nav .container { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 24px; }
+  nav a {
+    padding: 6px 14px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border);
+    font-size: 0.85em; transition: all 0.15s; white-space: nowrap;
+  }
+  nav a:hover { background: var(--surface2); text-decoration: none; border-color: var(--accent-dim); }
+  nav a.active { background: var(--accent-dim); border-color: var(--accent-dim); color: white; }
+
+  section { margin-bottom: 48px; }
+  section h2 { font-size: 1.5em; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid var(--accent-dim); display: inline-block; }
+  section h3 { font-size: 1.15em; margin: 20px 0 10px; color: var(--cyan); }
+  section h4 { font-size: 1em; margin: 16px 0 8px; color: var(--amber); }
+
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin: 16px 0; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; transition: border-color 0.15s;
+  }
+  .card:hover { border-color: var(--accent-dim); }
+  .card h4 { margin-top: 0; color: var(--text); font-size: 1.05em; margin-bottom: 6px; }
+  .card .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em;
+    font-weight: 600; margin-right: 4px; margin-bottom: 6px;
+  }
+  .badge-page { background: #dbeafe; color: #1e40af; }
+  .badge-component { background: #ede9fe; color: #5b21b6; }
+  .badge-hook { background: #dcfce7; color: #166534; }
+  .badge-store { background: #fce7f3; color: #9d174d; }
+  .badge-type { background: #fef3c7; color: #92400e; }
+  .badge-new { background: #fee2e2; color: #991b1b; }
+  .badge-changed { background: #fef3c7; color: #92400e; }
+  .card .file { color: var(--text-muted); font-size: 0.78em; font-family: monospace; margin-bottom: 8px; display: block; }
+  .card ul { margin: 8px 0 0 16px; }
+  .card li { font-size: 0.88em; color: var(--text-muted); margin: 3px 0; }
+
+  .diagram {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px;
+    overflow-x: auto; margin: 16px 0; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82em; line-height: 1.5; white-space: pre;
+  }
+  .diagram .layer-label { color: var(--accent); font-weight: 700; }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.88em; }
+  th, td { padding: 9px 13px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface2); color: var(--cyan); font-weight: 600; position: sticky; top: 50px; }
+  tr:hover td { background: var(--surface); }
+  td code { font-size: 0.88em; }
+
+  details { margin: 8px 0; }
+  details summary {
+    cursor: pointer; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; font-weight: 600; color: var(--text); transition: background 0.15s; list-style: none;
+  }
+  details summary:hover { background: var(--surface2); }
+  details[open] summary { border-radius: 8px 8px 0 0; border-bottom: none; }
+  details .detail-body {
+    padding: 16px; background: var(--surface); border: 1px solid var(--border);
+    border-top: none; border-radius: 0 0 8px 8px;
+  }
+
+  .flow-step { display: flex; align-items: flex-start; gap: 12px; margin: 8px 0; }
+  .flow-num {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--accent-dim); color: white;
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85em;
+    flex-shrink: 0; margin-top: 4px;
+  }
+  .flow-content { flex: 1; }
+  .flow-content strong { color: var(--cyan); }
+
+  .page-wireframe {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px;
+    margin: 16px 0; font-family: 'JetBrains Mono', monospace; font-size: 0.75em;
+    line-height: 1.45; white-space: pre; overflow-x: auto;
+  }
+
+  .status-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 0.75em; font-weight: 600; margin-left: 6px;
+  }
+  .status-new     { background: #fee2e2; color: #991b1b; }
+  .status-changed { background: #fef3c7; color: #92400e; }
+  .status-keep    { background: #dcfce7; color: #166534; }
+  .status-delete  { background: #f1f5f9; color: #475569; text-decoration: line-through; }
+
+  .alert { padding: 12px 16px; border-radius: 8px; margin: 12px 0; font-size: 0.9em; border-left: 4px solid; }
+  .alert-info   { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+  .alert-warn   { background: #fef3c7; border-color: #d97706; color: #78350f; }
+  .alert-design { background: #ede9fe; border-color: #7c3aed; color: #3b0764; }
+
+  .dep-gate {
+    background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px;
+    padding: 10px 14px; font-size: 0.88em; color: #78350f; margin: 8px 0;
+  }
+  .dep-gate strong { color: #92400e; }
+
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 8px 24px; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a href="#overview">Overview</a>
+    <a href="#launch">Launch Modal</a>
+    <a href="#layout">Layout & Nav</a>
+    <a href="#dep-system">Dependency Gates</a>
+    <a href="#routes">Routes</a>
+    <a href="#project-view">Project</a>
+    <a href="#taxonomy-view">Taxonomy</a>
+    <a href="#data-view">Data</a>
+    <a href="#suppliers-view">Suppliers</a>
+    <a href="#classification-view">Classification</a>
+    <a href="#review-view">Review</a>
+    <a href="#override-rules-view">Override Rules</a>
+    <a href="#version-history-view">Version History</a>
+    <a href="#state">State</a>
+    <a href="#filter-system">Filter System</a>
+    <a href="#ipc">IPC Contract</a>
+    <a href="#file-structure">File Structure</a>
+    <a href="#types">Type Contracts</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<header>
+  <h1>Frontend Architecture v2 — Target State</h1>
+  <p>Colab91 AP Classifier &mdash; Redesigned navigation, dependency gates, Data stepper, pivot-first Review, universal filter system</p>
+  <div class="date-tag">Target State &nbsp;|&nbsp; 2026-03-06</div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="overview">
+<h2>Overview</h2>
+
+<h3>What Changed from v1</h3>
+<table>
+  <tr><th>Area</th><th>v1 (current)</th><th>v2 (target)</th></tr>
+  <tr>
+    <td>App start</td>
+    <td>Loads to /workflow/upload; ProtectedRoute redirects if no project</td>
+    <td>LaunchModal overlay on center of screen; no blind redirect</td>
+  </tr>
+  <tr>
+    <td>Navigation</td>
+    <td>Numbered linear pipeline steps + project setup section</td>
+    <td>8 flat sidebar items; dependency gates show inline message not redirect</td>
+  </tr>
+  <tr>
+    <td>Upload flow</td>
+    <td>Single page with file drop + mapping + import</td>
+    <td>3-step sequential flow within Data view: Upload → Mapping → Priority → import on Save</td>
+  </tr>
+  <tr>
+    <td>Suppliers</td>
+    <td>Table with broken update IPC; no batch research selection</td>
+    <td>Checkbox multi-select, filter by research/confirmation status, batch research queue</td>
+  </tr>
+  <tr>
+    <td>Classification</td>
+    <td>Classify All only</td>
+    <td>Classify All + filtered batch (by supplier condition + transaction condition)</td>
+  </tr>
+  <tr>
+    <td>Review</td>
+    <td>Tables / Pivot / Metrics tabs; client-side pivot</td>
+    <td>Pivot-primary; server-side aggregation; keyboard-driven reclassify; export lives here</td>
+  </tr>
+  <tr>
+    <td>Override Rules</td>
+    <td>Gated on classified rows (wrong)</td>
+    <td>Always accessible; runs before LLM; can also re-apply retroactively</td>
+  </tr>
+  <tr>
+    <td>Filter system</td>
+    <td>FilterCondition used only in transactions and rules</td>
+    <td>Universal FilterCondition covering transactions, suppliers, classification queue; system fields (human_reviewed, classification_status, confirmation_status) are first-class</td>
+  </tr>
+  <tr>
+    <td>Export</td>
+    <td>/workflow/output page</td>
+    <td>Export button inside Review view; OutputPage removed</td>
+  </tr>
+  <tr>
+    <td>WorkflowStore</td>
+    <td>Only hasProject + isClassifying; missing 8 gate booleans</td>
+    <td>Full derived state: hasCompanyContext, hasTaxonomy, hasUploadedData, hasColumnsMapped, hasConfirmedSuppliers, hasClassifiedRows</td>
+  </tr>
+</table>
+
+<h3>Guiding Principles (unchanged from v1)</h3>
+<ul>
+  <li><strong>Pages call <code>ipc</code> directly</strong> — no renderer service layer. The typed IPC facade IS the abstraction.</li>
+  <li><strong>Complex orchestration lives in hooks</strong> — when a view has multi-step logic (reclassify, undo/redo, pivot keyboard), extract into custom hooks.</li>
+  <li><strong>No implicit any</strong> — every filter condition, drag item, queue entry, and pivot row is typed.</li>
+  <li><strong>IPC is compile-checked</strong> — IPCInvokeMap in shared types ensures channel names, args, and return types are validated end-to-end.</li>
+</ul>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="launch">
+<h2>App Launch — LaunchModal</h2>
+
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  [app background — blurred/dimmed]                                       │
+│                                                                          │
+│              ┌────────────────────────────────────┐                      │
+│              │  Colab91 AP Classifier             │                      │
+│              │  ─────────────────────────────     │                      │
+│              │                                    │                      │
+│              │  Project name                      │                      │
+│              │  [_______________________________] │                      │
+│              │                                    │                      │
+│              │  [ New Project ]                   │                      │
+│              │                                    │                      │
+│              │  ─────── or ───────                │                      │
+│              │                                    │                      │
+│              │  [ Open Existing Project... ]      │                      │
+│              │                                    │                      │
+│              │  ┌─ Recent ──────────────────────┐ │                      │
+│              │  │ Acme Corp FY24    2026-02-10  │ │                      │
+│              │  │ Beta LLC Q4       2026-01-30  │ │                      │
+│              │  └───────────────────────────────┘ │                      │
+│              └────────────────────────────────────┘                      │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Behavior</h3>
+<ul>
+  <li>Shown whenever <code>hasProject === false</code> — on cold start and after project close</li>
+  <li>Not a route; rendered as an overlay on top of AppShell (which shows sidebar + blank main area behind it)</li>
+  <li><strong>New Project</strong>: validates non-empty name → calls <code>ipc.project.new(name)</code> → dismisses modal → navigates to <code>/project</code></li>
+  <li><strong>Open Existing</strong>: calls <code>ipc.ingest.selectFile()</code> (or a dedicated project file picker) → calls <code>ipc.project.open(filePath)</code> → dismisses → navigates to last persisted route or <code>/project</code></li>
+  <li><strong>Recent projects</strong>: read from persisted <code>recentProjects</code> list in WorkflowStore — click to open directly without file picker</li>
+  <li>Escape key does nothing (cannot dismiss without a project open)</li>
+</ul>
+
+<h3>Component</h3>
+<div class="card-grid">
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-new">New</span>
+    <h4>LaunchModal</h4>
+    <div class="file">src/renderer/components/LaunchModal.tsx</div>
+    <ul>
+      <li>Overlay rendered in AppShell when <code>!hasProject</code></li>
+      <li>Controlled by <code>useWorkflowStore</code></li>
+      <li>Recent projects from <code>workflowStore.recentProjects</code></li>
+      <li>Replaces ProtectedRoute redirect behavior for the no-project state</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="layout">
+<h2>Layout & Navigation</h2>
+
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  ┌─────────────────┬────────────────────────────────────────────────────┐│
+│  │  SIDEBAR        │  MAIN CONTENT (&lt;Outlet /&gt;)                         ││
+│  │                 │                                                    ││
+│  │  Acme Corp FY24 │  Renders the active view component.               ││
+│  │  [switch ▼]     │                                                    ││
+│  │  ─────────      │  If view has unmet dependencies:                   ││
+│  │  Project        │  ┌────────────────────────────────────┐            ││
+│  │  Taxonomy       │  │  This view requires X to be set up.│            ││
+│  │  Data           │  │  → Go to [blocking view]           │            ││
+│  │  Suppliers  [!] │  └────────────────────────────────────┘            ││
+│  │  Classification │                                                    ││
+│  │  Review     [!] │                                                    ││
+│  │  Override Rules │                                                    ││
+│  │  Version History│                                                    ││
+│  │  ─────────      │                                                    ││
+│  │  [LLM Settings] │                                                    ││
+│  └─────────────────┴────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Layout Components</h3>
+<div class="card-grid">
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-changed">Changed</span>
+    <h4>AppShell</h4>
+    <div class="file">src/renderer/components/AppShell.tsx</div>
+    <ul>
+      <li>Renders <code>Sidebar</code> + <code>&lt;Outlet /&gt;</code> + <code>LaunchModal</code> overlay</li>
+      <li>No Header component (project name moved into Sidebar top)</li>
+      <li>Auto-reopens last project on startup (persisted filePath)</li>
+      <li>Subscribes to classification + research progress events</li>
+      <li>Debounced metadata + stats refresh on route change</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-changed">Redesigned</span>
+    <h4>Sidebar</h4>
+    <div class="file">src/renderer/components/Sidebar.tsx</div>
+    <ul>
+      <li><strong>Top:</strong> project name + "switch project" control (opens LaunchModal / file picker)</li>
+      <li>8 nav items: Project, Taxonomy, Data, Suppliers, Classification, Review, Override Rules, Version History</li>
+      <li>Items with unmet dependencies show a warning badge <code>[!]</code></li>
+      <li>Clicking a gated item navigates to route — view renders the dependency message inline, not a redirect</li>
+      <li>Active item highlighted</li>
+      <li>LLM Settings button at bottom</li>
+      <li>Collapsible (icon-only mode)</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-new">New</span>
+    <h4>DependencyGate</h4>
+    <div class="file">src/renderer/components/DependencyGate.tsx</div>
+    <ul>
+      <li>Wrapper component each view uses at its root</li>
+      <li>Accepts <code>requires: GateCondition[]</code> prop (each condition has a boolean + message + link)</li>
+      <li>If any condition fails: renders explanatory message with a direct link to the blocking view</li>
+      <li>If all pass: renders <code>children</code></li>
+      <li>Keeps routing simple — every route always renders, gate logic is in-view</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-keep">Keep</span>
+    <h4>SettingsDialog</h4>
+    <div class="file">src/renderer/components/SettingsDialog.tsx</div>
+    <ul>
+      <li>LLM config modal — unchanged from v1</li>
+      <li>Triggered from sidebar bottom button</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="dep-system">
+<h2>Dependency Gate System</h2>
+
+<p>Each view declares its own dependencies. <code>DependencyGate</code> reads derived booleans from <code>workflowStore</code> and renders an explanatory message with a link to the blocker instead of the view content.</p>
+
+<h3>Dependency Rules</h3>
+<table>
+  <tr><th>View</th><th>Required Conditions</th><th>Gate Message</th></tr>
+  <tr>
+    <td>Project</td>
+    <td><em>None — always accessible</em></td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td>Taxonomy</td>
+    <td><em>None — always accessible</em></td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td>Data</td>
+    <td><em>None — always accessible</em></td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td>Suppliers</td>
+    <td><code>hasUploadedData</code> (CSV imported + columns mapped)</td>
+    <td>"Upload and map your data first." → <a href="/data">Go to Data</a></td>
+  </tr>
+  <tr>
+    <td>Classification</td>
+    <td><code>hasTaxonomy</code> AND <code>hasConfirmedSuppliers</code></td>
+    <td>If no taxonomy: "Load a taxonomy before classifying." → <a href="/taxonomy">Go to Taxonomy</a><br>If no confirmed suppliers: "Confirm at least one supplier before classifying." → <a href="/suppliers">Go to Suppliers</a></td>
+  </tr>
+  <tr>
+    <td>Review</td>
+    <td><code>hasClassifiedRows</code></td>
+    <td>"Run classification first — no classified rows yet." → <a href="/classification">Go to Classification</a></td>
+  </tr>
+  <tr>
+    <td>Override Rules</td>
+    <td><code>hasUploadedData</code> (needs columns for condition builder)</td>
+    <td>"Upload data first so columns are available for rule conditions." → <a href="/data">Go to Data</a></td>
+  </tr>
+  <tr>
+    <td>Version History</td>
+    <td><em>None — always accessible</em></td>
+    <td>—</td>
+  </tr>
+</table>
+
+<div class="alert alert-design">
+  <strong>Design note:</strong> Override Rules has no dependency on classified rows (v1 spec was wrong). Rules run <em>before</em> the LLM during classification. They can also be re-applied retroactively after classification via <code>rules:applyAll</code>. Rules can be authored at any time after data is uploaded (so the condition field selector has columns to show).
+</div>
+
+<h3>WorkflowStore Derived Booleans</h3>
+<pre><code>// Derived in workflowStore, updated by refreshGateState()
+hasCompanyContext:    !!metadata?.companyContext?.companyName
+                     && !!metadata?.companyContext?.industry
+hasTaxonomy:         taxonomyNodeCount > 0
+hasUploadedData:     totalRows > 0       // fetched from transactions:stats
+hasColumnsMapped:    uploadRecord != null && uploadRecord.status === 'imported'
+hasConfirmedSuppliers: confirmedSupplierCount > 0  // from suppliers:list count
+hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="routes">
+<h2>Route Table</h2>
+
+<table>
+  <tr><th>Route</th><th>Component</th><th>Gate</th><th>Notes</th></tr>
+  <tr><td><code>/</code></td><td>→ redirect to <code>/project</code></td><td>—</td><td>Default</td></tr>
+  <tr><td><code>/project</code></td><td>ProjectView</td><td>None</td><td>Was <code>/project/details</code></td></tr>
+  <tr><td><code>/taxonomy</code></td><td>TaxonomyView</td><td>None</td><td>Was <code>/project/taxonomy</code></td></tr>
+  <tr><td><code>/data</code></td><td>DataView</td><td>None</td><td>Replaces <code>/workflow/upload</code> + DataReviewPage; internal step state</td></tr>
+  <tr><td><code>/suppliers</code></td><td>SuppliersView</td><td>hasUploadedData</td><td>Was <code>/project/suppliers</code></td></tr>
+  <tr><td><code>/classification</code></td><td>ClassificationView</td><td>hasTaxonomy + hasConfirmedSuppliers</td><td>Was <code>/workflow/classification</code></td></tr>
+  <tr><td><code>/review</code></td><td>ReviewView</td><td>hasClassifiedRows</td><td>Was <code>/workflow/review</code>; includes export</td></tr>
+  <tr><td><code>/override-rules</code></td><td>OverrideRulesView</td><td>hasUploadedData</td><td>Was <code>/project/override-rules</code></td></tr>
+  <tr><td><code>/version-history</code></td><td>VersionHistoryView</td><td>None</td><td>Was <code>/project/version-history</code></td></tr>
+</table>
+
+<p><strong>Removed routes:</strong> <code>/workflow/data-review</code> (merged into Data), <code>/workflow/output</code> (merged into Review), <code>/workflow/pivot</code> (merged into Review).</p>
+<p><code>ProtectedRoute</code> no longer used for dependency gates. All routes render their view; <code>DependencyGate</code> inside the view handles unmet conditions. <code>LaunchModal</code> overlay handles the no-project state.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="project-view">
+<h2>Project View</h2>
+<div class="file">src/renderer/views/ProjectView.tsx</div>
+
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Project                                                                 │
+│                                                                          │
+│  Company Name  * [________________________]                              │
+│  Industry      * [________________________]                              │
+│  Sector        * [________________________]                              │
+│  Description   * [                        ]                              │
+│                  [________________________]                              │
+│                                                                          │
+│  ⚠ Incomplete company context can reduce classification accuracy.        │
+│                                                                          │
+│  Procurement Notes  [                     ]                              │
+│                     [_____________________]                              │
+│  Additional Context [                     ]                              │
+│                     [_____________________]                              │
+│                                                                          │
+│  [ Save ]                                          * Required field      │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Functionality</h3>
+<ul>
+  <li><strong>Required fields:</strong> Company Name, Industry, Sector, Description. Save is disabled until these are filled. <code>hasCompanyContext</code> in WorkflowStore is only <code>true</code> when all four are present.</li>
+  <li><strong>Optional fields:</strong> Procurement Notes, Additional Context. A soft inline warning appears below the required fields if either is blank: "Incomplete company context can reduce classification accuracy." Not a blocker.</li>
+  <li>Loads from <code>project:getMetadata</code>. Saves via <code>project:updateMetadata</code>.</li>
+  <li>On successful save, WorkflowStore refreshes metadata → <code>hasCompanyContext</code> updates → sidebar gates re-evaluate.</li>
+</ul>
+
+<h3>IPC Channels</h3>
+<table>
+  <tr><th>Channel</th><th>When</th></tr>
+  <tr><td><code>project:getMetadata</code></td><td>On mount</td></tr>
+  <tr><td><code>project:updateMetadata</code></td><td>On save</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="taxonomy-view">
+<h2>Taxonomy View</h2>
+<div class="file">src/renderer/views/TaxonomyView.tsx</div>
+
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Taxonomy                                    [ Import from .txt File ]   │
+│                                                                          │
+│  ┌─── Tree ─────────────────────────────────────────────────────────┐    │
+│  │  [-] Corporate Services                                  [+ add] │    │
+│  │     [-] IT                                     [rename] [+ add]  │    │
+│  │        Software         [rename] [merge] [del] [+ add]           │    │
+│  │        Hardware         [rename] [merge] [del]                   │    │
+│  │     [+] HR                                                       │    │
+│  │  [-] Operations                                          [+ add] │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+│  ── Add Node ──────────────────────────────────────────────────────────  │
+│  L1  [ Select or create new ▼ ]                                          │
+│  L2  [ Select under L1 or create new ▼ ]                                │
+│  L3  [ Select under L2 or create new ▼ ]   (optional — adds at L2 if    │
+│        left blank)                                                       │
+│  Description  [ ________________________________ ]  (L3 only)            │
+│  [ Add Node ]                                                            │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Functionality</h3>
+<ol>
+  <li><strong>Import from file:</strong> Opens file picker (native Electron dialog via <code>ingest:selectFile</code> filtered to .txt), then calls <code>taxonomy:importFromFile(path)</code>. Replaces entire taxonomy if one exists (with confirmation prompt).</li>
+  <li><strong>Tree view:</strong> Expandable L1 → L2 → L3 hierarchy from <code>taxonomy:getNodes</code>. L3 node description shown on hover.</li>
+  <li><strong>Add node:</strong> Inline form below tree. L1 is a combo-select (pick existing or type new). L2 is a combo-select filtered to children of the chosen L1. L3 is optional combo-select filtered to children of chosen L2. If L3 is blank, the node is added at L2 depth. Description is available for L3 nodes only.</li>
+  <li><strong>Rename:</strong> Click rename icon → inline edit → confirm. Calls <code>taxonomy:renameNode</code>.</li>
+  <li><strong>Merge:</strong> Click merge on a node → shows a target picker dialog (select destination node at same depth) → confirm. Calls <code>taxonomy:mergeNodes</code>. All transactions referencing source are moved to target.</li>
+  <li><strong>Delete:</strong> Click delete → backend checks if any transactions reference this node. If yes: block and show message "X rows are classified under this node. Reassign them in Review first." with a link to Review filtered to that node. If no transactions reference it: confirm and call <code>taxonomy:deleteNode</code>.</li>
+</ol>
+
+<div class="alert alert-warn">
+  <strong>Delete block flow:</strong> <code>taxonomy:deleteNode</code> returns an error if transactions reference the node. Frontend catches this, shows the message with a link to Review filtered to <code>taxonomyNodeId = [nodeId]</code>. The taxonomy service's <code>reassignTo</code> parameter is NOT used from the UI — users must manually reassign in Review, then retry delete.
+</div>
+
+<h3>IPC Channels</h3>
+<table>
+  <tr><th>Channel</th><th>When</th></tr>
+  <tr><td><code>taxonomy:getNodes</code></td><td>On mount and after any mutation</td></tr>
+  <tr><td><code>taxonomy:addNode</code></td><td>Add Node form submit</td></tr>
+  <tr><td><code>taxonomy:renameNode</code></td><td>Rename confirm <span class="status-tag status-new">New IPC</span></td></tr>
+  <tr><td><code>taxonomy:mergeNodes</code></td><td>Merge confirm <span class="status-tag status-new">New IPC</span></td></tr>
+  <tr><td><code>taxonomy:deleteNode</code></td><td>Delete confirm</td></tr>
+  <tr><td><code>taxonomy:importFromFile</code></td><td>After file picker returns path</td></tr>
+  <tr><td><code>ingest:selectFile</code></td><td>Import button click (to get file path)</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="data-view">
+<h2>Data View — 3-Step Stepper</h2>
+<div class="file">src/renderer/views/DataView.tsx</div>
+
+<p>The Data view is a single sidebar nav item containing a 3-step sequential flow. Steps are <strong>not</strong> separate routes — step state lives in the DataView component (or in WorkflowStore for persistence). Users advance forward through steps; can navigate back to any completed step.</p>
+
+<div class="diagram">
+  Step 1: Upload CSV  ──▶  Step 2: Column Mapping  ──▶  Step 3: Column Priority
+  (file select,             (canonical ↔ file col,         (ordered list,
+   upload history)          LLM suggestions)                Save triggers import)
+</div>
+
+<h3>Step 1 — Upload CSV</h3>
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Data  /  1. Upload                                                      │
+│                                                                          │
+│  ┌─── Dataset Preview ───────────────────┐  ┌─── Upload History ──────┐  │
+│  │  (blank until a CSV is selected)      │  │ File         Rows   Map │  │
+│  │                                       │  │ ──────────── ──── ───── │  │
+│  │  ┌────────────────────────────────┐   │  │ invoices.csv  4521   ✓  │  │
+│  │  │  Drop CSV here or             │   │  │ q3_spend.csv  1200   ✓  │  │
+│  │  │  [ Select File ]              │   │  │ q4_spend.csv   890   ✓  │  │
+│  │  └────────────────────────────────┘   │  └─────────────────────────┘  │
+│  └───────────────────────────────────────┘                               │
+│                                                                          │
+│  ── After file selected ──────────────────────────────────────────────── │
+│  invoices_jan.csv — 4,521 rows detected                                  │
+│                                                                          │
+│  [ Map Columns ▼ ]                                                       │
+│     > Use previous mapping from: invoices.csv                            │
+│     > Suggest new mappings (LLM)                                         │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<p><strong>Functionality:</strong></p>
+<ul>
+  <li>File drag-drop zone + native file dialog via <code>ingest:selectFile</code></li>
+  <li><code>ingest:parseCSV</code> called on file select → shows row count + preview in left panel</li>
+  <li>Upload history shows all past uploads with their mapped column count</li>
+  <li><strong>"Map Columns" dropdown:</strong>
+    <ul>
+      <li>"Use previous mapping from: [filename]" — loads stored mapping from a previous upload that has matching/similar columns. Calls <code>ingest:getStoredMappings(columns)</code>. If found, skips LLM suggestion and pre-fills Step 2.</li>
+      <li>"Suggest new mappings (LLM)" — calls <code>ingest:suggestMappings</code> → advances to Step 2 with LLM suggestions pre-filled.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>Step 2 — Column Mapping</h3>
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Data  /  2. Column Mapping                                              │
+│                                                                          │
+│  ┌─── Dataset Preview ────────────────────┐  ┌─── Mapping Config ─────┐  │
+│  │  Vendor  │ Amount   │ GL Code │ Date   │  │  [ + Add Column ]     │  │
+│  │  ──────  │ ──────   │ ──────  │ ────── │  │                       │  │
+│  │  Acme    │ 1234.56  │ 6100    │ Jan-15 │  │  supplier_name        │  │
+│  │  Beta    │  567.00  │ 5200    │ Jan-16 │  │  [ Vendor       ▼ ] ✕ │  │
+│  │  ...     │  ...     │  ...    │  ...   │  │                       │  │
+│  └────────────────────────────────────────┘  │  spend_amount         │  │
+│                                              │  [ Amount       ▼ ] ✕ │  │
+│                                              │                       │  │
+│                                              │  gl_code              │  │
+│                                              │  [ GL Code      ▼ ] ✕ │  │
+│                                              │                       │  │
+│                                              │  invoice_date         │  │
+│                                              │  [ Date         ▼ ] ✕ │  │
+│                                              │                       │  │
+│                                              │  [ Apply Mappings → ] │  │
+│                                              └───────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<p><strong>Functionality:</strong></p>
+<ul>
+  <li><strong>Left:</strong> Dataset preview (first 5 rows), updates to highlight the currently selected file column in the active mapping row.</li>
+  <li><strong>Right:</strong> List of canonical column rows. Each row: canonical name (left) + dropdown of CSV columns (right) + delete icon.</li>
+  <li><strong>"+ Add Column":</strong> Appends a new row with a canonical name selector (dropdown of all canonical columns not yet mapped) + a CSV column dropdown. Lets users map columns not auto-detected by LLM.</li>
+  <li>Delete icon removes that mapping row.</li>
+  <li>Dropdown for each CSV column shows all columns from the parsed file; "— none —" to unmap.</li>
+  <li><strong>"Apply Mappings →":</strong> Validates that <code>supplier_name</code> and <code>spend_amount</code> are mapped (required), shows inline errors if not. On success, advances to Step 3 with the mappings object. Does NOT write to DB yet.</li>
+</ul>
+
+<h3>Step 3 — Column Priority</h3>
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Data  /  3. Column Priority                                             │
+│                                                                          │
+│  ┌─── Dataset Preview ────────────────────┐  ┌─── Priority Order ─────┐  │
+│  │  Vendor  │ Amount   │ GL Code │ Date   │  │  Columns sent to LLM  │  │
+│  │  Acme    │ 1234.56  │ 6100    │ Jan-15 │  │  in this order:       │  │
+│  │  ...     │  ...     │  ...    │  ...   │  │                       │  │
+│  └────────────────────────────────────────┘  │  1. supplier_name ☰   │  │
+│                                              │  2. spend_amount  ☰   │  │
+│                                              │  3. gl_description☰   │  │
+│                                              │  4. invoice_date  ☰   │  │
+│                                              │                       │  │
+│                                              │  Drag to reorder.     │  │
+│                                              │  Higher = more weight │  │
+│                                              │  in classification.   │  │
+│                                              │                       │  │
+│                                              │  [ Save & Import → ]  │  │
+│                                              └───────────────────────┘  │
+│                                                                          │
+│  If priorities already saved (re-visit):                                 │
+│  Shows read-only list with [ Edit ] button to unlock                     │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<p><strong>Functionality:</strong></p>
+<ul>
+  <li>Drag-to-reorder list of all mapped canonical columns. Order determines which columns are weighted most heavily in LLM classification prompts.</li>
+  <li>If the user is re-visiting after a prior import: shows read-only list with an "Edit" button. Editing and saving re-applies priorities but does NOT re-import the CSV.</li>
+  <li><strong>"Save & Import →":</strong> This is the trigger for the actual CSV import.
+    <ol>
+      <li>Calls <code>ingest:importCSV(filePath, mappings)</code> → rows inserted into DB</li>
+      <li>Calls <code>project:setSetting('column_priorities', orderedCanonicalCols)</code> → priorities saved</li>
+      <li>WorkflowStore calls <code>refreshGateState()</code> → <code>hasUploadedData</code> + <code>hasColumnsMapped</code> become true</li>
+      <li>Navigates to <code>/suppliers</code></li>
+    </ol>
+  </li>
+</ul>
+
+<h3>Components</h3>
+<div class="card-grid">
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-new">New</span>
+    <h4>DataView (container)</h4>
+    <div class="file">src/renderer/views/DataView.tsx</div>
+    <ul>
+      <li>Owns step state: <code>step: 'upload' | 'mapping' | 'priority'</code></li>
+      <li>Renders step indicator + active step component</li>
+      <li>Passes data down: filePath, csvPreview, mappings, priorities</li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-new">New</span>
+    <h4>DataUploadStep</h4>
+    <div class="file">src/renderer/views/data/DataUploadStep.tsx</div>
+    <ul>
+      <li>FileDropZone + upload history table</li>
+      <li>Map Columns dropdown</li>
+      <li>Calls <code>ingest:parseCSV</code>, <code>ingest:getStoredMappings</code>, <code>ingest:suggestMappings</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-new">New</span>
+    <h4>DataMappingStep</h4>
+    <div class="file">src/renderer/views/data/DataMappingStep.tsx</div>
+    <ul>
+      <li>CSVPreviewTable (left) + MappingConfigPanel (right)</li>
+      <li>Add/remove canonical column rows, dropdown per row</li>
+      <li>Validates required fields on Apply</li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-new">New</span>
+    <h4>DataPriorityStep</h4>
+    <div class="file">src/renderer/views/data/DataPriorityStep.tsx</div>
+    <ul>
+      <li>Drag-to-reorder priority list</li>
+      <li>Read-only mode with edit unlock when priorities already saved</li>
+      <li>Triggers import on Save &amp; Import</li>
+    </ul>
+  </div>
+</div>
+
+<h3>IPC Channels</h3>
+<table>
+  <tr><th>Channel</th><th>Step</th><th>When</th></tr>
+  <tr><td><code>ingest:selectFile</code></td><td>1</td><td>Browse button / drop</td></tr>
+  <tr><td><code>ingest:parseCSV</code></td><td>1</td><td>After file selected</td></tr>
+  <tr><td><code>ingest:getStoredMappings</code></td><td>1</td><td>"Use previous mapping" option</td></tr>
+  <tr><td><code>ingest:suggestMappings</code></td><td>1→2</td><td>"Suggest new mappings" option</td></tr>
+  <tr><td><code>ingest:getUpload</code></td><td>1</td><td>On mount (populate upload history)</td></tr>
+  <tr><td><code>ingest:importCSV</code></td><td>3</td><td>Save &amp; Import button</td></tr>
+  <tr><td><code>project:setSetting('column_priorities', ...)</code></td><td>3</td><td>After import succeeds</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="suppliers-view">
+<h2>Suppliers View</h2>
+<div class="file">src/renderer/views/SuppliersView.tsx</div>
+<div class="dep-gate"><strong>Requires:</strong> <code>hasUploadedData</code> — "Upload and map your data first."</div>
+
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Suppliers                                                               │
+│                                                                          │
+│  ⚠ Tail spend threshold not set. Set threshold: [ $_____ ] [ Apply ]    │
+│                                                                          │
+│  [ Research Selected ▼ ]  [ Confirm Selected ]                           │
+│  [ ⚠ 12 unconfirmed ]  [ ⚠ 8 unresearched ]  — filter shortcut buttons  │
+│                                                                          │
+│  Search: [_______________]  Filter: [ + Add Condition ]                  │
+│                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────┐   │
+│  │ ☐  │ Name          │ Type     │ Parent │ Txns │ Spend  │ Status  │  │   │
+│  ├────┼───────────────┼──────────┼────────┼──────┼────────┼─────────┤  │   │
+│  │ ☑  │ Amazon.com    │ Retailer │ Amzn   │  456 │ $890K  │Confirmed│  │   │
+│  │ ☐  │ Acme Corp     │ Mfg      │ —      │  189 │ $340K  │Pending  │[R]│   │
+│  │ ☐  │ Beta LLC      │ Services │ —      │   23 │ $12K   │Researched│[C]│  │
+│  │ ☐  │ ...                                                          │  │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  ── Research Progress Sidebar (slides in during batch research) ──────── │
+│  │  Researching 3 suppliers                                            │  │
+│  │  In queue: Adobe, Acme Corp, Beta LLC                               │  │
+│  │  Current: Acme Corp...                         [ Cancel ]           │  │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Functionality</h3>
+<ol>
+  <li><strong>Tail spend threshold:</strong> If <code>project:getSetting('tail_spend_threshold')</code> returns null or 0, shows a banner prompting the user to set it. Saving calls <code>project:setSetting('tail_spend_threshold', value)</code> then <code>suppliers:filterTailSpend(threshold)</code>.</li>
+  <li><strong>Warning buttons:</strong> "⚠ N unconfirmed" and "⚠ N unresearched" are clickable. Clicking applies a supplier filter condition (<code>{ field: 'confirmationStatus', operator: 'not_equals', value: 'confirmed' }</code> or <code>{ field: 'dataSource', operator: 'equals', value: 'manual' }</code>) to the table.</li>
+  <li><strong>Filter bar:</strong> Universal filter using <code>SupplierFilterCondition[]</code>. Field selector shows supplier-specific fields: name, confirmationStatus, dataSource (research status), isTailSpend, totalSpend. See <a href="#filter-system">Filter System</a>.</li>
+  <li><strong>Checkbox selection:</strong> Per-row checkboxes + select all. Selection drives batch actions.</li>
+  <li><strong>Row action button:</strong>
+    <ul>
+      <li>If supplier has <code>dataSource === 'manual'</code> and no universe data: shows <strong>[Research]</strong> button → calls <code>suppliers:researchSingle(supplierName)</code></li>
+      <li>If supplier has research data but <code>confirmationStatus === 'pending'</code>: shows <strong>[Confirm]</strong> button → calls <code>suppliers:confirm(id, 'confirmed')</code></li>
+      <li>If confirmed: shows status badge only</li>
+    </ul>
+  </li>
+  <li><strong>Research Selected:</strong> Queues selected suppliers for batch research via <code>suppliers:researchAll</code> with a filter. Progress shown in a slide-in sidebar panel with queue list, current supplier, and cancel button.</li>
+  <li><strong>Confirm Selected:</strong> Bulk-confirms all selected suppliers via individual <code>suppliers:confirm</code> calls (or a batch channel).</li>
+  <li><strong>Inline editing:</strong> Supplier name (double-click to edit), type, parent, supplierInfo fields — saved via <code>suppliers:update(supplierName, SupplierUpdateInput)</code>.</li>
+</ol>
+
+<h3>Components</h3>
+<div class="card-grid">
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-changed">Redesigned</span>
+    <h4>SuppliersView</h4>
+    <div class="file">src/renderer/views/SuppliersView.tsx</div>
+    <ul>
+      <li>Replaces SuppliersPage.tsx</li>
+      <li>Owns selection state, filter state, research progress subscription</li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-new">New</span>
+    <h4>ResearchProgressSidebar</h4>
+    <div class="file">src/renderer/components/suppliers/ResearchProgressSidebar.tsx</div>
+    <ul>
+      <li>Slides in during batch research</li>
+      <li>Shows queue list + current supplier + progress</li>
+      <li>Cancel button</li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge badge-component">Component</span>
+    <span class="status-tag status-new">New</span>
+    <h4>SupplierFilterBar</h4>
+    <div class="file">src/renderer/components/suppliers/SupplierFilterBar.tsx</div>
+    <ul>
+      <li>Universal filter bar (shared FilterConditionBuilder)</li>
+      <li>Supplier-specific field options</li>
+    </ul>
+  </div>
+</div>
+
+<h3>IPC Channels</h3>
+<table>
+  <tr><th>Channel</th><th>When</th></tr>
+  <tr><td><code>suppliers:list</code></td><td>On mount and after any mutation</td></tr>
+  <tr><td><code>suppliers:update</code> (fixed)</td><td>Inline edit save</td></tr>
+  <tr><td><code>suppliers:confirm</code></td><td>Confirm button / Confirm Selected</td></tr>
+  <tr><td><code>suppliers:researchSingle</code></td><td>Research row button</td></tr>
+  <tr><td><code>suppliers:researchAll</code></td><td>Research Selected (queues subset)</td></tr>
+  <tr><td><code>suppliers:research:progress</code> (event)</td><td>Subscribed in component for sidebar</td></tr>
+  <tr><td><code>suppliers:filterTailSpend</code> <span class="status-tag status-new">New IPC</span></td><td>Tail spend threshold apply</td></tr>
+  <tr><td><code>project:getSetting / setSetting</code></td><td>Tail spend threshold read/save</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="classification-view">
+<h2>Classification View</h2>
+<div class="file">src/renderer/views/ClassificationView.tsx</div>
+<div class="dep-gate"><strong>Requires:</strong> <code>hasTaxonomy</code> AND <code>hasConfirmedSuppliers</code></div>
+
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Classification                                                          │
+│                                                                          │
+│  ████████████████████████░░░░░░░░░░░░░░  340 / 800 classifiable rows    │
+│  400 rows blocked — awaiting supplier confirmation  →  [Go to Suppliers] │
+│                                                                          │
+│  ─── Classify ────────────────────────────────────────────────────────── │
+│                                                                          │
+│  Filter  [ + Add Condition ▼ ]   (e.g. human_reviewed = false, ...)      │
+│                                                                          │
+│  Matching: 124 unclassified rows across 18 confirmed suppliers           │
+│                                                                          │
+│  [ Classify All ]   [ Classify Matching ]   [ Cancel ]                  │
+│                                                                          │
+│  ─── Research (optional) ─────────────────────────────────────────────── │
+│                                                                          │
+│  Filter  [ + Add Condition ▼ ]                                           │
+│                                                                          │
+│  Matching: 12 unresearched suppliers                                     │
+│                                                                          │
+│  [ Research All ]   [ Research Matching ]   [ Cancel ]                  │
+│                                                                          │
+│  ─── Override Rules ──────────────────────────────────────────────────── │
+│  3 active rules.  [ View Rules ]   [ Re-apply All Rules ]                │
+│                                                                          │
+│  ─── Status ───────────────────────────────────────────────────────────  │
+│  Current: Classifying "Acme Corp" (supplier 12 of 18)                   │
+│  ██████████████░░░░░░░░░░  66%                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Functionality</h3>
+<ol>
+  <li>
+    <strong>Progress bar (top):</strong> Shows progress over <em>classifiable</em> rows only (those with a confirmed supplier). "Z rows blocked — awaiting supplier confirmation" is shown as a link to Suppliers. When all suppliers are confirmed, the blocked count disappears and the bar expands to full row count.
+  </li>
+  <li>
+    <strong>Filter conditions:</strong> Uses the universal <code>TransactionFilterCondition</code> / <code>SupplierFilterCondition</code> types. Available fields include:
+    <ul>
+      <li>Transaction fields: <code>human_reviewed</code>, <code>classification_status</code>, <code>spend_amount</code>, any canonical column</li>
+      <li>Supplier fields: <code>confirmationStatus</code>, <code>dataSource</code> (research status)</li>
+    </ul>
+    After conditions are set, a preview count is computed: "Matching: X rows across Y suppliers."
+  </li>
+  <li>
+    <strong>Classify All:</strong> Ignores filter — queues all confirmed suppliers. Calls <code>classification:start</code> (existing channel, existing behavior).
+  </li>
+  <li>
+    <strong>Classify Matching:</strong> Queues only suppliers matching the current filter. Calls <code>classification:startFiltered({ supplierFilter, transactionFilter })</code> <span class="status-tag status-new">New IPC</span>.
+  </li>
+  <li>
+    <strong>Research All / Research Matching:</strong> Same pattern as Classify for the research step. Calls <code>suppliers:researchAll</code> or <code>suppliers:researchFiltered(filter)</code> <span class="status-tag status-new">New IPC</span>.
+  </li>
+  <li>
+    <strong>Re-apply All Rules:</strong> Retroactively applies all active override rules to existing classified rows. Calls <code>rules:applyAll</code> <span class="status-tag status-new">New IPC</span>. Shows result count ("X rows reclassified by rules").
+  </li>
+  <li>
+    <strong>Live status:</strong> While running, shows current supplier name, supplier count progress, and a secondary progress bar. Cancel buttons stop the running operation.
+  </li>
+</ol>
+
+<h3>IPC Channels</h3>
+<table>
+  <tr><th>Channel</th><th>When</th></tr>
+  <tr><td><code>classification:start</code></td><td>Classify All</td></tr>
+  <tr><td><code>classification:startFiltered</code> <span class="status-tag status-new">New</span></td><td>Classify Matching</td></tr>
+  <tr><td><code>classification:cancel</code></td><td>Cancel button</td></tr>
+  <tr><td><code>classification:progress</code> (event)</td><td>Live status updates</td></tr>
+  <tr><td><code>suppliers:researchAll</code></td><td>Research All</td></tr>
+  <tr><td><code>suppliers:researchFiltered</code> <span class="status-tag status-new">New</span></td><td>Research Matching</td></tr>
+  <tr><td><code>suppliers:research:progress</code> (event)</td><td>Live research status</td></tr>
+  <tr><td><code>rules:applyAll</code> <span class="status-tag status-new">New</span></td><td>Re-apply All Rules</td></tr>
+  <tr><td><code>transactions:stats</code></td><td>On mount + after classify/research completes</td></tr>
+  <tr><td><code>transactions:queryGrouped</code></td><td>Filter preview count</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="review-view">
+<h2>Review View</h2>
+<div class="file">src/renderer/views/ReviewView.tsx</div>
+<div class="dep-gate"><strong>Requires:</strong> <code>hasClassifiedRows</code> — "Run classification first."</div>
+
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Review                                                       [Export ▼] │
+│                                                                          │
+│  Filter [ + Add Condition ]   View: [Sum ▼]  [% of total]               │
+│                                                                          │
+│  ┌─── Pivot Table ──────────────────────────────────────────────────────┐ │
+│  │  Classification         │  Spend (Sum)  │  Spend (%)  │  Rows        │ │
+│  │  ─────────────────────  │  ───────────  │  ─────────  │  ────        │ │
+│  │ [-] Corporate Services  │  $2,456,000   │   43.2%     │  4,231       │ │
+│  │   [-] IT                │  $1,200,000   │   21.1%     │  2,100       │ │
+│  │      Software           │    $890,000   │   15.7%     │  1,560  [→]  │ │
+│  │      Hardware           │    $310,000   │    5.5%     │    540  [→]  │ │
+│  │   [+] HR                │    $456,000   │    8.0%     │    890       │ │
+│  │   [+] Finance           │    $800,000   │   14.1%     │  1,241       │ │
+│  │ [-] Operations          │  $1,890,000   │   33.2%     │  3,210       │ │
+│  │   ...                                                                │ │
+│  │ [~] Unclassified        │    $450,000   │    7.9%     │    800       │ │
+│  └──────────────────────────────────────────────────────────────────────┘ │
+│                                                                          │
+│  ← [K] up  [J] down  [Space] expand/collapse  [R] reclassify selection   │
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Pivot Table</h3>
+<ul>
+  <li>Server-side aggregation via <code>transactions:pivotAggregation</code> (DuckDB GROUP BY). Works on millions of rows — returns only aggregated rows (~hundreds).</li>
+  <li>Default row dimensions: L1 → L2 → L3 (from <code>classification_l1</code>, <code>classification_l2</code>, <code>classification_l3</code> columns).</li>
+  <li>Expand/collapse nodes to drill into sub-levels.</li>
+  <li><strong>Spend display:</strong> Toggle between sum (absolute spend) and percentage (% of filtered total). Both columns shown simultaneously when space permits.</li>
+  <li><strong>[→] drill-down icon</strong> on leaf rows: opens a transaction detail panel showing individual rows for that node (paginated table via <code>transactions:query</code> with a filter on that taxonomy node).</li>
+  <li>"Unclassified" row shown at bottom for rows with no taxonomy node.</li>
+  <li><strong>Live updates:</strong> If classification is still running (isClassifying), the pivot auto-refreshes every 5 seconds.</li>
+</ul>
+
+<h3>Filter Bar</h3>
+<ul>
+  <li>Universal <code>FilterConditionBuilder</code> at the top of the view.</li>
+  <li>Filters narrow the pivot aggregation — sent to <code>transactions:pivotAggregation</code> as <code>filters</code> param.</li>
+  <li>System fields available: <code>human_reviewed</code>, <code>classification_status</code>, <code>supplier_name</code>, any canonical column.</li>
+</ul>
+
+<h3>Keyboard-Driven Reclassification</h3>
+<div class="alert alert-design">
+  <strong>Design:</strong> The pivot table is keyboard-navigable. Users navigate rows with arrow keys, select a row (or filter state representing a set of transactions), then press a shortcut to open the reclassify modal. This is the primary reclassification flow for power users.
+</div>
+
+<p><strong>Keyboard map (preliminary — full map defined separately):</strong></p>
+<table>
+  <tr><th>Key</th><th>Action</th></tr>
+  <tr><td><code>J / ↓</code></td><td>Move focus down one pivot row</td></tr>
+  <tr><td><code>K / ↑</code></td><td>Move focus up one pivot row</td></tr>
+  <tr><td><code>Space / →</code></td><td>Expand/collapse focused node</td></tr>
+  <tr><td><code>R</code></td><td>Open reclassify modal for focused row's transactions</td></tr>
+  <tr><td><code>Escape</code></td><td>Close modal / clear selection</td></tr>
+  <tr><td><code>Enter</code> (in modal)</td><td>Confirm reclassification</td></tr>
+</table>
+
+<h3>Reclassification Modal</h3>
+<div class="page-wireframe">
+┌────────────────────────────────────────────────────┐
+│  Reclassify Transactions                           │
+│                                                    │
+│  560 rows currently in: IT › Software              │
+│  Matching active filters                           │
+│                                                    │
+│  Move to:                                          │
+│  [ Search taxonomy... type to filter           ]   │
+│  (contains-match on node path text)                │
+│                                                    │
+│    IT | Software                  (current)        │
+│  ▶ IT | Licenses                                   │
+│    Corporate Services | IT | SaaS                  │
+│    ...                                             │
+│                                                    │
+│  [ Confirm: Reclassify 560 rows → IT | Licenses ]  │
+│  [ Cancel ]                                        │
+└────────────────────────────────────────────────────┘
+</div>
+
+<p><strong>Reclassification flow:</strong></p>
+<ol>
+  <li>User navigates to a pivot row (e.g. "IT › Software") and presses <code>R</code></li>
+  <li>Modal opens. The "scope" is all transactions matching the focused pivot row's implicit filter (e.g. <code>classification_l1 = 'Corporate Services'</code> AND <code>classification_l2 = 'IT'</code> AND <code>classification_l3 = 'Software'</code>) PLUS any active top-level filters from the filter bar</li>
+  <li>Row count is shown ("560 rows currently in: IT › Software")</li>
+  <li>User types in the search box — "contains" match on <code>full_path</code> of taxonomy nodes. Results filter live.</li>
+  <li>User selects target node from results list (arrow keys + Enter, or click)</li>
+  <li>"Confirm" button is shown with the target node and row count. User clicks Confirm (or presses Enter)</li>
+  <li>Calls <code>transactions:update({ filter: pivotFilter, update: { taxonomyNodeId: targetId, humanReviewed: true } })</code></li>
+  <li>Modal closes, pivot refreshes</li>
+  <li>Undo entry pushed to undo stack (via changelog entry from backend)</li>
+</ol>
+
+<h3>Export</h3>
+<ul>
+  <li><strong>[Export ▼]</strong> dropdown button in the top-right of Review view.</li>
+  <li>Options: "Export CSV" → calls <code>export:csv</code> (native save dialog + writes file)</li>
+  <li>Future: "Export Excel" (pivot to Excel via existing <code>exportPivotToExcel</code> utility)</li>
+</ul>
+
+<h3>Hooks</h3>
+<div class="card-grid">
+  <div class="card">
+    <span class="badge badge-hook">Hook</span>
+    <span class="status-tag status-changed">Updated</span>
+    <h4>useServerPivotData</h4>
+    <div class="file">src/renderer/hooks/useServerPivotData.ts</div>
+    <ul>
+      <li>Fetches pivot aggregation from <code>transactions:pivotAggregation</code></li>
+      <li>Accepts filters + auto-refresh interval (for live classification)</li>
+      <li>Returns <code>{ pivotData, totalCount, loading, refetch }</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge badge-hook">Hook</span>
+    <span class="status-tag status-new">New</span>
+    <h4>usePivotKeyboard</h4>
+    <div class="file">src/renderer/hooks/usePivotKeyboard.ts</div>
+    <ul>
+      <li>Manages keyboard focus/navigation state over pivot rows</li>
+      <li>Returns <code>{ focusedRow, setFocus, handleKeyDown }</code></li>
+      <li>Fires <code>onReclassify(focusedRow)</code> when R pressed</li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge badge-hook">Hook</span>
+    <span class="status-tag status-changed">Updated</span>
+    <h4>useReclassification</h4>
+    <div class="file">src/renderer/hooks/useReclassification.ts</div>
+    <ul>
+      <li>Modal open/close state</li>
+      <li>Taxonomy search (contains-match against loaded nodes)</li>
+      <li>Calls <code>transactions:update</code> on confirm</li>
+      <li>Pushes undo entry</li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge badge-hook">Hook</span>
+    <span class="status-tag status-keep">Keep</span>
+    <h4>useUndoRedo</h4>
+    <div class="file">src/renderer/hooks/useUndoRedo.ts</div>
+    <ul>
+      <li>Undo/redo stack (20 entries)</li>
+      <li>Undo via <code>changelog:revert</code></li>
+      <li>Keyboard: Cmd+Z / Cmd+Shift+Z</li>
+    </ul>
+  </div>
+</div>
+
+<h3>IPC Channels</h3>
+<table>
+  <tr><th>Channel</th><th>When</th></tr>
+  <tr><td><code>transactions:pivotAggregation</code></td><td>On mount, filter change, auto-refresh</td></tr>
+  <tr><td><code>transactions:query</code></td><td>Drill-down detail panel</td></tr>
+  <tr><td><code>transactions:update</code></td><td>Reclassify confirm</td></tr>
+  <tr><td><code>taxonomy:getNodes</code></td><td>On mount (for reclassify search)</td></tr>
+  <tr><td><code>changelog:revert</code></td><td>Undo</td></tr>
+  <tr><td><code>export:csv</code></td><td>Export → Export CSV</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="override-rules-view">
+<h2>Override Rules View</h2>
+<div class="file">src/renderer/views/OverrideRulesView.tsx</div>
+<div class="dep-gate"><strong>Requires:</strong> <code>hasUploadedData</code> — "Upload data first so columns are available for rule conditions."</div>
+
+<div class="alert alert-info">
+  <strong>Timing:</strong> Rules are applied <em>before</em> the LLM during classification (first-match wins). They can also be re-applied retroactively to already-classified rows via "Re-apply All Rules" on the Classification view. There is no dependency on classified rows — rules can be authored at any point after data is uploaded.
+</div>
+
+<div class="page-wireframe">
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Override Rules                                        [+ New Rule]      │
+│                                                                          │
+│  Filter: [_______________]   Sort by: [ Priority ▼ ]                    │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐│
+│  │ P │ Name            │ Conditions               │ Target     │ On ││
+│  ├───┼─────────────────┼──────────────────────────┼────────────┼────┤│
+│  │ 1 │ AWS Services    │ supplier contains "Amazon"│ IT|Cloud   │ ✓  ││
+│  │ 2 │ Office Supplies │ gl_code starts_with "5100"│ Ops|Office │ ✓  ││
+│  │ 3 │ Payroll vendors │ supplier contains "ADP"   │ HR|Payroll │    ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ── Inline Rule Builder (expands below the table when [+ New Rule]) ──── │
+│  ┌──────────────────────────────────────────────────────────────────────┐│
+│  │ Name: [________________________]  Priority: [___]  Active: [✓]      ││
+│  │                                                                      ││
+│  │ Conditions (AND):                                                    ││
+│  │  [ supplier_name  ▼ ] [ contains    ▼ ] [___________] [✕]           ││
+│  │  [ gl_code        ▼ ] [ starts_with ▼ ] [___________] [✕]           ││
+│  │  [ + Add Condition ]                                                 ││
+│  │                                                                      ││
+│  │ Target:  [ Corporate Services | IT | Cloud Services  ▼ ]            ││
+│  │                                                                      ││
+│  │  [ Save Rule ]  [ Cancel ]                                           ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Functionality</h3>
+<ol>
+  <li><strong>Rule list:</strong> Table ordered by priority. Priority column is an editable integer field — user can type a new number to re-prioritize inline. Auto-sorts on blur.</li>
+  <li><strong>Filter / search:</strong> Client-side filter on rule name and target taxonomy path.</li>
+  <li><strong>Active toggle:</strong> Checkbox in the "On" column to enable/disable without deleting. Calls <code>rules:update(id, { isActive: bool })</code>.</li>
+  <li><strong>New Rule:</strong> Expands an inline builder panel below the table (not a modal). Builder has:
+    <ul>
+      <li>Name + priority + active toggle</li>
+      <li>Dynamic condition rows: field selector (all available columns from <code>transactions:getColumns</code> + system fields) + operator + value + delete icon</li>
+      <li>"+ Add Condition" appends a row</li>
+      <li>Target: taxonomy node picker (tree or searchable dropdown, must select L3 leaf)</li>
+    </ul>
+    Save calls <code>rules:create</code>. Cancel collapses the panel.
+  </li>
+  <li><strong>Edit rule:</strong> Clicking a rule row expands the same inline builder pre-filled with that rule's data. Save calls <code>rules:update</code>.</li>
+  <li><strong>Delete rule:</strong> Confirmation prompt → <code>rules:delete</code>.</li>
+</ol>
+
+<h3>IPC Channels</h3>
+<table>
+  <tr><th>Channel</th><th>When</th></tr>
+  <tr><td><code>rules:list</code></td><td>On mount</td></tr>
+  <tr><td><code>rules:create</code></td><td>Save new rule</td></tr>
+  <tr><td><code>rules:update</code></td><td>Edit rule save / priority change / active toggle</td></tr>
+  <tr><td><code>rules:delete</code></td><td>Delete confirm</td></tr>
+  <tr><td><code>taxonomy:getNodes</code></td><td>On mount (for target picker)</td></tr>
+  <tr><td><code>transactions:getColumns</code></td><td>On mount (for condition field selector)</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="version-history-view">
+<h2>Version History View</h2>
+<div class="file">src/renderer/views/VersionHistoryView.tsx</div>
+
+<p>Minimal change from v1. Shows all changelog entries with expandable detail and revert action.</p>
+<ul>
+  <li>Loads from <code>changelog:list</code></li>
+  <li>Resolves taxonomy UUIDs to human-readable paths</li>
+  <li>Expandable rows showing before/after field diffs</li>
+  <li>Revert via <code>changelog:revert(changeId)</code></li>
+</ul>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="state">
+<h2>State Management</h2>
+
+<h3>WorkflowStore — Full Schema</h3>
+<pre><code>interface WorkflowState {
+  // ── Persisted (localStorage 'c91-workflow') ──
+  projectFilePath: string | null      // for auto-reopen on startup
+  lastRoute: string | null            // for session recovery
+  recentProjects: RecentProject[]     // list of { filePath, name, lastOpened }
+
+  // ── Live project state (reset on project close) ──
+  projectMetadata: ProjectMetadata | null
+  classificationProgress: ClassificationProgress | null
+  researchProgress: ResearchProgress | null
+
+  // ── Derived gate booleans (updated by refreshGateState()) ──
+  hasProject: boolean               // projectMetadata !== null
+  hasCompanyContext: boolean         // required fields filled
+  hasTaxonomy: boolean               // taxonomyNodeCount > 0
+  hasUploadedData: boolean           // totalRows > 0
+  hasColumnsMapped: boolean          // uploadRecord.status === 'imported'
+  hasConfirmedSuppliers: boolean     // confirmedSupplierCount > 0
+  hasClassifiedRows: boolean         // classifiedRows > 0
+
+  // ── Running state ──
+  isClassifying: boolean
+  isResearching: boolean
+
+  // ── Cached counts (populated by refreshGateState()) ──
+  taxonomyNodeCount: number
+  totalRows: number
+  classifiedRows: number
+  confirmedSupplierCount: number
+
+  // ── Actions ──
+  createProject(name: string): Promise&lt;void&gt;
+  loadProject(filePath: string): Promise&lt;void&gt;
+  closeProject(): Promise&lt;void&gt;
+  refreshMetadata(): Promise&lt;void&gt;
+  refreshGateState(): Promise&lt;void&gt;         // fetches stats + counts, derives booleans
+  subscribeToClassificationProgress(): () =&gt; void
+  subscribeToResearchProgress(): () =&gt; void
+  setLastRoute(route: string): void
+  reset(): void
+}</code></pre>
+
+<h3>refreshGateState()</h3>
+<p>Called by AppShell on every route change (debounced 50ms). Fetches:</p>
+<ul>
+  <li><code>transactions:stats</code> → <code>totalRows</code>, <code>classifiedRows</code></li>
+  <li><code>taxonomy:getNodeCount</code> → <code>taxonomyNodeCount</code></li>
+  <li><code>suppliers:list</code> → count where <code>confirmationStatus === 'confirmed'</code></li>
+  <li><code>ingest:getUpload</code> → <code>hasColumnsMapped</code></li>
+</ul>
+<p>Then derives all gate booleans from these counts + projectMetadata fields.</p>
+
+<h3>Persistence</h3>
+<table>
+  <tr><th>Data</th><th>Storage</th><th>Lifetime</th></tr>
+  <tr><td>projectFilePath, lastRoute, recentProjects</td><td>localStorage (<code>c91-workflow</code>)</td><td>Survives app restart</td></tr>
+  <tr><td>projectMetadata, gate booleans, counts</td><td>Zustand (in-memory)</td><td>Reset on project close</td></tr>
+  <tr><td>classificationProgress, researchProgress</td><td>Zustand (in-memory)</td><td>Reset on new run</td></tr>
+</table>
+
+<h3>No WorkflowStateContext</h3>
+<p>Components read Zustand directly via <code>useWorkflowStore(s =&gt; s.hasTaxonomy)</code> etc. The <code>DependencyGate</code> component accepts the required booleans as props, so callers pass <code>useWorkflowStore()</code> values explicitly. No React Context layer needed — Zustand is already the single source of truth.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="filter-system">
+<h2>Universal Filter System</h2>
+
+<p>A single <code>FilterCondition</code> type is used everywhere — transaction queries, supplier queries, classification queues, and rule conditions. System fields (<code>human_reviewed</code>, <code>classification_status</code>, <code>confirmationStatus</code>) are first-class field names alongside dynamic CSV columns.</p>
+
+<h3>FilterCondition (extended)</h3>
+<pre><code>// shared/types/filters.ts  (replaces FilterCondition in transactions.ts)
+
+type FilterOperator =
+  | 'equals' | 'not_equals'
+  | 'contains' | 'not_contains'
+  | 'starts_with' | 'ends_with'
+  | 'regex'
+  | 'in_list'                     // value is string[] (comma-sep string in UI)
+  | 'greater_than' | 'less_than'
+  | 'greater_than_or_equal' | 'less_than_or_equal'
+  | 'is_true' | 'is_false';       // NEW: for boolean fields
+
+type FilterConnector = 'AND' | 'OR';
+
+interface FilterCondition {
+  field: string;                   // column name or system field
+  operator: FilterOperator;
+  value: string | number | boolean | string[];
+  connector?: FilterConnector;     // default 'AND'
+}
+
+// ─── System field names (used across all views) ──────────────────────────
+
+// Transaction system fields
+const TRANSACTION_SYSTEM_FIELDS = [
+  'human_reviewed',           // boolean — is_true / is_false
+  'classification_status',    // 'unclassified' | 'classified_by_rule' | 'classified_by_ai'
+  'taxonomy_node_id',         // FK — equals / in_list
+  'classification_l1',        // derived — equals / contains
+  'classification_l2',        // derived
+  'classification_l3',        // derived
+] as const;
+
+// Supplier system fields (used in SupplierFilterCondition)
+const SUPPLIER_SYSTEM_FIELDS = [
+  'confirmationStatus',       // 'pending' | 'confirmed' | 'rejected' | 'merged'
+  'dataSource',               // 'universe' | 'web_search' | 'manual'
+  'isTailSpend',              // boolean
+  'universeMatch',            // boolean
+  'totalSpend',               // number
+  'transactionCount',         // number
+] as const;
+
+// ─── Context-typed filter wrappers ────────────────────────────────────────
+
+interface TransactionFilter {
+  conditions: FilterCondition[];
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+}
+
+interface SupplierFilter {
+  conditions: FilterCondition[];   // fields from SUPPLIER_SYSTEM_FIELDS or supplier name
+}
+
+// ─── Classification queue filter ─────────────────────────────────────────
+interface ClassificationQueueFilter {
+  supplierConditions?: FilterCondition[];    // filter which suppliers to include
+  transactionConditions?: FilterCondition[]; // filter which transactions within those suppliers
+}</code></pre>
+
+<h3>FilterConditionBuilder Component</h3>
+<pre><code>// Reusable filter builder used in: DataView, SuppliersView,
+// ClassificationView, ReviewView, OverrideRulesView
+
+interface FilterConditionBuilderProps {
+  conditions: FilterCondition[];
+  onChange: (conditions: FilterCondition[]) => void;
+  // Available fields depend on context:
+  availableFields: FieldDefinition[];
+}
+
+interface FieldDefinition {
+  name: string;          // field key used in FilterCondition.field
+  label: string;         // display name
+  type: 'string' | 'number' | 'boolean' | 'enum';
+  enumValues?: string[]; // for 'enum' type — shown as select in value input
+}</code></pre>
+
+<p>Each view passes its relevant <code>availableFields</code> — transaction views pass CSV canonical columns + system transaction fields; supplier view passes supplier fields. The builder component is generic and context-unaware.</p>
+
+<h3>Backend impact</h3>
+<ul>
+  <li><code>buildWhereClause()</code> in <code>src/main/utils/query-builder.ts</code> must handle <code>is_true</code> / <code>is_false</code> operators (map to <code>= TRUE</code> / <code>= FALSE</code> SQL) and <code>in_list</code> with arrays.</li>
+  <li><code>TransactionStore.queryTransactionsPaginated()</code> — field names like <code>human_reviewed</code>, <code>classification_l1</code> must be valid column names (the latter are computed columns added during classification).</li>
+  <li><code>SupplierService.listProjectSuppliers()</code> should accept an optional <code>SupplierFilter</code> for server-side filtering.</li>
+</ul>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="ipc">
+<h2>IPC Contract — v2 Changes</h2>
+
+<h3>New Channels</h3>
+<table>
+  <tr><th>Channel</th><th>Args</th><th>Returns</th><th>Handler Location</th></tr>
+  <tr>
+    <td><code>taxonomy:renameNode</code></td>
+    <td><code>(nodeId: string, newName: string)</code></td>
+    <td><code>void</code></td>
+    <td><code>ipc/taxonomy.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>taxonomy:mergeNodes</code></td>
+    <td><code>(sourceId: string, targetId: string)</code></td>
+    <td><code>{ transactionsMoved: number }</code></td>
+    <td><code>ipc/taxonomy.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>suppliers:filterTailSpend</code></td>
+    <td><code>(threshold: number)</code></td>
+    <td><code>{ markedCount: number }</code></td>
+    <td><code>ipc/suppliers.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>suppliers:researchFiltered</code></td>
+    <td><code>(filter: SupplierFilter)</code></td>
+    <td><code>void</code> (fire-and-forget, emits progress)</td>
+    <td><code>ipc/supplier-research.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>classification:startFiltered</code></td>
+    <td><code>(queueFilter: ClassificationQueueFilter)</code></td>
+    <td><code>void</code> (fire-and-forget, emits progress)</td>
+    <td><code>ipc/classification.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>rules:applyAll</code></td>
+    <td><code>()</code></td>
+    <td><code>{ reclassifiedCount: number }</code></td>
+    <td><code>ipc/rules.ts</code></td>
+  </tr>
+</table>
+
+<h3>Changed Channels</h3>
+<table>
+  <tr><th>Channel</th><th>Change</th></tr>
+  <tr>
+    <td><code>suppliers:update</code></td>
+    <td>Handler must be rewritten to accept <code>(supplierName: string, updates: SupplierUpdateInput)</code> and call a new <code>SupplierService.updateProjectSupplier()</code> method that handles supplierInfo, parentName, and categoryA patching.</td>
+  </tr>
+  <tr>
+    <td><code>suppliers:list</code></td>
+    <td>Should accept optional <code>SupplierFilter</code> arg for server-side filtering: <code>(filter?: SupplierFilter)</code></td>
+  </tr>
+  <tr>
+    <td><code>transactions:query / pivotAggregation / queryGrouped / distinctValues</code></td>
+    <td>Filter arg type updates to use extended <code>TransactionFilter</code> with <code>is_true</code>/<code>is_false</code> operator support</td>
+  </tr>
+  <tr>
+    <td><code>ingest:getStoredMappings</code></td>
+    <td>New exposure: <code>(columns: string[]) =&gt; UploadRecord | null</code>. Calls existing <code>IngestService.getStoredMappings()</code> which was never exposed.</td>
+  </tr>
+</table>
+
+<h3>Removed Channels</h3>
+<table>
+  <tr><th>Channel</th><th>Reason</th></tr>
+  <tr>
+    <td><code>project:deleteSetting</code></td>
+    <td>Never called in frontend. Remove if unused by any new view.</td>
+  </tr>
+</table>
+
+<h3>Full Updated IPCInvokeMap (delta)</h3>
+<pre><code>// Additions to ipc-contract.ts
+
+'taxonomy:renameNode':       { args: [nodeId: string, newName: string]; result: void };
+'taxonomy:mergeNodes':       { args: [sourceId: string, targetId: string]; result: { transactionsMoved: number } };
+'suppliers:update':          { args: [supplierName: string, updates: SupplierUpdateInput]; result: void }; // FIXED
+'suppliers:list':            { args: [filter?: SupplierFilter]; result: ProjectSupplierView[] }; // filter added
+'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
+'suppliers:researchFiltered':{ args: [filter: SupplierFilter]; result: void };
+'classification:startFiltered': { args: [queueFilter: ClassificationQueueFilter]; result: void };
+'rules:applyAll':            { args: []; result: { reclassifiedCount: number } };
+'ingest:getStoredMappings':  { args: [columns: string[]]; result: { id: string; fileName: string; columnMappings: ColumnMapping } | null };</code></pre>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="file-structure">
+<h2>File Structure — v2</h2>
+
+<pre><code>src/renderer/
+├── main.tsx
+├── App.tsx                          # 8 flat routes (no /workflow/ prefix)
+├── components/
+│   ├── AppShell.tsx                 # Sidebar + Outlet + LaunchModal overlay
+│   ├── LaunchModal.tsx              # NEW: center modal for new/open project
+│   ├── Sidebar.tsx                  # CHANGED: 8 items, [!] badges, project switcher
+│   ├── DependencyGate.tsx           # NEW: inline gate message wrapper
+│   ├── SettingsDialog.tsx           # unchanged
+│   ├── FilterConditionBuilder.tsx   # NEW: universal filter bar (shared across views)
+│   ├── upload/
+│   │   ├── FileDropZone.tsx         # keep
+│   │   └── CSVPreviewTable.tsx      # keep
+│   ├── suppliers/
+│   │   ├── ResearchProgressSidebar.tsx  # NEW
+│   │   └── SupplierTable.tsx            # NEW: table with checkbox, inline edit
+│   ├── classification/
+│   │   ├── ClassificationProgressBar.tsx # CHANGED
+│   │   ├── BlockedRowsBanner.tsx         # NEW
+│   │   └── ClassificationControls.tsx    # CHANGED: filter + batch
+│   └── review/
+│       ├── PivotTable.tsx               # NEW: keyboard-navigable pivot
+│       ├── PivotRow.tsx                 # NEW: single pivot row component
+│       ├── ReclassifyModal.tsx          # CHANGED: taxonomy search + confirm
+│       ├── TransactionDetailPanel.tsx   # NEW: drill-down from pivot leaf
+│       └── ExportButton.tsx             # NEW: export dropdown
+│       -- (removed: Dashboard.tsx, MultiTableSystem.tsx, ClassificationTree.tsx,
+│           Tabs.tsx, MetricsTab.tsx, SpendVisualizations.tsx, ExpandableMetrics.tsx,
+│           TopMetrics.tsx, BranchDetailView.tsx, SystemFeedbackModal.tsx,
+│           ActiveFilters.tsx, CurrentFiltersPanel.tsx, PivotFilterBar.tsx,
+│           PivotToolbar.tsx, MetricsTabContainer.tsx, FilterHelpButton.tsx)
+├── views/                           # RENAMED from pages/ — reflects non-pipeline nature
+│   ├── ProjectView.tsx              # was CompanyContextPage.tsx
+│   ├── TaxonomyView.tsx             # was TaxonomyPage.tsx (expanded)
+│   ├── DataView.tsx                 # NEW container (was UploadPage.tsx)
+│   │   ├── data/
+│   │   │   ├── DataUploadStep.tsx
+│   │   │   ├── DataMappingStep.tsx
+│   │   │   └── DataPriorityStep.tsx
+│   ├── SuppliersView.tsx            # was SuppliersPage.tsx (redesigned)
+│   ├── ClassificationView.tsx       # was ClassificationPage.tsx (redesigned)
+│   ├── ReviewView.tsx               # was ReviewPage.tsx + PivotPage.tsx (merged)
+│   ├── OverrideRulesView.tsx        # was OverrideRulesPage.tsx
+│   └── VersionHistoryView.tsx       # was VersionHistoryPage.tsx
+│       -- (removed: DataReviewPage.tsx, OutputPage.tsx)
+├── hooks/
+│   ├── useIPC.ts                    # keep
+│   ├── useServerPivotData.ts        # keep + update
+│   ├── usePivotKeyboard.ts          # NEW: keyboard nav for pivot
+│   ├── usePivotTreeState.ts         # keep (expand/collapse state)
+│   ├── useReclassification.ts       # updated
+│   ├── useUndoRedo.ts               # keep
+│   ├── useTransactions.ts           # keep (used in drill-down panel)
+│   └── useGroupedTransactions.ts    # keep
+│       -- (removed: useReviewFilters.ts — filter state moved into views directly)
+├── stores/
+│   └── workflowStore.ts             # CHANGED: full derived state
+├── lib/
+│   └── ipc.ts                       # CHANGED: new channels + filter type updates
+├── utils/
+│   ├── transactionTransform.ts      # keep
+│   ├── formatSpend.ts               # keep
+│   └── exportPivotToExcel.ts        # keep
+└── styles/
+    └── SuppliersView.css            # (others removed — use Tailwind inline)</code></pre>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section id="types">
+<h2>Key Type Contracts</h2>
+
+<h3>DependencyGate</h3>
+<pre><code>interface GateCondition {
+  met: boolean;            // derived boolean from workflowStore
+  message: string;         // human-readable explanation
+  linkLabel: string;       // e.g. "Go to Taxonomy"
+  linkTo: string;          // route path e.g. '/taxonomy'
+}
+
+// Usage:
+&lt;DependencyGate requires={[
+  { met: hasTaxonomy, message: "Load a taxonomy before classifying.", linkLabel: "Go to Taxonomy", linkTo: "/taxonomy" },
+  { met: hasConfirmedSuppliers, message: "Confirm at least one supplier first.", linkLabel: "Go to Suppliers", linkTo: "/suppliers" },
+]}&gt;
+  &lt;ClassificationView /&gt;
+&lt;/DependencyGate&gt;</code></pre>
+
+<h3>Data View State</h3>
+<pre><code>type DataStep = 'upload' | 'mapping' | 'priority';
+
+interface DataViewState {
+  step: DataStep;
+  filePath: string | null;
+  csvPreview: CSVPreview | null;
+  mappings: ColumnMappingWithPriority;  // canonical → { csvColumn, classificationPriority }
+}
+
+// DataView owns this state. Passes down to step sub-components as props.</code></pre>
+
+<h3>SupplierUpdateInput (fixed)</h3>
+<pre><code>// shared/types/suppliers.ts (existing, unchanged — just needs the handler to use it)
+interface SupplierUpdateInput {
+  parentSupplierId?: string | null;
+  parentName?: string | null;
+  supplierInfo?: SupplierInfo;    // written to supplier_universe via upsertSupplier
+  aliases?: string[] | null;
+  categoryA?: boolean;            // requires category_a column in project_suppliers
+}</code></pre>
+
+<h3>ClassificationQueueFilter</h3>
+<pre><code>// shared/types/classification.ts (new)
+interface ClassificationQueueFilter {
+  supplierConditions?: FilterCondition[];    // applied to project_suppliers table
+  transactionConditions?: FilterCondition[]; // applied to transactions (for the matched suppliers)
+}
+
+// Example: classify only unreviewed, high-spend confirmed suppliers
+const filter: ClassificationQueueFilter = {
+  supplierConditions: [
+    { field: 'confirmationStatus', operator: 'equals', value: 'confirmed' },
+    { field: 'totalSpend', operator: 'greater_than', value: 50000 },
+  ],
+  transactionConditions: [
+    { field: 'human_reviewed', operator: 'is_false' },
+    { field: 'classification_status', operator: 'equals', value: 'unclassified' },
+  ],
+};</code></pre>
+
+<h3>RecentProject</h3>
+<pre><code>// shared/types/project.ts (new)
+interface RecentProject {
+  filePath: string;
+  name: string;
+  lastOpenedAt: string;  // ISO timestamp
+}</code></pre>
+</section>
+
+</div><!-- /container -->
+
+<script>
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('nav a');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      navLinks.forEach(link => {
+        link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id);
+      });
+    }
+  });
+}, { rootMargin: '-20% 0px -75% 0px' });
+sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

@@ -5,7 +5,10 @@ import CSVPreviewTable from '../components/upload/CSVPreviewTable'
 import ColumnMappingEditor from '../components/upload/ColumnMappingEditor'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
-import type { CSVPreviewWithMappings, ColumnMapping } from '../../shared/types/column-mapping'
+import type { CSVPreviewWithMappings, ColumnMappingWithPriority } from '../../shared/types/column-mapping'
+import { toSimpleMapping } from '../../shared/types/column-mapping'
+
+const REQUIRED_COLS = ['supplier_name', 'spend_amount', 'invoice_date']
 
 export default function UploadPage() {
   const navigate = useNavigate()
@@ -18,7 +21,7 @@ export default function UploadPage() {
   // Upload draft as local state — resets on navigation, which is fine
   const [filePath, setFilePath] = useState<string | null>(null)
   const [preview, setPreview] = useState<CSVPreviewWithMappings | null>(null)
-  const [mapping, setMapping] = useState<ColumnMapping>({})
+  const [mapping, setMapping] = useState<ColumnMappingWithPriority>({})
 
   // Transient UI state
   const [loading, setLoading] = useState(false)
@@ -49,7 +52,7 @@ export default function UploadPage() {
       const parsed = await ipc.ingest.parseCSV(path)
       const mappingSuggestion = await ipc.ingest.suggestMappings(parsed.columns, parsed.sampleRows)
       setPreview({ ...parsed, mappingSuggestion })
-      setMapping(mappingSuggestion.mappings)
+      // mapping state populated by ColumnMappingEditor via onMappingChange
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to parse file')
     } finally {
@@ -62,7 +65,14 @@ export default function UploadPage() {
     setImporting(true)
     setError(null)
     try {
-      await ipc.ingest.importCSV(filePath, mapping)
+      await ipc.ingest.importCSV(filePath, toSimpleMapping(mapping))
+      // Derive and save column_priorities so classification can run
+      const required = REQUIRED_COLS.filter((col) => mapping[col]?.csvColumn)
+      const optional = Object.entries(mapping)
+        .filter(([name, e]) => !REQUIRED_COLS.includes(name) && e.classificationPriority && e.classificationPriority > 0)
+        .sort(([, a], [, b]) => (a.classificationPriority ?? 99) - (b.classificationPriority ?? 99))
+        .map(([name]) => name)
+      await ipc.project.setSetting('column_priorities', [...required, ...optional])
       await refreshMetadata()
       navigate('/workflow/data-review')
     } catch (e) {

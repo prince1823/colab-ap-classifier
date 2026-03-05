@@ -24,7 +24,7 @@ interface DashboardProps {
 
 const Dashboard = ({ transactions, loading, error, datasetId, foldername, refreshTransactions }: DashboardProps) => {
   const [showDashboardModal, setShowDashboardModal] = useState(false)
-  const [pendingReclassification, setPendingReclassification] = useState<{ rows: Record<string, unknown>[]; targetPath: string } | null>(null)
+  const [pendingReclassification, setPendingReclassification] = useState<{ transactionIds: string[]; targetPath: string } | null>(null)
   const [reclassToast, setReclassToast] = useState<{ show: boolean; rowCount: number; targetPath: string; undoable: boolean }>({ show: false, rowCount: 0, targetPath: '', undoable: false })
   const reclassToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -49,8 +49,8 @@ const Dashboard = ({ transactions, loading, error, datasetId, foldername, refres
     },
   })
 
-  const executeReclassification = useCallback(async (rows: Record<string, unknown>[], targetPath: string): Promise<boolean> => {
-    if (rows.length === 0) return false
+  const executeReclassification = useCallback(async (transactionIds: string[], targetPath: string): Promise<boolean> => {
+    if (transactionIds.length === 0) return false
     try {
       const taxonomyNodes = await ipc.taxonomy.getNodes()
       const cleanPath = targetPath.replace(/^root\|/, '')
@@ -59,9 +59,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, foldername, refres
         console.warn(`[Reclassify] No taxonomy node found for path: ${cleanPath}`)
         return false
       }
-
-      const transactionIds = rows.map((row) => row.id as string).filter((id) => id != null)
-      if (transactionIds.length === 0) return false
 
       await ipc.transactions.update({
         ids: transactionIds,
@@ -95,9 +92,9 @@ const Dashboard = ({ transactions, loading, error, datasetId, foldername, refres
 
   const handleConfirmReclassify = useCallback(async () => {
     if (!pendingReclassification) return
-    const { rows, targetPath } = pendingReclassification
+    const { transactionIds, targetPath } = pendingReclassification
     setPendingReclassification(null)
-    await executeReclassification(rows, targetPath)
+    await executeReclassification(transactionIds, targetPath)
   }, [pendingReclassification, executeReclassification])
 
   if (loading) {
@@ -135,8 +132,6 @@ const Dashboard = ({ transactions, loading, error, datasetId, foldername, refres
       <div className="content-container">
         <TablesTab
           transactions={transactions}
-          datasetId={datasetId ?? undefined}
-          foldername={foldername ?? undefined}
           onReclassify={executeReclassification}
           onOpenMetrics={() => setShowDashboardModal(true)}
           onRegisterRefetchGrouped={registerRefetchGrouped}
@@ -145,7 +140,7 @@ const Dashboard = ({ transactions, loading, error, datasetId, foldername, refres
 
       {pendingReclassification && (
         <ReclassifyConfirmModal
-          rowCount={pendingReclassification.rows.length}
+          rowCount={pendingReclassification.transactionIds.length}
           targetPath={pendingReclassification.targetPath}
           onConfirm={handleConfirmReclassify}
           onCancel={() => setPendingReclassification(null)}

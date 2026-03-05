@@ -13,17 +13,13 @@ import '../../styles/Tabs.css'
 
 interface TablesTabProps {
   transactions: DashboardTransactionRow[]
-  datasetId?: string
-  foldername?: string
-  onReclassify: (rows: Record<string, unknown>[], targetPath: string) => Promise<boolean>
+  onReclassify: (transactionIds: string[], targetPath: string) => Promise<boolean>
   onOpenMetrics: () => void
   onRegisterRefetchGrouped: (fn: () => void) => void
 }
 
 const TablesTab: React.FC<TablesTabProps> = ({
   transactions,
-  datasetId,
-  foldername,
   onReclassify,
   onOpenMetrics,
   onRegisterRefetchGrouped,
@@ -118,7 +114,7 @@ const TablesTab: React.FC<TablesTabProps> = ({
     return conditions.length > 0 ? { conditions } : undefined
   }, [activeFilters, filterState, filterConnectors, fsKeyToCol])
 
-  const groupedColumns = useMemo(() => tables.map(t => t.column), [tables])
+  const groupedColumns = useMemo(() => [...tables.map(t => t.column), 'classification_path'], [tables])
 
   const { data: groupedData, refetch: refetchGrouped } = useGroupedTransactions(groupedColumns, serverSideFilter)
 
@@ -565,19 +561,15 @@ const TablesTab: React.FC<TablesTabProps> = ({
 
         <div className="classification-section">
           <ClassificationTree
-            transactions={transactions}
-            activeFilters={activeFilters}
+            groupedRows={groupedData.get('classification_path')?.rows ?? []}
             selectedRows={selectedRows}
             setSelectedRows={setSelectedRows}
             keyboardFocus={keyboardFocus}
             setKeyboardFocus={setKeyboardFocus}
-            onReclassify={async (rows: Record<string, unknown>[], targetPath: string) => {
-              if (!rows || rows.length === 0) return false
-              return await onReclassify(rows, targetPath)
+            onReclassify={async (ids: string[], targetPath: string) => {
+              if (ids.length === 0) return false
+              return await onReclassify(ids, targetPath)
             }}
-            mode="review"
-            datasetId={datasetId}
-            foldername={foldername}
           />
         </div>
       </div>

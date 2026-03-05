@@ -249,6 +249,10 @@ export class TransactionStore implements ITransactionStore {
       return this.queryGroupedByClassificationLevel(column, levelIndex, filters);
     }
 
+    if (column === 'classification_path') {
+      return this.queryGroupedByClassificationPath(filters);
+    }
+
     const validCols = await this.getColumns();
     if (!validCols.includes(column)) {
       return { column, rows: [], totalAmount: 0, totalCount: 0 };
@@ -433,5 +437,47 @@ export class TransactionStore implements ITransactionStore {
     const totalCount = groupedRows.reduce((sum, r) => sum + r.count, 0);
 
     return { column, rows: groupedRows, totalAmount, totalCount };
+  }
+
+  private async queryGroupedByClassificationPath(
+    filters?: TransactionFilter
+  ): Promise<GroupedTransactionsResult> {
+    const { whereSQL, params } = this.buildFilterSQL(filters);
+    const validCols = await this.getColumns();
+    const hasSpend = validCols.includes('spend_amount');
+
+    const amountExpr = hasSpend
+      ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)'
+      : '0';
+
+    const sql = `
+      SELECT
+        tax.full_path as value,
+        ${amountExpr} as amount,
+        COUNT(*) as count
+      FROM transactions t
+      LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
+      ${whereSQL}
+      GROUP BY tax.full_path
+      HAVING tax.full_path IS NOT NULL AND tax.full_path != ''
+      ORDER BY ${hasSpend ? 'amount DESC' : 'count DESC'}
+    `;
+
+    const rows = await this.db.all<{
+      value: string;
+      amount: number | bigint;
+      count: number | bigint;
+    }>(sql, ...params);
+
+    const groupedRows: GroupedRow[] = rows.map((r) => ({
+      value: String(r.value),
+      amount: Number(r.amount),
+      count: Number(r.count),
+    }));
+
+    const totalAmount = groupedRows.reduce((sum, r) => sum + r.amount, 0);
+    const totalCount = groupedRows.reduce((sum, r) => sum + r.count, 0);
+
+    return { column: 'classification_path', rows: groupedRows, totalAmount, totalCount };
   }
 }

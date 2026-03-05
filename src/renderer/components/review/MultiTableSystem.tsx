@@ -28,17 +28,6 @@ interface FlatItem {
 
 type TableItem = HierarchicalItem | FlatItem;
 
-interface DragItem {
-  type: string;
-  column: string;
-  value: string;
-  selectedValues: string[];
-  transactionRows: Record<string, unknown>[];
-  serverSide: boolean;
-  isSelected: boolean;
-  isMultiSelect: boolean;
-}
-
 interface TableCardDragItem {
   tableId: string;
   index: number;

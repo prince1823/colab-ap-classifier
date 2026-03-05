@@ -17,7 +17,10 @@ interface TransactionRow {
   [key: string]: unknown
 }
 
-export const buildTaxonomyTree = (taxonomyPaths: string[]): TaxonomyTreeNode => {
+export const buildTaxonomyTree = (
+  taxonomyPaths: string[],
+  pathCounts?: Record<string, { count: number; amount: number }>
+): TaxonomyTreeNode => {
   const root: TaxonomyTreeNode = { name: 'Root', path: 'root', children: [], count: 0, amount: 0 }
 
   taxonomyPaths.forEach((pathStr: string) => {
@@ -56,6 +59,25 @@ export const buildTaxonomyTree = (taxonomyPaths: string[]): TaxonomyTreeNode => 
     }
   }
   sortTreeAlphabetically(root)
+
+  // When pathCounts provided, populate counts from server-aggregated data (bottom-up)
+  if (pathCounts) {
+    const populateFromCounts = (node: TaxonomyTreeNode): void => {
+      // Recurse to children first
+      node.children.forEach(populateFromCounts)
+      // Aggregate from children
+      const childCount = node.children.reduce((s, c) => s + c.count, 0)
+      const childAmount = node.children.reduce((s, c) => s + c.amount, 0)
+      // Add any direct entries at this exact path
+      const nodePath = node.path.replace(/^root\|/, '')
+      const direct = nodePath ? pathCounts[nodePath] : undefined
+      node.count = childCount + (direct?.count ?? 0)
+      node.amount = childAmount + (direct?.amount ?? 0)
+    }
+    root.children.forEach(populateFromCounts)
+    root.count = root.children.reduce((s, c) => s + c.count, 0)
+    root.amount = root.children.reduce((s, c) => s + c.amount, 0)
+  }
 
   return root
 }

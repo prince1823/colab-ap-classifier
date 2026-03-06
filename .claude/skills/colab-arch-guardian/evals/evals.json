@@ -1,0 +1,76 @@
+{
+  "skill_name": "colab-arch-guardian",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "I need to add a new IPC handler for bulk-deleting transactions. Here's what I'm thinking:\n\n```ts\n// In src/main/ipc/transactions.ts\nipcMain.handle('transactions:bulkDelete', async (_event, ids: string[]) => {\n  const conn = await duck.connect()\n  for (const id of ids) {\n    await conn.run(`DELETE FROM transactions WHERE id = '${id}'`)\n  }\n  return { deleted: ids.length }\n})\n```\n\nDoes this look right?",
+      "expected_output": "Should flag: (1) not using registerHandler(), (2) raw DuckDB connection bypassing promise queue, (3) SQL injection via string interpolation, (4) channel not in IPCInvokeMap, (5) return value not going through IPCResponse wrapper",
+      "assertions": [
+        {
+          "name": "uses_register_handler",
+          "description": "Response flags that ipcMain.handle must be replaced with registerHandler()",
+          "type": "contains_concept"
+        },
+        {
+          "name": "flags_duckdb_safety",
+          "description": "Response flags that duck.connect() / raw DuckDB connection bypasses the promise queue serialization",
+          "type": "contains_concept"
+        },
+        {
+          "name": "flags_ipc_contract",
+          "description": "Response flags that transactions:bulkDelete must be added to IPCInvokeMap in ipc-contract.ts",
+          "type": "contains_concept"
+        },
+        {
+          "name": "flags_sql_injection",
+          "description": "Response flags that string interpolation in SQL is a security vulnerability",
+          "type": "contains_concept"
+        },
+        {
+          "name": "provides_corrected_pattern",
+          "description": "Response provides a corrected code pattern or clear remediation steps",
+          "type": "contains_concept"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "I'm adding a ReportingService that generates spend reports. Here's my plan:\n\n```ts\n// src/main/services/reporting.ts\nimport { taxonomy } from './taxonomy'  // imported at module level\nimport { transactions } from './transactions'\n\nexport class ReportingService {\n  async generateReport() {\n    const nodes = await taxonomy.getNodes()\n    const txns = await transactions.query()\n    // build report...\n  }\n}\n```\n\nAlso, the report needs to show classification_l1 groupings, so the query will be:\n```sql\nSELECT classification_l1, SUM(spend_amount) FROM transactions GROUP BY classification_l1\n```\n\nArch check please.",
+      "expected_output": "Should flag: (1) module-level singleton imports of services — must use constructor injection, (2) classification_l1 is a virtual dim requiring JOIN taxonomy_nodes, not a physical column. Should also note new service must be wired in createContainer().",
+      "assertions": [
+        {
+          "name": "flags_di_violation",
+          "description": "Response flags that services imported at module level is a DI violation — must use constructor injection",
+          "type": "contains_concept"
+        },
+        {
+          "name": "flags_virtual_dim",
+          "description": "Response flags that classification_l1 is not a physical column and requires a JOIN against taxonomy_nodes",
+          "type": "contains_concept"
+        },
+        {
+          "name": "flags_container_wiring",
+          "description": "Response notes that new service must be added to createContainer() in container.ts",
+          "type": "contains_concept"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I'm building an alternative bulk import endpoint that reads from a directory of CSVs. Here's the handler:\n\n```ts\nregisterHandler('ingest:bulkImport', async (_event, dirPath: unknown) => {\n  const files = fs.readdirSync(dirPath as string).filter(f => f.endsWith('.csv'))\n  for (const file of files) {\n    const mapping = await ingest.suggestMappings([], [])\n    await ingest.importCSV(path.join(dirPath as string, file), {})\n  }\n  return { imported: files.length }\n})\n```\n\nThis is going into the ingest IPC file. What am I missing architecturally?",
+      "expected_output": "Should flag: (1) channel 'ingest:bulkImport' missing from IPCInvokeMap, (2) column_priorities must be saved after each importCSV call or classification will throw",
+      "assertions": [
+        {
+          "name": "flags_ipc_contract",
+          "description": "Response flags that ingest:bulkImport must be declared in IPCInvokeMap in ipc-contract.ts",
+          "type": "contains_concept"
+        },
+        {
+          "name": "flags_column_priorities",
+          "description": "Response flags that column_priorities must be saved via project:setSetting after each importCSV call",
+          "type": "contains_concept"
+        }
+      ]
+    }
+  ]
+}

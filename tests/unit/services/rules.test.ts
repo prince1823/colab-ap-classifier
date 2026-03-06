@@ -1,16 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RuleStore } from '../../../src/main/services/rules';
-import { createMockDatabase } from '../../helpers/mock-services';
-import type { Database } from '../../../src/shared/types/services';
+import { createMockDatabase, createMockTransactionStore } from '../../helpers/mock-services';
+import type { Database, TransactionStore } from '../../../src/shared/types/services';
 
 describe('RuleStore', () => {
   let db: Database;
+  let transactions: TransactionStore;
   let store: RuleStore;
 
   beforeEach(() => {
     vi.clearAllMocks();
     db = createMockDatabase();
-    store = new RuleStore(db);
+    transactions = createMockTransactionStore();
+    store = new RuleStore(db, transactions);
   });
 
   describe('listRules', () => {
@@ -112,21 +114,18 @@ describe('RuleStore', () => {
 
   describe('evaluateRules', () => {
     it('should match transactions with first-match-wins', async () => {
-      vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('FROM override_rules')) {
-          return [
-            { id: 'r1', name: 'Rule 1', conditions: '[{"field":"supplier_name","operator":"equals","value":"Acme"}]', target_taxonomy_node_id: 'tid1', priority_score: 1, source: 'project', is_active: true, created_at: '' },
-          ];
-        }
-        if (sql.includes('FROM transactions')) {
-          return [{ id: 'tx1' }, { id: 'tx2' }];
-        }
-        return [];
-      });
+      vi.mocked(db.all).mockResolvedValue([
+        { id: 'r1', name: 'Rule 1', conditions: '[{"field":"supplier_name","operator":"equals","value":"Acme"}]', target_taxonomy_node_id: 'tid1', priority: 1, source: 'project', is_active: true, created_at: '' },
+      ]);
+      vi.mocked(transactions.getIdsByConditions).mockResolvedValue(['tx1', 'tx2']);
 
       const result = await store.evaluateRules();
       expect(result.get('tx1')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
       expect(result.get('tx2')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
+      expect(transactions.getIdsByConditions).toHaveBeenCalledWith(
+        [{ field: 'supplier_name', operator: 'equals', value: 'Acme' }],
+        undefined
+      );
     });
 
     it('should return empty map when no rules exist', async () => {

@@ -25,7 +25,7 @@ describe('Integration: Rules', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db = createMockDatabase();
-    rules = new RuleStore(db);
+    rules = new RuleStore(db, createMockTransactionStore());
   });
 
   it('should list rules with parsed conditions', async () => {
@@ -139,7 +139,7 @@ describe('Integration: Transaction Queries', () => {
       { column_name: 'id' },
       { column_name: 'row_index' },
       { column_name: 'spend_amount' },
-      { column_name: 'supplier_name' },
+      { column_name: 'project_supplier_id' },
       { column_name: 'taxonomy_node_id' },
       { column_name: 'classification_status' },
       { column_name: 'classification_reasoning' },

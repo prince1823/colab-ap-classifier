@@ -1,6 +1,6 @@
 import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult } from './transactions';
+import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview } from './column-mapping';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
 import type { ChangeLog, ChangeSource } from './changelog';
@@ -107,6 +107,7 @@ export interface TransactionStore {
   queryDistinctValues(column: string, limit?: number): Promise<string[]>;
   getTransactionIdsByColumnValue(column: string, value: string, filters?: TransactionFilter): Promise<string[]>;
   queryPivotAggregation(dimensions: string[], valueDimension?: string, filters?: TransactionFilter): Promise<PivotAggregationResult>;
+  getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;
 }
 
 export interface TaxonomyStore {

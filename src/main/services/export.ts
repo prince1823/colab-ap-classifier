@@ -31,20 +31,21 @@ export class ExportService implements IExportService {
 
     const metaColumns = ['id', 'row_index', 'upload_id', 'taxonomy_node_id',
       'classification_status', 'human_reviewed', 'classification_reasoning',
-      'original_supplier_name', 'supplier_name', 'project_supplier_id', 'created_at', 'updated_at'];
+      'original_supplier_name', 'project_supplier_id', 'created_at', 'updated_at'];
 
     const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
 
     const rows = await this.db.all<Record<string, unknown>>(
-      `SELECT t.*, tax.full_path as classification_path, t.supplier_name as canonical_supplier_name
+      `SELECT t.*, ps.supplier_name, tax.full_path as classification_path
        FROM transactions t
+       LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
        LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
        ORDER BY t.row_index`
     );
 
     const headers = [
       ...canonicalColumns,
-      'canonical_supplier_name',
+      'supplier_name',
       'classification_path',
       'classification_l1',
       'classification_l2',
@@ -61,7 +62,7 @@ export class ExportService implements IExportService {
 
       const values = [
         ...canonicalColumns.map((col) => row[col] ?? ''),
-        row.canonical_supplier_name ?? '',
+        row.supplier_name ?? '',
         classificationPath,
         parts[0] || '',
         parts[1] || '',

@@ -222,7 +222,6 @@ export class DuckDBDatabase implements Database {
         human_reviewed BOOLEAN DEFAULT FALSE,
         classification_reasoning TEXT,
         original_supplier_name VARCHAR,
-        supplier_name VARCHAR,
         project_supplier_id VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -278,7 +277,6 @@ export class DuckDBDatabase implements Database {
       CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(classification_status);
       CREATE INDEX IF NOT EXISTS idx_transactions_upload ON transactions(upload_id);
       CREATE INDEX IF NOT EXISTS idx_transactions_supplier ON transactions(project_supplier_id);
-      CREATE INDEX IF NOT EXISTS idx_transactions_supplier_name ON transactions(supplier_name);
     `);
   }
 }

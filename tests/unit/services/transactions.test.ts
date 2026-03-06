@@ -21,11 +21,11 @@ describe('TransactionStore', () => {
       vi.mocked(db.all).mockResolvedValue([
         { column_name: 'id' },
         { column_name: 'row_index' },
-        { column_name: 'supplier_name' },
+        { column_name: 'project_supplier_id' },
       ]);
 
       const columns = await store.getColumns();
-      expect(columns).toEqual(['id', 'row_index', 'supplier_name']);
+      expect(columns).toEqual(['id', 'row_index', 'project_supplier_id']);
       expect(db.all).toHaveBeenCalledWith(
         expect.stringContaining('information_schema.columns')
       );
@@ -38,7 +38,7 @@ describe('TransactionStore', () => {
         { column_name: 'id' },
         { column_name: 'row_index' },
         { column_name: 'spend_amount' },
-        { column_name: 'supplier_name' },
+        { column_name: 'project_supplier_id' },
         { column_name: 'taxonomy_node_id' },
         { column_name: 'classification_status' },
       ]);
@@ -92,7 +92,7 @@ describe('TransactionStore', () => {
             { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
-            { column_name: 'supplier_name' },
+            { column_name: 'project_supplier_id' },
             { column_name: 'spend_amount' },
           ];
         }

@@ -197,7 +197,7 @@ describe('Classifier Mock Pipeline Test', () => {
     transactions = new TransactionStore(db, changelog);
     project = new ProjectStore(db, transactions, supplierUniverse);
     taxonomy = new TaxonomyStore(db, project);
-    rules = new RuleStore(db);
+    rules = new RuleStore(db, transactions);
     suppliers = new SupplierService(db, supplierUniverse);
     ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
     exportSvc = new ExportService(db);
@@ -289,11 +289,13 @@ describe('Classifier Mock Pipeline Test', () => {
     );
     expect(Number(unlinked?.cnt ?? 0)).toBe(0);
 
-    // Verify supplier_name column is populated
-    const noSupplier = await db.get<{ cnt: number | bigint }>(
-      'SELECT COUNT(*) as cnt FROM transactions WHERE supplier_name IS NULL OR supplier_name = \'\''
+    // Verify all transactions have a linked supplier with a name
+    const noSupplierName = await db.get<{ cnt: number | bigint }>(
+      `SELECT COUNT(*) as cnt FROM transactions t
+       LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+       WHERE ps.supplier_name IS NULL OR ps.supplier_name = ''`
     );
-    expect(Number(noSupplier?.cnt ?? 0)).toBe(0);
+    expect(Number(noSupplierName?.cnt ?? 0)).toBe(0);
 
     const supplierCount = await db.get<{ cnt: number | bigint }>(
       'SELECT COUNT(*) as cnt FROM project_suppliers'

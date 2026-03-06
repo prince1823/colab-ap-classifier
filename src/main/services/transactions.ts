@@ -14,6 +14,7 @@ import type {
   PivotAggregationRow,
   PivotAggregationResult,
   ClassificationStatus,
+  FilterCondition,
 } from '../../shared/types';
 import type { ChangeSource } from '../../shared/types/changelog';
 import { buildWhereClause } from '../utils/query-builder';
@@ -24,6 +25,13 @@ const BASE_COLUMNS = [
   'original_supplier_name', 'project_supplier_id',
   'created_at', 'updated_at',
 ];
+
+/** Columns that don't exist on transactions but are resolved via JOINs. */
+const VIRTUAL_COLUMNS: Record<string, string> = {
+  supplier_name: 'ps.supplier_name',
+};
+
+const SUPPLIER_JOIN = 'LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id';
 
 export class TransactionStore implements ITransactionStore {
   private cachedColumns: string[] | null = null;
@@ -37,12 +45,27 @@ export class TransactionStore implements ITransactionStore {
     this.cachedColumns = null;
   }
 
+  /** Check if a column is valid (physical on transactions or virtual via JOIN). */
+  private isValidColumn(column: string, physicalCols: string[]): boolean {
+    return physicalCols.includes(column) || column in VIRTUAL_COLUMNS;
+  }
+
+  /** Resolve a column name to its SQL expression (handles virtual columns). */
+  private resolveColumn(column: string): string {
+    return VIRTUAL_COLUMNS[column] ?? `t.${column}`;
+  }
+
+  /** Whether any columns in use require the supplier JOIN. */
+  private needsSupplierJoin(columns: string[]): boolean {
+    return columns.some((c) => c in VIRTUAL_COLUMNS);
+  }
+
   private buildFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[] } {
     const whereClauses: string[] = [];
     const params: unknown[] = [];
 
     if (filters?.supplierName) {
-      whereClauses.push('t.supplier_name = ?');
+      whereClauses.push('ps.supplier_name = ?');
       params.push(filters.supplierName);
     }
     if (filters?.taxonomyNodeId) {
@@ -91,8 +114,9 @@ export class TransactionStore implements ITransactionStore {
     const dynamicCols = validColumns.filter((c) => !BASE_COLUMNS.includes(c));
 
     const sql = `
-      SELECT t.*, tax.full_path as classification_path
+      SELECT t.*, ps.supplier_name, tax.full_path as classification_path
       FROM transactions t
+      ${SUPPLIER_JOIN}
       LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
       ${whereSQL}
       ORDER BY t.${safeSortBy} ${safeOrder}
@@ -169,13 +193,18 @@ export class TransactionStore implements ITransactionStore {
     const rows = await this.db.all<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' ORDER BY ordinal_position"
     );
-    this.cachedColumns = rows.map((r) => r.column_name);
+    const physical = rows.map((r) => r.column_name);
+    // Include virtual columns (resolved via JOINs) so consumers see them as available
+    for (const vc of Object.keys(VIRTUAL_COLUMNS)) {
+      if (!physical.includes(vc)) physical.push(vc);
+    }
+    this.cachedColumns = physical;
     return this.cachedColumns;
   }
 
   async getCount(filters?: TransactionFilter): Promise<number> {
     const { whereSQL, params } = this.buildFilterSQL(filters);
-    const sql = `SELECT COUNT(*) as cnt FROM transactions t ${whereSQL}`;
+    const sql = `SELECT COUNT(*) as cnt FROM transactions t ${SUPPLIER_JOIN} ${whereSQL}`;
     const result = await this.db.get<{ cnt: number | bigint }>(sql, ...params);
     return Number(result?.cnt ?? 0);
   }
@@ -254,12 +283,14 @@ export class TransactionStore implements ITransactionStore {
     }
 
     const validCols = await this.getColumns();
-    if (!validCols.includes(column)) {
+    if (!this.isValidColumn(column, validCols)) {
       return { column, rows: [], totalAmount: 0, totalCount: 0 };
     }
 
     const { whereSQL, params } = this.buildFilterSQL(filters);
     const hasSpend = validCols.includes('spend_amount');
+    const colExpr = this.resolveColumn(column);
+    const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
 
     const amountExpr = hasSpend
       ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)'
@@ -267,12 +298,13 @@ export class TransactionStore implements ITransactionStore {
 
     const sql = `
       SELECT
-        COALESCE(CAST(t.${column} AS VARCHAR), '(blank)') as value,
+        COALESCE(CAST(${colExpr} AS VARCHAR), '(blank)') as value,
         ${amountExpr} as amount,
         COUNT(*) as count
       FROM transactions t
+      ${supplierJoin}
       ${whereSQL}
-      GROUP BY t.${column}
+      GROUP BY ${colExpr}
       ORDER BY ${hasSpend ? 'amount DESC' : 'count DESC'}
     `;
 
@@ -299,12 +331,16 @@ export class TransactionStore implements ITransactionStore {
    */
   async queryDistinctValues(column: string, limit = 1000): Promise<string[]> {
     const validCols = await this.getColumns();
-    if (!validCols.includes(column)) return [];
+    if (!this.isValidColumn(column, validCols)) return [];
+
+    const colExpr = this.resolveColumn(column);
+    const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
 
     const sql = `
-      SELECT DISTINCT CAST(t.${column} AS VARCHAR) as value
+      SELECT DISTINCT CAST(${colExpr} AS VARCHAR) as value
       FROM transactions t
-      WHERE t.${column} IS NOT NULL
+      ${supplierJoin}
+      WHERE ${colExpr} IS NOT NULL
       ORDER BY value
       LIMIT ${limit}
     `;
@@ -322,20 +358,22 @@ export class TransactionStore implements ITransactionStore {
     filters?: TransactionFilter
   ): Promise<string[]> {
     const validCols = await this.getColumns();
-    if (!validCols.includes(column)) return [];
+    if (!this.isValidColumn(column, validCols)) return [];
 
     const { whereSQL, params } = this.buildFilterSQL(filters);
+    const colExpr = this.resolveColumn(column);
+    const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
 
     const valueCondition = value === '(blank)'
-      ? `t.${column} IS NULL`
-      : `CAST(t.${column} AS VARCHAR) = ?`;
+      ? `${colExpr} IS NULL`
+      : `CAST(${colExpr} AS VARCHAR) = ?`;
     if (value !== '(blank)') params.push(value);
 
     const fullWhere = whereSQL
       ? `${whereSQL} AND ${valueCondition}`
       : `WHERE ${valueCondition}`;
 
-    const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${fullWhere}`;
+    const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${supplierJoin} ${fullWhere}`;
     const rows = await this.db.all<{ id: string }>(sql, ...params);
     return rows.map((r) => String(r.id));
   }
@@ -352,15 +390,16 @@ export class TransactionStore implements ITransactionStore {
       return { dimensionColumns: [], rows: [], totalAmount: 0, totalCount: 0 };
     }
 
-    const VIRTUAL_DIMS: Record<string, string> = {
+    const PIVOT_VIRTUAL_DIMS: Record<string, string> = {
       classification_l1: "COALESCE(tax.l1, '(Unclassified)')",
       classification_l2: "COALESCE(tax.l2, '(Unclassified)')",
       classification_l3: "COALESCE(tax.l3, '(Unclassified)')",
+      supplier_name: "COALESCE(ps.supplier_name, '')",
     };
 
     const validCols = await this.getColumns();
     const safeDimensions = dimensions.filter(
-      (d) => validCols.includes(d) || d in VIRTUAL_DIMS
+      (d) => validCols.includes(d) || d in PIVOT_VIRTUAL_DIMS
     );
     if (!safeDimensions.length) {
       return { dimensionColumns: dimensions, rows: [], totalAmount: 0, totalCount: 0 };
@@ -373,13 +412,16 @@ export class TransactionStore implements ITransactionStore {
       ? `COALESCE(SUM(TRY_CAST(t.${valueDimension} AS DOUBLE)), 0)`
       : '0';
 
-    const needsTaxonomyJoin = safeDimensions.some((d) => d in VIRTUAL_DIMS);
+    const needsTaxonomyJoin = safeDimensions.some((d) =>
+      d.startsWith('classification_l')
+    );
     const taxonomyJoin = needsTaxonomyJoin
       ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
       : '';
+    const supplierJoin = this.needsSupplierJoin(safeDimensions) ? SUPPLIER_JOIN : '';
 
     const dimSelects = safeDimensions.map((d, i) => {
-      const expr = VIRTUAL_DIMS[d] ?? `COALESCE(CAST(t.${d} AS VARCHAR), '')`;
+      const expr = PIVOT_VIRTUAL_DIMS[d] ?? `COALESCE(CAST(t.${d} AS VARCHAR), '')`;
       return `${expr} as dim_${i}`;
     });
     const dimGroupBy = safeDimensions.map((_, i) => `dim_${i}`);
@@ -390,6 +432,7 @@ export class TransactionStore implements ITransactionStore {
         ${amountExpr} as amount,
         COUNT(*) as count
       FROM transactions t
+      ${supplierJoin}
       ${taxonomyJoin}
       ${whereSQL}
       GROUP BY ${dimGroupBy.join(', ')}
@@ -494,5 +537,28 @@ export class TransactionStore implements ITransactionStore {
     const totalCount = groupedRows.reduce((sum, r) => sum + r.count, 0);
 
     return { column: 'classification_path', rows: groupedRows, totalAmount, totalCount };
+  }
+
+  /**
+   * Return transaction IDs matching the given filter conditions.
+   * Used by RuleStore to delegate filtering (handles JOINs for virtual columns like supplier_name).
+   */
+  async getIdsByConditions(
+    conditions: FilterCondition[],
+    scopeToIds?: string[]
+  ): Promise<string[]> {
+    const built = buildWhereClause(conditions);
+    if (!built) return [];
+
+    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} WHERE (${built.sql})`;
+    const params = [...built.params];
+
+    if (scopeToIds && scopeToIds.length > 0) {
+      sql += ` AND t.id IN (${scopeToIds.map(() => '?').join(',')})`;
+      params.push(...scopeToIds);
+    }
+
+    const rows = await this.db.all<{ id: string }>(sql, ...params);
+    return rows.map((r) => String(r.id));
   }
 }

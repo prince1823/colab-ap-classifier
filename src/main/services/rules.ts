@@ -1,7 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { Database, RuleStore as IRuleStore } from '../../shared/types/services';
+import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactionStore } from '../../shared/types/services';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
-import { buildWhereClause } from '../utils/query-builder';
 
 interface RuleRow {
   id: string;
@@ -28,7 +27,7 @@ function rowToRule(row: RuleRow): OverrideRule {
 }
 
 export class RuleStore implements IRuleStore {
-  constructor(private db: Database) {}
+  constructor(private db: Database, private transactions: ITransactionStore) {}
 
   async listRules(): Promise<OverrideRule[]> {
     const rows = await this.db.all<RuleRow>(
@@ -84,22 +83,11 @@ export class RuleStore implements IRuleStore {
     const matched = new Map<string, { ruleId: string; targetTaxonomyNodeId: string }>();
 
     for (const rule of activeRules) {
-      const built = buildWhereClause(rule.conditions);
-      if (!built) continue;
+      const matchedIds = await this.transactions.getIdsByConditions(rule.conditions, transactionIds);
 
-      let sql = `SELECT id FROM transactions WHERE (${built.sql})`;
-      const params = [...built.params];
-
-      if (transactionIds && transactionIds.length > 0) {
-        sql += ` AND id IN (${transactionIds.map(() => '?').join(',')})`;
-        params.push(...transactionIds);
-      }
-
-      const rows = await this.db.all<{ id: string }>(sql, ...params);
-
-      for (const row of rows) {
-        if (!matched.has(row.id)) {
-          matched.set(row.id, { ruleId: rule.id, targetTaxonomyNodeId: rule.targetTaxonomyNodeId });
+      for (const id of matchedIds) {
+        if (!matched.has(id)) {
+          matched.set(id, { ruleId: rule.id, targetTaxonomyNodeId: rule.targetTaxonomyNodeId });
         }
       }
     }

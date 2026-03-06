@@ -73,12 +73,6 @@ export class SupplierService implements ISupplierService {
       );
     }
 
-    // Denormalize supplier_name from project_suppliers onto transactions
-    await this.db.run(
-      `UPDATE transactions SET supplier_name = (
-        SELECT ps.supplier_name FROM project_suppliers ps WHERE ps.id = transactions.project_supplier_id
-      ) WHERE supplier_name IS NULL AND project_supplier_id IS NOT NULL`
-    );
   }
 
   async addAlias(canonicalName: string, alias: string): Promise<void> {
@@ -100,10 +94,7 @@ export class SupplierService implements ISupplierService {
 
     // Re-map any transactions with this alias to the canonical supplier
     await this.db.run(
-      `UPDATE transactions SET project_supplier_id = ?, supplier_name = (
-        SELECT supplier_name FROM project_suppliers WHERE id = ?
-      ) WHERE original_supplier_name = ?`,
-      supplier.id,
+      'UPDATE transactions SET project_supplier_id = ? WHERE original_supplier_name = ?',
       supplier.id,
       alias
     );
@@ -116,12 +107,6 @@ export class SupplierService implements ISupplierService {
   async renameSupplier(supplierId: string, newName: string): Promise<void> {
     await this.db.run(
       'UPDATE project_suppliers SET supplier_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      newName,
-      supplierId
-    );
-    // Sync denormalized supplier_name on transactions
-    await this.db.run(
-      'UPDATE transactions SET supplier_name = ? WHERE project_supplier_id = ?',
       newName,
       supplierId
     );

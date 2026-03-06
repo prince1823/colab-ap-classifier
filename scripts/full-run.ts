@@ -81,6 +81,7 @@ interface RunConfig {
   companyContext: Record<string, string>;
   columnMapping: Record<string, string>;
   taxonomy?: string;
+  columnPriorities?: string[];
   skipSupplierResearch?: boolean;
   skipRules?: boolean;
 }
@@ -183,9 +184,10 @@ async function exportCSV(db: DuckDBDatabase, outPath: string): Promise<number> {
   const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
 
   const rows = await db.all<Record<string, unknown>>(
-    `SELECT t.*, tax.full_path as classification_path, t.supplier_name as canonical_supplier_name
+    `SELECT t.*, tax.full_path as classification_path, ps.supplier_name as canonical_supplier_name
      FROM transactions t
      LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
+     LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
      ORDER BY t.row_index`
   );
 
@@ -283,6 +285,9 @@ async function main() {
     supplierUniverse.setDefaultPath(UNIVERSE_PATH);
     await project.createProject(config.projectName, DB_PATH);
     await project.setSetting('company_context', config.companyContext);
+    if (config.columnPriorities) {
+      await project.setSetting('column_priorities', config.columnPriorities);
+    }
     timings.push({ phase: 'Create project', ms: Date.now() - start });
     log('  ✓ Create project');
 

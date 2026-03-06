@@ -20,21 +20,21 @@ export function registerTransactionsHandlers(transactions: TransactionStore): vo
   });
 
   registerHandler('transactions:queryGrouped', async (_event, column: unknown, filters: unknown) => {
-    return (transactions as import('../services/transactions').TransactionStore).queryGroupedByColumn(
+    return transactions.queryGroupedByColumn(
       column as string,
       filters as TransactionFilter | undefined
     );
   });
 
   registerHandler('transactions:distinctValues', async (_event, column: unknown, limit: unknown) => {
-    return (transactions as import('../services/transactions').TransactionStore).queryDistinctValues(
+    return transactions.queryDistinctValues(
       column as string,
       limit as number | undefined
     );
   });
 
   registerHandler('transactions:getIdsByValue', async (_event, column: unknown, value: unknown, filters: unknown) => {
-    return (transactions as import('../services/transactions').TransactionStore).getTransactionIdsByColumnValue(
+    return transactions.getTransactionIdsByColumnValue(
       column as string,
       value as string,
       filters as TransactionFilter | undefined
@@ -42,7 +42,7 @@ export function registerTransactionsHandlers(transactions: TransactionStore): vo
   });
 
   registerHandler('transactions:pivotAggregation', async (_event, dimensions: unknown, valueDimension: unknown, filters: unknown) => {
-    return (transactions as import('../services/transactions').TransactionStore).queryPivotAggregation(
+    return transactions.queryPivotAggregation(
       dimensions as string[],
       valueDimension as string,
       filters as TransactionFilter | undefined

@@ -1,5 +1,5 @@
 import DependencyGate from '../components/DependencyGate'
-import ReviewPage from '../pages/ReviewPage'
+import PivotPage from '../pages/PivotPage'
 import { useWorkflowStore } from '../stores/workflowStore'
 
 export default function ReviewView() {
@@ -16,7 +16,7 @@ export default function ReviewView() {
         },
       ]}
     >
-      <ReviewPage />
+      <PivotPage />
     </DependencyGate>
   )
 }

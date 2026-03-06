@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
+import ReclassifyModal from '../components/review/ReclassifyModal'
 import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
-import type { Aggregation } from '../types/pivot'
+import type { Aggregation, SpendDisplayMode, FlattenedPivotRow } from '../types/pivot'
 import type { PivotFilterState } from '../components/review/PivotFilterBar'
 import type { TransactionFilter, FilterCondition } from '../../shared/types/transactions'
 import { exportHierarchicalPivotExcel } from '../utils/exportPivotToExcel'
@@ -28,12 +29,15 @@ export default function PivotPage() {
   const [valueDimension, setValueDimension] = useState('spend_amount')
   const [aggregation, setAggregation] = useState<Aggregation>('sum')
   const [filterState, setFilterState] = useState<PivotFilterState>({})
+  const [spendDisplayMode, setSpendDisplayMode] = useState<SpendDisplayMode>('absolute')
+  const [reclassifyModalOpen, setReclassifyModalOpen] = useState(false)
+  const [reclassifyTargetRows, setReclassifyTargetRows] = useState<FlattenedPivotRow[]>([])
 
   const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
 
   const filter = useMemo(() => filterStateToTransactionFilter(filterState), [filterState])
 
-  const { pivotData, totalCount } = useServerPivotData(
+  const { pivotData, totalCount, refetch } = useServerPivotData(
     rowDimensions,
     valueDimension,
     aggregation,
@@ -57,11 +61,25 @@ export default function PivotPage() {
     exportHierarchicalPivotExcel({ data: pivotData })
   }
 
+  const handleReclassify = useCallback((rows: FlattenedPivotRow[]) => {
+    setReclassifyTargetRows(rows)
+    setReclassifyModalOpen(true)
+  }, [])
+
+  const handleReclassifySuccess = useCallback(() => {
+    setReclassifyModalOpen(false)
+    setReclassifyTargetRows([])
+    refetch()
+  }, [refetch])
+
   return (
     <div className="flex flex-col h-full p-4 gap-3">
       <div className="flex-shrink-0">
         <h2 className="text-lg font-semibold text-gray-900">Pivot View</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Explore spend by dimension. Double-click a row to filter.</p>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Navigate with arrow keys, Enter to select rows.
+          <span className="text-gray-400 ml-1">⌘K filter | ⌘F classify | Double-click to filter</span>
+        </p>
       </div>
       <div className="flex-1 min-h-0">
         <HierarchicalPivotView
@@ -81,8 +99,20 @@ export default function PivotPage() {
           onOpenInReview={() => navigate('/review')}
           openInReviewDisabled={false}
           totalCount={totalCount}
+          spendDisplayMode={spendDisplayMode}
+          onSpendDisplayModeChange={setSpendDisplayMode}
+          onReclassify={handleReclassify}
+          modalOpen={reclassifyModalOpen}
         />
       </div>
+
+      <ReclassifyModal
+        isOpen={reclassifyModalOpen}
+        onClose={() => setReclassifyModalOpen(false)}
+        targetRows={reclassifyTargetRows}
+        onSuccess={handleReclassifySuccess}
+        filterState={filterState}
+      />
     </div>
   )
 }

@@ -17,6 +17,12 @@ export interface HierarchicalPivotData {
   rowDimensions: string[]
 }
 
+/** A single segment in the path from root to a pivot row */
+export interface PathSegment {
+  dimensionField: string
+  value: string
+}
+
 /** Flattened row ready for table rendering */
 export interface FlattenedPivotRow {
   key: string
@@ -29,6 +35,13 @@ export interface FlattenedPivotRow {
   transactionCount: number
   isFirstInL1Group: boolean
   isFirstInL2Group: boolean
+  /** Full path from root to this row — used for filter/reclassify scope */
+  pathSegments: PathSegment[]
+  /** Key of the depth-0 ancestor (first dimension) — used for percentage base */
+  depth0AncestorKey: string
+  /** Which dimension column this row represents */
+  dimensionField: string
 }
 
 export type Aggregation = 'sum' | 'count' | 'average'
+export type SpendDisplayMode = 'absolute' | 'percentage'

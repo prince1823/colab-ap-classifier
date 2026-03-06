@@ -2,8 +2,9 @@ import React, { useState, useRef, useMemo } from 'react'
 import { ChevronRight, ChevronDown, X } from 'lucide-react'
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { Aggregation, HierarchicalPivotData, FlattenedPivotRow } from '../../types/pivot'
+import type { Aggregation, HierarchicalPivotData, FlattenedPivotRow, SpendDisplayMode } from '../../types/pivot'
 import { usePivotTreeState, filterRowsBySearch } from '../../hooks/usePivotTreeState'
+import { usePivotKeyboard } from '../../hooks/usePivotKeyboard'
 import PivotToolbar from './PivotToolbar'
 import type { PivotFilterState } from './PivotFilterBar'
 import { fmtAbbrev } from '../../utils/formatSpend'
@@ -33,6 +34,13 @@ interface HierarchicalPivotViewProps {
   openInReviewDisabled: boolean
   /* Total transaction count (server-side mode) */
   totalCount?: number
+  /* Spend display */
+  spendDisplayMode: SpendDisplayMode
+  onSpendDisplayModeChange: (mode: SpendDisplayMode) => void
+  /* Reclassify */
+  onReclassify?: (rows: FlattenedPivotRow[]) => void
+  /** Whether a modal is open (suppresses keyboard) */
+  modalOpen?: boolean
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -58,8 +66,7 @@ function colLabel(col: string): string {
   return COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-
-const fmt = (n: number, agg: Aggregation) => {
+const fmtAbsolute = (n: number, agg: Aggregation) => {
   if (n === 0) return ''
   if (agg === 'count') return n.toLocaleString()
   return fmtAbbrev(n)
@@ -85,22 +92,17 @@ export default function HierarchicalPivotView({
   onOpenInReview,
   openInReviewDisabled,
   totalCount,
+  spendDisplayMode,
+  onSpendDisplayModeChange,
+  onReclassify,
+  modalOpen = false,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
-  const [isAllExpanded, setIsAllExpanded] = useState(false)
+  const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
 
-  const { flatRows, toggleExpand, expandAll, collapseAll } = usePivotTreeState(
+  const { flatRows, toggleExpand, expandToLevel, depth0TotalMap } = usePivotTreeState(
     pivotData?.root ?? null
   )
-
-  const handleToggleExpandAll = () => {
-    if (isAllExpanded) {
-      collapseAll()
-    } else {
-      expandAll()
-    }
-    setIsAllExpanded(!isAllExpanded)
-  }
 
   const visibleRows = useMemo(
     () => filterRowsBySearch(flatRows, search),
@@ -116,8 +118,63 @@ export default function HierarchicalPivotView({
     overscan: 20,
   })
 
+  // Keyboard navigation
+  const handleCmdK = useMemo(() => (rows: FlattenedPivotRow[]) => {
+    // OR filter: use each row's deepest (most specific) dimension value.
+    // Values in the same dimension are OR'd via in_list.
+    const newFilter: PivotFilterState = { ...filterState }
+    for (const row of rows) {
+      const deepest = row.pathSegments[row.pathSegments.length - 1]
+      if (!deepest) continue
+      const current = newFilter[deepest.dimensionField] || []
+      if (!current.includes(deepest.value)) {
+        newFilter[deepest.dimensionField] = [...current, deepest.value]
+      }
+    }
+    onFilterStateChange(newFilter)
+  }, [filterState, onFilterStateChange])
+
+  const handleCmdF = useMemo(() => (rows: FlattenedPivotRow[]) => {
+    onReclassify?.(rows)
+  }, [onReclassify])
+
+  const { focusedIndex, selectedKeys, handleKeyDown, clearSelection } = usePivotKeyboard({
+    visibleRows,
+    rowVirtualizer,
+    onCmdK: handleCmdK,
+    onCmdF: handleCmdF,
+    onToggleExpand: toggleExpand,
+    disabled: modalOpen,
+  })
+
+  // Cycle expand/collapse
+  const maxDepth = rowDimensions.length
+  const handleCycleCollapse = () => {
+    const nextLevel = collapseLevel >= maxDepth ? 0 : collapseLevel + 1
+    setCollapseLevel(nextLevel)
+    expandToLevel(nextLevel)
+  }
+  const cycleLabelMap = (level: number) => {
+    if (level >= maxDepth) return 'All'
+    const dim = rowDimensions[level]
+    return dim ? colLabel(dim) : `D${level + 1}`
+  }
+
   const hasData = totalCount ? totalCount > 0 : (transactions?.length ?? 0) > 0
   const grandTotal = pivotData?.grandTotal ?? 0
+
+  // Format spend value based on display mode
+  const fmtSpend = (row: FlattenedPivotRow) => {
+    if (row.total === 0) return ''
+    if (aggregation === 'count') return row.total.toLocaleString()
+    if (spendDisplayMode === 'percentage' && aggregation === 'sum') {
+      if (row.depth === 0) return '100%'
+      const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
+      if (base === 0) return '--'
+      return ((row.total / base) * 100).toFixed(1) + '%'
+    }
+    return fmtAbbrev(row.total)
+  }
 
   // Flatten active filters into pills
   const activeFilters = useMemo(() => {
@@ -168,6 +225,19 @@ export default function HierarchicalPivotView({
               </button>
             </>
           )}
+          {/* Selection indicator */}
+          {selectedKeys.size > 0 && (
+            <span className="inline-flex items-center gap-1 text-[9px] font-medium text-indigo-600 flex-shrink-0 ml-1">
+              {selectedKeys.size} selected
+              <button onClick={clearSelection} className="hover:text-indigo-800">
+                <X size={8} />
+              </button>
+              <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘K</kbd>
+              <span className="text-gray-400">filter</span>
+              <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘F</kbd>
+              <span className="text-gray-400">classify</span>
+            </span>
+          )}
         </div>
 
         {/* Right section — search + export */}
@@ -212,8 +282,9 @@ export default function HierarchicalPivotView({
         onRowDimensionsChange={onRowDimensionsChange}
         onValueDimensionChange={onValueDimensionChange}
         onAggregationChange={onAggregationChange}
-        isAllExpanded={isAllExpanded}
-        onToggleExpandAll={handleToggleExpandAll}
+        collapseLevel={collapseLevel}
+        onCycleCollapse={handleCycleCollapse}
+        cycleLevelLabel={cycleLabelMap(collapseLevel)}
         onOpenInReview={onOpenInReview}
         openInReviewDisabled={openInReviewDisabled}
         rows={allRows}
@@ -221,6 +292,9 @@ export default function HierarchicalPivotView({
         filterState={filterState}
         onFilterStateChange={onFilterStateChange}
         onClearAllFilters={onClearAllFilters}
+        spendDisplayMode={spendDisplayMode}
+        onSpendDisplayModeChange={onSpendDisplayModeChange}
+        showSpendToggle={aggregation === 'sum'}
       />
 
       {!hasData && (
@@ -233,7 +307,10 @@ export default function HierarchicalPivotView({
       {hasData && pivotData && <div
         ref={scrollRef}
         className="overflow-auto flex-1 border border-gray-200 rounded-lg"
-        style={{ position: 'relative' }}
+        style={{ position: 'relative', outline: 'none' }}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        role="grid"
       >
         <table className="pivot-hierarchy-table" style={{ minWidth: '100%' }}>
           {/* Header */}
@@ -248,7 +325,7 @@ export default function HierarchicalPivotView({
                   })
                   .join(' > ')}
               </th>
-              <th>Total</th>
+              <th>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '% of Total' : 'Total'}</th>
             </tr>
           </thead>
 
@@ -277,6 +354,9 @@ export default function HierarchicalPivotView({
                       rowDimensions={rowDimensions}
                       filterState={filterState}
                       onFilterStateChange={onFilterStateChange}
+                      isFocused={virtualRow.index === focusedIndex}
+                      isSelected={selectedKeys.has(row.key)}
+                      formattedTotal={fmtSpend(row)}
                     />
                   )
                 })}
@@ -303,7 +383,7 @@ export default function HierarchicalPivotView({
           <tfoot className="pivot-hierarchy-tfoot">
             <tr>
               <td>Grand Total</td>
-              <td>{fmt(grandTotal, aggregation)}</td>
+              <td>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '' : fmtAbsolute(grandTotal, aggregation)}</td>
             </tr>
           </tfoot>
         </table>
@@ -320,6 +400,9 @@ function PivotTreeRow({
   rowDimensions,
   filterState,
   onFilterStateChange,
+  isFocused,
+  isSelected,
+  formattedTotal,
 }: {
   row: FlattenedPivotRow
   aggregation: Aggregation
@@ -327,6 +410,9 @@ function PivotTreeRow({
   rowDimensions: string[]
   filterState: PivotFilterState
   onFilterStateChange: (state: PivotFilterState) => void
+  isFocused: boolean
+  isSelected: boolean
+  formattedTotal: string
 }) {
   const indent = row.depth * 20
 
@@ -340,6 +426,8 @@ function PivotTreeRow({
     <tr
       className={`pivot-tree-row ${groupBorderClass}`}
       data-depth={row.depth}
+      data-focused={isFocused || undefined}
+      data-selected={isSelected || undefined}
     >
       {/* Label cell */}
       <td
@@ -381,7 +469,7 @@ function PivotTreeRow({
 
       {/* Row total — show at every level */}
       <td className="pivot-tree-total-cell">
-        {fmt(row.total, aggregation)}
+        {formattedTotal}
       </td>
     </tr>
   )

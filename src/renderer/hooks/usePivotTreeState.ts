@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
-import type { PivotTreeNode, FlattenedPivotRow } from '../types/pivot'
+import type { PivotTreeNode, FlattenedPivotRow, PathSegment } from '../types/pivot'
 
 /**
  * Manages expand/collapse state for the hierarchical pivot tree
@@ -56,6 +56,29 @@ export function usePivotTreeState(
     setExpandedKeys(new Set<string>())
   }, [])
 
+  const expandToLevel = useCallback((targetDepth: number) => {
+    if (!root) return
+    const keys = new Set<string>()
+    const walk = (node: PivotTreeNode) => {
+      if (node.children.length > 0 && node.depth < targetDepth) {
+        keys.add(node.key)
+      }
+      for (const child of node.children) walk(child)
+    }
+    for (const child of root.children) walk(child)
+    setExpandedKeys(keys)
+  }, [root])
+
+  // Map depth-0 key → total spend (base for percentage calculations)
+  const depth0TotalMap = useMemo(() => {
+    if (!root) return new Map<string, number>()
+    const map = new Map<string, number>()
+    for (const child of root.children) {
+      map.set(child.key, child.total)
+    }
+    return map
+  }, [root])
+
   // Flatten tree via DFS, respecting expand/collapse state
   const flatRows = useMemo((): FlattenedPivotRow[] => {
     if (!root) return []
@@ -63,9 +86,14 @@ export function usePivotTreeState(
     let prevL1Key = ''
     let prevL2Key = ''
 
-    const walk = (node: PivotTreeNode) => {
+    const walk = (node: PivotTreeNode, pathStack: PathSegment[], currentDepth0Key: string) => {
       const isExpanded = expandedKeys.has(node.key)
       const hasChildren = node.children.length > 0
+
+      // Build path segments for this node
+      const segment: PathSegment = { dimensionField: node.dimensionField, value: node.label }
+      const pathSegments = [...pathStack, segment]
+      const depth0Key = node.depth === 0 ? node.key : currentDepth0Key
 
       // Determine group separators
       let isFirstInL1Group = false
@@ -91,17 +119,20 @@ export function usePivotTreeState(
         transactionCount: node.transactionCount,
         isFirstInL1Group,
         isFirstInL2Group,
+        pathSegments,
+        depth0AncestorKey: depth0Key,
+        dimensionField: node.dimensionField,
       })
 
       if (isExpanded && hasChildren) {
         for (const child of node.children) {
-          walk(child)
+          walk(child, pathSegments, depth0Key)
         }
       }
     }
 
     for (const child of root.children) {
-      walk(child)
+      walk(child, [], '')
     }
 
     return rows
@@ -112,6 +143,8 @@ export function usePivotTreeState(
     toggleExpand,
     expandAll,
     collapseAll,
+    expandToLevel,
+    depth0TotalMap,
     expandedKeys,
   }
 }

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { Plus, X, ChevronUp, ChevronDown, Maximize2, Minimize2, Filter, ExternalLink } from 'lucide-react'
+import { Plus, X, ChevronUp, ChevronDown, Filter, ExternalLink, Layers } from 'lucide-react'
 import * as Popover from '@radix-ui/react-popover'
-import type { Aggregation } from '../../types/pivot'
+import type { Aggregation, SpendDisplayMode } from '../../types/pivot'
 import type { PivotFilterState } from './PivotFilterBar'
 import '../../styles/PivotHierarchy.css'
 
@@ -37,8 +37,10 @@ interface PivotToolbarProps {
   onRowDimensionsChange: (dims: string[]) => void
   onValueDimensionChange: (dim: string) => void
   onAggregationChange: (agg: Aggregation) => void
-  isAllExpanded: boolean
-  onToggleExpandAll: () => void
+  /* Expand/collapse cycle */
+  collapseLevel: number
+  onCycleCollapse: () => void
+  cycleLevelLabel: string
   /* Open in Review */
   onOpenInReview: () => void
   openInReviewDisabled: boolean
@@ -48,6 +50,10 @@ interface PivotToolbarProps {
   filterState: PivotFilterState
   onFilterStateChange: (state: PivotFilterState) => void
   onClearAllFilters: () => void
+  /* Spend display toggle */
+  spendDisplayMode: SpendDisplayMode
+  onSpendDisplayModeChange: (mode: SpendDisplayMode) => void
+  showSpendToggle: boolean
 }
 
 /** Columns to exclude from the filter list (non-filterable) */
@@ -64,8 +70,9 @@ export default function PivotToolbar({
   onRowDimensionsChange,
   onValueDimensionChange,
   onAggregationChange,
-  isAllExpanded,
-  onToggleExpandAll,
+  collapseLevel,
+  onCycleCollapse,
+  cycleLevelLabel,
   onOpenInReview,
   openInReviewDisabled,
   rows,
@@ -73,6 +80,9 @@ export default function PivotToolbar({
   filterState,
   onFilterStateChange,
   onClearAllFilters,
+  spendDisplayMode,
+  onSpendDisplayModeChange,
+  showSpendToggle,
 }: PivotToolbarProps) {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [addMenuSearch, setAddMenuSearch] = useState('')
@@ -323,7 +333,7 @@ export default function PivotToolbar({
         )}
       </div>
 
-      {/* Value + Aggregation */}
+      {/* Value + Aggregation + Spend toggle */}
       <div className="pivot-toolbar-section">
         <span className="pivot-toolbar-label">Value:</span>
         <select
@@ -345,16 +355,29 @@ export default function PivotToolbar({
           <option value="count">Count</option>
           <option value="average">Avg</option>
         </select>
+        {showSpendToggle && (
+          <button
+            className="pivot-toolbar-icon-btn"
+            onClick={() => onSpendDisplayModeChange(spendDisplayMode === 'absolute' ? 'percentage' : 'absolute')}
+            title={spendDisplayMode === 'absolute' ? 'Show as percentage of top-level total' : 'Show absolute values'}
+            data-active={spendDisplayMode === 'percentage' ? '' : undefined}
+          >
+            <span style={{ fontSize: 11, fontWeight: 600, minWidth: 14, textAlign: 'center' }}>
+              {spendDisplayMode === 'absolute' ? '$' : '%'}
+            </span>
+          </button>
+        )}
       </div>
 
-      {/* Expand/Collapse + Review — right side */}
+      {/* Collapse cycle + Review — right side */}
       <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
         <button
           className="pivot-toolbar-icon-btn"
-          onClick={onToggleExpandAll}
-          title={isAllExpanded ? 'Collapse all' : 'Expand all'}
+          onClick={onCycleCollapse}
+          title={`Showing: ${cycleLevelLabel}. Click to cycle collapse level.`}
         >
-          {isAllExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          <Layers size={12} />
+          <span style={{ fontSize: 9, fontWeight: 700, marginLeft: 2 }}>{cycleLevelLabel}</span>
         </button>
         <button
           onClick={onOpenInReview}

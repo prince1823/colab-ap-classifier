@@ -679,12 +679,14 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 │  │  Vendor  │ Amount   │ GL Code │ Date   │  │  Columns sent to LLM  │  │
 │  │  Acme    │ 1234.56  │ 6100    │ Jan-15 │  │  in this order:       │  │
 │  │  ...     │  ...     │  ...    │  ...   │  │                       │  │
-│  └────────────────────────────────────────┘  │  1. supplier_name ☰   │  │
-│                                              │  2. spend_amount  ☰   │  │
-│                                              │  3. gl_description☰   │  │
-│                                              │  4. invoice_date  ☰   │  │
+│  └────────────────────────────────────────┘  │  1. supplier_name [↑][↓] │
+│                                              │  2. spend_amount  [↑][↓] │
+│                                              │  3. gl_description[↑][↓] │
 │                                              │                       │  │
-│                                              │  Drag to reorder.     │  │
+│                                              │  Not sent to LLM:     │  │
+│                                              │  — invoice_date [Add]  │  │
+│                                              │                       │  │
+│                                              │  Up/down to reorder.  │  │
 │                                              │  Higher = more weight │  │
 │                                              │  in classification.   │  │
 │                                              │                       │  │
@@ -698,13 +700,13 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 
 <p><strong>Functionality:</strong></p>
 <ul>
-  <li>Drag-to-reorder list of all mapped canonical columns. Order determines which columns are weighted most heavily in LLM classification prompts.</li>
+  <li>Two sub-lists: "Columns sent to LLM" (numbered, with up/down reorder buttons and a remove action) and "Not sent to LLM" (with an "Add" action to move back to the LLM list). This separates "include in transaction table" (decided in Step 2) from "send to LLM for classification" (decided here). All mapped columns are imported into the DB regardless; only the LLM-list columns are saved to <code>column_priorities</code>.</li>
   <li>If the user is re-visiting after a prior import: shows read-only list with an "Edit" button. Editing and saving re-applies priorities but does NOT re-import the CSV.</li>
   <li><strong>"Save & Import →":</strong> This is the trigger for the actual CSV import.
     <ol>
-      <li>Calls <code>ingest:importCSV(filePath, mappings)</code> → rows inserted into DB</li>
-      <li>Calls <code>project:setSetting('column_priorities', orderedCanonicalCols)</code> → priorities saved</li>
-      <li>WorkflowStore calls <code>refreshGateState()</code> → <code>hasUploadedData</code> + <code>hasColumnsMapped</code> become true</li>
+      <li>Calls <code>ingest:importCSV(filePath, mappings)</code> → rows inserted into DB (all mapped columns)</li>
+      <li>Calls <code>project:setSetting('column_priorities', orderedLlmCols)</code> → only LLM columns saved, in priority order</li>
+      <li>WorkflowStore calls <code>refreshGateState()</code> → <code>hasUploadedData</code> becomes true</li>
       <li>Navigates to <code>/suppliers</code></li>
     </ol>
   </li>

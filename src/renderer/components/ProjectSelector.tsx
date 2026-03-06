@@ -34,7 +34,7 @@ export default function ProjectSelector() {
     try {
       // project:open with no filePath triggers the native file dialog in the IPC handler
       await loadProject('')
-      navigate('/workflow/upload')
+      navigate('/project')
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : 'Failed to open project')
     }

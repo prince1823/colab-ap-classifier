@@ -78,7 +78,7 @@ export default function PivotPage() {
           onClearAllFilters={() => setFilterState({})}
           onExport={handleExport}
           exportDisabled={!pivotData}
-          onOpenInReview={() => navigate('/workflow/review')}
+          onOpenInReview={() => navigate('/review')}
           openInReviewDisabled={false}
           totalCount={totalCount}
         />

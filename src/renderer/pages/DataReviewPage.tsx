@@ -83,7 +83,7 @@ export default function DataReviewPage() {
           {taxonomyNodeCount === 0 && (
             <span>
               Import a taxonomy via{' '}
-              <button onClick={() => navigate('/project/taxonomy')} className="font-medium text-blue-600 hover:underline">
+              <button onClick={() => navigate('/taxonomy')} className="font-medium text-blue-600 hover:underline">
                 Project Setup → Taxonomy
               </button>{' '}
               to enable classification.
@@ -91,7 +91,7 @@ export default function DataReviewPage() {
           )}
         </div>
         <button
-          onClick={() => navigate('/workflow/classification')}
+          onClick={() => navigate('/classification')}
           disabled={taxonomyNodeCount === 0}
           className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
         >

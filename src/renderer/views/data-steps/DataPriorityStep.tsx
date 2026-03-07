@@ -32,12 +32,14 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
 
   useEffect(() => {
     // Load combined preview from transactions table
-    Promise.all([
-      ipc.transactions.query(),
-      ipc.transactions.getColumns(),
-    ]).then(([result, columns]) => {
-      setPreviewColumns(columns)
-      setPreviewRows(result.rows.slice(0, 10) as TransactionPreviewRow[])
+    setPreviewColumns(allCanonicals)
+    ipc.transactions.query().then((result) => {
+      // Flatten: merge canonicalFields onto top-level so row[col] works
+      const flat = result.rows.slice(0, 10).map((r) => ({
+        ...r,
+        ...r.canonicalFields,
+      })) as TransactionPreviewRow[]
+      setPreviewRows(flat)
       setTotalRows(result.total)
     }).catch(() => {
       // Ignore — preview is optional

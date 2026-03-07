@@ -154,7 +154,6 @@ export interface IngestService {
   selectFile(): Promise<string | null>;
   parseCSVPreview(filePath: string): CSVPreview;
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
-  getStoredMappings(columns: string[]): Promise<UploadRecord | null>;
   importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
   getUploadHistory(): Promise<UploadRecord[]>;
   deriveMappings(columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource): Promise<DerivedMappings>;

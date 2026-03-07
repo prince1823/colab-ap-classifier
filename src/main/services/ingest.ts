@@ -182,48 +182,6 @@ export class IngestService implements IIngestService {
     }
   }
 
-  async getStoredMappings(columns: string[]): Promise<UploadRecord | null> {
-    // Find existing uploads with matching column structure for reuse
-    const uploads = await this.db.all<{
-      id: string;
-      file_name: string;
-      file_path: string | null;
-      column_mappings: string;
-      row_count: number;
-      status: string;
-      created_at: string;
-      updated_at: string | null;
-    }>('SELECT * FROM uploads ORDER BY created_at DESC');
-
-    const sortedColumns = [...columns].sort().join(',');
-
-    for (const upload of uploads) {
-      try {
-        const mappings = JSON.parse(upload.column_mappings) as ColumnMapping;
-        const mappedCsvCols = [...new Set(Object.values(mappings))].sort().join(',');
-        // Check if the CSV columns in the stored mapping are a subset of current columns
-        const storedCsvCols = Object.values(mappings);
-        const allMatch = storedCsvCols.every((col) => columns.includes(col));
-        if (allMatch && storedCsvCols.length > 0) {
-          return {
-            id: upload.id,
-            fileName: upload.file_name,
-            filePath: upload.file_path ?? undefined,
-            columnMappings: mappings,
-            rowCount: upload.row_count,
-            status: upload.status as UploadRecord['status'],
-            createdAt: String(upload.created_at),
-            updatedAt: upload.updated_at ? String(upload.updated_at) : undefined,
-          };
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    return null;
-  }
-
   async importCSV(
     filePath: string,
     columnMapping: ColumnMapping,
@@ -253,12 +211,12 @@ export class IngestService implements IIngestService {
 
     const mapping = columnMapping || {};
 
-    // Raw CSV supplier value → original_supplier_name (static column, audit trail).
-    // supplier_name (static column) gets populated later by normalizeAllTransactions().
-    if (mapping.supplier_name) {
-      mapping.original_supplier_name = mapping.supplier_name;
-      delete mapping.supplier_name;
-    }
+    // supplier_name maps to the original_supplier_name DB column (audit trail).
+    // The canonical supplier_name is resolved via JOIN to project_suppliers after normalization.
+    // We remap at the SQL level only — the mapping object stays unmutated so it's
+    // stored correctly in the uploads table for reuse.
+    const dbColumn = (canonical: string) =>
+      canonical === 'supplier_name' ? 'original_supplier_name' : canonical;
 
     const canonicalNames = Object.keys(mapping);
 
@@ -269,8 +227,9 @@ export class IngestService implements IIngestService {
     const existingSet = new Set(existingColumns.map((c) => c.column_name));
 
     for (const canonical of canonicalNames) {
-      if (!existingSet.has(canonical)) {
-        await this.db.run(`ALTER TABLE transactions ADD COLUMN "${canonical}" VARCHAR`);
+      const col = dbColumn(canonical);
+      if (!existingSet.has(col)) {
+        await this.db.run(`ALTER TABLE transactions ADD COLUMN "${col}" VARCHAR`);
       }
     }
 
@@ -285,7 +244,7 @@ export class IngestService implements IIngestService {
 
       const colNames: string[] = ['id', 'row_index'];
       for (const canonical of canonicalNames) {
-        colNames.push(`"${canonical}"`);
+        colNames.push(`"${dbColumn(canonical)}"`);
       }
 
       const valueRows: string[] = [];
@@ -310,7 +269,7 @@ export class IngestService implements IIngestService {
       rowsInserted += batch.length;
     }
 
-    // Save upload record
+    // Save upload record — mapping is unmutated, stores supplier_name (not original_supplier_name)
     const finalUploadId = uploadId || randomUUID();
     const fileName = path.basename(filePath);
     const enrichedMapping = toEnrichedMapping(mapping);

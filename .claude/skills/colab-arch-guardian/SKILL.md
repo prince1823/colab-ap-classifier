@@ -206,24 +206,34 @@ were trying to do.
 
 **Base schema columns** (always present): `id`, `row_index`, `upload_id`, `taxonomy_node_id`,
 `classification_status`, `human_reviewed`, `classification_reasoning`, `original_supplier_name`,
-`project_supplier_id`, `supplier_name`, `spend_amount`, `invoice_date`, `created_at`, `updated_at`.
+`project_supplier_id`, `created_at`, `updated_at`.
+Note: `supplier_name` is a **virtual column** resolved via JOIN to `project_suppliers` (see invariant 8).
+Columns like `spend_amount`, `invoice_date`, and other canonical columns are added dynamically
+via `ALTER TABLE` at import time based on the CSV mapping.
 
 **Check:** If a service or query hardcodes an optional column like `gl_description` or
 `department` without first checking it exists, flag it.
 
 ---
 
-### 8. supplier_name denormalization — both FK and name column coexist by design
+### 8. supplier_name is virtual — FK-based, resolved via JOIN
 
-**Rule:** `supplier_name` IS a physical column on the `transactions` table (denormalized
-from `project_suppliers`). It coexists with `project_supplier_id` FK intentionally — the
-denormalization avoids JOINs in every transaction query. `original_supplier_name` is the
-raw CSV value (audit trail). Do not remove or treat `supplier_name` on transactions as
-a mistake.
+**Rule:** `supplier_name` is NOT a physical column on the `transactions` table. It is a
+**virtual column** resolved via `LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id`
+(defined in `VIRTUAL_COLUMNS` in `transactions.ts`). `original_supplier_name` is the physical
+column that stores the raw CSV value as an audit trail. `project_supplier_id` is the FK that
+links to the canonical supplier record.
 
-**Why it matters:** The denormalization was an explicit architectural decision (commit b1893f5).
-Code that JOINs project_suppliers for supplier_name on every transaction query is doing
-unnecessary work.
+**Why it matters:** The mapping flow maps user CSV columns to `supplier_name` (the canonical
+name). `importCSV` remaps this to `original_supplier_name` at the SQL INSERT level only —
+the stored mapping in the `uploads` table keeps `supplier_name` as the key so downstream
+consumers (derive-mappings, column priorities) see the correct canonical name. Do not mutate
+the mapping object; remap at the SQL level only.
+
+**Check:** If code mutates a mapping dict to replace `supplier_name` with
+`original_supplier_name`, or if `original_supplier_name` leaks into user-facing UI
+(mapping step, priority step, pivot columns), flag it. The user should only ever see
+`supplier_name`.
 
 ---
 

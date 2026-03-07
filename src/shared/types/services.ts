@@ -1,7 +1,7 @@
 import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition } from './transactions';
-import type { ColumnMapping, ColumnMappingResult, CSVPreview } from './column-mapping';
+import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
 import type { ChangeLog, ChangeSource } from './changelog';
 import type { CompanyContext } from './project';
@@ -157,6 +157,8 @@ export interface IngestService {
   getStoredMappings(columns: string[]): Promise<UploadRecord | null>;
   importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
   getUploadHistory(): Promise<UploadRecord[]>;
+  deriveMappings(columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource): Promise<DerivedMappings>;
+  getExistingCanonicals(): Promise<string[]>;
 }
 
 export interface ExportService {

@@ -67,3 +67,26 @@ export interface ColumnMappingResult {
   unmappedCanonicalColumns: string[];
   reasoning: string;
 }
+
+/** A single canonical → CSV column mapping row used in the mapping UI. */
+export interface MappingRow {
+  canonical: string;
+  csvColumn: string;
+}
+
+/** Source for deriving column mappings: LLM suggestion or a stored upload. */
+export type DeriveMappingsSource = 'llm' | { uploadId: string };
+
+/** Result of backend mapping derivation — ready to display in the mapping step. */
+export interface DerivedMappings {
+  rows: MappingRow[];
+  existingCanonicals: string[];
+}
+
+/** Summary of a completed upload (already imported into DB). */
+export interface CompletedUpload {
+  uploadId: string;
+  fileName: string;
+  rowCount: number;
+  mappings: MappingRow[];
+}

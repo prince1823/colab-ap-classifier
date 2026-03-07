@@ -1,18 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import CSVPreviewTable from '../../components/upload/CSVPreviewTable'
 import { REQUIRED_CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
-import type { CSVPreviewWithMappings, ColumnMappingResult } from '../../../shared/types/column-mapping'
-
-export interface MappingRow {
-  canonical: string
-  csvColumn: string
-}
+import type { CSVPreview, DerivedMappings, MappingRow } from '../../../shared/types/column-mapping'
 
 interface Props {
-  preview: CSVPreviewWithMappings
-  initialMappings?: MappingRow[]
+  preview: CSVPreview
+  derivedMappings: DerivedMappings
   onApply: (mappings: MappingRow[]) => void
   onBack: () => void
+  importing: boolean
 }
 
 const REQUIRED = new Set(REQUIRED_CANONICAL_COLUMNS as readonly string[])
@@ -27,30 +23,12 @@ function toSnakeCase(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 }
 
-function deriveInitialMappings(suggestion: ColumnMappingResult, csvColumns: string[]): MappingRow[] {
-  const rows: MappingRow[] = []
-  // Required first
-  for (const canonical of REQUIRED_CANONICAL_COLUMNS) {
-    rows.push({ canonical, csvColumn: suggestion.mappings[canonical] ?? '' })
-  }
-  // Then non-required LLM suggestions
-  const usedRequired = new Set(rows.map((r) => r.csvColumn).filter(Boolean))
-  for (const [canonical, csv] of Object.entries(suggestion.mappings)) {
-    if (!REQUIRED.has(canonical) && csv && !usedRequired.has(csv)) {
-      rows.push({ canonical, csvColumn: csv })
-    }
-  }
-  return rows
-}
-
-export default function DataMappingStep({ preview, initialMappings, onApply, onBack }: Props) {
-  const [mappings, setMappings] = useState<MappingRow[]>(
-    () => initialMappings ?? deriveInitialMappings(preview.mappingSuggestion, preview.columns)
-  )
+export default function DataMappingStep({ preview, derivedMappings, onApply, onBack, importing }: Props) {
+  const [mappings, setMappings] = useState<MappingRow[]>(() => derivedMappings.rows)
+  const mappingListRef = useRef<HTMLDivElement>(null)
 
   // Track used CSV columns
   const usedCsvCols = new Set(mappings.map((m) => m.csvColumn).filter(Boolean))
-  const usedCanonicals = new Set(mappings.map((m) => m.canonical))
 
   const handleCsvChange = (index: number, csvColumn: string) => {
     setMappings((prev) => prev.map((m, i) => i === index ? { ...m, csvColumn } : m))
@@ -67,10 +45,13 @@ export default function DataMappingStep({ preview, initialMappings, onApply, onB
   }
 
   const handleAdd = () => {
-    // Find first unused CSV column as default
     const availableCsv = preview.columns.find((c) => !usedCsvCols.has(c)) ?? ''
     const canonical = toSnakeCase(availableCsv || 'column')
     setMappings((prev) => [...prev, { canonical, csvColumn: availableCsv }])
+    // Scroll to bottom
+    requestAnimationFrame(() => {
+      mappingListRef.current?.scrollTo({ top: mappingListRef.current.scrollHeight, behavior: 'smooth' })
+    })
   }
 
   const canApply = REQUIRED_CANONICAL_COLUMNS.every((req) =>
@@ -85,8 +66,8 @@ export default function DataMappingStep({ preview, initialMappings, onApply, onB
       </div>
 
       {/* Right: Mapping config */}
-      <div className="w-80 flex-shrink-0 space-y-4 overflow-auto">
-        <div className="flex items-center justify-between">
+      <div className="w-80 flex-shrink-0 flex flex-col space-y-4 overflow-hidden">
+        <div className="flex items-center justify-between flex-shrink-0">
           <h3 className="text-sm font-medium text-gray-700">Column Mappings</h3>
           <button
             onClick={handleAdd}
@@ -96,11 +77,11 @@ export default function DataMappingStep({ preview, initialMappings, onApply, onB
           </button>
         </div>
 
-        <div className="space-y-3">
+        <div ref={mappingListRef} className="flex-1 overflow-auto space-y-3">
           {mappings.map((row, index) => {
             const isRequired = REQUIRED.has(row.canonical)
             return (
-              <div key={index} className="rounded-lg border border-gray-200 bg-white p-3">
+              <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 transition-shadow">
                 <div className="flex items-center justify-between mb-1.5">
                   {isRequired ? (
                     <div className="flex items-center gap-1.5">
@@ -148,19 +129,30 @@ export default function DataMappingStep({ preview, initialMappings, onApply, onB
           })}
         </div>
 
-        <div className="flex gap-3 pt-2">
+        <div className="flex gap-3 pt-2 flex-shrink-0">
           <button
             onClick={onBack}
-            className="flex-1 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            disabled={importing}
+            className="flex-1 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             &larr; Back
           </button>
           <button
             onClick={() => onApply(mappings)}
-            disabled={!canApply}
-            className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+            disabled={!canApply || importing}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
           >
-            Apply Mappings &rarr;
+            {importing ? (
+              <>
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Importing...
+              </>
+            ) : (
+              'Apply & Import \u2192'
+            )}
           </button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { registerHandler } from './register';
 import type { IngestService } from '../../shared/types/services';
-import type { ColumnMapping } from '../../shared/types/column-mapping';
+import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
 
 export function registerIngestHandlers(ingest: IngestService): void {
   registerHandler('ingest:selectFile', async () => {
@@ -22,5 +22,21 @@ export function registerIngestHandlers(ingest: IngestService): void {
   registerHandler('ingest:getUpload', async () => {
     const uploads = await ingest.getUploadHistory();
     return uploads.length > 0 ? uploads[0] : null;
+  });
+
+  registerHandler('ingest:getUploadHistory', async () => {
+    return ingest.getUploadHistory();
+  });
+
+  registerHandler('ingest:deriveMappings', async (_event, columns: unknown, sampleRows: unknown, source: unknown) => {
+    return ingest.deriveMappings(
+      columns as string[],
+      sampleRows as Record<string, string>[],
+      source as DeriveMappingsSource
+    );
+  });
+
+  registerHandler('ingest:getExistingCanonicals', async () => {
+    return ingest.getExistingCanonicals();
   });
 }

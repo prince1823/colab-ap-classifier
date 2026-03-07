@@ -5,7 +5,7 @@ import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shar
 import type { TransactionFilter, TransactionUpdate } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
-import type { ColumnMapping } from '../../shared/types/column-mapping';
+import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
 
 /**
  * Typed invoke wrapper that unwraps the IPCResponse envelope.
@@ -47,7 +47,7 @@ export const ipc = {
       invoke('project:updateMetadata', updates),
   },
 
-  // ── Ingest (5 channels) ──
+  // ── Ingest (8 channels) ──
   ingest: {
     selectFile: () => invoke('ingest:selectFile'),
     parseCSV: (filePath: string) =>
@@ -57,6 +57,10 @@ export const ipc = {
     importCSV: (filePath: string, mapping?: ColumnMapping) =>
       invoke('ingest:importCSV', filePath, mapping),
     getUpload: () => invoke('ingest:getUpload'),
+    getUploadHistory: () => invoke('ingest:getUploadHistory'),
+    deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
+      invoke('ingest:deriveMappings', columns, sampleRows, source),
+    getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
   },
 
   // ── Classification (2 channels + 1 event) ──

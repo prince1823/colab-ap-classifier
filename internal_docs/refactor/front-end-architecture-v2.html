@@ -588,51 +588,76 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
 <section id="data-view">
-<h2>Data View — 3-Step Stepper</h2>
+<h2>Data View — 3-Step Stepper (Multi-CSV)</h2>
 <div class="file">src/renderer/views/DataView.tsx</div>
 
-<p>The Data view is a single sidebar nav item containing a 3-step sequential flow. Steps are <strong>not</strong> separate routes — step state lives in the DataView component (or in WorkflowStore for persistence). Users advance forward through steps; can navigate back to any completed step.</p>
+<p>The Data view is a single sidebar nav item containing a 3-step sequential flow. Steps are <strong>not</strong> separate routes — step state lives in the DataView component. Users can upload <strong>multiple CSVs</strong> with different column mappings; each CSV is imported immediately after mapping confirmation. The priority step is visited once after all uploads are complete.</p>
 
 <div class="diagram">
-  Step 1: Upload CSV  ──▶  Step 2: Column Mapping  ──▶  Step 3: Column Priority
-  (file select,             (canonical ↔ file col,         (ordered list,
-   upload history)          LLM suggestions)                Save triggers import)
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  Step 1: Upload CSV  ──▶  Step 2: Column Mapping               │
+  │  (file select,             (canonical ↔ file col,               │
+  │   upload history,           + Add Column,                       │
+  │   mapping source choice)    Apply &amp; Import)                 │
+  │       ▲                          │                              │
+  │       └──────────────────────────┘  (loop: add more CSVs)      │
+  └──────────────────────────┬─────────────────────────────────────┘
+                             ▼
+                 Step 3: Column Priority
+                 (drag-to-reorder, combined
+                  transaction preview,
+                  Save Priorities only)
 </div>
+
+<p><strong>Multi-CSV flow:</strong> After each CSV is mapped, <code>ingest:importCSV</code> is called immediately and a default <code>column_priorities</code> is saved (satisfying invariant 5). The user returns to Step 1 where completed uploads are listed. They can add more CSVs or proceed to Step 3 to finalize priority ordering.</p>
 
 <h3>Step 1 — Upload CSV</h3>
 <div class="page-wireframe">
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Data  /  1. Upload                                                      │
 │                                                                          │
-│  ┌─── Dataset Preview ───────────────────┐  ┌─── Upload History ──────┐  │
-│  │  (blank until a CSV is selected)      │  │ File         Rows   Map │  │
-│  │                                       │  │ ──────────── ──── ───── │  │
-│  │  ┌────────────────────────────────┐   │  │ invoices.csv  4521   ✓  │  │
-│  │  │  Drop CSV here or             │   │  │ q3_spend.csv  1200   ✓  │  │
-│  │  │  [ Select File ]              │   │  │ q4_spend.csv   890   ✓  │  │
-│  │  └────────────────────────────────┘   │  └─────────────────────────┘  │
-│  └───────────────────────────────────────┘                               │
+│  ┌────────────────────────────────────┐                                  │
+│  │  Drop CSV here or [ Select File ] │                                   │
+│  └────────────────────────────────────┘                                  │
 │                                                                          │
-│  ── After file selected ──────────────────────────────────────────────── │
-│  invoices_jan.csv — 4,521 rows detected                                  │
+│  ── After file selected (full width) ────────────────────────────────── │
+│  invoices_jan.csv — 4,521 rows detected  [AI Suggestion →] [Different] │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │  CSV Preview Table (first 5 rows)                               │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
 │                                                                          │
-│  [ Map Columns ▼ ]                                                       │
-│     > Use previous mapping from: invoices.csv                            │
-│     > Suggest new mappings (LLM)                                         │
+│  Upload History                           [Set Column Priorities →]     │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │ File          Rows   Columns  Status    Mapping                 │    │
+│  │ ──────────── ─────── ──────── ──────── ─────────────────────    │    │
+│  │ invoices.csv  4,521    5      Imported  [Use this mapping]      │    │
+│  │ q3_spend.csv  1,200    4      Imported  [Use this mapping]      │    │
+│  │                                                                  │    │
+│  │  (scrolls both axes, fills remaining height)                    │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+│  Loading overlay (when deriving mappings):                               │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │         [spinner]  Generating column mappings...                 │    │
+│  │                    This may take a few seconds                   │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────────────┘
 </div>
 
 <p><strong>Functionality:</strong></p>
 <ul>
-  <li>File drag-drop zone + native file dialog via <code>ingest:selectFile</code></li>
-  <li><code>ingest:parseCSV</code> called on file select → shows row count + preview in left panel</li>
-  <li>Upload history shows all past uploads with their mapped column count</li>
-  <li><strong>"Map Columns" dropdown:</strong>
+  <li><strong>Full-width single-column layout.</strong> FileDropZone or CSV preview at top; upload history table fills remaining height below with both horizontal and vertical scrolling (sticky header).</li>
+  <li><code>ingest:parseCSV</code> called on file select → shows file info bar with action buttons inline, CSV preview below.</li>
+  <li><strong>Mapping source choice (after file selected):</strong> User explicitly chooses how to derive column mappings:
     <ul>
-      <li>"Use previous mapping from: [filename]" — loads stored mapping from a previous upload that has matching/similar columns. Calls <code>ingest:getStoredMappings(columns)</code>. If found, skips LLM suggestion and pre-fills Step 2.</li>
-      <li>"Suggest new mappings (LLM)" — calls <code>ingest:suggestMappings</code> → advances to Step 2 with LLM suggestions pre-filled.</li>
+      <li>"Use this mapping" (per upload history row) — calls <code>ingest:deriveMappings(columns, sampleRows, { uploadId })</code>. Backend loads that upload's stored mapping and builds rows from ALL existing canonical columns.</li>
+      <li>"AI Suggestion →" (inline button next to file info) — calls <code>ingest:deriveMappings(columns, sampleRows, 'llm')</code>. Backend calls LLM to suggest mappings.</li>
     </ul>
   </li>
+  <li><strong>Loading overlay:</strong> When <code>deriveMappings</code> is in progress (especially for LLM source), a full-area loading overlay with spinner replaces the step content. Managed via <code>derivingMappings</code> state in DataView.</li>
+  <li><strong>First upload (no priors):</strong> Only "AI Suggestion" is shown; no upload history table.</li>
+  <li><strong>"Set Column Priorities →":</strong> Shown next to upload history header when uploads exist and no active file. Advances to Step 3.</li>
+  <li>On mount: calls <code>ingest:getUploadHistory</code> to populate upload history table from DB.</li>
 </ul>
 
 <h3>Step 2 — Column Mapping</h3>
@@ -640,34 +665,38 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Data  /  2. Column Mapping                                              │
 │                                                                          │
-│  ┌─── Dataset Preview ────────────────────┐  ┌─── Mapping Config ─────┐  │
+│  ┌─── CSV Preview ────────────────────────┐  ┌─── Mapping Config ─────┐  │
 │  │  Vendor  │ Amount   │ GL Code │ Date   │  │  [ + Add Column ]     │  │
 │  │  ──────  │ ──────   │ ──────  │ ────── │  │                       │  │
-│  │  Acme    │ 1234.56  │ 6100    │ Jan-15 │  │  supplier_name        │  │
-│  │  Beta    │  567.00  │ 5200    │ Jan-16 │  │  [ Vendor       ▼ ] ✕ │  │
+│  │  Acme    │ 1234.56  │ 6100    │ Jan-15 │  │  Supplier Name  req   │  │
+│  │  Beta    │  567.00  │ 5200    │ Jan-16 │  │  [ Vendor       ▼ ]   │  │
 │  │  ...     │  ...     │  ...    │  ...   │  │                       │  │
-│  └────────────────────────────────────────┘  │  spend_amount         │  │
-│                                              │  [ Amount       ▼ ] ✕ │  │
+│  └────────────────────────────────────────┘  │  Spend Amount   req   │  │
+│                                              │  [ Amount       ▼ ]   │  │
 │                                              │                       │  │
-│                                              │  gl_code              │  │
-│                                              │  [ GL Code      ▼ ] ✕ │  │
+│                                              │  gl_code         ✕    │  │
+│                                              │  [ GL Code      ▼ ]   │  │
 │                                              │                       │  │
-│                                              │  invoice_date         │  │
-│                                              │  [ Date         ▼ ] ✕ │  │
+│                                              │  invoice_date    ✕    │  │
+│                                              │  [ Date         ▼ ]   │  │
 │                                              │                       │  │
-│                                              │  [ Apply Mappings → ] │  │
+│                                              │  [← Back] [Apply & Import →]│
 │                                              └───────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────┘
 </div>
 
 <p><strong>Functionality:</strong></p>
 <ul>
-  <li><strong>Left:</strong> Dataset preview (first 5 rows), updates to highlight the currently selected file column in the active mapping row.</li>
-  <li><strong>Right:</strong> List of canonical column rows. Each row: canonical name (left) + dropdown of CSV columns (right) + delete icon.</li>
-  <li><strong>"+ Add Column":</strong> Appends a new row with a canonical name selector (dropdown of all canonical columns not yet mapped) + a CSV column dropdown. Lets users map columns not auto-detected by LLM.</li>
-  <li>Delete icon removes that mapping row.</li>
-  <li>Dropdown for each CSV column shows all columns from the parsed file; "— none —" to unmap.</li>
-  <li><strong>"Apply Mappings →":</strong> Validates that <code>supplier_name</code> and <code>spend_amount</code> are mapped (required), shows inline errors if not. On success, advances to Step 3 with the mappings object. Does NOT write to DB yet.</li>
+  <li><strong>Left:</strong> CSV preview table (first 5 rows) for reference while mapping.</li>
+  <li><strong>Right:</strong> Mapping rows initialized from <code>ingest:deriveMappings</code> response. Required columns (supplier_name, spend_amount, invoice_date) are fixed at top with "required" badge. Optional columns have editable canonical names and can be removed.</li>
+  <li><strong>"+ Add Column":</strong> Appends a new mapping row with the next available CSV column. Each row has an editable canonical name and a dropdown to select the CSV column.</li>
+  <li><strong>"Apply &amp; Import →":</strong> Validates required columns are mapped, then:
+    <ol>
+      <li>Calls <code>ingest:importCSV(filePath, mappings)</code> → rows inserted into DB</li>
+      <li>Saves default <code>column_priorities</code> via <code>project:setSetting</code> (supplier_name first + all other mapped columns)</li>
+      <li>Appends to completed uploads list, returns to Step 1</li>
+    </ol>
+  </li>
 </ul>
 
 <h3>Step 3 — Column Priority</h3>
@@ -675,87 +704,82 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Data  /  3. Column Priority                                             │
 │                                                                          │
-│  ┌─── Dataset Preview ────────────────────┐  ┌─── Priority Order ─────┐  │
-│  │  Vendor  │ Amount   │ GL Code │ Date   │  │  Columns sent to LLM  │  │
-│  │  Acme    │ 1234.56  │ 6100    │ Jan-15 │  │  in this order:       │  │
-│  │  ...     │  ...     │  ...    │  ...   │  │                       │  │
-│  └────────────────────────────────────────┘  │  1. supplier_name [↑][↓] │
-│                                              │  2. spend_amount  [↑][↓] │
-│                                              │  3. gl_description[↑][↓] │
+│  ┌─── Transaction Preview (combined) ─────┐  ┌─── Priority Order ─────┐  │
+│  │  supplier │ spend  │ gl_code │ date    │  │  Columns sent to LLM  │  │
+│  │  ──────── │ ────── │ ─────── │ ─────── │  │  Drag to reorder.     │  │
+│  │  Acme     │ 1234   │ 6100    │ Jan-15  │  │                       │  │
+│  │  Beta     │  567   │ 5200    │ Jan-16  │  │  ≡ 1. supplier_name ✕ │  │
+│  │  ...      │  ...   │  ...    │  ...    │  │                       │  │
+│  │                                        │  │  Not sent to LLM:     │  │
+│  │  Showing 10 of 5,721 rows             │  │  — spend_amount [Add]  │  │
+│  └────────────────────────────────────────┘  │  — gl_code      [Add]  │  │
+│                                              │  — invoice_date  [Add]  │  │
 │                                              │                       │  │
-│                                              │  Not sent to LLM:     │  │
-│                                              │  — invoice_date [Add]  │  │
-│                                              │                       │  │
-│                                              │  Up/down to reorder.  │  │
-│                                              │  Higher = more weight │  │
-│                                              │  in classification.   │  │
-│                                              │                       │  │
-│                                              │  [ Save & Import → ]  │  │
+│                                              │  [← Back] [Save Priorities →]│
 │                                              └───────────────────────┘  │
-│                                                                          │
-│  If priorities already saved (re-visit):                                 │
-│  Shows read-only list with [ Edit ] button to unlock                     │
 └──────────────────────────────────────────────────────────────────────────┘
 </div>
 
 <p><strong>Functionality:</strong></p>
 <ul>
-  <li>Two sub-lists: "Columns sent to LLM" (numbered, with up/down reorder buttons and a remove action) and "Not sent to LLM" (with an "Add" action to move back to the LLM list). This separates "include in transaction table" (decided in Step 2) from "send to LLM for classification" (decided here). All mapped columns are imported into the DB regardless; only the LLM-list columns are saved to <code>column_priorities</code>.</li>
-  <li>If the user is re-visiting after a prior import: shows read-only list with an "Edit" button. Editing and saving re-applies priorities but does NOT re-import the CSV.</li>
-  <li><strong>"Save & Import →":</strong> This is the trigger for the actual CSV import.
-    <ol>
-      <li>Calls <code>ingest:importCSV(filePath, mappings)</code> → rows inserted into DB (all mapped columns)</li>
-      <li>Calls <code>project:setSetting('column_priorities', orderedLlmCols)</code> → only LLM columns saved, in priority order</li>
-      <li>WorkflowStore calls <code>refreshGateState()</code> → <code>hasUploadedData</code> becomes true</li>
-      <li>Navigates to <code>/suppliers</code></li>
-    </ol>
+  <li><strong>Left:</strong> Combined transaction preview from all imported CSVs. Queries <code>transactions:query</code> and <code>transactions:getColumns</code> to show first 10 rows with canonical column names.</li>
+  <li><strong>Right — priority editor:</strong> Two lists with drag-to-reorder:
+    <ul>
+      <li>"Columns sent to LLM" — numbered, draggable items with remove (✕) button. <strong>Default:</strong> only <code>supplier_name</code> (if it exists in mappings). All other columns start in the "Not sent" list.</li>
+      <li>"Not sent to LLM" — columns with "Add" button to move into the LLM list.</li>
+    </ul>
   </li>
+  <li>Drag-to-reorder uses native HTML5 drag-and-drop (drag handles on each LLM list item).</li>
+  <li><strong>"Save Priorities →":</strong> Saves <code>column_priorities</code> via <code>project:setSetting</code> with the user's chosen ordering, then navigates to <code>/suppliers</code>. Does NOT trigger import (import already happened in Step 2).</li>
 </ul>
 
 <h3>Components</h3>
 <div class="card-grid">
   <div class="card">
     <span class="badge badge-component">Component</span>
-    <span class="status-tag status-new">New</span>
     <h4>DataView (container)</h4>
     <div class="file">src/renderer/views/DataView.tsx</div>
     <ul>
       <li>Owns step state: <code>step: 'upload' | 'mapping' | 'priority'</code></li>
-      <li>Renders step indicator + active step component</li>
-      <li>Passes data down: filePath, csvPreview, mappings, priorities</li>
+      <li>Multi-CSV state: <code>completedUploads[]</code>, <code>activeFilePath</code>, <code>activePreview</code>, <code>activeDerivedMappings</code></li>
+      <li>Loads upload history on mount via <code>ingest:getUploadHistory</code></li>
+      <li>Orchestrates: file ready → derive mappings → mapping step → import → back to upload</li>
+      <li>Computes <code>allMappings</code> union from all uploads for priority step</li>
     </ul>
   </div>
   <div class="card">
     <span class="badge badge-component">Component</span>
-    <span class="status-tag status-new">New</span>
     <h4>DataUploadStep</h4>
-    <div class="file">src/renderer/views/data/DataUploadStep.tsx</div>
+    <div class="file">src/renderer/views/data-steps/DataUploadStep.tsx</div>
     <ul>
-      <li>FileDropZone + upload history table</li>
-      <li>Map Columns dropdown</li>
-      <li>Calls <code>ingest:parseCSV</code>, <code>ingest:getStoredMappings</code>, <code>ingest:suggestMappings</code></li>
+      <li>Full-width layout: FileDropZone / CSV preview at top; upload history table fills remaining height below</li>
+      <li>Action buttons inline with file info: "AI Suggestion", "Choose Different File"</li>
+      <li>"Use this mapping" per upload history row; "Set Column Priorities" next to history header</li>
+      <li>Upload history table scrolls both axes with sticky header</li>
+      <li>Full-area loading overlay when <code>derivingMappings</code> prop is true</li>
+      <li>Calls <code>ingest:parseCSV</code> on file select</li>
     </ul>
   </div>
   <div class="card">
     <span class="badge badge-component">Component</span>
-    <span class="status-tag status-new">New</span>
     <h4>DataMappingStep</h4>
-    <div class="file">src/renderer/views/data/DataMappingStep.tsx</div>
+    <div class="file">src/renderer/views/data-steps/DataMappingStep.tsx</div>
     <ul>
-      <li>CSVPreviewTable (left) + MappingConfigPanel (right)</li>
-      <li>Add/remove canonical column rows, dropdown per row</li>
-      <li>Validates required fields on Apply</li>
+      <li>CSVPreviewTable (left) + mapping config with + Add Column (right)</li>
+      <li>Receives <code>derivedMappings</code> from backend (rows + existingCanonicals)</li>
+      <li>Editable canonical names, CSV column dropdowns, remove button per row</li>
+      <li>Triggers import on "Apply &amp; Import"</li>
     </ul>
   </div>
   <div class="card">
     <span class="badge badge-component">Component</span>
-    <span class="status-tag status-new">New</span>
     <h4>DataPriorityStep</h4>
-    <div class="file">src/renderer/views/data/DataPriorityStep.tsx</div>
+    <div class="file">src/renderer/views/data-steps/DataPriorityStep.tsx</div>
     <ul>
-      <li>Drag-to-reorder priority list</li>
-      <li>Read-only mode with edit unlock when priorities already saved</li>
-      <li>Triggers import on Save &amp; Import</li>
+      <li>Combined transaction preview (all imported CSVs)</li>
+      <li>Drag-to-reorder priority list (native HTML5 DnD)</li>
+      <li>Default: only <code>supplier_name</code> in LLM list</li>
+      <li>Saves priorities only (no import)</li>
     </ul>
   </div>
 </div>
@@ -765,11 +789,13 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
   <tr><th>Channel</th><th>Step</th><th>When</th></tr>
   <tr><td><code>ingest:selectFile</code></td><td>1</td><td>Browse button / drop</td></tr>
   <tr><td><code>ingest:parseCSV</code></td><td>1</td><td>After file selected</td></tr>
-  <tr><td><code>ingest:getStoredMappings</code></td><td>1</td><td>"Use previous mapping" option</td></tr>
-  <tr><td><code>ingest:suggestMappings</code></td><td>1→2</td><td>"Suggest new mappings" option</td></tr>
-  <tr><td><code>ingest:getUpload</code></td><td>1</td><td>On mount (populate upload history)</td></tr>
-  <tr><td><code>ingest:importCSV</code></td><td>3</td><td>Save &amp; Import button</td></tr>
-  <tr><td><code>project:setSetting('column_priorities', ...)</code></td><td>3</td><td>After import succeeds</td></tr>
+  <tr><td><code>ingest:getUploadHistory</code></td><td>1</td><td>On mount (populate completed uploads list)</td></tr>
+  <tr><td><code>ingest:deriveMappings</code></td><td>1→2</td><td>After user chooses mapping source (LLM or prior upload)</td></tr>
+  <tr><td><code>ingest:getExistingCanonicals</code></td><td>2</td><td>Used by deriveMappings internally; also powers double-click popover</td></tr>
+  <tr><td><code>ingest:importCSV</code></td><td>2</td><td>"Apply &amp; Import" button (per CSV)</td></tr>
+  <tr><td><code>project:setSetting('column_priorities', ...)</code></td><td>2, 3</td><td>Default after each import (Step 2); user override (Step 3)</td></tr>
+  <tr><td><code>transactions:query</code></td><td>3</td><td>Combined transaction preview</td></tr>
+  <tr><td><code>transactions:getColumns</code></td><td>3</td><td>Discover column names for preview table</td></tr>
 </table>
 </section>
 

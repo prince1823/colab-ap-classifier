@@ -7,7 +7,7 @@ export interface LLMConfigResponse {
   hasAnthropicKey: boolean;
   hasOpenAIKey: boolean;
 }
-import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority } from './column-mapping';
+import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type {
   TransactionFilter,
   TransactionStats,
@@ -21,6 +21,7 @@ import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
 import type { ChangeLog } from './changelog';
+import type { UploadRecord } from './services';
 
 export interface IPCInvokeMap {
   // Project
@@ -39,7 +40,10 @@ export interface IPCInvokeMap {
   'ingest:parseCSV':         { args: [filePath: string]; result: CSVPreview };
   'ingest:suggestMappings':  { args: [columns: string[], sampleRows: Record<string, string>[]]; result: ColumnMappingResult };
   'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: { rowsInserted: number; uploadId: string } };
-  'ingest:getUpload':        { args: []; result: { id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null };
+  'ingest:getUpload':              { args: []; result: { id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null };
+  'ingest:getUploadHistory':       { args: []; result: UploadRecord[] };
+  'ingest:deriveMappings':         { args: [columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource]; result: DerivedMappings };
+  'ingest:getExistingCanonicals':  { args: []; result: string[] };
 
   // Transactions
   'transactions:query':             { args: [filters?: TransactionFilter]; result: PaginatedTransactions };

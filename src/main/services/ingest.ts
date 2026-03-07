@@ -7,9 +7,13 @@ import type {
   CSVPreview,
   ColumnMapping,
   ColumnMappingResult,
+  MappingRow,
+  DeriveMappingsSource,
+  DerivedMappings,
 } from '../../shared/types/column-mapping';
-import { toEnrichedMapping } from '../../shared/types/column-mapping';
-import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
+import { toEnrichedMapping, toSimpleMapping } from '../../shared/types/column-mapping';
+import type { ColumnMappingWithPriority } from '../../shared/types/column-mapping';
+import { CANONICAL_COLUMNS, REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import type {
   Database,
   IngestService as IIngestService,
@@ -342,11 +346,88 @@ export class IngestService implements IIngestService {
       id: row.id,
       fileName: row.file_name,
       filePath: row.file_path ?? undefined,
-      columnMappings: row.column_mappings ? JSON.parse(row.column_mappings) : {},
+      columnMappings: row.column_mappings
+        ? toSimpleMapping(JSON.parse(row.column_mappings) as ColumnMappingWithPriority)
+        : {},
       rowCount: row.row_count,
       status: row.status as UploadRecord['status'],
       createdAt: String(row.created_at),
       updatedAt: row.updated_at ? String(row.updated_at) : undefined,
     }));
+  }
+
+  async deriveMappings(
+    columns: string[],
+    sampleRows: Record<string, string>[],
+    source: DeriveMappingsSource
+  ): Promise<DerivedMappings> {
+    const existingCanonicals = await this.getExistingCanonicals();
+
+    if (source === 'llm') {
+      // First upload path: use LLM to suggest mappings
+      const suggestion = await this.suggestMappings(columns, sampleRows);
+      const rows: MappingRow[] = [];
+
+      // Required canonicals first
+      for (const canonical of REQUIRED_CANONICAL_COLUMNS) {
+        rows.push({ canonical, csvColumn: suggestion.mappings[canonical] ?? '' });
+      }
+
+      // Then non-required LLM suggestions
+      const usedCsvCols = new Set(rows.map((r) => r.csvColumn).filter(Boolean));
+      for (const [canonical, csv] of Object.entries(suggestion.mappings)) {
+        if (!REQUIRED_CANONICAL_COLUMNS.includes(canonical as typeof REQUIRED_CANONICAL_COLUMNS[number]) && csv && !usedCsvCols.has(csv)) {
+          rows.push({ canonical, csvColumn: csv });
+        }
+      }
+
+      return { rows, existingCanonicals };
+    }
+
+    // Stored mapping path: load from a specific prior upload
+    const uploads = await this.getUploadHistory();
+    const upload = uploads.find((u) => u.id === source.uploadId);
+    if (!upload) {
+      throw new Error(`Upload not found: ${source.uploadId}`);
+    }
+
+    const storedMapping = upload.columnMappings; // canonical → csvColumn
+    const rows: MappingRow[] = [];
+
+    // Start with ALL existing canonicals, auto-fill CSV columns that match the new file
+    const allCanonicals = new Set([
+      ...REQUIRED_CANONICAL_COLUMNS,
+      ...existingCanonicals,
+      ...Object.keys(storedMapping),
+    ]);
+
+    for (const canonical of allCanonicals) {
+      const csvCol = storedMapping[canonical];
+      // Auto-fill if the stored CSV column exists in the new file's columns
+      const matched = csvCol && columns.includes(csvCol) ? csvCol : '';
+      rows.push({ canonical, csvColumn: matched });
+    }
+
+    // Sort: required first, then rest alphabetically
+    const requiredSet = new Set<string>(REQUIRED_CANONICAL_COLUMNS);
+    rows.sort((a, b) => {
+      const aReq = requiredSet.has(a.canonical) ? 0 : 1;
+      const bReq = requiredSet.has(b.canonical) ? 0 : 1;
+      if (aReq !== bReq) return aReq - bReq;
+      return a.canonical.localeCompare(b.canonical);
+    });
+
+    return { rows, existingCanonicals };
+  }
+
+  async getExistingCanonicals(): Promise<string[]> {
+    const uploads = await this.getUploadHistory();
+    const canonicals = new Set<string>();
+    for (const upload of uploads) {
+      for (const key of Object.keys(upload.columnMappings)) {
+        canonicals.add(key);
+      }
+    }
+    return [...canonicals].sort();
   }
 }

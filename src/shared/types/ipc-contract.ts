@@ -73,6 +73,7 @@ export interface IPCInvokeMap {
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierName: string]; result: SupplierInfo };
+  'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
 
   // Rules
   'rules:list':   { args: []; result: OverrideRule[] };

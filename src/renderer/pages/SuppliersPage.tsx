@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
+import type { ResearchProgress } from '../../shared/types/classification'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
 
@@ -76,7 +77,6 @@ function EditableCell({
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value)
-              // Auto-commit on select change
               setEditing(false)
               if (e.target.value !== value) {
                 onSave(e.target.value)
@@ -115,6 +115,13 @@ function EditableCell({
   )
 }
 
+/** Status badge component */
+function StatusBadge({ status }: { status: string }) {
+  const cls = status === 'confirmed' ? 'status-badge confirmed'
+    : status === 'rejected' ? 'status-badge rejected'
+    : 'status-badge pending'
+  return <span className={cls}>{status}</span>
+}
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
@@ -123,58 +130,47 @@ export default function SuppliersPage() {
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
-  const [catAFilter, setCatAFilter] = useState<'all' | 'catA' | 'nonCatA'>('all')
-  const [classificationMap, setClassificationMap] = useState<Record<string, { l1: string; l2: string; l3: string }>>({})
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unconfirmed' | 'unresearched'>('all')
+  const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
+  const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
+  const [tailSpendSet, setTailSpendSet] = useState(false)
 
-  /** Build supplier->{l1,l2,l3} map from transactions (top classification by spend per supplier) */
-  const buildClassificationMap = (transactions: { classificationPath?: string | null; canonicalFields?: Record<string, unknown> }[]): Record<string, { l1: string; l2: string; l3: string }> => {
-    // Accumulate spend per supplier+path combo
-    const spendBySupplierPath = new Map<string, Map<string, number>>()
-    for (const t of transactions) {
-      const supplier = t.canonicalFields?.supplier_name
-      if (!supplier || !t.classificationPath) continue
-      const name = String(supplier)
-      if (!spendBySupplierPath.has(name)) spendBySupplierPath.set(name, new Map())
-      const pathMap = spendBySupplierPath.get(name)!
-      const spend = Number(t.canonicalFields?.spend_amount ?? 0) || 0
-      pathMap.set(t.classificationPath, (pathMap.get(t.classificationPath) || 0) + Math.abs(spend))
-    }
-
-    // Pick top path per supplier
-    const result: Record<string, { l1: string; l2: string; l3: string }> = {}
-    for (const [supplier, pathMap] of spendBySupplierPath) {
-      let topPath = ''
-      let topSpend = -1
-      for (const [path, spend] of pathMap) {
-        if (spend > topSpend) { topPath = path; topSpend = spend }
-      }
-      if (topPath) {
-        const parts = topPath.split('|').map(p => p.trim())
-        result[supplier] = { l1: parts[0] || '', l2: parts[1] || '', l3: parts[2] || '' }
-      }
-    }
-    return result
-  }
-
-  const loadData = async () => {
-    // Only show spinner if no cached data
+  const loadData = useCallback(async () => {
     if (suppliers.length === 0) setLoading(true)
     setError(null)
     try {
-      const [data, paginatedResult] = await Promise.all([
-        ipc.suppliers.list(),
-        ipc.transactions.query(),
-      ])
+      const data = await ipc.suppliers.list()
       setSuppliers(data as ProjectSupplierView[])
-      setClassificationMap(buildClassificationMap(paginatedResult.rows))
+
+      // Check tail spend threshold
+      const threshold = await ipc.project.getSetting('tail_spend_threshold')
+      if (threshold && Number(threshold) > 0) {
+        setTailSpendThreshold(String(threshold))
+        setTailSpendSet(true)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load suppliers')
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData() }, [loadData])
+
+  // Subscribe to research progress
+  useEffect(() => {
+    const unsub = ipc.suppliers.onResearchProgress((progress: ResearchProgress) => {
+      setResearchProgress(progress)
+      if (progress.status === 'complete' || progress.status === 'error') {
+        setTimeout(() => {
+          setResearchProgress(null)
+          loadData()
+        }, 1500)
+      }
+    })
+    return unsub
+  }, [loadData])
 
   /** Update local state */
   const updateSuppliers = useCallback((updater: (prev: ProjectSupplierView[]) => ProjectSupplierView[]) => {
@@ -188,11 +184,9 @@ export default function SuppliersPage() {
       const existingInfo = supplier.supplierInfo ?? {}
       const updatedInfo: SupplierInfo = {
         ...existingInfo,
-        [field]: newValue || undefined, // clear empty strings
+        [field]: newValue || undefined,
       }
       await ipc.suppliers.update(supplier.supplierName, { supplierInfo: updatedInfo })
-
-      // Update local state immediately
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, supplierInfo: updatedInfo } : s
       ))
@@ -219,20 +213,88 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Save categoryA toggle */
-  const saveCategoryA = useCallback(async (supplier: ProjectSupplierView, checked: boolean) => {
+  /** Research a single supplier */
+  const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
     setSaving(true)
     try {
-      await ipc.suppliers.update(supplier.supplierName, { categoryA: checked })
+      const info = await ipc.suppliers.researchSingle(supplier.supplierName)
       updateSuppliers(prev => prev.map(s =>
-        s.id === supplier.id ? { ...s, categoryA: checked } : s
+        s.supplierName === supplier.supplierName
+          ? { ...s, supplierInfo: info, dataSource: 'web_search' as const }
+          : s
       ))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update')
+      setError(e instanceof Error ? e.message : 'Research failed')
     } finally {
       setSaving(false)
     }
   }, [updateSuppliers])
+
+  /** Confirm a single supplier */
+  const confirmSupplier = useCallback(async (supplier: ProjectSupplierView) => {
+    setSaving(true)
+    try {
+      await ipc.suppliers.confirm(supplier.id, 'confirmed')
+      updateSuppliers(prev => prev.map(s =>
+        s.id === supplier.id ? { ...s, confirmationStatus: 'confirmed' } : s
+      ))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to confirm')
+    } finally {
+      setSaving(false)
+    }
+  }, [updateSuppliers])
+
+  /** Batch research selected suppliers */
+  const researchSelected = useCallback(async () => {
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.dataSource === 'manual')
+    if (selected.length === 0) return
+    for (const s of selected) {
+      try {
+        const info = await ipc.suppliers.researchSingle(s.supplierName)
+        updateSuppliers(prev => prev.map(sup =>
+          sup.id === s.id ? { ...sup, supplierInfo: info, dataSource: 'web_search' as const } : sup
+        ))
+      } catch {
+        // Continue with next supplier
+      }
+    }
+    setSelectedIds(new Set())
+  }, [suppliers, selectedIds, updateSuppliers])
+
+  /** Batch confirm selected suppliers */
+  const confirmSelected = useCallback(async () => {
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.confirmationStatus !== 'confirmed')
+    if (selected.length === 0) return
+    for (const s of selected) {
+      try {
+        await ipc.suppliers.confirm(s.id, 'confirmed')
+      } catch {
+        // Continue with next
+      }
+    }
+    updateSuppliers(prev => prev.map(s =>
+      selectedIds.has(s.id) ? { ...s, confirmationStatus: 'confirmed' } : s
+    ))
+    setSelectedIds(new Set())
+  }, [suppliers, selectedIds, updateSuppliers])
+
+  /** Apply tail spend threshold */
+  const applyTailSpend = useCallback(async () => {
+    const val = Number(tailSpendThreshold)
+    if (!val || val <= 0) return
+    setSaving(true)
+    try {
+      await ipc.project.setSetting('tail_spend_threshold', val)
+      await ipc.suppliers.filterTailSpend(val)
+      setTailSpendSet(true)
+      await loadData()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to apply threshold')
+    } finally {
+      setSaving(false)
+    }
+  }, [tailSpendThreshold, loadData])
 
   /** Get display value for a supplierInfo field */
   const getFieldValue = (supplier: ProjectSupplierView, field: keyof SupplierInfo): string => {
@@ -244,13 +306,25 @@ export default function SuppliersPage() {
     return String(val)
   }
 
-  /** Sort by spend descending, then filter by catA and search */
+  // Computed counts
+  const unconfirmedCount = useMemo(() =>
+    suppliers.filter(s => s.confirmationStatus !== 'confirmed').length
+  , [suppliers])
+
+  const unresearchedCount = useMemo(() =>
+    suppliers.filter(s => s.dataSource === 'manual').length
+  , [suppliers])
+
+  /** Sort by spend descending, then filter */
   const filteredSuppliers = useMemo(() => {
     let result = [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
 
-    // Category A filter
-    if (catAFilter === 'catA') result = result.filter(s => s.categoryA)
-    else if (catAFilter === 'nonCatA') result = result.filter(s => !s.categoryA)
+    // Status filter
+    if (statusFilter === 'unconfirmed') {
+      result = result.filter(s => s.confirmationStatus !== 'confirmed')
+    } else if (statusFilter === 'unresearched') {
+      result = result.filter(s => s.dataSource === 'manual')
+    }
 
     // Search filter
     const q = search.trim().toLowerCase()
@@ -271,7 +345,28 @@ export default function SuppliersPage() {
     }
 
     return result
-  }, [suppliers, search, catAFilter])
+  }, [suppliers, search, statusFilter])
+
+  // Select all logic
+  const allSelected = filteredSuppliers.length > 0 && filteredSuppliers.every(s => selectedIds.has(s.id))
+  const someSelected = selectedIds.size > 0
+
+  const toggleSelectAll = useCallback(() => {
+    if (allSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredSuppliers.map(s => s.id)))
+    }
+  }, [allSelected, filteredSuppliers])
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   if (loading) {
     return (
@@ -288,32 +383,84 @@ export default function SuppliersPage() {
     <div className="suppliers-page">
       {error && <div className="suppliers-error">{error}</div>}
 
-      <div className="flex items-center justify-end gap-2 mb-2">
-        <select
-          className="rounded border border-gray-300 px-2 py-0.5 text-[11px] bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-          value={catAFilter}
-          onChange={(e) => setCatAFilter(e.target.value as 'all' | 'catA' | 'nonCatA')}
-        >
-          <option value="all">All</option>
-          <option value="catA">Cat. A</option>
-          <option value="nonCatA">Non Cat. A</option>
-        </select>
-        <div className="relative">
+      {/* Tail spend threshold banner */}
+      {!tailSpendSet && (
+        <div className="suppliers-banner">
+          <span>Tail spend threshold not set.</span>
+          <input
+            type="number"
+            placeholder="$ amount"
+            value={tailSpendThreshold}
+            onChange={(e) => setTailSpendThreshold(e.target.value)}
+            className="banner-input"
+          />
+          <button onClick={applyTailSpend} className="banner-btn" disabled={!tailSpendThreshold}>
+            Apply
+          </button>
+        </div>
+      )}
+
+      {/* Research progress bar */}
+      {researchProgress && researchProgress.status === 'researching' && (
+        <div className="suppliers-progress">
+          Researching: {researchProgress.currentSupplier}
+          ({researchProgress.processedSuppliers}/{researchProgress.totalSuppliers})
+          <div className="progress-bar">
+            <div
+              className="progress-fill"
+              style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Batch actions + warning buttons */}
+      <div className="suppliers-actions-bar">
+        {someSelected && (
+          <div className="batch-actions">
+            <button onClick={researchSelected} className="action-btn research">
+              Research Selected
+            </button>
+            <button onClick={confirmSelected} className="action-btn confirm">
+              Confirm Selected
+            </button>
+            <span className="selected-count">{selectedIds.size} selected</span>
+          </div>
+        )}
+        <div className="warning-buttons">
+          {unconfirmedCount > 0 && (
+            <button
+              className={`warning-btn ${statusFilter === 'unconfirmed' ? 'active' : ''}`}
+              onClick={() => setStatusFilter(statusFilter === 'unconfirmed' ? 'all' : 'unconfirmed')}
+            >
+              {unconfirmedCount} unconfirmed
+            </button>
+          )}
+          {unresearchedCount > 0 && (
+            <button
+              className={`warning-btn ${statusFilter === 'unresearched' ? 'active' : ''}`}
+              onClick={() => setStatusFilter(statusFilter === 'unresearched' ? 'all' : 'unresearched')}
+            >
+              {unresearchedCount} unresearched
+            </button>
+          )}
+        </div>
+        <div className="suppliers-search-area">
           <input
             ref={searchRef}
             type="text"
-            placeholder="Search suppliers…"
+            placeholder="Search suppliers..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); searchRef.current?.blur() } }}
-            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none w-40"
+            className="suppliers-search-input"
           />
           {search && (
             <button
               onClick={() => { setSearch(''); searchRef.current?.focus() }}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+              className="suppliers-search-clear"
             >
-              ✕
+              <svg viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
             </button>
           )}
         </div>
@@ -323,13 +470,19 @@ export default function SuppliersPage() {
         <table className="suppliers-table">
           <thead>
             <tr>
+              <th className="col-check">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  className="supplier-checkbox"
+                />
+              </th>
               <th className="col-supplier">Supplier</th>
               <th className="col-right">Txns</th>
               <th className="col-right">Spend</th>
-              <th className="col-center">Cat. A</th>
-              <th>L1</th>
-              <th>L2</th>
-              <th>L3</th>
+              <th>Status</th>
+              <th>Actions</th>
               {INFO_COLUMNS.map(col => (
                 <React.Fragment key={col.key}>
                   <th>{col.label}</th>
@@ -340,34 +493,43 @@ export default function SuppliersPage() {
           </thead>
           <tbody>
             {filteredSuppliers.map((s) => (
-              <tr key={s.id}>
-                <td className="col-supplier" title={s.supplierName}>{s.supplierName}</td>
-                <td className="col-right">{s.transactionCount}</td>
-                <td className="col-right">
-                  {fmtAbbrev(s.totalSpend)}
-                </td>
-                <td className="col-center">
+              <tr key={s.id} className={selectedIds.has(s.id) ? 'row-selected' : ''}>
+                <td className="col-check">
                   <input
                     type="checkbox"
-                    className="supplier-cata-check"
-                    checked={s.categoryA}
-                    onChange={(e) => saveCategoryA(s, e.target.checked)}
+                    checked={selectedIds.has(s.id)}
+                    onChange={() => toggleSelect(s.id)}
+                    className="supplier-checkbox"
                   />
                 </td>
-                <td title={classificationMap[s.supplierName]?.l1 || ''}>
-                  {classificationMap[s.supplierName]?.l1 || <span className="cell-placeholder">-</span>}
-                </td>
-                <td title={classificationMap[s.supplierName]?.l2 || ''}>
-                  {classificationMap[s.supplierName]?.l2 || <span className="cell-placeholder">-</span>}
-                </td>
-                <td title={classificationMap[s.supplierName]?.l3 || ''}>
-                  {classificationMap[s.supplierName]?.l3 || <span className="cell-placeholder">-</span>}
+                <td className="col-supplier" title={s.supplierName}>{s.supplierName}</td>
+                <td className="col-right">{s.transactionCount}</td>
+                <td className="col-right">{fmtAbbrev(s.totalSpend)}</td>
+                <td><StatusBadge status={s.confirmationStatus} /></td>
+                <td className="col-actions">
+                  {s.dataSource === 'manual' && !s.supplierInfo ? (
+                    <button
+                      className="row-action-btn research"
+                      onClick={() => researchSupplier(s)}
+                      title="Research this supplier"
+                    >
+                      Research
+                    </button>
+                  ) : s.confirmationStatus === 'pending' ? (
+                    <button
+                      className="row-action-btn confirm"
+                      onClick={() => confirmSupplier(s)}
+                      title="Confirm this supplier"
+                    >
+                      Confirm
+                    </button>
+                  ) : null}
                 </td>
 
                 {INFO_COLUMNS.map(col => {
                   const val = getFieldValue(s, col.key)
                   const parentCell = col.key === 'officialBusinessName' ? (
-                    <td>
+                    <td key={`parent-${s.id}`}>
                       <EditableCell
                         value={s.parentName || ''}
                         onSave={(newVal) => saveParentName(s, newVal)}
@@ -450,7 +612,7 @@ export default function SuppliersPage() {
             {filteredSuppliers.length === 0 && (
               <tr>
                 <td colSpan={7 + INFO_COLUMNS.length + 1} className="suppliers-empty">
-                  {search ? `No suppliers matching "${search}"` : 'No suppliers found. Upload a CSV and run classification to populate suppliers.'}
+                  {search ? `No suppliers matching "${search}"` : 'No suppliers found. Upload a CSV to populate suppliers.'}
                 </td>
               </tr>
             )}

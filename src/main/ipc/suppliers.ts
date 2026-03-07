@@ -1,6 +1,6 @@
 import { registerHandler } from './register';
 import type { SupplierService, SupplierResearcher } from '../../shared/types/services';
-import type { SupplierConfirmationStatus } from '../../shared/types/suppliers';
+import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 
 export function registerSuppliersHandlers(
   suppliers: SupplierService,
@@ -10,11 +10,16 @@ export function registerSuppliersHandlers(
     return suppliers.listProjectSuppliers();
   });
 
-  registerHandler('suppliers:update', async (_event, supplierId: unknown, newName: unknown) => {
-    await suppliers.renameSupplier(supplierId as string, newName as string);
+  registerHandler('suppliers:update', async (_event, supplierName: unknown, updates: unknown) => {
+    await suppliers.updateSupplier(supplierName as string, updates as SupplierUpdateInput);
   });
 
   registerHandler('suppliers:confirm', async (_event, id: unknown, status: unknown) => {
     await suppliers.confirmSupplier(id as string, status as SupplierConfirmationStatus);
+  });
+
+  registerHandler('suppliers:filterTailSpend', async (_event, threshold: unknown) => {
+    const ids = await suppliers.filterTailSpend(threshold as number);
+    return { markedCount: ids.length };
   });
 }

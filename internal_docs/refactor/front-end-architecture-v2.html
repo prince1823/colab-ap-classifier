@@ -1451,7 +1451,7 @@ interface FieldDefinition {
   <tr><th>Channel</th><th>Change</th></tr>
   <tr>
     <td><code>suppliers:update</code></td>
-    <td>Handler must be rewritten to accept <code>(supplierName: string, updates: SupplierUpdateInput)</code> and call a new <code>SupplierService.updateProjectSupplier()</code> method that handles supplierInfo, parentName, and categoryA patching.</td>
+    <td>Handler must be rewritten to accept <code>(supplierName: string, updates: SupplierUpdateInput)</code> and call a new <code>SupplierService.updateSupplier()</code> method that handles supplierInfo, parentName, and mappedTaxonomyPaths patching.</td>
   </tr>
   <tr>
     <td><code>suppliers:list</code></td>
@@ -1600,7 +1600,7 @@ interface SupplierUpdateInput {
   parentName?: string | null;
   supplierInfo?: SupplierInfo;    // written to supplier_universe via upsertSupplier
   aliases?: string[] | null;
-  categoryA?: boolean;            // requires category_a column in project_suppliers
+  mappedTaxonomyPaths?: string[] | null;  // JSON array of pipe-delimited taxonomy paths
 }</code></pre>
 
 <h3>ClassificationQueueFilter</h3>

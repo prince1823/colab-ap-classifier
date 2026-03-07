@@ -115,6 +115,8 @@ export const ipc = {
       invoke('suppliers:researchSingle', supplierName),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
       on('suppliers:research:progress', callback),
+    filterTailSpend: (threshold: number) =>
+      invoke('suppliers:filterTailSpend', threshold),
   },
 
   // ── Rules (4 channels) ──

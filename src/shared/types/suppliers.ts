@@ -44,8 +44,8 @@ export interface ProjectSupplier {
   isTailSpend: boolean;
   parentSupplierName: string | null;
   parentName: string | null;
-  categoryA: boolean;
   supplierInfo: SupplierInfo | null;
+  mappedTaxonomyPaths: string[] | null;
   dataSource: 'universe' | 'web_search' | 'manual';
   universeMatch: boolean;
   createdAt: string;
@@ -62,5 +62,5 @@ export interface SupplierUpdateInput {
   parentName?: string | null;
   supplierInfo?: SupplierInfo;
   aliases?: string[] | null;
-  categoryA?: boolean;
+  mappedTaxonomyPaths?: string[] | null;
 }

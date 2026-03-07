@@ -122,6 +122,17 @@ export class DuckDBDatabase implements Database {
         CREATE INDEX IF NOT EXISTS idx_project_suppliers_name ON project_suppliers(supplier_name);
       `);
     }
+
+    // Migrate: ensure supplier_info and mapped_taxonomy_paths columns exist on project_suppliers
+    const siCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'supplier_info'"
+    );
+    if (siCol.length === 0) {
+      await this.exec(`
+        ALTER TABLE project_suppliers ADD COLUMN supplier_info JSON;
+        ALTER TABLE project_suppliers ADD COLUMN mapped_taxonomy_paths JSON;
+      `);
+    }
   }
 
   async closeDatabase(): Promise<void> {
@@ -268,6 +279,8 @@ export class DuckDBDatabase implements Database {
         parent_supplier_name VARCHAR,
         data_source VARCHAR DEFAULT 'manual',
         universe_match BOOLEAN DEFAULT FALSE,
+        supplier_info JSON,
+        mapped_taxonomy_paths JSON,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );

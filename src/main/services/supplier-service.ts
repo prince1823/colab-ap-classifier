@@ -8,6 +8,7 @@ import type {
   ProjectSupplier,
   ProjectSupplierView,
   SupplierConfirmationStatus,
+  SupplierUpdateInput,
 } from '../../shared/types/suppliers';
 
 export class SupplierService implements ISupplierService {
@@ -112,6 +113,34 @@ export class SupplierService implements ISupplierService {
     );
   }
 
+  async updateSupplier(supplierName: string, updates: SupplierUpdateInput): Promise<void> {
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (updates.supplierInfo !== undefined) {
+      setClauses.push('supplier_info = ?');
+      params.push(JSON.stringify(updates.supplierInfo));
+    }
+    if (updates.parentName !== undefined) {
+      setClauses.push('parent_supplier_name = ?');
+      params.push(updates.parentName);
+    }
+    if (updates.mappedTaxonomyPaths !== undefined) {
+      setClauses.push('mapped_taxonomy_paths = ?');
+      params.push(JSON.stringify(updates.mappedTaxonomyPaths));
+    }
+
+    if (setClauses.length === 0) return;
+
+    setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(supplierName);
+
+    await this.db.run(
+      `UPDATE project_suppliers SET ${setClauses.join(', ')} WHERE supplier_name = ?`,
+      ...params
+    );
+  }
+
   private async transactionColumnExists(columnName: string): Promise<boolean> {
     const row = await this.db.get<{ cnt: number }>(
       `SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = ?`,
@@ -132,6 +161,8 @@ export class SupplierService implements ISupplierService {
       parent_supplier_name: string | null;
       data_source: string;
       universe_match: boolean;
+      supplier_info: string | null;
+      mapped_taxonomy_paths: string | null;
       created_at: string;
       transaction_count: number | bigint;
       total_spend: number | bigint;
@@ -142,7 +173,8 @@ export class SupplierService implements ISupplierService {
       FROM project_suppliers ps
       LEFT JOIN transactions t ON t.project_supplier_id = ps.id
       GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
-               ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.created_at, ps.updated_at
+               ps.parent_supplier_name, ps.data_source, ps.universe_match,
+               ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at
       ORDER BY ps.supplier_name`
     );
 
@@ -153,8 +185,8 @@ export class SupplierService implements ISupplierService {
       isTailSpend: Boolean(row.is_tail_spend),
       parentSupplierName: row.parent_supplier_name,
       parentName: row.parent_supplier_name,
-      categoryA: false,
-      supplierInfo: null,
+      supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
+      mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
       dataSource: row.data_source as ProjectSupplier['dataSource'],
       universeMatch: Boolean(row.universe_match),
       createdAt: String(row.created_at),
@@ -173,6 +205,8 @@ export class SupplierService implements ISupplierService {
       parent_supplier_name: string | null;
       data_source: string;
       universe_match: boolean;
+      supplier_info: string | null;
+      mapped_taxonomy_paths: string | null;
       created_at: string;
     }>(
       'SELECT * FROM project_suppliers WHERE id = ?',
@@ -188,8 +222,8 @@ export class SupplierService implements ISupplierService {
       isTailSpend: Boolean(row.is_tail_spend),
       parentSupplierName: row.parent_supplier_name,
       parentName: row.parent_supplier_name,
-      categoryA: false,
-      supplierInfo: null,
+      supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
+      mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
       dataSource: row.data_source as ProjectSupplier['dataSource'],
       universeMatch: Boolean(row.universe_match),
       createdAt: String(row.created_at),

@@ -1,4 +1,4 @@
-import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus } from './suppliers';
+import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
@@ -128,6 +128,7 @@ export interface SupplierService {
   addAlias(canonicalName: string, alias: string): Promise<void>;
   getAliases(canonicalName: string): Promise<string[]>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
+  updateSupplier(supplierName: string, updates: SupplierUpdateInput): Promise<void>;
   listProjectSuppliers(): Promise<ProjectSupplierView[]>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;

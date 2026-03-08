@@ -150,6 +150,7 @@ export const ipc = {
     getSupplierUniversePath: () => invoke('settings:getSupplierUniversePath'),
     setSupplierUniversePath: (path: string) => invoke('settings:setSupplierUniversePath', path),
     selectSupplierUniverseFile: () => invoke('settings:selectSupplierUniverseFile'),
-    clearSupplierUniversePath: () => invoke('settings:clearSupplierUniversePath'),
+    getSupplierUniverseResolvedPath: () => invoke('settings:getSupplierUniverseResolvedPath'),
+    createNewSupplierUniverse: () => invoke('settings:createNewSupplierUniverse'),
   },
 };

@@ -25,8 +25,8 @@ import type { UploadRecord } from './services';
 
 export interface IPCInvokeMap {
   // Project
-  'project:new':            { args: [name: string, filePath?: string]; result: { filePath: string; name: string; warning?: string } | null };
-  'project:open':           { args: [filePath?: string]; result: { filePath: string; name: string; warning?: string } | null };
+  'project:new':            { args: [name: string, filePath?: string]; result: { filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean } | null };
+  'project:open':           { args: [filePath?: string]; result: { filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean } | null };
   'project:close':          { args: []; result: void };
   'project:getSetting':     { args: [key: string]; result: unknown };
   'project:setSetting':     { args: [key: string, value: unknown]; result: void };
@@ -96,10 +96,11 @@ export interface IPCInvokeMap {
   'settings:validateApiKey': { args: [provider: string, key: string]; result: { valid: boolean; error?: string } };
 
   // Settings — Supplier Universe
-  'settings:getSupplierUniversePath':    { args: []; result: string | null };
-  'settings:setSupplierUniversePath':    { args: [path: string]; result: void };
-  'settings:selectSupplierUniverseFile': { args: []; result: string | null };
-  'settings:clearSupplierUniversePath':  { args: []; result: void };
+  'settings:getSupplierUniversePath':         { args: []; result: string | null };
+  'settings:setSupplierUniversePath':         { args: [path: string]; result: void };
+  'settings:selectSupplierUniverseFile':      { args: []; result: string | null };
+  'settings:getSupplierUniverseResolvedPath': { args: []; result: string | null };
+  'settings:createNewSupplierUniverse':       { args: []; result: string | null };
 }
 
 export interface IPCEventMap {

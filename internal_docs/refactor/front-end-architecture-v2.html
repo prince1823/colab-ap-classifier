@@ -1463,9 +1463,15 @@ interface FieldDefinition {
     <td><code>ipc/settings.ts</code></td>
   </tr>
   <tr>
-    <td><code>settings:clearSupplierUniversePath</code></td>
+    <td><code>settings:getSupplierUniverseResolvedPath</code></td>
     <td><code>()</code></td>
-    <td><code>void</code></td>
+    <td><code>string | null</code></td>
+    <td><code>ipc/settings.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>settings:createNewSupplierUniverse</code></td>
+    <td><code>()</code></td>
+    <td><code>string | null</code></td>
     <td><code>ipc/settings.ts</code></td>
   </tr>
 </table>
@@ -1514,10 +1520,16 @@ interface FieldDefinition {
 'ingest:getStoredMappings':  { args: [columns: string[]]; result: { id: string; fileName: string; columnMappings: ColumnMapping } | null };
 
 // Settings — Supplier Universe (app-level, not project-level)
-'settings:getSupplierUniversePath':    { args: []; result: string | null };
-'settings:setSupplierUniversePath':    { args: [path: string]; result: void };
-'settings:selectSupplierUniverseFile': { args: []; result: string | null };
-'settings:clearSupplierUniversePath':  { args: []; result: void };</code></pre>
+// User must explicitly configure a path — no silent default location
+'settings:getSupplierUniversePath':         { args: []; result: string | null };
+'settings:setSupplierUniversePath':         { args: [path: string]; result: void }; // also opens the DB
+'settings:selectSupplierUniverseFile':      { args: []; result: string | null };
+'settings:getSupplierUniverseResolvedPath': { args: []; result: string | null };
+'settings:createNewSupplierUniverse':       { args: []; result: string | null }; // showSaveDialog + open
+
+// project:open and project:new results now include needsSupplierUniverseSetup flag
+// { filePath, name, warning?, needsSupplierUniverseSetup? }
+// When true, LaunchModal shows supplier-universe-setup step before calling onProjectReady()</code></pre>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->

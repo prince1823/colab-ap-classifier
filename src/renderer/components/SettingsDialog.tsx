@@ -42,7 +42,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const [saveSuccess, setSaveSuccess] = useState(false)
 
   // Supplier universe path state
-  const [supplierPath, setSupplierPath] = useState<string | null>(null)
+  const [supplierResolvedPath, setSupplierResolvedPath] = useState<string>('')
   const [supplierPathError, setSupplierPathError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
       setConfig(cfg)
       setForm((prev) => ({ ...prev, provider: cfg.provider, model: cfg.model }))
     }).catch(() => {/* non-fatal */})
-    ipc.settings.getSupplierUniversePath().then(setSupplierPath).catch(() => {/* non-fatal */})
+    ipc.settings.getSupplierUniverseResolvedPath().then((p) => setSupplierResolvedPath(p ?? '')).catch(() => {/* non-fatal */})
   }, [open])
 
   function handleProviderChange(e: React.ChangeEvent<HTMLInputElement>): void {
@@ -113,19 +113,9 @@ export default function SettingsDialog({ open, onClose }: Props) {
       const selected = await ipc.settings.selectSupplierUniverseFile()
       if (!selected) return
       await ipc.settings.setSupplierUniversePath(selected)
-      setSupplierPath(selected)
+      setSupplierResolvedPath(selected)
     } catch (e) {
       setSupplierPathError(e instanceof Error ? e.message : 'Failed to set path')
-    }
-  }
-
-  async function handleResetSupplierPath(): Promise<void> {
-    setSupplierPathError(null)
-    try {
-      await ipc.settings.clearSupplierUniversePath()
-      setSupplierPath(null)
-    } catch (e) {
-      setSupplierPathError(e instanceof Error ? e.message : 'Failed to reset path')
     }
   }
 
@@ -146,8 +136,8 @@ export default function SettingsDialog({ open, onClose }: Props) {
           </div>
 
           <div className="space-y-4">
-            {/* ── LLM Settings ── */}
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">LLM</h3>
+            {/* ── Classification Model ── */}
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Classification Model</h3>
 
             {/* Provider */}
             <div>
@@ -248,29 +238,21 @@ export default function SettingsDialog({ open, onClose }: Props) {
             <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">Supplier Universe</h3>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Database File</label>
-              <div className="flex items-center gap-2">
-                <div
-                  className="min-w-0 flex-1 truncate rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600"
-                  title={supplierPath || 'Using default location'}
-                >
-                  {supplierPath || 'Default'}
-                </div>
+              <div
+                className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 overflow-x-auto whitespace-nowrap"
+                title={supplierResolvedPath}
+              >
+                {supplierResolvedPath || 'Not configured'}
+              </div>
+              <div className="mt-2">
                 <button
                   onClick={handleBrowseSupplierUniverse}
-                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
                 >
-                  <FolderOpenIcon className="h-4 w-4" />
-                  Browse
+                  <FolderOpenIcon className="h-3.5 w-3.5" />
+                  Change
                 </button>
               </div>
-              {supplierPath && (
-                <button
-                  onClick={handleResetSupplierPath}
-                  className="mt-1 text-xs text-blue-600 hover:text-blue-800"
-                >
-                  Reset to default
-                </button>
-              )}
               {supplierPathError && (
                 <p className="mt-1 text-xs text-red-600">{supplierPathError}</p>
               )}

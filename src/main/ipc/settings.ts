@@ -81,6 +81,7 @@ export function registerSettingsHandlers(
     }
     await appConfig.setSupplierUniversePath(p);
     supplierUniverse.setDefaultPath(p);
+    await supplierUniverse.open();
   });
 
   registerHandler('settings:selectSupplierUniverseFile', async () => {
@@ -93,8 +94,22 @@ export function registerSettingsHandlers(
     return result.filePaths[0];
   });
 
-  registerHandler('settings:clearSupplierUniversePath', async () => {
-    await appConfig.clearSupplierUniversePath();
-    // Reset to default — will take effect on next project open
+  registerHandler('settings:getSupplierUniverseResolvedPath', async () => {
+    return appConfig.getSupplierUniversePath() ?? null;
   });
+
+  registerHandler('settings:createNewSupplierUniverse', async () => {
+    const result = await dialog.showSaveDialog({
+      title: 'Create Supplier Universe Database',
+      defaultPath: 'supplier_universe.db',
+      filters: [{ name: 'DuckDB Database', extensions: ['db'] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    const p = result.filePath;
+    await appConfig.setSupplierUniversePath(p);
+    supplierUniverse.setDefaultPath(p);
+    await supplierUniverse.open(p);
+    return p;
+  });
+
 }

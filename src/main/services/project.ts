@@ -22,7 +22,7 @@ export class ProjectStore implements IProjectStore {
   async createProject(
     name: string,
     filePath: string
-  ): Promise<{ filePath: string; name: string; warning?: string }> {
+  ): Promise<{ filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean }> {
     if (!name || name.trim().length === 0) {
       throw new Error('Project name must not be empty');
     }
@@ -45,9 +45,17 @@ export class ProjectStore implements IProjectStore {
     await this.setSetting('project_name', name);
     await this.setSetting('tail_spend_threshold', 10000);
 
-    await this.supplierUniverse.open();
-
     this.currentProjectName = name;
+
+    try {
+      await this.supplierUniverse.open();
+    } catch (err) {
+      if (err instanceof Error && err.message === 'supplier-universe:not-configured') {
+        return { filePath, name, needsSupplierUniverseSetup: true };
+      }
+      throw err;
+    }
+
     const warning = this.supplierUniverse.wasNewlyCreated()
       ? 'Supplier universe database was not found — a new empty database was created. You can select an existing file in Settings.'
       : undefined;
@@ -57,7 +65,7 @@ export class ProjectStore implements IProjectStore {
 
   async openProject(
     filePath: string
-  ): Promise<{ filePath: string; name: string; warning?: string }> {
+  ): Promise<{ filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean }> {
     if (!filePath || filePath.trim().length === 0) {
       throw new Error('File path must not be empty');
     }
@@ -89,7 +97,15 @@ export class ProjectStore implements IProjectStore {
 
     this.currentProjectName = name;
 
-    await this.supplierUniverse.open();
+    try {
+      await this.supplierUniverse.open();
+    } catch (err) {
+      if (err instanceof Error && err.message === 'supplier-universe:not-configured') {
+        return { filePath, name, needsSupplierUniverseSetup: true };
+      }
+      throw err;
+    }
+
     const warning = this.supplierUniverse.wasNewlyCreated()
       ? 'Supplier universe database was not found — a new empty database was created. You can select an existing file in Settings.'
       : undefined;

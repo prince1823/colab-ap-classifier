@@ -1,7 +1,5 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
-import { existsSync, unlinkSync, copyFileSync } from 'fs';
-import path from 'path';
-import { app } from 'electron';
+import { existsSync, unlinkSync } from 'fs';
 import type { SupplierUniverse } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import { convertPlaceholders } from './database';
@@ -33,21 +31,9 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
 
     this._wasNewlyCreated = false;
 
-    const userDataDefault = path.join(app.getPath('userData'), 'supplier_universe.db');
-    const dbPath = filePath || this.defaultPath || userDataDefault;
-
-    // Migration: if using the default userData path and it doesn't exist,
-    // check if the old colabip/ location has a DB to copy from
-    if (dbPath === userDataDefault && !existsSync(dbPath)) {
-      const legacyPath = path.join(process.cwd(), 'colabip', 'supplier_universe.db');
-      if (existsSync(legacyPath)) {
-        try {
-          copyFileSync(legacyPath, dbPath);
-          console.log(`[SupplierUniverse] Migrated DB from ${legacyPath} to ${dbPath}`);
-        } catch (err) {
-          console.warn(`[SupplierUniverse] Failed to migrate from legacy path:`, err);
-        }
-      }
+    const dbPath = filePath || this.defaultPath;
+    if (!dbPath) {
+      throw new Error('supplier-universe:not-configured');
     }
 
     try {

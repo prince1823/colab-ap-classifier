@@ -116,6 +116,7 @@ export class DuckDBDatabase implements Database {
           parent_supplier_name VARCHAR,
           data_source VARCHAR DEFAULT 'manual',
           universe_match BOOLEAN DEFAULT FALSE,
+          is_researched BOOLEAN DEFAULT FALSE,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -131,6 +132,17 @@ export class DuckDBDatabase implements Database {
       await this.exec(`
         ALTER TABLE project_suppliers ADD COLUMN supplier_info JSON;
         ALTER TABLE project_suppliers ADD COLUMN mapped_taxonomy_paths JSON;
+      `);
+    }
+
+    // Migrate: ensure is_researched column exists on project_suppliers
+    const irCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'is_researched'"
+    );
+    if (irCol.length === 0) {
+      await this.exec(`
+        ALTER TABLE project_suppliers ADD COLUMN is_researched BOOLEAN DEFAULT FALSE;
+        UPDATE project_suppliers SET is_researched = TRUE WHERE supplier_info IS NOT NULL;
       `);
     }
   }
@@ -279,6 +291,7 @@ export class DuckDBDatabase implements Database {
         parent_supplier_name VARCHAR,
         data_source VARCHAR DEFAULT 'manual',
         universe_match BOOLEAN DEFAULT FALSE,
+        is_researched BOOLEAN DEFAULT FALSE,
         supplier_info JSON,
         mapped_taxonomy_paths JSON,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

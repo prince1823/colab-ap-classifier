@@ -22,7 +22,7 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerTaxonomyHandlers(services.taxonomy);
   registerIngestHandlers(services.ingest);
   registerSuppliersHandlers(services.suppliers, services.researcher);
-  registerSupplierResearchHandlers(services.researcher);
+  registerSupplierResearchHandlers(services.researcher, services.suppliers);
   registerClassificationHandlers(services.classifier, services.eventBus);
   registerRulesHandlers(services.rules);
   registerTransactionsHandlers(services.transactions);

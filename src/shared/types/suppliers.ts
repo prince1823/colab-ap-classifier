@@ -46,8 +46,8 @@ export interface ProjectSupplier {
   parentName: string | null;
   supplierInfo: SupplierInfo | null;
   mappedTaxonomyPaths: string[] | null;
-  dataSource: 'universe' | 'web_search' | 'manual';
   universeMatch: boolean;
+  isResearched: boolean;
   createdAt: string;
 }
 

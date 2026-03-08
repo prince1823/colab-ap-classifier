@@ -42,7 +42,7 @@ export class SupplierResearcher implements ISupplierResearcher {
         searchResults = await this.webSearch.searchSupplier(supplierName, address);
       }
     } catch (error) {
-      console.error(`[SupplierResearch] Web search failed for ${supplierName}:`, error);
+      console.error(`[Research] Web search failed for "${supplierName}":`, error);
     }
 
     // Research via LLM

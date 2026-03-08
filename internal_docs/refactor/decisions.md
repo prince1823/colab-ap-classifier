@@ -39,3 +39,17 @@ The old `importCSV` didn't store the file path. The new implementation stores it
 
 ### Backward-compatible standalone exports preserved in agents
 The three agent files (`classification-agent.ts`, `research-agent.ts`, `column-mapping-agent.ts`) keep their standalone pure function exports (`buildSystemPrompt`, `parseResponse`, etc.) alongside the new DI classes. This allows tests and other consumers to use the pure functions directly without needing the full DI setup.
+
+## Supplier research persistence moved to IPC handler
+
+### Problem
+`SupplierResearcher.researchSingle()` stored results in `supplier_universe.db` but not in the project's `project_suppliers` table. The UI was acting as middleman — receiving the result, patching local React state, then calling `suppliers:update` to persist. If the UI crashed or the user navigated away before the update call fired, the project DB never got the research data.
+
+### Decision
+Persist research results to `project_suppliers` in the `suppliers:researchSingle` IPC handler (Option B), rather than giving `SupplierResearcher` a project DB dependency (Option A) or creating a new orchestrator (Option C).
+
+### Rationale
+- The IPC handler is where project-scope and global-scope naturally intersect — it already has access to both `SupplierResearcher` and `SupplierService`.
+- The logic is pure coordination ("call A, then call B with A's result"), not business rules.
+- `SupplierResearcher` stays project-unaware (clean knowledge-acquisition role), `SupplierService` stays research-unaware.
+- UI simplified to just `await researchSingle()` then `loadData()` — no manual state patching for research results.

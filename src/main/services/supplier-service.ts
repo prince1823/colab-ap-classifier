@@ -42,11 +42,10 @@ export class SupplierService implements ISupplierService {
     const id = uuidv4();
     const universeInfo = await this.supplierUniverse.getSupplier(rawName);
     await this.db.run(
-      `INSERT INTO project_suppliers (id, supplier_name, data_source, universe_match)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO project_suppliers (id, supplier_name, universe_match)
+       VALUES (?, ?, ?)`,
       id,
       rawName,
-      universeInfo ? 'universe' : 'manual',
       universeInfo ? true : false
     );
 
@@ -159,8 +158,8 @@ export class SupplierService implements ISupplierService {
       confirmation_status: string;
       is_tail_spend: boolean;
       parent_supplier_name: string | null;
-      data_source: string;
       universe_match: boolean;
+      is_researched: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
       created_at: string;
@@ -173,7 +172,7 @@ export class SupplierService implements ISupplierService {
       FROM project_suppliers ps
       LEFT JOIN transactions t ON t.project_supplier_id = ps.id
       GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
-               ps.parent_supplier_name, ps.data_source, ps.universe_match,
+               ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.is_researched,
                ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at
       ORDER BY ps.supplier_name`
     );
@@ -187,8 +186,8 @@ export class SupplierService implements ISupplierService {
       parentName: row.parent_supplier_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
-      dataSource: row.data_source as ProjectSupplier['dataSource'],
       universeMatch: Boolean(row.universe_match),
+      isResearched: Boolean(row.is_researched),
       createdAt: String(row.created_at),
       transactionCount: Number(row.transaction_count),
       totalSpend: Number(row.total_spend),
@@ -203,8 +202,8 @@ export class SupplierService implements ISupplierService {
       confirmation_status: string;
       is_tail_spend: boolean;
       parent_supplier_name: string | null;
-      data_source: string;
       universe_match: boolean;
+      is_researched: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
       created_at: string;
@@ -224,8 +223,8 @@ export class SupplierService implements ISupplierService {
       parentName: row.parent_supplier_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
-      dataSource: row.data_source as ProjectSupplier['dataSource'],
       universeMatch: Boolean(row.universe_match),
+      isResearched: Boolean(row.is_researched),
       createdAt: String(row.created_at),
     };
   }
@@ -276,36 +275,10 @@ export class SupplierService implements ISupplierService {
     return ids;
   }
 
-  async enrichProjectSupplier(id: string): Promise<ProjectSupplierView> {
-    const supplier = await this.getProjectSupplier(id);
-    if (!supplier) throw new Error(`Project supplier not found: ${id}`);
-
-    // Get universe data
-    const universeInfo = await this.supplierUniverse.getSupplier(supplier.supplierName);
-    if (universeInfo) {
-      await this.db.run(
-        'UPDATE project_suppliers SET universe_match = TRUE, data_source = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        'universe',
-        id
-      );
-    }
-
-    // Get transaction aggregates
-    const agg = await this.db.get<{ cnt: number | bigint; spend: number | bigint }>(
-      `SELECT COUNT(*) as cnt, COALESCE(SUM(TRY_CAST(spend_amount AS DOUBLE)), 0) as spend
-       FROM transactions WHERE project_supplier_id = ?`,
-      id
+  async markResearched(supplierName: string): Promise<void> {
+    await this.db.run(
+      'UPDATE project_suppliers SET is_researched = TRUE, updated_at = CURRENT_TIMESTAMP WHERE supplier_name = ?',
+      supplierName
     );
-
-    const aliases = await this.supplierUniverse.searchVariants(supplier.supplierName);
-
-    return {
-      ...supplier,
-      universeMatch: universeInfo !== null,
-      dataSource: universeInfo ? 'universe' : supplier.dataSource,
-      transactionCount: Number(agg?.cnt ?? 0),
-      totalSpend: Number(agg?.spend ?? 0),
-      aliases,
-    };
   }
 }

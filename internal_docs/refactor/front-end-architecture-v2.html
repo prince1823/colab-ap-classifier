@@ -835,13 +835,13 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 <h3>Functionality</h3>
 <ol>
   <li><strong>Tail spend threshold:</strong> If <code>project:getSetting('tail_spend_threshold')</code> returns null or 0, shows a banner prompting the user to set it. Saving calls <code>project:setSetting('tail_spend_threshold', value)</code> then <code>suppliers:filterTailSpend(threshold)</code>.</li>
-  <li><strong>Warning buttons:</strong> "⚠ N unconfirmed" and "⚠ N unresearched" are clickable. Clicking applies a supplier filter condition (<code>{ field: 'confirmationStatus', operator: 'not_equals', value: 'confirmed' }</code> or <code>{ field: 'dataSource', operator: 'equals', value: 'manual' }</code>) to the table.</li>
-  <li><strong>Filter bar:</strong> Universal filter using <code>SupplierFilterCondition[]</code>. Field selector shows supplier-specific fields: name, confirmationStatus, dataSource (research status), isTailSpend, totalSpend. See <a href="#filter-system">Filter System</a>.</li>
+  <li><strong>Warning buttons:</strong> "⚠ N unconfirmed" and "⚠ N unresearched" are clickable. Clicking applies a supplier filter condition (<code>{ field: 'confirmationStatus', operator: 'not_equals', value: 'confirmed' }</code> or <code>{ field: 'isResearched', operator: 'is_false' }</code>) to the table.</li>
+  <li><strong>Filter bar:</strong> Universal filter using <code>SupplierFilterCondition[]</code>. Field selector shows supplier-specific fields: name, confirmationStatus, isResearched (research status), isTailSpend, totalSpend. See <a href="#filter-system">Filter System</a>.</li>
   <li><strong>Checkbox selection:</strong> Per-row checkboxes + select all. Selection drives batch actions.</li>
   <li><strong>Row action button:</strong>
     <ul>
-      <li>If supplier has <code>dataSource === 'manual'</code> and no universe data: shows <strong>[Research]</strong> button → calls <code>suppliers:researchSingle(supplierName)</code></li>
-      <li>If supplier has research data but <code>confirmationStatus === 'pending'</code>: shows <strong>[Confirm]</strong> button → calls <code>suppliers:confirm(id, 'confirmed')</code></li>
+      <li>If <code>isResearched === false</code>: shows <strong>[Research]</strong> button → calls <code>suppliers:researchSingle(supplierName)</code></li>
+      <li>If <code>isResearched === true</code> and <code>confirmationStatus === 'pending'</code>: shows <strong>[Confirm]</strong> button → calls <code>suppliers:confirm(id, 'confirmed')</code></li>
       <li>If confirmed: shows status badge only</li>
     </ul>
   </li>
@@ -946,7 +946,7 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
     <strong>Filter conditions:</strong> Uses the universal <code>TransactionFilterCondition</code> / <code>SupplierFilterCondition</code> types. Available fields include:
     <ul>
       <li>Transaction fields: <code>human_reviewed</code>, <code>classification_status</code>, <code>spend_amount</code>, any canonical column</li>
-      <li>Supplier fields: <code>confirmationStatus</code>, <code>dataSource</code> (research status)</li>
+      <li>Supplier fields: <code>confirmationStatus</code>, <code>isResearched</code> (research status)</li>
     </ul>
     After conditions are set, a preview count is computed: "Matching: X rows across Y suppliers."
   </li>
@@ -1346,7 +1346,7 @@ const TRANSACTION_SYSTEM_FIELDS = [
 // Supplier system fields (used in SupplierFilterCondition)
 const SUPPLIER_SYSTEM_FIELDS = [
   'confirmationStatus',       // 'pending' | 'confirmed' | 'rejected' | 'merged'
-  'dataSource',               // 'universe' | 'web_search' | 'manual'
+  'isResearched',             // boolean — has research been completed
   'isTailSpend',              // boolean
   'universeMatch',            // boolean
   'totalSpend',               // number

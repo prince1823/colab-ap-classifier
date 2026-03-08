@@ -134,7 +134,7 @@ export interface SupplierService {
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
   assignParent(id: string, parentId: string): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;
-  enrichProjectSupplier(id: string): Promise<ProjectSupplierView>;
+  markResearched(supplierName: string): Promise<void>;
 }
 
 export interface RuleStore {

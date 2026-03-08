@@ -217,18 +217,14 @@ export default function SuppliersPage() {
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
     setSaving(true)
     try {
-      const info = await ipc.suppliers.researchSingle(supplier.supplierName)
-      updateSuppliers(prev => prev.map(s =>
-        s.supplierName === supplier.supplierName
-          ? { ...s, supplierInfo: info, dataSource: 'web_search' as const }
-          : s
-      ))
+      await ipc.suppliers.researchSingle(supplier.supplierName)
+      await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Research failed')
     } finally {
       setSaving(false)
     }
-  }, [updateSuppliers])
+  }, [loadData])
 
   /** Confirm a single supplier */
   const confirmSupplier = useCallback(async (supplier: ProjectSupplierView) => {
@@ -247,20 +243,18 @@ export default function SuppliersPage() {
 
   /** Batch research selected suppliers */
   const researchSelected = useCallback(async () => {
-    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.dataSource === 'manual')
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
     if (selected.length === 0) return
     for (const s of selected) {
       try {
-        const info = await ipc.suppliers.researchSingle(s.supplierName)
-        updateSuppliers(prev => prev.map(sup =>
-          sup.id === s.id ? { ...sup, supplierInfo: info, dataSource: 'web_search' as const } : sup
-        ))
+        await ipc.suppliers.researchSingle(s.supplierName)
       } catch {
         // Continue with next supplier
       }
     }
     setSelectedIds(new Set())
-  }, [suppliers, selectedIds, updateSuppliers])
+    await loadData()
+  }, [suppliers, selectedIds, loadData])
 
   /** Batch confirm selected suppliers */
   const confirmSelected = useCallback(async () => {
@@ -312,7 +306,7 @@ export default function SuppliersPage() {
   , [suppliers])
 
   const unresearchedCount = useMemo(() =>
-    suppliers.filter(s => s.dataSource === 'manual').length
+    suppliers.filter(s => !s.isResearched).length
   , [suppliers])
 
   /** Sort by spend descending, then filter */
@@ -323,7 +317,7 @@ export default function SuppliersPage() {
     if (statusFilter === 'unconfirmed') {
       result = result.filter(s => s.confirmationStatus !== 'confirmed')
     } else if (statusFilter === 'unresearched') {
-      result = result.filter(s => s.dataSource === 'manual')
+      result = result.filter(s => !s.isResearched)
     }
 
     // Search filter
@@ -507,7 +501,7 @@ export default function SuppliersPage() {
                 <td className="col-right">{fmtAbbrev(s.totalSpend)}</td>
                 <td><StatusBadge status={s.confirmationStatus} /></td>
                 <td className="col-actions">
-                  {s.dataSource === 'manual' && !s.supplierInfo ? (
+                  {!s.isResearched ? (
                     <button
                       className="row-action-btn research"
                       onClick={() => researchSupplier(s)}

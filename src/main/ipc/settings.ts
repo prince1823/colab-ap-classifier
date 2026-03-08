@@ -1,5 +1,7 @@
+import { dialog } from 'electron';
+import { existsSync } from 'fs';
 import { registerHandler } from './register';
-import type { ILLMConfigService } from '../../shared/types/services';
+import type { IAppConfigService, SupplierUniverse } from '../../shared/types/services';
 import type { LLMConfigResponse } from '../../shared/types/ipc-contract';
 
 async function validateApiKey(
@@ -36,30 +38,63 @@ async function validateApiKey(
   }
 }
 
-export function registerSettingsHandlers(llmConfig: ILLMConfigService): void {
+export function registerSettingsHandlers(
+  appConfig: IAppConfigService,
+  supplierUniverse: SupplierUniverse
+): void {
+  // ── LLM Config ──
   registerHandler('settings:getLLMConfig', async (): Promise<LLMConfigResponse> => {
     return {
-      provider: llmConfig.getProvider(),
-      model: llmConfig.getModel(),
-      hasOpenRouterKey: llmConfig.getApiKey('openrouter') !== null,
-      hasAnthropicKey:  llmConfig.getApiKey('anthropic') !== null,
-      hasOpenAIKey:     llmConfig.getApiKey('openai') !== null,
+      provider: appConfig.getProvider(),
+      model: appConfig.getModel(),
+      hasOpenRouterKey: appConfig.getApiKey('openrouter') !== null,
+      hasAnthropicKey:  appConfig.getApiKey('anthropic') !== null,
+      hasOpenAIKey:     appConfig.getApiKey('openai') !== null,
     };
   });
 
   registerHandler('settings:setApiKey', async (_event, provider: unknown, key: unknown) => {
-    await llmConfig.setApiKey(provider as string, key as string);
+    await appConfig.setApiKey(provider as string, key as string);
   });
 
   registerHandler('settings:setProvider', async (_event, provider: unknown) => {
-    await llmConfig.setProvider(provider as string);
+    await appConfig.setProvider(provider as string);
   });
 
   registerHandler('settings:setModel', async (_event, model: unknown) => {
-    await llmConfig.setModel(model as string);
+    await appConfig.setModel(model as string);
   });
 
   registerHandler('settings:validateApiKey', async (_event, provider: unknown, key: unknown) => {
     return validateApiKey(provider as string, key as string);
+  });
+
+  // ── Supplier Universe Path ──
+  registerHandler('settings:getSupplierUniversePath', async () => {
+    return appConfig.getSupplierUniversePath();
+  });
+
+  registerHandler('settings:setSupplierUniversePath', async (_event, filePath: unknown) => {
+    const p = filePath as string;
+    if (!existsSync(p)) {
+      throw new Error(`File not found: ${p}`);
+    }
+    await appConfig.setSupplierUniversePath(p);
+    supplierUniverse.setDefaultPath(p);
+  });
+
+  registerHandler('settings:selectSupplierUniverseFile', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Supplier Universe Database',
+      filters: [{ name: 'DuckDB Database', extensions: ['db'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
+  registerHandler('settings:clearSupplierUniversePath', async () => {
+    await appConfig.clearSupplierUniversePath();
+    // Reset to default — will take effect on next project open
   });
 }

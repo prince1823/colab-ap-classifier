@@ -1444,6 +1444,30 @@ interface FieldDefinition {
     <td><code>{ reclassifiedCount: number }</code></td>
     <td><code>ipc/rules.ts</code></td>
   </tr>
+  <tr>
+    <td><code>settings:getSupplierUniversePath</code></td>
+    <td><code>()</code></td>
+    <td><code>string | null</code></td>
+    <td><code>ipc/settings.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>settings:setSupplierUniversePath</code></td>
+    <td><code>(path: string)</code></td>
+    <td><code>void</code></td>
+    <td><code>ipc/settings.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>settings:selectSupplierUniverseFile</code></td>
+    <td><code>()</code></td>
+    <td><code>string | null</code></td>
+    <td><code>ipc/settings.ts</code></td>
+  </tr>
+  <tr>
+    <td><code>settings:clearSupplierUniversePath</code></td>
+    <td><code>()</code></td>
+    <td><code>void</code></td>
+    <td><code>ipc/settings.ts</code></td>
+  </tr>
 </table>
 
 <h3>Changed Channels</h3>
@@ -1487,7 +1511,13 @@ interface FieldDefinition {
 'suppliers:researchFiltered':{ args: [filter: SupplierFilter]; result: void };
 'classification:startFiltered': { args: [queueFilter: ClassificationQueueFilter]; result: void };
 'rules:applyAll':            { args: []; result: { reclassifiedCount: number } };
-'ingest:getStoredMappings':  { args: [columns: string[]]; result: { id: string; fileName: string; columnMappings: ColumnMapping } | null };</code></pre>
+'ingest:getStoredMappings':  { args: [columns: string[]]; result: { id: string; fileName: string; columnMappings: ColumnMapping } | null };
+
+// Settings — Supplier Universe (app-level, not project-level)
+'settings:getSupplierUniversePath':    { args: []; result: string | null };
+'settings:setSupplierUniversePath':    { args: [path: string]; result: void };
+'settings:selectSupplierUniverseFile': { args: []; result: string | null };
+'settings:clearSupplierUniversePath':  { args: []; result: void };</code></pre>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->

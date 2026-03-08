@@ -1,6 +1,7 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
-import { existsSync, unlinkSync } from 'fs';
+import { existsSync, unlinkSync, copyFileSync } from 'fs';
 import path from 'path';
+import { app } from 'electron';
 import type { SupplierUniverse } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import { convertPlaceholders } from './database';
@@ -15,9 +16,14 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
   private connection: DuckDBConnection | null = null;
   private filePath: string | null = null;
   private defaultPath: string | null = null;
+  private _wasNewlyCreated = false;
 
   setDefaultPath(p: string): void {
     this.defaultPath = p;
+  }
+
+  wasNewlyCreated(): boolean {
+    return this._wasNewlyCreated;
   }
 
   async open(filePath?: string): Promise<void> {
@@ -25,7 +31,24 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
       await this.close();
     }
 
-    const dbPath = filePath || this.defaultPath || path.join(process.cwd(), 'colabip', 'supplier_universe.db');
+    this._wasNewlyCreated = false;
+
+    const userDataDefault = path.join(app.getPath('userData'), 'supplier_universe.db');
+    const dbPath = filePath || this.defaultPath || userDataDefault;
+
+    // Migration: if using the default userData path and it doesn't exist,
+    // check if the old colabip/ location has a DB to copy from
+    if (dbPath === userDataDefault && !existsSync(dbPath)) {
+      const legacyPath = path.join(process.cwd(), 'colabip', 'supplier_universe.db');
+      if (existsSync(legacyPath)) {
+        try {
+          copyFileSync(legacyPath, dbPath);
+          console.log(`[SupplierUniverse] Migrated DB from ${legacyPath} to ${dbPath}`);
+        } catch (err) {
+          console.warn(`[SupplierUniverse] Failed to migrate from legacy path:`, err);
+        }
+      }
+    }
 
     try {
       this.instance = await DuckDBInstance.create(dbPath);
@@ -50,6 +73,7 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
 
     if (tables.length === 0) {
       await this.initializeSchema();
+      this._wasNewlyCreated = true;
     }
   }
 

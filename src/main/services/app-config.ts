@@ -1,13 +1,14 @@
 import { app, safeStorage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ILLMConfigService } from '../../shared/types/services';
+import type { IAppConfigService } from '../../shared/types/services';
 
 interface ConfigFileShape {
   provider?: string;
   model?: string;
   // base64-encoded encrypted (or plaintext if encryption unavailable) key per provider
   keys?: Record<string, string>;
+  supplierUniversePath?: string;
 }
 
 function isConfigFileShape(v: unknown): v is ConfigFileShape {
@@ -21,15 +22,28 @@ function isConfigFileShape(v: unknown): v is ConfigFileShape {
       if (typeof val !== 'string') return false;
     }
   }
+  if (obj.supplierUniversePath !== undefined && typeof obj.supplierUniversePath !== 'string') return false;
   return true;
 }
 
-export class LLMConfigService implements ILLMConfigService {
+export class AppConfigService implements IAppConfigService {
   private readonly configPath: string;
   private config: ConfigFileShape = {};
 
   constructor() {
-    this.configPath = path.join(app.getPath('userData'), 'llm-config.json');
+    const userDataDir = app.getPath('userData');
+    this.configPath = path.join(userDataDir, 'app-config.json');
+
+    // Migrate from old llm-config.json if app-config.json doesn't exist yet
+    const oldPath = path.join(userDataDir, 'llm-config.json');
+    if (!fs.existsSync(this.configPath) && fs.existsSync(oldPath)) {
+      try {
+        fs.renameSync(oldPath, this.configPath);
+      } catch {
+        // Fall through — load will handle missing file
+      }
+    }
+
     this.load();
   }
 
@@ -48,6 +62,8 @@ export class LLMConfigService implements ILLMConfigService {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
   }
+
+  // ─── LLM Settings ──────────────────────────────────────────────────────────
 
   getApiKey(provider: string): string | null {
     const stored = this.config.keys?.[provider];
@@ -97,6 +113,22 @@ export class LLMConfigService implements ILLMConfigService {
 
   async setModel(model: string): Promise<void> {
     this.config.model = model;
+    this.save();
+  }
+
+  // ─── Supplier Universe Path ─────────────────────────────────────────────────
+
+  getSupplierUniversePath(): string | null {
+    return this.config.supplierUniversePath || null;
+  }
+
+  async setSupplierUniversePath(p: string): Promise<void> {
+    this.config.supplierUniversePath = p;
+    this.save();
+  }
+
+  async clearSupplierUniversePath(): Promise<void> {
+    delete this.config.supplierUniversePath;
     this.save();
   }
 }

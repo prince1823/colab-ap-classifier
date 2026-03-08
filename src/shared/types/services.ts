@@ -7,15 +7,20 @@ import type { ChangeLog, ChangeSource } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
 
-// ─── LLM Config ──────────────────────────────────────────────────────────────
+// ─── App Config ──────────────────────────────────────────────────────────────
 
-export interface ILLMConfigService {
+export interface IAppConfigService {
+  // LLM settings
   getApiKey(provider: string): string | null;
   setApiKey(provider: string, key: string): Promise<void>;
   getProvider(): string;
   setProvider(provider: string): Promise<void>;
   getModel(): string;
   setModel(model: string): Promise<void>;
+  // Supplier universe path
+  getSupplierUniversePath(): string | null;
+  setSupplierUniversePath(p: string): Promise<void>;
+  clearSupplierUniversePath(): Promise<void>;
 }
 
 // ─── Database Layer ──────────────────────────────────────────────────────────
@@ -36,6 +41,8 @@ export interface SupplierUniverse {
   open(filePath?: string): Promise<void>;
   close(): Promise<void>;
   isOpen(): boolean;
+  setDefaultPath(p: string): void;
+  wasNewlyCreated(): boolean;
   getSupplier(name: string): Promise<SupplierInfo | null>;
   getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>>;
   upsertSupplier(name: string, data: Partial<SupplierInfo>): Promise<void>;
@@ -83,8 +90,8 @@ export interface ColumnMappingAgent {
 // ─── Data Services ───────────────────────────────────────────────────────────
 
 export interface ProjectStore {
-  createProject(name: string, filePath: string): Promise<{ filePath: string; name: string }>;
-  openProject(filePath: string): Promise<{ filePath: string; name: string }>;
+  createProject(name: string, filePath: string): Promise<{ filePath: string; name: string; warning?: string }>;
+  openProject(filePath: string): Promise<{ filePath: string; name: string; warning?: string }>;
   closeProject(): Promise<void>;
   isProjectOpen(): boolean;
   getSetting(key: string): Promise<unknown>;

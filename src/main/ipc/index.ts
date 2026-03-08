@@ -27,5 +27,5 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerRulesHandlers(services.rules);
   registerTransactionsHandlers(services.transactions);
   registerExportHandlers(services.export);
-  registerSettingsHandlers(services.llmConfig);
+  registerSettingsHandlers(services.appConfig, services.supplierUniverse);
 }

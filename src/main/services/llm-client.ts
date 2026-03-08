@@ -1,4 +1,4 @@
-import type { LLMClient, ILLMConfigService } from '../../shared/types/services';
+import type { LLMClient, IAppConfigService } from '../../shared/types/services';
 import { debugLog } from '../utils/debug-log';
 
 export interface ChatOptions {
@@ -52,9 +52,9 @@ const MAX_RETRY_DELAY_MS = 60_000;
 
 /**
  * Minimal env-only config service used by the backward-compat standalone chat() function.
- * In production, LLMConfigService (which also reads a persisted config file) is injected.
+ * In production, AppConfigService (which also reads a persisted config file) is injected.
  */
-class EnvLLMConfigService implements ILLMConfigService {
+class EnvAppConfigService implements IAppConfigService {
   getApiKey(provider: string): string | null {
     switch (provider) {
       case 'anthropic': return process.env.ANTHROPIC_API_KEY || null;
@@ -69,6 +69,9 @@ class EnvLLMConfigService implements ILLMConfigService {
   async setProvider(): Promise<void> {}
   getModel(): string { return process.env.CLASSIFIER_MODEL || 'claude-3-5-haiku-latest'; }
   async setModel(): Promise<void> {}
+  getSupplierUniversePath(): string | null { return null; }
+  async setSupplierUniversePath(): Promise<void> {}
+  async clearSupplierUniversePath(): Promise<void> {}
 }
 
 function isRetryableStatus(status: number, errorBody?: string): boolean {
@@ -145,7 +148,7 @@ function extractOpenAIText(data: unknown): string {
 }
 
 export class OpenRouterLLMClient implements LLMClient {
-  constructor(private readonly configService: ILLMConfigService = new EnvLLMConfigService()) {}
+  constructor(private readonly configService: IAppConfigService = new EnvAppConfigService()) {}
 
   async chat(systemPrompt: string, userPrompt: string, options?: ChatOptions): Promise<string> {
     const provider = options?.provider ?? this.configService.getProvider();

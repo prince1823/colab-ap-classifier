@@ -22,7 +22,7 @@ export class ProjectStore implements IProjectStore {
   async createProject(
     name: string,
     filePath: string
-  ): Promise<{ filePath: string; name: string }> {
+  ): Promise<{ filePath: string; name: string; warning?: string }> {
     if (!name || name.trim().length === 0) {
       throw new Error('Project name must not be empty');
     }
@@ -48,13 +48,16 @@ export class ProjectStore implements IProjectStore {
     await this.supplierUniverse.open();
 
     this.currentProjectName = name;
+    const warning = this.supplierUniverse.wasNewlyCreated()
+      ? 'Supplier universe database was not found — a new empty database was created. You can select an existing file in Settings.'
+      : undefined;
 
-    return { filePath, name };
+    return { filePath, name, warning };
   }
 
   async openProject(
     filePath: string
-  ): Promise<{ filePath: string; name: string }> {
+  ): Promise<{ filePath: string; name: string; warning?: string }> {
     if (!filePath || filePath.trim().length === 0) {
       throw new Error('File path must not be empty');
     }
@@ -87,13 +90,16 @@ export class ProjectStore implements IProjectStore {
     this.currentProjectName = name;
 
     await this.supplierUniverse.open();
+    const warning = this.supplierUniverse.wasNewlyCreated()
+      ? 'Supplier universe database was not found — a new empty database was created. You can select an existing file in Settings.'
+      : undefined;
 
     // Ensure performance indexes (non-blocking)
     this.ensureIndexes().catch((err) =>
       console.warn('[Project] Failed to ensure indexes:', err)
     );
 
-    return { filePath, name };
+    return { filePath, name, warning };
   }
 
   async closeProject(): Promise<void> {

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { Plus, X, ChevronUp, ChevronDown, Filter, ExternalLink, Layers } from 'lucide-react'
+import { Plus, X, ChevronUp, ChevronDown, Filter, Layers } from 'lucide-react'
 import * as Popover from '@radix-ui/react-popover'
 import type { Aggregation, SpendDisplayMode } from '../../types/pivot'
 import type { PivotFilterState } from './PivotFilterBar'
@@ -41,9 +41,6 @@ interface PivotToolbarProps {
   collapseLevel: number
   onCycleCollapse: () => void
   cycleLevelLabel: string
-  /* Open in Review */
-  onOpenInReview: () => void
-  openInReviewDisabled: boolean
   /* Filter props */
   rows?: Record<string, unknown>[]
   filterOptions?: Record<string, string[]>
@@ -73,8 +70,6 @@ export default function PivotToolbar({
   collapseLevel,
   onCycleCollapse,
   cycleLevelLabel,
-  onOpenInReview,
-  openInReviewDisabled,
   rows,
   filterOptions: filterOptionsProp,
   filterState,
@@ -378,15 +373,6 @@ export default function PivotToolbar({
         >
           <Layers size={12} />
           <span style={{ fontSize: 9, fontWeight: 700, marginLeft: 2 }}>{cycleLevelLabel}</span>
-        </button>
-        <button
-          onClick={onOpenInReview}
-          disabled={openInReviewDisabled}
-          className="inline-flex items-center gap-0.5 rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-          title="Open filtered transactions in Review tab"
-        >
-          <ExternalLink size={12} />
-          <span>Review</span>
         </button>
       </div>
     </div>

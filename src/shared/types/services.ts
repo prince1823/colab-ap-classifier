@@ -101,7 +101,7 @@ export interface TransactionStore {
   getStats(): Promise<TransactionStats>;
   getColumns(): Promise<string[]>;
   getCount(filters?: TransactionFilter): Promise<number>;
-  updateTransactions(update: TransactionUpdate, source?: ChangeSource): Promise<void>;
+  updateTransactions(update: TransactionUpdate, source?: ChangeSource): Promise<string | undefined>;
   invalidateColumnCache(): void;
   queryGroupedByColumn(column: string, filters?: TransactionFilter): Promise<GroupedTransactionsResult>;
   queryDistinctValues(column: string, limit?: number): Promise<string[]>;

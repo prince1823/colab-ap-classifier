@@ -29,9 +29,6 @@ interface HierarchicalPivotViewProps {
   /* Export */
   onExport: () => void
   exportDisabled: boolean
-  /* Open in Review */
-  onOpenInReview: () => void
-  openInReviewDisabled: boolean
   /* Total transaction count (server-side mode) */
   totalCount?: number
   /* Spend display */
@@ -39,6 +36,8 @@ interface HierarchicalPivotViewProps {
   onSpendDisplayModeChange: (mode: SpendDisplayMode) => void
   /* Reclassify */
   onReclassify?: (rows: FlattenedPivotRow[]) => void
+  /* Drill-down */
+  onDrillDown?: (row: FlattenedPivotRow) => void
   /** Whether a modal is open (suppresses keyboard) */
   modalOpen?: boolean
 }
@@ -89,12 +88,11 @@ export default function HierarchicalPivotView({
   onClearAllFilters,
   onExport,
   exportDisabled,
-  onOpenInReview,
-  openInReviewDisabled,
   totalCount,
   spendDisplayMode,
   onSpendDisplayModeChange,
   onReclassify,
+  onDrillDown,
   modalOpen = false,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
@@ -264,11 +262,11 @@ export default function HierarchicalPivotView({
             onClick={onExport}
             disabled={exportDisabled || !hasData}
             className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-1.5 py-px text-[10px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-            title="Export as Excel"
+            title="Export CSV"
             style={{ height: 20 }}
           >
             <ArrowDownTrayIcon className="h-2.5 w-2.5" />
-            <span>.xlsx</span>
+            <span>CSV</span>
           </button>
         </div>
       </div>
@@ -285,8 +283,6 @@ export default function HierarchicalPivotView({
         collapseLevel={collapseLevel}
         onCycleCollapse={handleCycleCollapse}
         cycleLevelLabel={cycleLabelMap(collapseLevel)}
-        onOpenInReview={onOpenInReview}
-        openInReviewDisabled={openInReviewDisabled}
         rows={allRows}
         filterOptions={filterOptions}
         filterState={filterState}
@@ -357,6 +353,7 @@ export default function HierarchicalPivotView({
                       isFocused={virtualRow.index === focusedIndex}
                       isSelected={selectedKeys.has(row.key)}
                       formattedTotal={fmtSpend(row)}
+                      onDrillDown={onDrillDown}
                     />
                   )
                 })}
@@ -403,6 +400,7 @@ function PivotTreeRow({
   isFocused,
   isSelected,
   formattedTotal,
+  onDrillDown,
 }: {
   row: FlattenedPivotRow
   aggregation: Aggregation
@@ -413,6 +411,7 @@ function PivotTreeRow({
   isFocused: boolean
   isSelected: boolean
   formattedTotal: string
+  onDrillDown?: (row: FlattenedPivotRow) => void
 }) {
   const indent = row.depth * 20
 
@@ -424,7 +423,7 @@ function PivotTreeRow({
 
   return (
     <tr
-      className={`pivot-tree-row ${groupBorderClass}`}
+      className={`pivot-tree-row group/row ${groupBorderClass}`}
       data-depth={row.depth}
       data-focused={isFocused || undefined}
       data-selected={isSelected || undefined}
@@ -464,6 +463,15 @@ function PivotTreeRow({
         </span>
         {row.hasChildren && (
           <span className="pivot-tree-count">({row.transactionCount})</span>
+        )}
+        {row.isLeaf && onDrillDown && (
+          <button
+            className="pivot-tree-drilldown ml-1 opacity-0 group-hover/row:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity"
+            onClick={(e) => { e.stopPropagation(); onDrillDown(row) }}
+            title="View transactions"
+          >
+            <ChevronRight size={12} />
+          </button>
         )}
       </td>
 

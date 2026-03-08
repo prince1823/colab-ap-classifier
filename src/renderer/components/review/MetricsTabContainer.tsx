@@ -1,24 +1,15 @@
 import React, { useMemo } from 'react'
 import MetricsTab from './MetricsTab'
 import { useIPC } from '../../hooks/useIPC'
-import { useReviewFilters } from '../../hooks/useReviewFilters'
-import { useReviewFilterContext } from './ReviewFilterContext'
 import { ipc } from '../../lib/ipc'
 import type { TransactionFilter } from '../../../shared/types/transactions'
 
 interface MetricsTabContainerProps {
-  onClose: () => void
+  filter?: TransactionFilter
 }
 
-const MetricsTabContainer: React.FC<MetricsTabContainerProps> = ({ onClose }) => {
-  const { setFilters } = useReviewFilterContext()
-  const { toFilterConditions } = useReviewFilters()
-
-  // Stable string key — changes only when active filter state changes
-  const filterConditions = toFilterConditions()
-  const filterKey = useMemo(() => JSON.stringify(filterConditions), [filterConditions])
-  const filter: TransactionFilter | undefined =
-    filterConditions.length > 0 ? { conditions: filterConditions } : undefined
+const MetricsTabContainer: React.FC<MetricsTabContainerProps> = ({ filter }) => {
+  const filterKey = useMemo(() => JSON.stringify(filter), [filter])
 
   // Global stats — unfiltered total rows/spend/suppliers
   const { data: stats } = useIPC(() => ipc.transactions.stats(), [])
@@ -65,23 +56,9 @@ const MetricsTabContainer: React.FC<MetricsTabContainerProps> = ({ onClose }) =>
         const month = String(row.dimensions[1] ?? '').padStart(2, '0')
         return { month: `${year}-${month}`, spend: row.amount }
       })
-      .filter(d => d.month.length >= 7) // guard against malformed rows
+      .filter(d => d.month.length >= 7)
       .sort((a, b) => a.month.localeCompare(b.month))
   }, [monthlyResult])
-
-  const handleDrillToFilters = (filters: Record<string, string[]>) => {
-    setFilters(prev => {
-      const next = { ...prev.filterState }
-      if (filters.supplier) next.supplier = filters.supplier
-      if (filters.classificationL1) next.classificationL1 = filters.classificationL1
-      if (filters.glDescription) next.glDescription = filters.glDescription
-      if (filters.company) next.company = filters.company
-      if (filters.costCenter) next.costCenter = filters.costCenter
-      if (filters.country) next.country = filters.country
-      return { filterState: next }
-    })
-    onClose()
-  }
 
   return (
     <MetricsTab
@@ -89,7 +66,7 @@ const MetricsTabContainer: React.FC<MetricsTabContainerProps> = ({ onClose }) =>
       l1Data={l1Data}
       supplierData={supplierData}
       monthlyData={monthlyData}
-      onDrillToFilters={handleDrillToFilters}
+      filter={filter}
     />
   )
 }

@@ -60,9 +60,10 @@ export class TransactionStore implements ITransactionStore {
     return columns.some((c) => c in VIRTUAL_COLUMNS);
   }
 
-  private buildFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[] } {
+  private buildFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[]; needsTaxonomyJoin: boolean } {
     const whereClauses: string[] = [];
     const params: unknown[] = [];
+    let needsTaxonomyJoin = false;
 
     if (filters?.supplierName) {
       whereClauses.push('ps.supplier_name = ?');
@@ -86,7 +87,17 @@ export class TransactionStore implements ITransactionStore {
     }
 
     if (filters?.conditions && filters.conditions.length > 0) {
-      const built = buildWhereClause(filters.conditions);
+      if (filters.conditions.some((c) => c.field.startsWith('classification_l'))) {
+        needsTaxonomyJoin = true;
+      }
+      const FILTER_VIRTUAL_DIMS: Record<string, string> = {
+        classification_l1: 'tax.l1',
+        classification_l2: 'tax.l2',
+        classification_l3: 'tax.l3',
+        supplier_name: 'ps.supplier_name',
+      };
+      const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
+      const built = buildWhereClause(filters.conditions, resolver);
       if (built) {
         whereClauses.push(`(${built.sql})`);
         params.push(...built.params);
@@ -94,7 +105,7 @@ export class TransactionStore implements ITransactionStore {
     }
 
     const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-    return { whereSQL, params };
+    return { whereSQL, params, needsTaxonomyJoin };
   }
 
   async queryTransactions(filters?: TransactionFilter): Promise<Transaction[]> {
@@ -203,14 +214,15 @@ export class TransactionStore implements ITransactionStore {
   }
 
   async getCount(filters?: TransactionFilter): Promise<number> {
-    const { whereSQL, params } = this.buildFilterSQL(filters);
-    const sql = `SELECT COUNT(*) as cnt FROM transactions t ${SUPPLIER_JOIN} ${whereSQL}`;
+    const { whereSQL, params, needsTaxonomyJoin } = this.buildFilterSQL(filters);
+    const taxonomyJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
+    const sql = `SELECT COUNT(*) as cnt FROM transactions t ${SUPPLIER_JOIN} ${taxonomyJoin} ${whereSQL}`;
     const result = await this.db.get<{ cnt: number | bigint }>(sql, ...params);
     return Number(result?.cnt ?? 0);
   }
 
-  async updateTransactions(update: TransactionUpdate, source: ChangeSource = 'manual'): Promise<void> {
-    if (!update.ids || update.ids.length === 0) return;
+  async updateTransactions(update: TransactionUpdate, source: ChangeSource = 'manual'): Promise<string | undefined> {
+    if (!update.ids || update.ids.length === 0) return undefined;
 
     const placeholders = update.ids.map(() => '?').join(',');
     const oldRows = await this.db.all<Record<string, unknown>>(
@@ -245,7 +257,7 @@ export class TransactionStore implements ITransactionStore {
       newValues.classification_reasoning = update.classificationReasoning;
     }
 
-    if (setClauses.length === 0) return;
+    if (setClauses.length === 0) return undefined;
     setClauses.push('updated_at = CURRENT_TIMESTAMP');
 
     await this.db.run(
@@ -253,7 +265,7 @@ export class TransactionStore implements ITransactionStore {
       ...params, ...update.ids
     );
 
-    await this.changelog.logChange({
+    const changelogId = await this.changelog.logChange({
       source,
       affectedTable: 'transactions',
       affectedIds: update.ids,
@@ -262,6 +274,7 @@ export class TransactionStore implements ITransactionStore {
       newValues,
       description: `Updated ${update.ids.length} transaction(s)`,
     });
+    return changelogId;
   }
 
   /**
@@ -287,10 +300,11 @@ export class TransactionStore implements ITransactionStore {
       return { column, rows: [], totalAmount: 0, totalCount: 0 };
     }
 
-    const { whereSQL, params } = this.buildFilterSQL(filters);
+    const { whereSQL, params, needsTaxonomyJoin } = this.buildFilterSQL(filters);
     const hasSpend = validCols.includes('spend_amount');
     const colExpr = this.resolveColumn(column);
     const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
+    const taxonomyJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
 
     const amountExpr = hasSpend
       ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)'
@@ -303,6 +317,7 @@ export class TransactionStore implements ITransactionStore {
         COUNT(*) as count
       FROM transactions t
       ${supplierJoin}
+      ${taxonomyJoin}
       ${whereSQL}
       GROUP BY ${colExpr}
       ORDER BY ${hasSpend ? 'amount DESC' : 'count DESC'}
@@ -360,9 +375,10 @@ export class TransactionStore implements ITransactionStore {
     const validCols = await this.getColumns();
     if (!this.isValidColumn(column, validCols)) return [];
 
-    const { whereSQL, params } = this.buildFilterSQL(filters);
+    const { whereSQL, params, needsTaxonomyJoin } = this.buildFilterSQL(filters);
     const colExpr = this.resolveColumn(column);
     const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
+    const taxonomyJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
 
     const valueCondition = value === '(blank)'
       ? `${colExpr} IS NULL`
@@ -373,7 +389,7 @@ export class TransactionStore implements ITransactionStore {
       ? `${whereSQL} AND ${valueCondition}`
       : `WHERE ${valueCondition}`;
 
-    const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${supplierJoin} ${fullWhere}`;
+    const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${supplierJoin} ${taxonomyJoin} ${fullWhere}`;
     const rows = await this.db.all<{ id: string }>(sql, ...params);
     return rows.map((r) => String(r.id));
   }
@@ -405,14 +421,14 @@ export class TransactionStore implements ITransactionStore {
       return { dimensionColumns: dimensions, rows: [], totalAmount: 0, totalCount: 0 };
     }
 
-    const { whereSQL, params } = this.buildFilterSQL(filters);
+    const { whereSQL, params, needsTaxonomyJoin: filterNeedsTaxonomy } = this.buildFilterSQL(filters);
     const hasValue = validCols.includes(valueDimension);
 
     const amountExpr = hasValue
       ? `COALESCE(SUM(TRY_CAST(t.${valueDimension} AS DOUBLE)), 0)`
       : '0';
 
-    const needsTaxonomyJoin = safeDimensions.some((d) =>
+    const needsTaxonomyJoin = filterNeedsTaxonomy || safeDimensions.some((d) =>
       d.startsWith('classification_l')
     );
     const taxonomyJoin = needsTaxonomyJoin
@@ -541,16 +557,32 @@ export class TransactionStore implements ITransactionStore {
 
   /**
    * Return transaction IDs matching the given filter conditions.
-   * Used by RuleStore to delegate filtering (handles JOINs for virtual columns like supplier_name).
+   * Handles JOINs for virtual columns: supplier_name, classification_l1/l2/l3.
    */
   async getIdsByConditions(
     conditions: FilterCondition[],
     scopeToIds?: string[]
   ): Promise<string[]> {
-    const built = buildWhereClause(conditions);
+    /** Virtual dim → SQL expression (same as pivot aggregation) */
+    const VIRTUAL_DIM_EXPRS: Record<string, string> = {
+      classification_l1: 'tax.l1',
+      classification_l2: 'tax.l2',
+      classification_l3: 'tax.l3',
+      supplier_name: 'ps.supplier_name',
+    };
+
+    const resolveColumn = (field: string) =>
+      VIRTUAL_DIM_EXPRS[field] ?? `t."${field}"`;
+
+    const built = buildWhereClause(conditions, resolveColumn);
     if (!built) return [];
 
-    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} WHERE (${built.sql})`;
+    const needsTaxonomy = conditions.some((c) => c.field.startsWith('classification_l'));
+    const taxonomyJoin = needsTaxonomy
+      ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
+      : '';
+
+    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${taxonomyJoin} WHERE (${built.sql})`;
     const params = [...built.params];
 
     if (scopeToIds && scopeToIds.length > 0) {

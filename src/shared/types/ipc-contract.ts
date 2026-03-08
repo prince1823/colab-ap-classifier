@@ -10,6 +10,7 @@ export interface LLMConfigResponse {
 import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type {
   TransactionFilter,
+  FilterCondition,
   TransactionStats,
   PaginatedTransactions,
   TransactionUpdate,
@@ -49,11 +50,12 @@ export interface IPCInvokeMap {
   'transactions:query':             { args: [filters?: TransactionFilter]; result: PaginatedTransactions };
   'transactions:stats':             { args: []; result: TransactionStats };
   'transactions:getColumns':        { args: []; result: string[] };
-  'transactions:update':            { args: [update: TransactionUpdate]; result: void };
+  'transactions:update':            { args: [update: TransactionUpdate]; result: string | undefined };
   'transactions:queryGrouped':      { args: [column: string, filters?: TransactionFilter]; result: GroupedTransactionsResult };
   'transactions:distinctValues':    { args: [column: string, limit?: number]; result: string[] };
   'transactions:getIdsByValue':     { args: [column: string, value: string, filters?: TransactionFilter]; result: string[] };
   'transactions:pivotAggregation':  { args: [dimensions: string[], valueDimension: string, filters?: TransactionFilter]; result: PivotAggregationResult };
+  'transactions:getIdsByConditions': { args: [conditions: FilterCondition[]]; result: string[] };
 
   // Classification
   'classification:start':  { args: []; result: void };

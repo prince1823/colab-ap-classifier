@@ -1,28 +1,9 @@
 import { useState, useEffect } from 'react'
 import { ipc } from '../lib/ipc'
+import FilterConditionBuilder, { OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { OverrideRule } from '../../shared/types/rules'
 import type { FilterCondition, FilterOperator } from '../../shared/types/transactions'
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
-
-const OPERATORS: FilterOperator[] = [
-  'equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with',
-  'regex', 'in_list', 'greater_than', 'less_than', 'greater_than_or_equal', 'less_than_or_equal',
-]
-
-const OPERATOR_LABELS: Record<FilterOperator, string> = {
-  equals: 'equals',
-  not_equals: 'not equals',
-  contains: 'contains',
-  not_contains: 'not contains',
-  starts_with: 'starts with',
-  ends_with: 'ends with',
-  regex: 'matches regex',
-  in_list: 'in list',
-  greater_than: '>',
-  less_than: '<',
-  greater_than_or_equal: '≥',
-  less_than_or_equal: '≤',
-}
 
 export default function OverrideRulesPage() {
   const [rules, setRules] = useState<OverrideRule[]>([])
@@ -115,22 +96,6 @@ export default function OverrideRulesPage() {
     }
   }
 
-  const updateCondition = (index: number, field: keyof FilterCondition, value: string) => {
-    setConditions((prev) => prev.map((c, i) => (i === index ? { ...c, [field]: value } : c)))
-  }
-
-  const addCondition = () => {
-    setConditions((prev) => [...prev, { field: '', operator: 'equals' as FilterOperator, value: '', connector: 'AND' }])
-  }
-
-  const toggleConnector = (index: number) => {
-    setConditions((prev) => prev.map((c, i) => (i === index ? { ...c, connector: c.connector === 'AND' ? 'OR' : 'AND' } : c)))
-  }
-
-  const removeCondition = (index: number) => {
-    setConditions((prev) => prev.filter((_, i) => i !== index))
-  }
-
   const getNodePath = (nodeId: string) => taxonomyNodes.find((n) => n.id === nodeId)?.fullPath || nodeId
 
   const formatConditionSummary = (conds: FilterCondition[]) => {
@@ -190,66 +155,11 @@ export default function OverrideRulesPage() {
               ))}
             </select>
           </div>
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <label className="text-xs font-medium text-gray-600">Conditions</label>
-              <button onClick={addCondition} className="text-xs text-blue-600 hover:text-blue-800">+ Add condition</button>
-            </div>
-            <div className="space-y-0">
-              {conditions.map((c, i) => (
-                <div key={i}>
-                  {/* Condition row — reads like a sentence: field  operator  value */}
-                  <div className="flex items-center gap-0 rounded-lg border border-gray-200 bg-gray-50 px-1 py-1">
-                    <select
-                      value={c.field as string}
-                      onChange={(e) => updateCondition(i, 'field', e.target.value)}
-                      className="rounded-md border-0 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-800 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400"
-                    >
-                      <option value="">field…</option>
-                      {columns.map((col) => (
-                        <option key={col} value={col}>{col}</option>
-                      ))}
-                    </select>
-                    <span className="px-1.5 text-[10px] text-gray-400 select-none">→</span>
-                    <select
-                      value={c.operator}
-                      onChange={(e) => updateCondition(i, 'operator', e.target.value)}
-                      className="rounded-md border-0 bg-white px-2.5 py-1.5 text-xs text-gray-600 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400"
-                    >
-                      {OPERATORS.map((op) => <option key={op} value={op}>{OPERATOR_LABELS[op]}</option>)}
-                    </select>
-                    <span className="px-1.5 text-[10px] text-gray-400 select-none">→</span>
-                    <input
-                      value={String(c.value)}
-                      onChange={(e) => updateCondition(i, 'value', e.target.value)}
-                      placeholder="value"
-                      className="min-w-0 flex-1 rounded-md border-0 bg-white px-2.5 py-1.5 text-xs text-gray-800 shadow-sm ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-blue-400"
-                    />
-                    {conditions.length > 1 && (
-                      <button onClick={() => removeCondition(i)} className="ml-1 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Remove condition">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                      </button>
-                    )}
-                  </div>
-                  {/* AND/OR connector pill centered between rows */}
-                  {i < conditions.length - 1 && (
-                    <div className="flex justify-center py-1.5">
-                      <button
-                        onClick={() => toggleConnector(i)}
-                        className={`rounded-full px-4 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                          c.connector === 'OR'
-                            ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                            : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
-                        }`}
-                      >
-                        {c.connector || 'AND'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+          <FilterConditionBuilder
+            conditions={conditions}
+            onChange={setConditions}
+            availableFields={columns}
+          />
           <div className="flex gap-2">
             <button onClick={handleSave} disabled={saving} className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Saving...' : 'Save'}

@@ -1003,60 +1003,64 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 
 <div class="page-wireframe">
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  Review                                                       [Export ▼] │
+│  Review                                                   [Export CSV ▼] │
 │                                                                          │
-│  Filter [ + Add Condition ]   View: [Sum ▼]  [% of total]               │
+│  Filters: [supplier:Acme ✕] [L1:IT ✕]  Clear all        Search [_____] │
+│  ┌ Dims: [Supplier ▼][L1 ▼][L2 ▼][L3 ▼]  Agg: [Sum ▼]  [$ | %] ───┐  │
+│  │  [ + Add Condition ]  (human_reviewed, classification_status, …)   │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  ┌─── Pivot Table ──────────────────────────────────────────────────────┐ │
-│  │  Classification         │  Spend (Sum)  │  Spend (%)  │  Rows        │ │
-│  │  ─────────────────────  │  ───────────  │  ─────────  │  ────        │ │
-│  │ [-] Corporate Services  │  $2,456,000   │   43.2%     │  4,231       │ │
-│  │   [-] IT                │  $1,200,000   │   21.1%     │  2,100       │ │
-│  │      Software           │    $890,000   │   15.7%     │  1,560  [→]  │ │
-│  │      Hardware           │    $310,000   │    5.5%     │    540  [→]  │ │
-│  │   [+] HR                │    $456,000   │    8.0%     │    890       │ │
-│  │   [+] Finance           │    $800,000   │   14.1%     │  1,241       │ │
-│  │ [-] Operations          │  $1,890,000   │   33.2%     │  3,210       │ │
+│  │  Supplier > L1 > L2 > L3      │  Total                              │ │
+│  │  ─────────────────────────────  │  ─────                             │ │
+│  │ [-] Acme Corp                  │  $2,456,000                         │ │
+│  │   [-] Corporate Services       │  $1,200,000                         │ │
+│  │      [-] IT                    │    $890,000                         │ │
+│  │         Software               │    $580,000                    [→]  │ │
+│  │         Hardware               │    $310,000                    [→]  │ │
+│  │      [+] HR                    │    $310,000                         │ │
+│  │   [+] Operations               │  $1,256,000                         │ │
+│  │ [-] Beta LLC                   │  $1,890,000                         │ │
 │  │   ...                                                                │ │
-│  │ [~] Unclassified        │    $450,000   │    7.9%     │    800       │ │
+│  │ [~] (Unclassified)             │    $450,000                         │ │
 │  └──────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
-│  ← [K] up  [J] down  [Space] expand/collapse  [R] reclassify selection   │
+│  ↑↓ navigate  ←→ collapse/expand  Enter select  ⌘K filter  ⌘F classify  │
 └──────────────────────────────────────────────────────────────────────────┘
 </div>
 
 <h3>Pivot Table</h3>
 <ul>
   <li>Server-side aggregation via <code>transactions:pivotAggregation</code> (DuckDB GROUP BY). Works on millions of rows — returns only aggregated rows (~hundreds).</li>
-  <li>Default row dimensions: L1 → L2 → L3 (from <code>classification_l1</code>, <code>classification_l2</code>, <code>classification_l3</code> columns).</li>
+  <li>Default row dimensions: Supplier → L1 → L2 → L3 (from <code>supplier_name</code>, <code>classification_l1</code>, <code>classification_l2</code>, <code>classification_l3</code>). User can reorder or swap dimensions via the toolbar.</li>
   <li>Expand/collapse nodes to drill into sub-levels.</li>
-  <li><strong>Spend display:</strong> Toggle between sum (absolute spend) and percentage (% of filtered total). Both columns shown simultaneously when space permits.</li>
-  <li><strong>[→] drill-down icon</strong> on leaf rows: opens a transaction detail panel showing individual rows for that node (paginated table via <code>transactions:query</code> with a filter on that taxonomy node).</li>
-  <li>"Unclassified" row shown at bottom for rows with no taxonomy node.</li>
-  <li><strong>Live updates:</strong> If classification is still running (isClassifying), the pivot auto-refreshes every 5 seconds.</li>
+  <li><strong>Spend display:</strong> Toggle between sum (absolute spend) and percentage (% of filtered total).</li>
+  <li><strong>[→] drill-down icon</strong> on leaf rows: opens a transaction detail panel showing individual rows for that node (paginated table via <code>transactions:query</code> with filter conditions built from the row's full path segments).</li>
+  <li>"(Unclassified)" row shown at bottom for rows with no taxonomy node.</li>
+  <li><strong>Live updates:</strong> Polls every ~5 seconds while <code>isClassifying</code> is true, plus a final refetch when classification completes (<code>isClassifying</code> transitions false).</li>
 </ul>
 
-<h3>Filter Bar</h3>
+<h3>Filter System</h3>
+<p>Two complementary filter mechanisms, both producing <code>FilterCondition[]</code> that merge into a single <code>TransactionFilter</code> sent to the backend. No querying happens in the frontend — all filtering is server-side via <code>buildFilterSQL()</code>.</p>
 <ul>
-  <li>Universal <code>FilterConditionBuilder</code> at the top of the view.</li>
-  <li>Filters narrow the pivot aggregation — sent to <code>transactions:pivotAggregation</code> as <code>filters</code> param.</li>
-  <li>System fields available: <code>human_reviewed</code>, <code>classification_status</code>, <code>supplier_name</code>, any canonical column.</li>
+  <li><strong>Dimension pill filters:</strong> Quick-filter by pivot dimension values. Created via double-click on a row label or ⌘K on selected rows. Renders as removable pills above the table. Internally converted from <code>PivotFilterState</code> (Record&lt;string, string[]&gt;) to <code>FilterCondition[]</code> with <code>in_list</code> operator.</li>
+  <li><strong>FilterConditionBuilder:</strong> Collapsible panel toggled by <code>[+ Add Condition]</code> button. Provides full field/operator/value rows with AND/OR connectors — same component used in Override Rules. System fields available: <code>human_reviewed</code>, <code>classification_status</code>, <code>classification_reasoning</code>, plus all canonical columns from the dataset.</li>
+  <li>Both filter sources are merged in <code>PivotPage</code> into one <code>TransactionFilter.conditions</code> array and passed to <code>useServerPivotData</code>.</li>
 </ul>
 
-<h3>Keyboard-Driven Reclassification</h3>
+<h3>Keyboard Navigation</h3>
 <div class="alert alert-design">
-  <strong>Design:</strong> The pivot table is keyboard-navigable. Users navigate rows with arrow keys, select a row (or filter state representing a set of transactions), then press a shortcut to open the reclassify modal. This is the primary reclassification flow for power users.
+  <strong>Design:</strong> The pivot table is keyboard-navigable. Users navigate rows with arrow keys, select rows with Enter, then use shortcuts to filter or reclassify. This is the primary interaction flow for power users.
 </div>
 
-<p><strong>Keyboard map (preliminary — full map defined separately):</strong></p>
 <table>
   <tr><th>Key</th><th>Action</th></tr>
-  <tr><td><code>J / ↓</code></td><td>Move focus down one pivot row</td></tr>
-  <tr><td><code>K / ↑</code></td><td>Move focus up one pivot row</td></tr>
-  <tr><td><code>Space / →</code></td><td>Expand/collapse focused node</td></tr>
-  <tr><td><code>R</code></td><td>Open reclassify modal for focused row's transactions</td></tr>
-  <tr><td><code>Escape</code></td><td>Close modal / clear selection</td></tr>
-  <tr><td><code>Enter</code> (in modal)</td><td>Confirm reclassification</td></tr>
+  <tr><td><code>↑ / ↓</code></td><td>Move focus up/down one pivot row</td></tr>
+  <tr><td><code>← / →</code></td><td>Collapse / expand focused node</td></tr>
+  <tr><td><code>Enter</code></td><td>Toggle selection on focused row (multi-select)</td></tr>
+  <tr><td><code>⌘K</code></td><td>Add selected rows as dimension pill filters</td></tr>
+  <tr><td><code>⌘F</code></td><td>Open reclassify modal for selected rows</td></tr>
+  <tr><td><code>Escape</code></td><td>Clear selection</td></tr>
 </table>
 
 <h3>Reclassification Modal</h3>
@@ -1083,22 +1087,21 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 
 <p><strong>Reclassification flow:</strong></p>
 <ol>
-  <li>User navigates to a pivot row (e.g. "IT › Software") and presses <code>R</code></li>
-  <li>Modal opens. The "scope" is all transactions matching the focused pivot row's implicit filter (e.g. <code>classification_l1 = 'Corporate Services'</code> AND <code>classification_l2 = 'IT'</code> AND <code>classification_l3 = 'Software'</code>) PLUS any active top-level filters from the filter bar</li>
+  <li>User navigates to a pivot row (e.g. "IT › Software") and presses <code>⌘F</code></li>
+  <li>Modal opens. The "scope" is all transactions matching the selected pivot row's <strong>full path segments</strong> (e.g. <code>supplier_name = 'Acme'</code> AND <code>classification_l1 = 'Corporate Services'</code> AND <code>classification_l2 = 'IT'</code>) PLUS any active filters (both dimension pills and condition builder)</li>
   <li>Row count is shown ("560 rows currently in: IT › Software")</li>
   <li>User types in the search box — "contains" match on <code>full_path</code> of taxonomy nodes. Results filter live.</li>
   <li>User selects target node from results list (arrow keys + Enter, or click)</li>
   <li>"Confirm" button is shown with the target node and row count. User clicks Confirm (or presses Enter)</li>
-  <li>Calls <code>transactions:update({ filter: pivotFilter, update: { taxonomyNodeId: targetId, humanReviewed: true } })</code></li>
+  <li>Calls <code>transactions:update({ ids: matchingIds, taxonomyNodeId: targetId })</code></li>
   <li>Modal closes, pivot refreshes</li>
-  <li>Undo entry pushed to undo stack (via changelog entry from backend)</li>
+  <li>Undo entry pushed to undo stack (backend auto-creates changelog entry on update; <code>useReclassification</code> pushes it to <code>useUndoRedo</code>)</li>
 </ol>
 
 <h3>Export</h3>
 <ul>
-  <li><strong>[Export ▼]</strong> dropdown button in the top-right of Review view.</li>
-  <li>Options: "Export CSV" → calls <code>export:csv</code> (native save dialog + writes file)</li>
-  <li>Future: "Export Excel" (pivot to Excel via existing <code>exportPivotToExcel</code> utility)</li>
+  <li><strong>[Export CSV]</strong> button in the top-right of Review view.</li>
+  <li>Calls <code>export:csv</code> — native save dialog + writes flat CSV of all transactions with classification columns.</li>
 </ul>
 
 <h3>Hooks</h3>
@@ -1110,31 +1113,32 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
     <div class="file">src/renderer/hooks/useServerPivotData.ts</div>
     <ul>
       <li>Fetches pivot aggregation from <code>transactions:pivotAggregation</code></li>
-      <li>Accepts filters + auto-refresh interval (for live classification)</li>
+      <li>Accepts filters (merged dimension pills + condition builder conditions)</li>
+      <li>Auto-refreshes: polls every ~5s while <code>isClassifying</code>, refetches on completion</li>
       <li>Returns <code>{ pivotData, totalCount, loading, refetch }</code></li>
     </ul>
   </div>
   <div class="card">
     <span class="badge badge-hook">Hook</span>
-    <span class="status-tag status-new">New</span>
+    <span class="status-tag status-keep">Keep</span>
     <h4>usePivotKeyboard</h4>
     <div class="file">src/renderer/hooks/usePivotKeyboard.ts</div>
     <ul>
       <li>Manages keyboard focus/navigation state over pivot rows</li>
-      <li>Returns <code>{ focusedRow, setFocus, handleKeyDown }</code></li>
-      <li>Fires <code>onReclassify(focusedRow)</code> when R pressed</li>
+      <li>Returns <code>{ focusedIndex, selectedKeys, handleKeyDown, clearSelection }</code></li>
+      <li>Fires <code>onCmdK(rows)</code> for filter, <code>onCmdF(rows)</code> for reclassify</li>
     </ul>
   </div>
   <div class="card">
     <span class="badge badge-hook">Hook</span>
-    <span class="status-tag status-changed">Updated</span>
+    <span class="status-tag status-new">New</span>
     <h4>useReclassification</h4>
     <div class="file">src/renderer/hooks/useReclassification.ts</div>
     <ul>
-      <li>Modal open/close state</li>
-      <li>Taxonomy search (contains-match against loaded nodes)</li>
+      <li>Owns modal open/close state, target rows, taxonomy fetch + search</li>
+      <li>Builds correct filter from full path segments + active filters (handles <code>(Unclassified)</code> → <code>IS NULL</code>)</li>
       <li>Calls <code>transactions:update</code> on confirm</li>
-      <li>Pushes undo entry</li>
+      <li>Integrates with <code>useUndoRedo</code> — pushes changelog entry to undo stack</li>
     </ul>
   </div>
   <div class="card">
@@ -1153,12 +1157,12 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 <h3>IPC Channels</h3>
 <table>
   <tr><th>Channel</th><th>When</th></tr>
-  <tr><td><code>transactions:pivotAggregation</code></td><td>On mount, filter change, auto-refresh</td></tr>
-  <tr><td><code>transactions:query</code></td><td>Drill-down detail panel</td></tr>
+  <tr><td><code>transactions:pivotAggregation</code></td><td>On mount, filter change, auto-refresh while classifying</td></tr>
+  <tr><td><code>transactions:query</code></td><td>Drill-down detail panel (paginated), reclassify ID resolution</td></tr>
   <tr><td><code>transactions:update</code></td><td>Reclassify confirm</td></tr>
   <tr><td><code>taxonomy:getNodes</code></td><td>On mount (for reclassify search)</td></tr>
   <tr><td><code>changelog:revert</code></td><td>Undo</td></tr>
-  <tr><td><code>export:csv</code></td><td>Export → Export CSV</td></tr>
+  <tr><td><code>export:csv</code></td><td>Export CSV button</td></tr>
 </table>
 </section>
 

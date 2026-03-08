@@ -6,7 +6,6 @@ import {
 import { Sparkles, TrendingUp, TrendingDown, AlertCircle, PieChart as PieIcon, BarChart3 } from 'lucide-react'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import { useIPC } from '../../hooks/useIPC'
-import { useReviewFilters } from '../../hooks/useReviewFilters'
 import { ipc } from '../../lib/ipc'
 import type { TransactionStats, TransactionFilter } from '../../../shared/types/transactions'
 import '../../styles/MetricsTab.css'
@@ -16,7 +15,7 @@ interface MetricsTabProps {
   l1Data: { name: string; value: number }[]
   supplierData: { name: string; total: number }[]
   monthlyData: { month: string; spend: number }[]
-  onDrillToFilters?: (filters: Record<string, string[]>) => void
+  filter?: TransactionFilter
 }
 
 const formatCurrency = (amount: number | string) => fmtAbbrev(Number(amount) || 0)
@@ -39,7 +38,7 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   l1Data,
   supplierData,
   monthlyData,
-  onDrillToFilters,
+  filter,
 }) => {
   const [particularDimension, setParticularDimension] = useState('company')
   const [animateIn, setAnimateIn] = useState(false)
@@ -50,16 +49,10 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   }, [])
 
   // Fetch particular-dimension data via IPC (MetricsTab owns this since it owns the dimension state)
-  const { toFilterConditions } = useReviewFilters()
-  const filterConditions = toFilterConditions()
-  const filterKey = useMemo(() => JSON.stringify(filterConditions), [filterConditions])
+  const filterKey = useMemo(() => JSON.stringify(filter), [filter])
   const particularColumn = DIMENSION_TO_COLUMN[particularDimension] ?? 'company'
   const { data: particularResult } = useIPC(
-    () => {
-      const fc = toFilterConditions()
-      const f: TransactionFilter | undefined = fc.length > 0 ? { conditions: fc } : undefined
-      return ipc.transactions.pivotAggregation([particularColumn], 'spend_amount', f)
-    },
+    () => ipc.transactions.pivotAggregation([particularColumn], 'spend_amount', filter),
     [filterKey, particularColumn]
   )
 
@@ -140,30 +133,6 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
 
     return result
   }, [monthlyData, totals, l1Data, supplierData])
-
-  const handleTopSupplierClick = (entry: { name: string }) => {
-    if (!onDrillToFilters || !entry) return
-    onDrillToFilters({ supplier: [entry.name] })
-  }
-
-  const handleL1CategoryClick = (entry: { name: string }) => {
-    if (!onDrillToFilters || !entry) return
-    onDrillToFilters({ classificationL1: [entry.name] })
-  }
-
-  const handleParticularClick = (entry: { name: string }) => {
-    if (!onDrillToFilters || !entry) return
-    const keyMap: Record<string, string> = {
-      company: 'company',
-      cost_center: 'costCenter',
-      gl: 'glDescription',
-      gl_account_desc: 'glDescription',
-      country: 'country',
-    }
-    const key = keyMap[particularDimension]
-    if (!key) return
-    onDrillToFilters({ [key]: [entry.name] })
-  }
 
   return (
     <div className={`metrics-tab ${animateIn ? 'metrics-tab-animate' : ''}`}>
@@ -274,8 +243,6 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
                   radius={[0, 4, 4, 0]}
                   barSize={18}
                   isAnimationActive
-                  onClick={handleTopSupplierClick}
-                  style={{ cursor: onDrillToFilters ? 'pointer' : 'default' }}
                 >
                   <LabelList dataKey="total" position="right" formatter={formatCurrencyShort} style={{ fontSize: '10px', fill: 'var(--text-secondary)', fontWeight: '600' }} offset={10} />
                 </Bar>
@@ -306,8 +273,6 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
                   dataKey="value"
                   isAnimationActive
                   label={({ value }: { name: string; value: number }) => formatCurrencyShort(value)}
-                  onClick={handleL1CategoryClick}
-                  style={{ cursor: onDrillToFilters ? 'pointer' : 'default' }}
                 >
                   {l1Data.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -373,8 +338,6 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
                   radius={[0, 4, 4, 0]}
                   barSize={18}
                   isAnimationActive
-                  onClick={handleParticularClick}
-                  style={{ cursor: onDrillToFilters ? 'pointer' : 'default' }}
                 >
                   <LabelList dataKey="value" position="right" formatter={formatCurrencyShort} style={{ fontSize: '10px', fill: 'var(--text-secondary)', fontWeight: '600' }} offset={10} />
                 </Bar>

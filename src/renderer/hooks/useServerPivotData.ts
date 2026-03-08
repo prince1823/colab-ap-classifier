@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
+import { useWorkflowStore } from '../stores/workflowStore'
 import type { TransactionFilter } from '../../shared/types/transactions'
 import type { HierarchicalPivotData, PivotTreeNode, Aggregation } from '../types/pivot'
 
@@ -70,6 +71,22 @@ export function useServerPivotData(
   const refetch = useCallback(() => {
     fetchPivot()
   }, [fetchPivot])
+
+  // Auto-refresh while classification is running
+  const isClassifying = useWorkflowStore((s) => s.isClassifying)
+  const wasClassifyingRef = useRef(false)
+
+  useEffect(() => {
+    if (isClassifying) {
+      wasClassifyingRef.current = true
+      const interval = setInterval(() => fetchPivot(), 5000)
+      return () => clearInterval(interval)
+    } else if (wasClassifyingRef.current) {
+      // Classification just finished — do one final refresh
+      wasClassifyingRef.current = false
+      fetchPivot()
+    }
+  }, [isClassifying, fetchPivot])
 
   // Build the PivotTreeNode hierarchy from flat aggregated rows
   const pivotData = useMemo((): HierarchicalPivotData | null => {

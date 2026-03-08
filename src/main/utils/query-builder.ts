@@ -1,8 +1,17 @@
 import type { FilterCondition } from '../../shared/types/transactions';
 
-export function conditionToSQL(condition: FilterCondition, params: unknown[]): string | null {
+/** Optional column resolver — maps field name to SQL expression. Default: quoted column name. */
+export type ColumnResolver = (field: string) => string;
+
+const defaultResolver: ColumnResolver = (field) => `"${field}"`;
+
+export function conditionToSQL(
+  condition: FilterCondition,
+  params: unknown[],
+  resolveColumn: ColumnResolver = defaultResolver
+): string | null {
   const { field, operator, value } = condition;
-  const col = `"${field}"`;
+  const col = resolveColumn(field);
 
   switch (operator) {
     case 'equals':
@@ -26,6 +35,8 @@ export function conditionToSQL(condition: FilterCondition, params: unknown[]): s
     case 'regex':
       params.push(value);
       return `regexp_matches(${col}, ?)`;
+    case 'is_null':
+      return `${col} IS NULL`;
     case 'in_list': {
       const values = Array.isArray(value) ? value : String(value).split(',').map(v => v.trim());
       if (values.length === 0) return null;
@@ -49,7 +60,10 @@ export function conditionToSQL(condition: FilterCondition, params: unknown[]): s
   }
 }
 
-export function buildWhereClause(conditions: FilterCondition[]): { sql: string; params: unknown[] } | null {
+export function buildWhereClause(
+  conditions: FilterCondition[],
+  resolveColumn?: ColumnResolver
+): { sql: string; params: unknown[] } | null {
   if (!conditions || conditions.length === 0) return null;
 
   const params: unknown[] = [];
@@ -57,7 +71,7 @@ export function buildWhereClause(conditions: FilterCondition[]): { sql: string; 
 
   for (let i = 0; i < conditions.length; i++) {
     const condition = conditions[i];
-    const fragment = conditionToSQL(condition, params);
+    const fragment = conditionToSQL(condition, params, resolveColumn);
     if (!fragment) continue;
 
     if (parts.length > 0) {

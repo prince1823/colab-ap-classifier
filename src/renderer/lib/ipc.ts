@@ -2,7 +2,7 @@ import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
 import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
-import type { TransactionFilter, TransactionUpdate } from '../../shared/types/transactions';
+import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
@@ -87,6 +87,8 @@ export const ipc = {
       invoke('transactions:getIdsByValue', column, value, filters),
     pivotAggregation: (dimensions: string[], valueDimension: string, filters?: TransactionFilter) =>
       invoke('transactions:pivotAggregation', dimensions, valueDimension, filters),
+    getIdsByConditions: (conditions: FilterCondition[]) =>
+      invoke('transactions:getIdsByConditions', conditions),
   },
 
   // ── Taxonomy (8 channels) ──

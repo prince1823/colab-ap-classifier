@@ -44,6 +44,7 @@ export type FilterOperator =
   | 'ends_with'
   | 'regex'
   | 'in_list'
+  | 'is_null'
   | 'greater_than'
   | 'less_than'
   | 'greater_than_or_equal'

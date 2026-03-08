@@ -264,14 +264,12 @@ export class TaxonomyStore implements ITaxonomyStore {
     const transactionsMoved = Number(countResult?.cnt ?? 0);
 
     if (transactionsMoved > 0) {
-      await this.db.run(
-        'UPDATE transactions SET taxonomy_node_id = ? WHERE taxonomy_node_id = ?',
-        targetId,
-        sourceId
+      throw new Error(
+        `Cannot merge — ${transactionsMoved} transaction(s) are classified under "${source.full_path}". Reassign them in Review first.`
       );
     }
 
-    // Delete source node
+    // Delete source node (safe — no transactions reference it)
     await this.db.run('DELETE FROM taxonomy WHERE id = ?', sourceId);
 
     return { transactionsMoved };
@@ -298,6 +296,16 @@ export class TaxonomyStore implements ITaxonomyStore {
 
     if (!fs.existsSync(resolvedPath)) {
       throw new Error(`Taxonomy file not found: ${resolvedPath}`);
+    }
+
+    // Block import if any transactions are already classified
+    const classified = await this.db.get<{ cnt: number | bigint }>(
+      'SELECT COUNT(*) as cnt FROM transactions WHERE taxonomy_node_id IS NOT NULL'
+    );
+    if (Number(classified?.cnt ?? 0) > 0) {
+      throw new Error(
+        `Cannot replace taxonomy — ${classified!.cnt} transaction(s) are already classified.`
+      );
     }
 
     const content = fs.readFileSync(resolvedPath, 'utf-8');

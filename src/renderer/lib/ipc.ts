@@ -89,7 +89,7 @@ export const ipc = {
       invoke('transactions:pivotAggregation', dimensions, valueDimension, filters),
   },
 
-  // ── Taxonomy (6 channels) ──
+  // ── Taxonomy (8 channels) ──
   taxonomy: {
     getNodeCount: () => invoke('taxonomy:getNodeCount'),
     getNodes: () => invoke('taxonomy:getNodes'),
@@ -97,6 +97,10 @@ export const ipc = {
       invoke('taxonomy:addNode', fullPath, description),
     updateNode: (nodeId: string, updates: { description?: string }) =>
       invoke('taxonomy:updateNode', nodeId, updates),
+    renameNode: (nodeId: string, newName: string) =>
+      invoke('taxonomy:renameNode', nodeId, newName),
+    mergeNodes: (sourceId: string, targetId: string) =>
+      invoke('taxonomy:mergeNodes', sourceId, targetId),
     deleteNode: (nodeId: string) =>
       invoke('taxonomy:deleteNode', nodeId),
     importFromFile: (filePath: string) =>

@@ -539,51 +539,63 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
 <div class="page-wireframe">
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Taxonomy                                    [ Import from .txt File ]   │
+│  847 nodes · 3 L1 · 24 L2 · 820 L3                                     │
 │                                                                          │
-│  ┌─── Tree ─────────────────────────────────────────────────────────┐    │
-│  │  [-] Corporate Services                                  [+ add] │    │
-│  │     [-] IT                                     [rename] [+ add]  │    │
-│  │        Software         [rename] [merge] [del] [+ add]           │    │
-│  │        Hardware         [rename] [merge] [del]                   │    │
-│  │     [+] HR                                                       │    │
-│  │  [-] Operations                                          [+ add] │    │
-│  └──────────────────────────────────────────────────────────────────┘    │
+│  [-] Corporate Services                                                  │
+│     [-] IT                                                               │
+│        Software         "Enterprise software licenses and SaaS subs"    │
+│        Hardware         "Physical computing equipment and peripherals"  │
+│        Licenses         "Software licensing and maintenance fees"       │
+│     [-] HR                                                               │
+│        Payroll          "Payroll processing and services"                │
+│        Benefits         "Employee benefits and insurance"                │
+│     [+] Finance                                                          │
+│  [-] Operations                                                          │
+│     [+] Facilities                                                       │
+│     [+] Logistics                                                        │
 │                                                                          │
-│  ── Add Node ──────────────────────────────────────────────────────────  │
-│  L1  [ Select or create new ▼ ]                                          │
-│  L2  [ Select under L1 or create new ▼ ]                                │
-│  L3  [ Select under L2 or create new ▼ ]   (optional — adds at L2 if    │
-│        left blank)                                                       │
-│  Description  [ ________________________________ ]  (L3 only)            │
-│  [ Add Node ]                                                            │
+│  Hover actions:                                                          │
+│    L1 row  →  [+]  [merge]  [×]       (+) adds L2 child                │
+│    L2 row  →  [+]  [merge]  [×]       (+) adds L3 child                │
+│    L3 row  →       [merge]  [×]       no children                       │
+│  Click any name or description to edit inline (rename / update desc).   │
+│  No new L1 creation — only existing L1s from import.                    │
+│                                                                          │
+│  Inline add form (shown when [+] clicked on a row):                     │
+│  ┌ Add L3 under IT: [________] Desc: [____________] [Add] [Cancel] ┐   │
 └──────────────────────────────────────────────────────────────────────────┘
 </div>
 
 <h3>Functionality</h3>
 <ol>
-  <li><strong>Import from file:</strong> Opens file picker (native Electron dialog via <code>ingest:selectFile</code> filtered to .txt), then calls <code>taxonomy:importFromFile(path)</code>. Replaces entire taxonomy if one exists (with confirmation prompt).</li>
-  <li><strong>Tree view:</strong> Expandable L1 → L2 → L3 hierarchy from <code>taxonomy:getNodes</code>. L3 node description shown on hover.</li>
-  <li><strong>Add node:</strong> Inline form below tree. L1 is a combo-select (pick existing or type new). L2 is a combo-select filtered to children of the chosen L1. L3 is optional combo-select filtered to children of chosen L2. If L3 is blank, the node is added at L2 depth. Description is available for L3 nodes only.</li>
-  <li><strong>Rename:</strong> Click rename icon → inline edit → confirm. Calls <code>taxonomy:renameNode</code>.</li>
-  <li><strong>Merge:</strong> Click merge on a node → shows a target picker dialog (select destination node at same depth) → confirm. Calls <code>taxonomy:mergeNodes</code>. All transactions referencing source are moved to target.</li>
-  <li><strong>Delete:</strong> Click delete → backend checks if any transactions reference this node. If yes: block and show message "X rows are classified under this node. Reassign them in Review first." with a link to Review filtered to that node. If no transactions reference it: confirm and call <code>taxonomy:deleteNode</code>.</li>
+  <li><strong>Import from file:</strong> Opens file picker (native Electron dialog via <code>ingest:selectFile</code> filtered to .txt), then calls <code>taxonomy:importFromFile(path)</code>. If any transactions have a <code>taxonomy_node_id</code> set, <strong>block import</strong> with message: &ldquo;Cannot replace taxonomy &mdash; X transactions are already classified.&rdquo; If no classified transactions exist, import replaces the full taxonomy.</li>
+  <li><strong>Tree view:</strong> Expandable L1 &rarr; L2 &rarr; L3 hierarchy from <code>taxonomy:getNodes</code>. Descriptions shown <strong>inline</strong> next to node names wherever they exist. Descriptions are click-to-edit: click text &rarr; input field, Enter saves via <code>taxonomy:updateNode(nodeId, { description })</code>, Escape cancels.</li>
+  <li><strong>Add node:</strong> Contextual <code>[+]</code> button on each L1 and L2 row (shown on hover). Clicking opens an inline form directly below the row. L1 <code>[+]</code> adds an L2 &mdash; form has one text field for the L2 name. L2 <code>[+]</code> adds an L3 &mdash; form has a text field for L3 name and an optional description field. No <code>[+]</code> on L3 nodes. <strong>Cannot create new L1 nodes</strong> &mdash; only the L1 nodes from import exist (max 3). Calls <code>taxonomy:addNode(parentPath + '|' + newName, description)</code>.</li>
+  <li><strong>Rename:</strong> Click node name to enter inline edit mode. Enter saves via <code>taxonomy:renameNode</code>, Escape cancels. Works on L1, L2, and L3 names.</li>
+  <li><strong>Merge:</strong> Click merge on a node &rarr; shows a target picker (sibling nodes at same depth). If any transactions reference the source node, <strong>block merge</strong> with message: &ldquo;Cannot merge &mdash; X transactions are classified under this node. Reassign them in Review first.&rdquo; If no classified transactions, confirm and call <code>taxonomy:mergeNodes</code>.</li>
+  <li><strong>Delete:</strong> Click delete &rarr; if any transactions reference this node, <strong>block delete</strong> with message: &ldquo;Cannot delete &mdash; X transactions are classified under this node. Reassign them in Review first.&rdquo; with a link to Review filtered to that node. If no transactions reference it, confirm and call <code>taxonomy:deleteNode</code>.</li>
 </ol>
 
 <div class="alert alert-warn">
-  <strong>Delete block flow:</strong> <code>taxonomy:deleteNode</code> returns an error if transactions reference the node. Frontend catches this, shows the message with a link to Review filtered to <code>taxonomyNodeId = [nodeId]</code>. The taxonomy service's <code>reassignTo</code> parameter is NOT used from the UI — users must manually reassign in Review, then retry delete.
+  <strong>Classified transaction guard:</strong> Import, merge, and delete are all blocked when transactions reference the affected node(s). The backend returns an error with the count; the frontend catches it and shows a message with a link to Review filtered to <code>taxonomyNodeId = [nodeId]</code>. Users must reassign transactions in Review first, then retry. The taxonomy service&rsquo;s <code>reassignTo</code> parameter is NOT used from the UI.
 </div>
 
 <h3>IPC Channels</h3>
 <table>
   <tr><th>Channel</th><th>When</th></tr>
   <tr><td><code>taxonomy:getNodes</code></td><td>On mount and after any mutation</td></tr>
-  <tr><td><code>taxonomy:addNode</code></td><td>Add Node form submit</td></tr>
+  <tr><td><code>taxonomy:addNode</code></td><td>Inline add form submit (under L1 or L2 row)</td></tr>
+  <tr><td><code>taxonomy:updateNode</code></td><td>Description inline edit save</td></tr>
   <tr><td><code>taxonomy:renameNode</code></td><td>Rename confirm <span class="status-tag status-new">New IPC</span></td></tr>
   <tr><td><code>taxonomy:mergeNodes</code></td><td>Merge confirm <span class="status-tag status-new">New IPC</span></td></tr>
   <tr><td><code>taxonomy:deleteNode</code></td><td>Delete confirm</td></tr>
   <tr><td><code>taxonomy:importFromFile</code></td><td>After file picker returns path</td></tr>
   <tr><td><code>ingest:selectFile</code></td><td>Import button click (to get file path)</td></tr>
 </table>
+
+<div class="alert alert-warn">
+  <strong>L1 constraint:</strong> The taxonomy is limited to exactly the L1 categories established at import time (max 3). New L1 nodes cannot be created through the UI. Users can rename existing L1s but not add or delete them if they have children.
+</div>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->

@@ -18,6 +18,14 @@ export function registerTaxonomyHandlers(taxonomy: TaxonomyStore): void {
     await taxonomy.updateNode(nodeId as string, updates as { description?: string });
   });
 
+  registerHandler('taxonomy:renameNode', async (_event, nodeId: unknown, newName: unknown) => {
+    await taxonomy.renameNode(nodeId as string, newName as string);
+  });
+
+  registerHandler('taxonomy:mergeNodes', async (_event, sourceId: unknown, targetId: unknown) => {
+    return taxonomy.mergeNodes(sourceId as string, targetId as string);
+  });
+
   registerHandler('taxonomy:deleteNode', async (_event, nodeId: unknown) => {
     await taxonomy.deleteNode(nodeId as string);
   });

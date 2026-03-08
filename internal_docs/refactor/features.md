@@ -54,3 +54,9 @@
 - LLM review of classifications before human review
 
 ### Login System
+
+### Category A Supplier Mappings
+- Suppliers can have `mapped_taxonomy_paths` — pre-assigned taxonomy paths (stored as JSON array of pipe-delimited paths on `project_suppliers`)
+- Replaces the old `categoryA` boolean with actual taxonomy mapping data
+- Planned: Use mapped_taxonomy_paths during classification to auto-assign taxonomy nodes for a supplier's transactions (before LLM), similar to override rules but scoped per-supplier
+- Integration with classification pipeline and override rules engine TBD

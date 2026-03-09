@@ -152,7 +152,7 @@ export default function SuppliersPage() {
       }
 
       // Load supplier universe path
-      const suPath = await ipc.settings.getSupplierUniversePath()
+      const suPath = await ipc.supplierUniverse.getPath()
       setSupplierUniversePath(suPath)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load suppliers')
@@ -298,9 +298,8 @@ export default function SuppliersPage() {
   /** Change supplier universe DB via file picker */
   const changeSupplierUniverse = useCallback(async () => {
     try {
-      const selected = await ipc.settings.selectSupplierUniverseFile()
+      const selected = await ipc.supplierUniverse.selectFile()
       if (!selected) return
-      await ipc.settings.setSupplierUniversePath(selected)
       setSupplierUniversePath(selected)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to set supplier universe path')

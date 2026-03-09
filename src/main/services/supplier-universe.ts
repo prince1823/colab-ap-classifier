@@ -1,8 +1,15 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
 import { existsSync, unlinkSync } from 'fs';
-import type { SupplierUniverse } from '../../shared/types/services';
+import type { SupplierUniverse, IAppConfigService } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import { convertPlaceholders } from './database';
+
+export class SupplierUniverseNotConfiguredError extends Error {
+  constructor() {
+    super('Supplier universe database path is not configured');
+    this.name = 'SupplierUniverseNotConfiguredError';
+  }
+}
 
 function parseJSON<T>(json: string | null | undefined): T | null {
   if (!json) return null;
@@ -14,26 +21,30 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
   private connection: DuckDBConnection | null = null;
   private filePath: string | null = null;
   private defaultPath: string | null = null;
-  private _wasNewlyCreated = false;
 
-  setDefaultPath(p: string): void {
-    this.defaultPath = p;
+  constructor(private readonly appConfig: IAppConfigService) {}
+
+  getConfiguredPath(): string | null {
+    return this.defaultPath || this.appConfig.getSupplierUniversePath();
   }
 
-  wasNewlyCreated(): boolean {
-    return this._wasNewlyCreated;
+  async configure(path: string): Promise<void> {
+    if (!existsSync(path) && !path.endsWith('.db')) {
+      throw new Error(`Invalid supplier universe path: ${path}`);
+    }
+    await this.appConfig.setSupplierUniversePath(path);
+    this.defaultPath = path;
+    await this.open(path);
   }
 
-  async open(filePath?: string): Promise<void> {
+  async open(filePath?: string): Promise<{ created: boolean }> {
     if (this.instance) {
       await this.close();
     }
 
-    this._wasNewlyCreated = false;
-
-    const dbPath = filePath || this.defaultPath;
+    const dbPath = filePath || this.defaultPath || this.appConfig.getSupplierUniversePath();
     if (!dbPath) {
-      throw new Error('supplier-universe:not-configured');
+      throw new SupplierUniverseNotConfiguredError();
     }
 
     try {
@@ -52,15 +63,19 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
     }
 
     this.filePath = dbPath;
+    this.defaultPath = dbPath;
 
     const tables = await this.allRaw<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'suppliers'"
     );
 
+    let created = false;
     if (tables.length === 0) {
       await this.initializeSchema();
-      this._wasNewlyCreated = true;
+      created = true;
     }
+
+    return { created };
   }
 
   async close(): Promise<void> {

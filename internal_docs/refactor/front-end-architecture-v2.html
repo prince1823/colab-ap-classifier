@@ -294,8 +294,9 @@
 <ul>
   <li>Shown whenever <code>hasProject === false</code> — on cold start and after project close</li>
   <li>Not a route; rendered as an overlay on top of AppShell (which shows sidebar + blank main area behind it)</li>
-  <li><strong>New Project</strong>: validates non-empty name → calls <code>ipc.project.new(name)</code> → dismisses modal → navigates to <code>/project</code></li>
-  <li><strong>Open Existing</strong>: calls <code>ipc.ingest.selectFile()</code> (or a dedicated project file picker) → calls <code>ipc.project.open(filePath)</code> → dismisses → navigates to last persisted route or <code>/project</code></li>
+  <li><strong>New Project</strong>: validates non-empty name → calls <code>ipc.project.new(name)</code> → if <code>needsSupplierUniverseSetup</code>, shows supplier-universe-setup mode; otherwise dismisses → navigates to <code>/project</code></li>
+  <li><strong>Open Existing</strong>: calls <code>ipc.project.open(filePath)</code> → if <code>needsSupplierUniverseSetup</code>, shows supplier-universe-setup mode; otherwise dismisses → navigates to last persisted route or <code>/project</code></li>
+  <li><strong>Supplier Universe Setup</strong>: shown when supplier universe path is not configured. User selects existing file (<code>ipc.supplierUniverse.selectFile()</code>) or creates new (<code>ipc.supplierUniverse.createNew()</code>), then calls <code>finalizeProjectOpen()</code></li>
   <li><strong>Recent projects</strong>: read from persisted <code>recentProjects</code> list in WorkflowStore — click to open directly without file picker</li>
   <li>Escape key does nothing (cannot dismiss without a project open)</li>
 </ul>
@@ -395,7 +396,7 @@
     <h4>SettingsDialog</h4>
     <div class="file">src/renderer/components/SettingsDialog.tsx</div>
     <ul>
-      <li>LLM config modal — unchanged from v1</li>
+      <li>Two sections: <strong>Classification Model</strong> (LLM provider/model/key via <code>settings:*</code> IPC) and <strong>Supplier Universe</strong> (DB path via <code>supplier-universe:*</code> IPC)</li>
       <li>Triggered from sidebar bottom button</li>
     </ul>
   </div>
@@ -1270,8 +1271,9 @@ hasClassifiedRows:   classifiedRows > 0  // from transactions:stats</code></pre>
   confirmedSupplierCount: number
 
   // ── Actions ──
-  createProject(name: string): Promise&lt;void&gt;
-  loadProject(filePath: string): Promise&lt;void&gt;
+  createProject(name: string): Promise&lt;{ needsSupplierUniverseSetup?: boolean }&gt;
+  loadProject(filePath: string): Promise&lt;{ needsSupplierUniverseSetup?: boolean }&gt;
+  finalizeProjectOpen(): Promise&lt;void&gt;  // IPC round-trip: ensures supplier universe open + fetches metadata
   closeProject(): Promise&lt;void&gt;
   refreshMetadata(): Promise&lt;void&gt;
   refreshGateState(): Promise&lt;void&gt;         // fetches stats + counts, derives booleans
@@ -1519,17 +1521,22 @@ interface FieldDefinition {
 'rules:applyAll':            { args: []; result: { reclassifiedCount: number } };
 'ingest:getStoredMappings':  { args: [columns: string[]]; result: { id: string; fileName: string; columnMappings: ColumnMapping } | null };
 
-// Settings — Supplier Universe (app-level, not project-level)
-// User must explicitly configure a path — no silent default location
-'settings:getSupplierUniversePath':         { args: []; result: string | null };
-'settings:setSupplierUniversePath':         { args: [path: string]; result: void }; // also opens the DB
-'settings:selectSupplierUniverseFile':      { args: []; result: string | null };
-'settings:getSupplierUniverseResolvedPath': { args: []; result: string | null };
-'settings:createNewSupplierUniverse':       { args: []; result: string | null }; // showSaveDialog + open
+// Supplier Universe (app-level, not project-level)
+// SupplierUniverse service owns its path lifecycle — configure() persists + opens atomically
+// IPC namespace: supplier-universe:
+'supplier-universe:getPath':    { args: []; result: string | null };
+'supplier-universe:selectFile': { args: []; result: string | null }; // showOpenDialog → configure → return path
+'supplier-universe:createNew':  { args: []; result: string | null }; // showSaveDialog → configure → return path
+
+// project:finalizeOpen — ensures supplier universe is open after setup, returns project info
+'project:finalizeOpen': { args: []; result: { filePath: string; name: string } };
 
 // project:open and project:new results now include needsSupplierUniverseSetup flag
 // { filePath, name, warning?, needsSupplierUniverseSetup? }
-// When true, LaunchModal shows supplier-universe-setup step before calling onProjectReady()</code></pre>
+// When true, LaunchModal shows supplier-universe-setup step before calling onProjectReady()
+
+// Service interfaces: ILLMConfig (narrow, 6 LLM methods) extended by IAppConfigService (adds supplier universe path persistence)
+// LLM client depends on ILLMConfig only; SupplierUniverse takes IAppConfigService for path persistence</code></pre>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->

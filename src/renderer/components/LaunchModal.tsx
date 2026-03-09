@@ -53,9 +53,8 @@ export default function LaunchModal({ onProjectReady }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const selected = await ipc.settings.selectSupplierUniverseFile()
+      const selected = await ipc.supplierUniverse.selectFile()
       if (!selected) { setLoading(false); return }
-      await ipc.settings.setSupplierUniversePath(selected)
       await finalizeProjectOpen()
       onProjectReady()
     } catch (e) {
@@ -69,7 +68,7 @@ export default function LaunchModal({ onProjectReady }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const path = await ipc.settings.createNewSupplierUniverse()
+      const path = await ipc.supplierUniverse.createNew()
       if (!path) { setLoading(false); return }
       await finalizeProjectOpen()
       onProjectReady()

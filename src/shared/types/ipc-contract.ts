@@ -28,6 +28,7 @@ export interface IPCInvokeMap {
   'project:new':            { args: [name: string, filePath?: string]; result: { filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean } | null };
   'project:open':           { args: [filePath?: string]; result: { filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean } | null };
   'project:close':          { args: []; result: void };
+  'project:finalizeOpen':   { args: []; result: { filePath: string; name: string } };
   'project:getSetting':     { args: [key: string]; result: unknown };
   'project:setSetting':     { args: [key: string, value: unknown]; result: void };
   'project:deleteSetting':  { args: [key: string]; result: void };
@@ -95,12 +96,10 @@ export interface IPCInvokeMap {
   'settings:setModel':       { args: [model: string]; result: void };
   'settings:validateApiKey': { args: [provider: string, key: string]; result: { valid: boolean; error?: string } };
 
-  // Settings — Supplier Universe
-  'settings:getSupplierUniversePath':         { args: []; result: string | null };
-  'settings:setSupplierUniversePath':         { args: [path: string]; result: void };
-  'settings:selectSupplierUniverseFile':      { args: []; result: string | null };
-  'settings:getSupplierUniverseResolvedPath': { args: []; result: string | null };
-  'settings:createNewSupplierUniverse':       { args: []; result: string | null };
+  // Supplier Universe
+  'supplier-universe:getPath':    { args: []; result: string | null };
+  'supplier-universe:selectFile': { args: []; result: string | null };
+  'supplier-universe:createNew':  { args: []; result: string | null };
 }
 
 export interface IPCEventMap {

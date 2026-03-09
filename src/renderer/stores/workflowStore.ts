@@ -72,8 +72,6 @@ export const useWorkflowStore = create<WorkflowState>()(
 
         const result = await ipc.project.new(name)
         if (result?.needsSupplierUniverseSetup) {
-          // Store the file path so finalizeProjectOpen can use it, but don't set hasProject yet
-          set({ projectFilePath: result.filePath ?? null })
           return { needsSupplierUniverseSetup: true }
         }
         const metadata = await ipc.project.getMetadata()
@@ -93,7 +91,6 @@ export const useWorkflowStore = create<WorkflowState>()(
 
         const result = await ipc.project.open(filePath)
         if (result?.needsSupplierUniverseSetup) {
-          set({ projectFilePath: result.filePath ?? filePath ?? null })
           return { needsSupplierUniverseSetup: true }
         }
 
@@ -124,6 +121,8 @@ export const useWorkflowStore = create<WorkflowState>()(
       },
 
       finalizeProjectOpen: async () => {
+        // Ensure supplier universe is open on the main process, then fetch metadata
+        await ipc.project.finalizeOpen()
         let metadata: ProjectMetadata | null = null
         try {
           metadata = await ipc.project.getMetadata()
@@ -132,6 +131,7 @@ export const useWorkflowStore = create<WorkflowState>()(
         }
         set({
           projectMetadata: metadata,
+          projectFilePath: metadata?.filePath ?? null,
           classificationProgress: null,
           hasProject: metadata !== null,
           isClassifying: false,

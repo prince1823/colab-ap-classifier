@@ -187,7 +187,18 @@ describe('Classifier Mock Pipeline Test', () => {
 
     // Build service graph with real DuckDB + real SupplierUniverse + mocked agents
     db = new DuckDBDatabase();
-    supplierUniverse = new DuckDBSupplierUniverse();
+    const mockAppConfig = {
+      getApiKey: () => null,
+      setApiKey: async () => {},
+      getProvider: () => 'openrouter',
+      setProvider: async () => {},
+      getModel: () => 'claude-3-5-haiku-latest',
+      setModel: async () => {},
+      getSupplierUniversePath: () => universePath,
+      setSupplierUniversePath: async () => {},
+      clearSupplierUniversePath: async () => {},
+    };
+    supplierUniverse = new DuckDBSupplierUniverse(mockAppConfig);
     const webSearch = createMockWebSearch();
     const researchAgent = createMockResearchAgentFromFixture();
     const classificationAgent = createMockClassificationAgentFromFixture(db);
@@ -231,9 +242,6 @@ describe('Classifier Mock Pipeline Test', () => {
   // ─── Phase 1: Create project ────────────────────────────────────────────
 
   it('Phase 1: Create project and set company context', async () => {
-    // Set default path before createProject so it opens the temp universe, not colabip/
-    supplierUniverse.setDefaultPath(universePath);
-
     const result = await project.createProject(testConfig.projectName, dbPath);
     expect(result.name).toBe(testConfig.projectName);
     expect(db.isOpen()).toBe(true);

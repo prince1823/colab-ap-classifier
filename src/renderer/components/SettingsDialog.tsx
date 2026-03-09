@@ -55,7 +55,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
       setConfig(cfg)
       setForm((prev) => ({ ...prev, provider: cfg.provider, model: cfg.model }))
     }).catch(() => {/* non-fatal */})
-    ipc.settings.getSupplierUniverseResolvedPath().then((p) => setSupplierResolvedPath(p ?? '')).catch(() => {/* non-fatal */})
+    ipc.supplierUniverse.getPath().then((p) => setSupplierResolvedPath(p ?? '')).catch(() => {/* non-fatal */})
   }, [open])
 
   function handleProviderChange(e: React.ChangeEvent<HTMLInputElement>): void {
@@ -110,9 +110,8 @@ export default function SettingsDialog({ open, onClose }: Props) {
   async function handleBrowseSupplierUniverse(): Promise<void> {
     setSupplierPathError(null)
     try {
-      const selected = await ipc.settings.selectSupplierUniverseFile()
+      const selected = await ipc.supplierUniverse.selectFile()
       if (!selected) return
-      await ipc.settings.setSupplierUniversePath(selected)
       setSupplierResolvedPath(selected)
     } catch (e) {
       setSupplierPathError(e instanceof Error ? e.message : 'Failed to set path')

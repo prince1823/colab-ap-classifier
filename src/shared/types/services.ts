@@ -7,17 +7,20 @@ import type { ChangeLog, ChangeSource } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
 
-// ─── App Config ──────────────────────────────────────────────────────────────
+// ─── LLM Config ──────────────────────────────────────────────────────────────
 
-export interface IAppConfigService {
-  // LLM settings
+export interface ILLMConfig {
   getApiKey(provider: string): string | null;
   setApiKey(provider: string, key: string): Promise<void>;
   getProvider(): string;
   setProvider(provider: string): Promise<void>;
   getModel(): string;
   setModel(model: string): Promise<void>;
-  // Supplier universe path
+}
+
+// ─── App Config ──────────────────────────────────────────────────────────────
+
+export interface IAppConfigService extends ILLMConfig {
   getSupplierUniversePath(): string | null;
   setSupplierUniversePath(p: string): Promise<void>;
   clearSupplierUniversePath(): Promise<void>;
@@ -38,11 +41,11 @@ export interface Database {
 }
 
 export interface SupplierUniverse {
-  open(filePath?: string): Promise<void>;
+  open(filePath?: string): Promise<{ created: boolean }>;
   close(): Promise<void>;
   isOpen(): boolean;
-  setDefaultPath(p: string): void;
-  wasNewlyCreated(): boolean;
+  configure(path: string): Promise<void>;
+  getConfiguredPath(): string | null;
   getSupplier(name: string): Promise<SupplierInfo | null>;
   getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>>;
   upsertSupplier(name: string, data: Partial<SupplierInfo>): Promise<void>;

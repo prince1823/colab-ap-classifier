@@ -69,15 +69,9 @@ export interface ServiceContainer {
 export function createContainer(): ServiceContainer {
   // Leaf layer
   const db = new DuckDBDatabase();
-  const supplierUniverse = new DuckDBSupplierUniverse();
   const appConfig = new AppConfigService();
+  const supplierUniverse = new DuckDBSupplierUniverse(appConfig);
   const llm = new OpenRouterLLMClient(appConfig);
-
-  // Wire configured supplier universe path
-  const configuredPath = appConfig.getSupplierUniversePath();
-  if (configuredPath) {
-    supplierUniverse.setDefaultPath(configuredPath);
-  }
   const webSearch = new ExaWebSearch();
 
   // Agents

@@ -256,7 +256,18 @@ async function main() {
   // ─── Bootstrap services ─────────────────────────────────────────────────
 
   const db = new DuckDBDatabase();
-  const supplierUniverse = new DuckDBSupplierUniverse();
+  const scriptAppConfig = {
+    getApiKey: () => null,
+    setApiKey: async () => {},
+    getProvider: () => 'openrouter',
+    setProvider: async () => {},
+    getModel: () => 'claude-3-5-haiku-latest',
+    setModel: async () => {},
+    getSupplierUniversePath: () => UNIVERSE_PATH,
+    setSupplierUniversePath: async () => {},
+    clearSupplierUniversePath: async () => {},
+  };
+  const supplierUniverse = new DuckDBSupplierUniverse(scriptAppConfig);
   const eventBus = new EventEmitter();
   const llm = new OpenRouterLLMClient();
   const webSearch = new ExaWebSearch();
@@ -282,7 +293,6 @@ async function main() {
     // ─── Phase 1: Create project ──────────────────────────────────────────
 
     let start = Date.now();
-    supplierUniverse.setDefaultPath(UNIVERSE_PATH);
     await project.createProject(config.projectName, DB_PATH);
     await project.setSetting('company_context', config.companyContext);
     if (config.columnPriorities) {

@@ -32,8 +32,9 @@ interface WorkflowState {
   confirmedSupplierCount: number
 
   // Actions
-  createProject: (name: string) => Promise<void>
-  loadProject: (filePath: string) => Promise<void>
+  createProject: (name: string) => Promise<{ needsSupplierUniverseSetup?: boolean }>
+  loadProject: (filePath: string) => Promise<{ needsSupplierUniverseSetup?: boolean }>
+  finalizeProjectOpen: () => Promise<void>
   closeProject: () => Promise<void>
   refreshMetadata: () => Promise<void>
   refreshGateState: () => Promise<void>
@@ -69,7 +70,10 @@ export const useWorkflowStore = create<WorkflowState>()(
         try { await ipc.project.close() } catch { /* already closed */ }
         set({ projectMetadata: null, classificationProgress: null, hasProject: false, isClassifying: false, ...INITIAL_GATE_STATE })
 
-        await ipc.project.new(name)
+        const result = await ipc.project.new(name)
+        if (result?.needsSupplierUniverseSetup) {
+          return { needsSupplierUniverseSetup: true }
+        }
         const metadata = await ipc.project.getMetadata()
         set({
           projectMetadata: metadata,
@@ -78,13 +82,17 @@ export const useWorkflowStore = create<WorkflowState>()(
           hasProject: metadata !== null,
           isClassifying: false,
         })
+        return {}
       },
 
       loadProject: async (filePath: string) => {
         try { await ipc.project.close() } catch { /* already closed */ }
         set({ projectMetadata: null, classificationProgress: null, hasProject: false, isClassifying: false, ...INITIAL_GATE_STATE })
 
-        await ipc.project.open(filePath)
+        const result = await ipc.project.open(filePath)
+        if (result?.needsSupplierUniverseSetup) {
+          return { needsSupplierUniverseSetup: true }
+        }
 
         let metadata: ProjectMetadata | null = null
         try {
@@ -102,6 +110,25 @@ export const useWorkflowStore = create<WorkflowState>()(
           }
         }
 
+        set({
+          projectMetadata: metadata,
+          projectFilePath: metadata?.filePath ?? null,
+          classificationProgress: null,
+          hasProject: metadata !== null,
+          isClassifying: false,
+        })
+        return {}
+      },
+
+      finalizeProjectOpen: async () => {
+        // Ensure supplier universe is open on the main process, then fetch metadata
+        await ipc.project.finalizeOpen()
+        let metadata: ProjectMetadata | null = null
+        try {
+          metadata = await ipc.project.getMetadata()
+        } catch {
+          // keep null
+        }
         set({
           projectMetadata: metadata,
           projectFilePath: metadata?.filePath ?? null,

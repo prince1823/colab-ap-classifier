@@ -137,7 +137,18 @@ describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
 
     // Build real service graph
     db = new DuckDBDatabase();
-    supplierUniverse = new DuckDBSupplierUniverse();
+    const mockAppConfig = {
+      getApiKey: () => null,
+      setApiKey: async () => {},
+      getProvider: () => 'openrouter',
+      setProvider: async () => {},
+      getModel: () => 'claude-3-5-haiku-latest',
+      setModel: async () => {},
+      getSupplierUniversePath: () => UNIVERSE_PATH,
+      setSupplierUniversePath: async () => {},
+      clearSupplierUniversePath: async () => {},
+    };
+    supplierUniverse = new DuckDBSupplierUniverse(mockAppConfig);
     const llm = new OpenRouterLLMClient();
     const webSearch = new ExaWebSearch();
     const classificationAgent = new LLMClassificationAgent(llm);
@@ -178,9 +189,6 @@ describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
   // ─── Phase 1: Create project ────────────────────────────────────────────
 
   it('Phase 1: Create project and set company context', async () => {
-    // Set default path before createProject so it opens the temp universe, not colabip/
-    supplierUniverse.setDefaultPath(UNIVERSE_PATH);
-
     const result = await project.createProject(testConfig.projectName, DB_PATH);
     expect(result.name).toBe(testConfig.projectName);
     expect(db.isOpen()).toBe(true);

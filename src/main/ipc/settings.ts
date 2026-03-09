@@ -1,5 +1,5 @@
 import { registerHandler } from './register';
-import type { ILLMConfigService } from '../../shared/types/services';
+import type { ILLMConfig } from '../../shared/types/services';
 import type { LLMConfigResponse } from '../../shared/types/ipc-contract';
 
 async function validateApiKey(
@@ -36,27 +36,27 @@ async function validateApiKey(
   }
 }
 
-export function registerSettingsHandlers(llmConfig: ILLMConfigService): void {
+export function registerSettingsHandlers(appConfig: ILLMConfig): void {
   registerHandler('settings:getLLMConfig', async (): Promise<LLMConfigResponse> => {
     return {
-      provider: llmConfig.getProvider(),
-      model: llmConfig.getModel(),
-      hasOpenRouterKey: llmConfig.getApiKey('openrouter') !== null,
-      hasAnthropicKey:  llmConfig.getApiKey('anthropic') !== null,
-      hasOpenAIKey:     llmConfig.getApiKey('openai') !== null,
+      provider: appConfig.getProvider(),
+      model: appConfig.getModel(),
+      hasOpenRouterKey: appConfig.getApiKey('openrouter') !== null,
+      hasAnthropicKey:  appConfig.getApiKey('anthropic') !== null,
+      hasOpenAIKey:     appConfig.getApiKey('openai') !== null,
     };
   });
 
   registerHandler('settings:setApiKey', async (_event, provider: unknown, key: unknown) => {
-    await llmConfig.setApiKey(provider as string, key as string);
+    await appConfig.setApiKey(provider as string, key as string);
   });
 
   registerHandler('settings:setProvider', async (_event, provider: unknown) => {
-    await llmConfig.setProvider(provider as string);
+    await appConfig.setProvider(provider as string);
   });
 
   registerHandler('settings:setModel', async (_event, model: unknown) => {
-    await llmConfig.setModel(model as string);
+    await appConfig.setModel(model as string);
   });
 
   registerHandler('settings:validateApiKey', async (_event, provider: unknown, key: unknown) => {

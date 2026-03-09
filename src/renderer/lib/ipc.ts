@@ -31,13 +31,14 @@ function on<K extends keyof IPCEventMap>(channel: K, callback: (data: IPCEventMa
  * Typed IPC client — all types inferred from IPCInvokeMap via channel string.
  */
 export const ipc = {
-  // ── Project (9 channels) ──
+  // ── Project (10 channels) ──
   project: {
     new: (name: string, filePath?: string) =>
       invoke('project:new', name, filePath),
     open: (filePath?: string) =>
       invoke('project:open', filePath),
     close: () => invoke('project:close'),
+    finalizeOpen: () => invoke('project:finalizeOpen'),
     getSetting: (key: string) => invoke('project:getSetting', key),
     setSetting: (key: string, value: unknown) => invoke('project:setSetting', key, value),
     deleteSetting: (key: string) => invoke('project:deleteSetting', key),
@@ -153,5 +154,12 @@ export const ipc = {
     setProvider: (provider: string) => invoke('settings:setProvider', provider),
     setModel: (model: string) => invoke('settings:setModel', model),
     validateApiKey: (provider: string, key: string) => invoke('settings:validateApiKey', provider, key),
+  },
+
+  // ── Supplier Universe (3 channels) ──
+  supplierUniverse: {
+    getPath: () => invoke('supplier-universe:getPath'),
+    selectFile: () => invoke('supplier-universe:selectFile'),
+    createNew: () => invoke('supplier-universe:createNew'),
   },
 };

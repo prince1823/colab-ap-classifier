@@ -1,8 +1,8 @@
 import { registerHandler } from './register';
-import type { ProjectStore, Database } from '../../shared/types/services';
+import type { ProjectStore, Database, SupplierUniverse } from '../../shared/types/services';
 import type { ProjectMetadata, ProjectMetadataUpdate, CompanyContext } from '../../shared/types/project';
 
-export function registerProjectHandlers(project: ProjectStore, db: Database): void {
+export function registerProjectHandlers(project: ProjectStore, db: Database, supplierUniverse: SupplierUniverse): void {
   registerHandler('project:new', async (_event, projectName: unknown, filePath?: unknown) => {
     let targetPath = filePath as string | undefined;
     if (!targetPath) {
@@ -25,6 +25,15 @@ export function registerProjectHandlers(project: ProjectStore, db: Database): vo
 
   registerHandler('project:close', async () => {
     await project.closeProject();
+  });
+
+  registerHandler('project:finalizeOpen', async () => {
+    await supplierUniverse.open();
+    const settings = await project.getAllSettings();
+    return {
+      filePath: db.getFilePath() ?? '',
+      name: (settings.project_name as string) ?? 'Untitled',
+    };
   });
 
   registerHandler('project:getSetting', async (_event, key: unknown) => {

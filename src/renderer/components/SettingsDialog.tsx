@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { XMarkIcon, CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, CheckCircleIcon, ExclamationCircleIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
 import { ipc } from '../lib/ipc'
 import type { LLMConfigResponse } from '../../shared/types/ipc-contract'
 
@@ -41,15 +41,21 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
+  // Supplier universe path state
+  const [supplierResolvedPath, setSupplierResolvedPath] = useState<string>('')
+  const [supplierPathError, setSupplierPathError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!open) return
     setForm(DEFAULT_FORM)
     setSaveError(null)
     setSaveSuccess(false)
+    setSupplierPathError(null)
     ipc.settings.getLLMConfig().then((cfg) => {
       setConfig(cfg)
       setForm((prev) => ({ ...prev, provider: cfg.provider, model: cfg.model }))
     }).catch(() => {/* non-fatal */})
+    ipc.supplierUniverse.getPath().then((p) => setSupplierResolvedPath(p ?? '')).catch(() => {/* non-fatal */})
   }, [open])
 
   function handleProviderChange(e: React.ChangeEvent<HTMLInputElement>): void {
@@ -101,6 +107,17 @@ export default function SettingsDialog({ open, onClose }: Props) {
     }
   }
 
+  async function handleBrowseSupplierUniverse(): Promise<void> {
+    setSupplierPathError(null)
+    try {
+      const selected = await ipc.supplierUniverse.selectFile()
+      if (!selected) return
+      setSupplierResolvedPath(selected)
+    } catch (e) {
+      setSupplierPathError(e instanceof Error ? e.message : 'Failed to set path')
+    }
+  }
+
   const keyIsSet = config ? hasKeyForProvider(config, form.provider) : false
 
   return (
@@ -109,7 +126,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white p-6 shadow-xl">
           <div className="mb-4 flex items-center justify-between">
-            <Dialog.Title className="text-lg font-semibold text-gray-900">LLM Settings</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold text-gray-900">Settings</Dialog.Title>
             <Dialog.Close asChild>
               <button className="rounded p-1 text-gray-400 hover:text-gray-600">
                 <XMarkIcon className="h-5 w-5" />
@@ -118,6 +135,9 @@ export default function SettingsDialog({ open, onClose }: Props) {
           </div>
 
           <div className="space-y-4">
+            {/* ── Classification Model ── */}
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Classification Model</h3>
+
             {/* Provider */}
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Provider</label>
@@ -193,7 +213,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
             )}
           </div>
 
-          <div className="mt-6 flex justify-end gap-2">
+          <div className="mt-4 flex justify-end gap-2">
             {form.apiKey.trim() && (
               <button
                 onClick={handleValidate}
@@ -210,6 +230,32 @@ export default function SettingsDialog({ open, onClose }: Props) {
             >
               {isSaving ? 'Saving…' : 'Save'}
             </button>
+          </div>
+
+          {/* ── Supplier Universe ── */}
+          <div className="mt-6 border-t border-gray-200 pt-4">
+            <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">Supplier Universe</h3>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Database File</label>
+              <div
+                className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 overflow-x-auto whitespace-nowrap"
+                title={supplierResolvedPath}
+              >
+                {supplierResolvedPath || 'Not configured'}
+              </div>
+              <div className="mt-2">
+                <button
+                  onClick={handleBrowseSupplierUniverse}
+                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <FolderOpenIcon className="h-3.5 w-3.5" />
+                  Change
+                </button>
+              </div>
+              {supplierPathError && (
+                <p className="mt-1 text-xs text-red-600">{supplierPathError}</p>
+              )}
+            </div>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

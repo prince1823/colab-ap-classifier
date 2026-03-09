@@ -11,13 +11,14 @@ import { registerRulesHandlers } from './rules';
 import { registerTransactionsHandlers } from './transactions';
 import { registerExportHandlers } from './export';
 import { registerSettingsHandlers } from './settings';
+import { registerSupplierUniverseHandlers } from './supplier-universe';
 
 export function registerAllHandlers(services: ServiceContainer): void {
   // Test channel
   registerHandler('test:ping', async () => 'pong');
 
   // Namespace handlers
-  registerProjectHandlers(services.project, services.db);
+  registerProjectHandlers(services.project, services.db, services.supplierUniverse);
   registerChangelogHandlers(services.changelog);
   registerTaxonomyHandlers(services.taxonomy);
   registerIngestHandlers(services.ingest);
@@ -27,5 +28,6 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerRulesHandlers(services.rules);
   registerTransactionsHandlers(services.transactions);
   registerExportHandlers(services.export);
-  registerSettingsHandlers(services.llmConfig);
+  registerSettingsHandlers(services.appConfig);
+  registerSupplierUniverseHandlers(services.supplierUniverse);
 }

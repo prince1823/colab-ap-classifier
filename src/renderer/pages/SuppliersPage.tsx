@@ -135,6 +135,7 @@ export default function SuppliersPage() {
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
   const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
   const [tailSpendSet, setTailSpendSet] = useState(false)
+  const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     if (suppliers.length === 0) setLoading(true)
@@ -149,6 +150,10 @@ export default function SuppliersPage() {
         setTailSpendThreshold(String(threshold))
         setTailSpendSet(true)
       }
+
+      // Load supplier universe path
+      const suPath = await ipc.supplierUniverse.getPath()
+      setSupplierUniversePath(suPath)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load suppliers')
     } finally {
@@ -290,6 +295,17 @@ export default function SuppliersPage() {
     }
   }, [tailSpendThreshold, loadData])
 
+  /** Change supplier universe DB via file picker */
+  const changeSupplierUniverse = useCallback(async () => {
+    try {
+      const selected = await ipc.supplierUniverse.selectFile()
+      if (!selected) return
+      setSupplierUniversePath(selected)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to set supplier universe path')
+    }
+  }, [])
+
   /** Get display value for a supplierInfo field */
   const getFieldValue = (supplier: ProjectSupplierView, field: keyof SupplierInfo): string => {
     const info = supplier.supplierInfo
@@ -376,6 +392,16 @@ export default function SuppliersPage() {
   return (
     <div className="suppliers-page">
       {error && <div className="suppliers-error">{error}</div>}
+
+      {/* Supplier universe status */}
+      <div className="suppliers-banner" style={{ background: '#f0f4f8', borderColor: '#d0d7de' }}>
+        <span className="text-xs text-gray-500" title={supplierUniversePath || 'Default location'}>
+          Supplier DB: <strong>{supplierUniversePath ? supplierUniversePath.split('/').slice(-2).join('/') : 'Default'}</strong>
+        </span>
+        <button onClick={changeSupplierUniverse} className="banner-btn" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
+          Change
+        </button>
+      </div>
 
       {/* Tail spend threshold banner */}
       {!tailSpendSet && (

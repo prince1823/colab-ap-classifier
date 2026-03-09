@@ -9,13 +9,21 @@ import type { ClassificationInput, ClassificationResult, ResearchProgress, Class
 
 // ─── LLM Config ──────────────────────────────────────────────────────────────
 
-export interface ILLMConfigService {
+export interface ILLMConfig {
   getApiKey(provider: string): string | null;
   setApiKey(provider: string, key: string): Promise<void>;
   getProvider(): string;
   setProvider(provider: string): Promise<void>;
   getModel(): string;
   setModel(model: string): Promise<void>;
+}
+
+// ─── App Config ──────────────────────────────────────────────────────────────
+
+export interface IAppConfigService extends ILLMConfig {
+  getSupplierUniversePath(): string | null;
+  setSupplierUniversePath(p: string): Promise<void>;
+  clearSupplierUniversePath(): Promise<void>;
 }
 
 // ─── Database Layer ──────────────────────────────────────────────────────────
@@ -33,9 +41,11 @@ export interface Database {
 }
 
 export interface SupplierUniverse {
-  open(filePath?: string): Promise<void>;
+  open(filePath?: string): Promise<{ created: boolean }>;
   close(): Promise<void>;
   isOpen(): boolean;
+  configure(path: string): Promise<void>;
+  getConfiguredPath(): string | null;
   getSupplier(name: string): Promise<SupplierInfo | null>;
   getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>>;
   upsertSupplier(name: string, data: Partial<SupplierInfo>): Promise<void>;
@@ -83,8 +93,8 @@ export interface ColumnMappingAgent {
 // ─── Data Services ───────────────────────────────────────────────────────────
 
 export interface ProjectStore {
-  createProject(name: string, filePath: string): Promise<{ filePath: string; name: string }>;
-  openProject(filePath: string): Promise<{ filePath: string; name: string }>;
+  createProject(name: string, filePath: string): Promise<{ filePath: string; name: string; warning?: string }>;
+  openProject(filePath: string): Promise<{ filePath: string; name: string; warning?: string }>;
   closeProject(): Promise<void>;
   isProjectOpen(): boolean;
   getSetting(key: string): Promise<unknown>;

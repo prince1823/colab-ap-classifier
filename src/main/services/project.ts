@@ -7,6 +7,7 @@ import type {
   ProjectStore as IProjectStore,
   TransactionStore as ITransactionStore,
 } from '../../shared/types/services';
+import { SupplierUniverseNotConfiguredError } from './supplier-universe';
 
 const C91_EXTENSION = '.c91';
 
@@ -22,7 +23,7 @@ export class ProjectStore implements IProjectStore {
   async createProject(
     name: string,
     filePath: string
-  ): Promise<{ filePath: string; name: string }> {
+  ): Promise<{ filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean }> {
     if (!name || name.trim().length === 0) {
       throw new Error('Project name must not be empty');
     }
@@ -45,16 +46,25 @@ export class ProjectStore implements IProjectStore {
     await this.setSetting('project_name', name);
     await this.setSetting('tail_spend_threshold', 10000);
 
-    await this.supplierUniverse.open();
-
     this.currentProjectName = name;
 
-    return { filePath, name };
+    try {
+      const { created } = await this.supplierUniverse.open();
+      const warning = created
+        ? 'Supplier universe database was not found — a new empty database was created. You can select an existing file in Settings.'
+        : undefined;
+      return { filePath, name, warning };
+    } catch (err) {
+      if (err instanceof SupplierUniverseNotConfiguredError) {
+        return { filePath, name, needsSupplierUniverseSetup: true };
+      }
+      throw err;
+    }
   }
 
   async openProject(
     filePath: string
-  ): Promise<{ filePath: string; name: string }> {
+  ): Promise<{ filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean }> {
     if (!filePath || filePath.trim().length === 0) {
       throw new Error('File path must not be empty');
     }
@@ -86,14 +96,24 @@ export class ProjectStore implements IProjectStore {
 
     this.currentProjectName = name;
 
-    await this.supplierUniverse.open();
+    try {
+      const { created } = await this.supplierUniverse.open();
+      const warning = created
+        ? 'Supplier universe database was not found — a new empty database was created. You can select an existing file in Settings.'
+        : undefined;
 
-    // Ensure performance indexes (non-blocking)
-    this.ensureIndexes().catch((err) =>
-      console.warn('[Project] Failed to ensure indexes:', err)
-    );
+      // Ensure performance indexes (non-blocking)
+      this.ensureIndexes().catch((err) =>
+        console.warn('[Project] Failed to ensure indexes:', err)
+      );
 
-    return { filePath, name };
+      return { filePath, name, warning };
+    } catch (err) {
+      if (err instanceof SupplierUniverseNotConfiguredError) {
+        return { filePath, name, needsSupplierUniverseSetup: true };
+      }
+      throw err;
+    }
   }
 
   async closeProject(): Promise<void> {

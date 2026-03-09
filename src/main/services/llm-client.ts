@@ -1,4 +1,4 @@
-import type { LLMClient, ILLMConfigService } from '../../shared/types/services';
+import type { LLMClient, ILLMConfig } from '../../shared/types/services';
 import { debugLog } from '../utils/debug-log';
 
 export interface ChatOptions {
@@ -51,10 +51,10 @@ const INITIAL_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
 /**
- * Minimal env-only config service used by the backward-compat standalone chat() function.
- * In production, LLMConfigService (which also reads a persisted config file) is injected.
+ * Minimal env-only config used by the backward-compat standalone chat() function.
+ * In production, AppConfigService (which also reads a persisted config file) is injected.
  */
-class EnvLLMConfigService implements ILLMConfigService {
+class EnvLLMConfig implements ILLMConfig {
   getApiKey(provider: string): string | null {
     switch (provider) {
       case 'anthropic': return process.env.ANTHROPIC_API_KEY || null;
@@ -145,7 +145,7 @@ function extractOpenAIText(data: unknown): string {
 }
 
 export class OpenRouterLLMClient implements LLMClient {
-  constructor(private readonly configService: ILLMConfigService = new EnvLLMConfigService()) {}
+  constructor(private readonly configService: ILLMConfig = new EnvLLMConfig()) {}
 
   async chat(systemPrompt: string, userPrompt: string, options?: ChatOptions): Promise<string> {
     const provider = options?.provider ?? this.configService.getProvider();

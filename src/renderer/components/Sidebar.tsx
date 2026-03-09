@@ -150,7 +150,7 @@ export default function Sidebar({ collapsed, onToggle, onSwitchProject }: Sideba
             </ul>
           </nav>
 
-          {/* LLM Settings button at bottom */}
+          {/* Settings button at bottom */}
           <div className="border-t border-gray-200 p-2">
             <Tooltip.Root>
               <Tooltip.Trigger asChild>
@@ -162,7 +162,7 @@ export default function Sidebar({ collapsed, onToggle, onSwitchProject }: Sideba
                   )}
                 >
                   <Cog6ToothIcon className="h-5 w-5 flex-shrink-0" />
-                  {!collapsed && <span>LLM Settings</span>}
+                  {!collapsed && <span>Settings</span>}
                 </button>
               </Tooltip.Trigger>
               {collapsed && (
@@ -172,7 +172,7 @@ export default function Sidebar({ collapsed, onToggle, onSwitchProject }: Sideba
                     side="right"
                     sideOffset={8}
                   >
-                    LLM Settings
+                    Settings
                     <Tooltip.Arrow className="fill-gray-900" />
                   </Tooltip.Content>
                 </Tooltip.Portal>

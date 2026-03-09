@@ -7,7 +7,7 @@ import type {
   ClassificationAgent,
   ResearchAgent,
   ColumnMappingAgent,
-  ILLMConfigService,
+  IAppConfigService,
   ChangelogStore as IChangelogStore,
   TransactionStore as ITransactionStore,
   ProjectStore as IProjectStore,
@@ -24,7 +24,7 @@ import { DuckDBDatabase } from './services/database';
 import { DuckDBSupplierUniverse } from './services/supplier-universe';
 import { eventBus } from './event-bus';
 import { OpenRouterLLMClient } from './services/llm-client';
-import { LLMConfigService } from './services/llm-config';
+import { AppConfigService } from './services/app-config';
 import { ExaWebSearch } from './services/exa-search';
 import { LLMClassificationAgent } from './agents/classification-agent';
 import { LLMResearchAgent } from './agents/research-agent';
@@ -46,7 +46,7 @@ export interface ServiceContainer {
   supplierUniverse: SupplierUniverse;
   eventBus: EventBus;
   llm: LLMClient;
-  llmConfig: ILLMConfigService;
+  appConfig: IAppConfigService;
   webSearch: WebSearch;
   // Agents
   classificationAgent: ClassificationAgent;
@@ -69,9 +69,9 @@ export interface ServiceContainer {
 export function createContainer(): ServiceContainer {
   // Leaf layer
   const db = new DuckDBDatabase();
-  const supplierUniverse = new DuckDBSupplierUniverse();
-  const llmConfig = new LLMConfigService();
-  const llm = new OpenRouterLLMClient(llmConfig);
+  const appConfig = new AppConfigService();
+  const supplierUniverse = new DuckDBSupplierUniverse(appConfig);
+  const llm = new OpenRouterLLMClient(appConfig);
   const webSearch = new ExaWebSearch();
 
   // Agents
@@ -99,7 +99,7 @@ export function createContainer(): ServiceContainer {
   );
 
   return {
-    db, supplierUniverse, eventBus, llm, llmConfig, webSearch,
+    db, supplierUniverse, eventBus, llm, appConfig, webSearch,
     classificationAgent, researchAgent, columnMappingAgent,
     changelog, transactions, project, taxonomy, suppliers, rules,
     ingest, export: exportSvc, researcher, classifier,

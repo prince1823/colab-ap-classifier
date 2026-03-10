@@ -139,7 +139,7 @@ export interface SupplierService {
   getAliases(canonicalName: string): Promise<string[]>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
   updateSupplier(supplierName: string, updates: SupplierUpdateInput): Promise<void>;
-  listProjectSuppliers(): Promise<ProjectSupplierView[]>;
+  listProjectSuppliers(filter?: { conditions: FilterCondition[] }): Promise<ProjectSupplierView[]>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
   assignParent(id: string, parentId: string): Promise<void>;

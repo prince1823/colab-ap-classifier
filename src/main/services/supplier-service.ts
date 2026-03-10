@@ -10,6 +10,8 @@ import type {
   SupplierConfirmationStatus,
   SupplierUpdateInput,
 } from '../../shared/types/suppliers';
+import type { FilterCondition } from '../../shared/types/transactions';
+import { buildWhereClause, type ColumnResolver } from '../utils/query-builder';
 
 export class SupplierService implements ISupplierService {
   constructor(
@@ -148,9 +150,65 @@ export class SupplierService implements ISupplierService {
     return Number(row?.cnt ?? 0) > 0;
   }
 
-  async listProjectSuppliers(): Promise<ProjectSupplierView[]> {
+  /** Fields that are computed aggregates — must be filtered in outer WHERE, not inner WHERE. */
+  private static readonly AGGREGATE_FIELDS = new Set(['total_spend', 'transaction_count']);
+
+  /** Known supplier column mappings — snake_case only. */
+  private static readonly SUPPLIER_COLUMNS: Record<string, string> = {
+    supplier_name: 'ps.supplier_name',
+    confirmation_status: 'ps.confirmation_status',
+    is_researched: 'ps.is_researched',
+    is_tail_spend: 'ps.is_tail_spend',
+    universe_match: 'ps.universe_match',
+    parent_supplier_name: 'ps.parent_supplier_name',
+    data_source: 'ps.data_source',
+    // Aggregate fields — resolved on the outer subquery alias
+    total_spend: 'sub.total_spend',
+    transaction_count: 'sub.transaction_count',
+  };
+
+  /** Column resolver that validates against known fields and throws for unknown ones. */
+  private static readonly SUPPLIER_COLUMN_RESOLVER: ColumnResolver = (field: string) => {
+    const col = SupplierService.SUPPLIER_COLUMNS[field];
+    if (!col) throw new Error(`Unknown supplier filter field: "${field}"`);
+    return col;
+  };
+
+  async listProjectSuppliers(filter?: { conditions: FilterCondition[] }): Promise<ProjectSupplierView[]> {
     const hasSpend = await this.transactionColumnExists('spend_amount');
     const spendExpr = hasSpend ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)' : '0';
+
+    // Split conditions into regular (inner WHERE) vs aggregate (outer WHERE)
+    const conditions = filter?.conditions ?? [];
+    const regularConditions = conditions.filter(c => !SupplierService.AGGREGATE_FIELDS.has(c.field));
+    const aggregateConditions = conditions.filter(c => SupplierService.AGGREGATE_FIELDS.has(c.field));
+
+    // Build inner WHERE clause for non-aggregate fields
+    const innerWhere = buildWhereClause(regularConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+    const innerWhereSQL = innerWhere ? `WHERE ${innerWhere.sql}` : '';
+    const innerParams = innerWhere?.params ?? [];
+
+    // Build inner query
+    const innerSQL = `SELECT ps.*,
+        COUNT(t.id) as transaction_count,
+        ${spendExpr} as total_spend
+      FROM project_suppliers ps
+      LEFT JOIN transactions t ON t.project_supplier_id = ps.id
+      ${innerWhereSQL}
+      GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
+               ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.is_researched,
+               ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at`;
+
+    // Build outer WHERE clause for aggregate fields
+    const outerWhere = buildWhereClause(aggregateConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+    const outerWhereSQL = outerWhere ? `WHERE ${outerWhere.sql}` : '';
+    const outerParams = outerWhere?.params ?? [];
+
+    const sql = aggregateConditions.length > 0
+      ? `SELECT * FROM (${innerSQL}) sub ${outerWhereSQL} ORDER BY sub.supplier_name`
+      : `${innerSQL} ORDER BY ps.supplier_name`;
+
+    const allParams = [...innerParams, ...outerParams];
 
     const rows = await this.db.all<{
       id: string;
@@ -165,17 +223,7 @@ export class SupplierService implements ISupplierService {
       created_at: string;
       transaction_count: number | bigint;
       total_spend: number | bigint;
-    }>(
-      `SELECT ps.*,
-        COUNT(t.id) as transaction_count,
-        ${spendExpr} as total_spend
-      FROM project_suppliers ps
-      LEFT JOIN transactions t ON t.project_supplier_id = ps.id
-      GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
-               ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.is_researched,
-               ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at
-      ORDER BY ps.supplier_name`
-    );
+    }>(sql, ...allParams);
 
     return rows.map((row) => ({
       id: row.id,

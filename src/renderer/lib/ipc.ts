@@ -112,7 +112,7 @@ export const ipc = {
 
   // ── Suppliers (3 channels + research) ──
   suppliers: {
-    list: () => invoke('suppliers:list'),
+    list: (filter?: { conditions: FilterCondition[] }) => invoke('suppliers:list', filter),
     update: (supplierName: string, updates: SupplierUpdateInput) =>
       invoke('suppliers:update', supplierName, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>

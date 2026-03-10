@@ -73,7 +73,7 @@ export interface IPCInvokeMap {
   'taxonomy:importFromFile': { args: [filePath: string]; result: { nodeCount: number; fileName: string } };
 
   // Suppliers
-  'suppliers:list':           { args: []; result: ProjectSupplierView[] };
+  'suppliers:list':           { args: [filter?: { conditions: FilterCondition[] }]; result: ProjectSupplierView[] };
   'suppliers:update':         { args: [supplierName: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: []; result: void };

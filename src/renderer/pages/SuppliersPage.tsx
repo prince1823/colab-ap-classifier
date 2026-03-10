@@ -129,37 +129,70 @@ export default function SuppliersPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [statusFilter, setStatusFilter] = useState<'all' | 'unconfirmed' | 'unresearched'>('all')
+
+  // Debounce search input — 300ms delay before triggering backend call
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(timer)
+  }, [search])
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
   const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
   const [tailSpendSet, setTailSpendSet] = useState(false)
   const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
 
+  // Build backend filter conditions from current search/status UI
+  const buildFilter = useCallback(() => {
+    const conditions: Array<{ field: string; operator: string; value: string | number | string[] }> = []
+
+    if (statusFilter === 'unconfirmed') {
+      conditions.push({ field: 'confirmation_status', operator: 'not_equals', value: 'confirmed' })
+    } else if (statusFilter === 'unresearched') {
+      conditions.push({ field: 'is_researched', operator: 'is_false', value: '' })
+    }
+
+    const q = debouncedSearch.trim()
+    if (q) {
+      conditions.push({ field: 'supplier_name', operator: 'contains', value: q })
+    }
+
+    return conditions.length > 0 ? { conditions } : undefined
+  }, [debouncedSearch, statusFilter])
+
+  // Load settings once on mount — not re-fetched on filter changes
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const threshold = await ipc.project.getSetting('tail_spend_threshold')
+        if (threshold && Number(threshold) > 0) {
+          setTailSpendThreshold(String(threshold))
+          setTailSpendSet(true)
+        }
+        const suPath = await ipc.supplierUniverse.getPath()
+        setSupplierUniversePath(suPath)
+      } catch {
+        // settings load failure is non-fatal
+      }
+    }
+    loadSettings()
+  }, [])
+
   const loadData = useCallback(async () => {
     if (suppliers.length === 0) setLoading(true)
     setError(null)
     try {
-      const data = await ipc.suppliers.list()
+      const filter = buildFilter()
+      const data = await ipc.suppliers.list(filter as Parameters<typeof ipc.suppliers.list>[0])
       setSuppliers(data as ProjectSupplierView[])
-
-      // Check tail spend threshold
-      const threshold = await ipc.project.getSetting('tail_spend_threshold')
-      if (threshold && Number(threshold) > 0) {
-        setTailSpendThreshold(String(threshold))
-        setTailSpendSet(true)
-      }
-
-      // Load supplier universe path
-      const suPath = await ipc.supplierUniverse.getPath()
-      setSupplierUniversePath(suPath)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load suppliers')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [buildFilter])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -325,37 +358,10 @@ export default function SuppliersPage() {
     suppliers.filter(s => !s.isResearched).length
   , [suppliers])
 
-  /** Sort by spend descending, then filter */
+  /** Sort by spend descending — filtering is handled by backend */
   const filteredSuppliers = useMemo(() => {
-    let result = [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
-
-    // Status filter
-    if (statusFilter === 'unconfirmed') {
-      result = result.filter(s => s.confirmationStatus !== 'confirmed')
-    } else if (statusFilter === 'unresearched') {
-      result = result.filter(s => !s.isResearched)
-    }
-
-    // Search filter
-    const q = search.trim().toLowerCase()
-    if (q) {
-      result = result.filter(s => {
-        if (s.supplierName.toLowerCase().includes(q)) return true
-        if (s.parentName && s.parentName.toLowerCase().includes(q)) return true
-        const info = s.supplierInfo
-        if (!info) return false
-        return INFO_COLUMNS.some(col => {
-          if (col.key === 'websiteUrl' || col.key === 'sources') return false
-          const val = info[col.key]
-          if (val == null) return false
-          const str = Array.isArray(val) ? val.join(' ') : String(val)
-          return str.toLowerCase().includes(q)
-        })
-      })
-    }
-
-    return result
-  }, [suppliers, search, statusFilter])
+    return [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
+  }, [suppliers])
 
   // Select all logic
   const allSelected = filteredSuppliers.length > 0 && filteredSuppliers.every(s => selectedIds.has(s.id))

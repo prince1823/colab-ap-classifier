@@ -37,6 +37,10 @@ export function conditionToSQL(
       return `regexp_matches(${col}, ?)`;
     case 'is_null':
       return `${col} IS NULL`;
+    case 'is_true':
+      return `${col} IS TRUE`;
+    case 'is_false':
+      return `${col} IS FALSE`;
     case 'in_list': {
       const values = Array.isArray(value) ? value : String(value).split(',').map(v => v.trim());
       if (values.length === 0) return null;

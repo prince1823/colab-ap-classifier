@@ -79,8 +79,6 @@ export function useServerPivotData(
   useEffect(() => {
     if (isClassifying) {
       wasClassifyingRef.current = true
-      const interval = setInterval(() => fetchPivot(), 5000)
-      return () => clearInterval(interval)
     } else if (wasClassifyingRef.current) {
       // Classification just finished — do one final refresh
       wasClassifyingRef.current = false

@@ -1,20 +1,20 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Maximize2, Minimize2 } from 'lucide-react'
+import { ChevronRight, ChevronDown, Plus, Trash2, Merge, Maximize2, Minimize2, Upload } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
 
-// ── Inline editable text ──────────────────────────────────────────────
-function EditableText({
+// ── Inline editable cell ─────────────────────────────────────────────
+function EditableCell({
   value,
   onSave,
-  className,
   placeholder,
+  className = '',
 }: {
   value: string
   onSave: (val: string) => void
-  className?: string
   placeholder?: string
+  className?: string
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
@@ -34,41 +34,134 @@ function EditableText({
     else setDraft(value)
   }, [draft, value, onSave])
 
-  const cancel = useCallback(() => {
-    setDraft(value)
-    setEditing(false)
-  }, [value])
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="w-full bg-white border border-blue-300 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-400"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit() }
+          else if (e.key === 'Escape') { e.preventDefault(); setDraft(value); setEditing(false) }
+        }}
+      />
+    )
+  }
 
   return (
     <span
-      className={`cursor-pointer rounded px-0.5 hover:bg-blue-50 hover:ring-1 hover:ring-blue-200 ${className ?? ''}`}
-      onClick={(e) => { if (!editing) { e.stopPropagation(); setDraft(value); setEditing(true) } }}
-      title={editing ? undefined : 'Click to rename'}
+      className={`cursor-pointer rounded px-1.5 py-0.5 hover:bg-blue-50 transition-colors ${className}`}
+      onDoubleClick={() => { setDraft(value); setEditing(true) }}
+      title="Double-click to edit"
     >
-      {editing ? (
-        <input
-          ref={inputRef}
-          className="bg-transparent border-none outline-none p-0 m-0 font-inherit text-inherit"
-          style={{ width: `${Math.min(Math.max(draft.length, 1), 60)}ch`, maxWidth: '100%' }}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); commit() }
-            else if (e.key === 'Escape') { e.preventDefault(); cancel() }
-          }}
-        />
-      ) : (
-        value || <span className="italic text-gray-300">{placeholder ?? 'click to edit'}</span>
-      )}
+      {value || <span className="italic text-gray-300">{placeholder ?? '—'}</span>}
     </span>
   )
 }
 
-// ── Tree node types ───────────────────────────────────────────────────
+// ── Truncated description cell with "more"/"less" ───────────────────
+function DescriptionCell({
+  value,
+  onSave,
+}: {
+  value: string
+  onSave: (val: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    if (editing && textareaRef.current) {
+      textareaRef.current.focus()
+      textareaRef.current.select()
+    }
+  }, [editing])
+
+  const commit = useCallback(() => {
+    setEditing(false)
+    const trimmed = draft.trim()
+    if (trimmed !== value) onSave(trimmed)
+    else setDraft(value)
+  }, [draft, value, onSave])
+
+  if (editing) {
+    return (
+      <textarea
+        ref={textareaRef}
+        className="w-full bg-white border border-blue-300 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-400 resize-none"
+        rows={3}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit() }
+          else if (e.key === 'Escape') { e.preventDefault(); setDraft(value); setEditing(false) }
+        }}
+      />
+    )
+  }
+
+  if (!value) {
+    return (
+      <span
+        className="cursor-pointer text-xs italic text-gray-300 hover:text-blue-400 transition-colors px-1 py-0.5"
+        onDoubleClick={() => { setDraft(''); setEditing(true) }}
+        title="Double-click to add description"
+      >
+        —
+      </span>
+    )
+  }
+
+  const needsTruncation = value.length > 100
+
+  return (
+    <div>
+      <span
+        className="text-xs text-gray-600 cursor-pointer hover:bg-blue-50 rounded px-1 py-0.5 transition-colors inline-block"
+        style={!expanded && needsTruncation ? {
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        } : undefined}
+        onDoubleClick={() => { setDraft(value); setEditing(true) }}
+        title="Double-click to edit"
+      >
+        {value}
+      </span>
+      {needsTruncation && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="ml-1 text-[10px] font-medium text-blue-500 hover:text-blue-700 hover:underline transition-colors"
+        >
+          {expanded ? 'less' : 'more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── Tree node types ──────────────────────────────────────────────────
 type L3Tree = TaxonomyNode
 type L2Tree = TaxonomyNode & { children: L3Tree[] }
 type L1Tree = TaxonomyNode & { children: L2Tree[] }
+
+// ── Flattened row for table ──────────────────────────────────────────
+interface FlatRow {
+  node: TaxonomyNode
+  level: 1 | 2 | 3
+  isFirstInL1: boolean
+  isFirstInL2: boolean
+  l1RowSpan: number
+  l2RowSpan: number
+  l1Node: L1Tree
+  l2Node: L2Tree | null
+}
 
 export default function TaxonomyPage() {
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
@@ -78,20 +171,48 @@ export default function TaxonomyPage() {
   const [error, setError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
 
-  // Collapse/expand
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [collapsedL1, setCollapsedL1] = useState<Set<string>>(new Set())
+  const [collapsedL2, setCollapsedL2] = useState<Set<string>>(new Set())
 
-  // Contextual add
   const [addingUnder, setAddingUnder] = useState<string | null>(null)
   const [addName, setAddName] = useState('')
   const [addDescription, setAddDescription] = useState('')
   const [addSaving, setAddSaving] = useState(false)
 
-  // Merge
   const [mergingNodeId, setMergingNodeId] = useState<string | null>(null)
   const [mergeSearch, setMergeSearch] = useState('')
+  const [mergeAnchor, setMergeAnchor] = useState<{ top: number; left: number } | null>(null)
+  const mergePopoverRef = useRef<HTMLDivElement>(null)
+  const mergeInputRef = useRef<HTMLInputElement>(null)
 
-  // ── Data loading ──────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Close merge popover on click outside
+  useEffect(() => {
+    if (!mergingNodeId) return
+    const handler = (e: MouseEvent) => {
+      if (mergePopoverRef.current && !mergePopoverRef.current.contains(e.target as Node)) {
+        setMergingNodeId(null); setMergeSearch(''); setMergeAnchor(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [mergingNodeId])
+
+  // Focus merge input when popover opens
+  useEffect(() => {
+    if (mergingNodeId && mergeInputRef.current) mergeInputRef.current.focus()
+  }, [mergingNodeId])
+
+  const openMergeAt = useCallback((nodeId: string, buttonEl: HTMLButtonElement) => {
+    const rect = buttonEl.getBoundingClientRect()
+    setMergingNodeId(nodeId)
+    setMergeSearch('')
+    setAddingUnder(null)
+    setMergeAnchor({ top: rect.bottom + 4, left: Math.min(rect.left, window.innerWidth - 340) })
+  }, [])
+
+  // ── Data loading ────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -107,61 +228,155 @@ export default function TaxonomyPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // ── Tree structure ────────────────────────────────────────────────
+  // ── Build tree ──────────────────────────────────────────────────────
   const tree: L1Tree[] = useMemo(() => {
-    const l1s = nodes.filter((n) => n.depth === 1)
+    const l1s = nodes.filter((n) => n.depth === 1).sort((a, b) => a.l1.localeCompare(b.l1))
     return l1s.map((l1) => ({
       ...l1,
       children: nodes
         .filter((n) => n.depth === 2 && n.l1 === l1.l1)
+        .sort((a, b) => (a.l2 ?? '').localeCompare(b.l2 ?? ''))
         .map((l2) => ({
           ...l2,
-          children: nodes.filter((n) => n.depth === 3 && n.l1 === l2.l1 && n.l2 === l2.l2),
+          children: nodes
+            .filter((n) => n.depth === 3 && n.l1 === l2.l1 && n.l2 === l2.l2)
+            .sort((a, b) => (a.l3 ?? '').localeCompare(b.l3 ?? '')),
         })),
     }))
   }, [nodes])
 
-  // ── Collapse helpers ──────────────────────────────────────────────
-  const toggle = useCallback((key: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }, [])
+  // ── Flatten tree into table rows with rowSpan calculations ──────────
+  const flatRows: FlatRow[] = useMemo(() => {
+    const rows: FlatRow[] = []
+    const query = searchQuery.toLowerCase()
 
-  const expandAll = useCallback(() => setCollapsed(new Set()), [])
+    for (const l1 of tree) {
+      const l1IsCollapsed = collapsedL1.has(l1.fullPath)
+
+      // Search filter: skip L1 if no descendant matches
+      if (query) {
+        const l1Match = l1.l1.toLowerCase().includes(query)
+        const anyDescendant = l1.children.some(l2 =>
+          (l2.l2 ?? '').toLowerCase().includes(query) ||
+          l2.children.some(l3 =>
+            (l3.l3 ?? '').toLowerCase().includes(query) ||
+            (l3.description ?? '').toLowerCase().includes(query)
+          )
+        )
+        if (!l1Match && !anyDescendant) continue
+      }
+
+      // If collapsed or no children — single row for L1
+      if (l1IsCollapsed || l1.children.length === 0) {
+        rows.push({
+          node: l1, level: 1,
+          isFirstInL1: true, isFirstInL2: false,
+          l1RowSpan: 1, l2RowSpan: 0,
+          l1Node: l1, l2Node: null,
+        })
+        continue
+      }
+
+      // Build visible L2s
+      const visibleL2s: { l2: L2Tree; visibleL3s: L3Tree[] }[] = []
+      for (const l2 of l1.children) {
+        if (query) {
+          const l2Match = (l2.l2 ?? '').toLowerCase().includes(query) || l1.l1.toLowerCase().includes(query)
+          const anyL3 = l2.children.some(l3 =>
+            (l3.l3 ?? '').toLowerCase().includes(query) ||
+            (l3.description ?? '').toLowerCase().includes(query)
+          )
+          if (!l2Match && !anyL3) continue
+        }
+
+        const l2IsCollapsed = collapsedL2.has(l2.fullPath)
+        if (l2IsCollapsed || l2.children.length === 0) {
+          visibleL2s.push({ l2, visibleL3s: [] })
+        } else {
+          let l3List = l2.children
+          if (query) {
+            const filtered = l2.children.filter(l3 =>
+              (l3.l3 ?? '').toLowerCase().includes(query) ||
+              (l3.description ?? '').toLowerCase().includes(query) ||
+              (l2.l2 ?? '').toLowerCase().includes(query) ||
+              l1.l1.toLowerCase().includes(query)
+            )
+            if (filtered.length > 0) l3List = filtered
+          }
+          visibleL2s.push({ l2, visibleL3s: l3List })
+        }
+      }
+
+      // Calculate total L1 row span
+      let l1TotalRows = 0
+      for (const { visibleL3s } of visibleL2s) {
+        l1TotalRows += visibleL3s.length > 0 ? visibleL3s.length : 1
+      }
+      if (l1TotalRows === 0) l1TotalRows = 1
+
+      // Emit rows
+      let isFirstL1Row = true
+      for (const { l2, visibleL3s } of visibleL2s) {
+        const l2RowCount = visibleL3s.length > 0 ? visibleL3s.length : 1
+
+        if (visibleL3s.length === 0) {
+          // L2-only row (collapsed or no children)
+          rows.push({
+            node: l2, level: 2,
+            isFirstInL1: isFirstL1Row, isFirstInL2: true,
+            l1RowSpan: isFirstL1Row ? l1TotalRows : 0,
+            l2RowSpan: 1,
+            l1Node: l1, l2Node: l2,
+          })
+          isFirstL1Row = false
+        } else {
+          let isFirstL2Row = true
+          for (const l3 of visibleL3s) {
+            rows.push({
+              node: l3, level: 3,
+              isFirstInL1: isFirstL1Row, isFirstInL2: isFirstL2Row,
+              l1RowSpan: isFirstL1Row ? l1TotalRows : 0,
+              l2RowSpan: isFirstL2Row ? l2RowCount : 0,
+              l1Node: l1, l2Node: l2,
+            })
+            isFirstL1Row = false
+            isFirstL2Row = false
+          }
+        }
+      }
+    }
+    return rows
+  }, [tree, collapsedL1, collapsedL2, searchQuery])
+
+  // ── Collapse helpers ────────────────────────────────────────────────
+  const toggleL1 = useCallback((key: string) => {
+    setCollapsedL1((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }, [])
+  const toggleL2 = useCallback((key: string) => {
+    setCollapsedL2((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }, [])
+  const expandAll = useCallback(() => { setCollapsedL1(new Set()); setCollapsedL2(new Set()) }, [])
   const collapseAll = useCallback(() => {
-    const keys = new Set<string>()
-    tree.forEach((l1) => {
-      keys.add(l1.fullPath)
-      l1.children.forEach((l2) => keys.add(l2.fullPath))
-    })
-    setCollapsed(keys)
+    setCollapsedL1(new Set(tree.map(l1 => l1.fullPath)))
+    setCollapsedL2(new Set(tree.flatMap(l1 => l1.children.map(l2 => l2.fullPath))))
   }, [tree])
 
-  // ── Handlers (thin layer — confirm, call IPC, display errors) ──────
+  // ── Action handlers ─────────────────────────────────────────────────
   const handleRename = useCallback(async (nodeId: string, newName: string) => {
     const node = nodes.find((n) => n.id === nodeId)
     const oldName = node ? (node.l3 ?? node.l2 ?? node.l1) : ''
     if (!window.confirm(`Rename "${oldName}" to "${newName}"?`)) return
     try {
       await ipc.taxonomy.renameNode(nodeId, newName)
-      await loadData()
-      await refreshMetadata()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to rename node')
-    }
+      await loadData(); await refreshMetadata()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to rename') }
   }, [nodes, loadData, refreshMetadata])
 
   const handleUpdateDescription = useCallback(async (nodeId: string, description: string) => {
     try {
       await ipc.taxonomy.updateNode(nodeId, { description })
       await loadData()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update description')
-    }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to update description') }
   }, [loadData])
 
   const handleDelete = useCallback(async (nodeId: string) => {
@@ -169,199 +384,56 @@ export default function TaxonomyPage() {
     if (!window.confirm(`Delete "${node?.fullPath ?? nodeId}"? This cannot be undone.`)) return
     try {
       await ipc.taxonomy.deleteNode(nodeId)
-      await loadData()
-      await refreshMetadata()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete node')
-    }
+      await loadData(); await refreshMetadata()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to delete') }
   }, [nodes, loadData, refreshMetadata])
 
   const handleMerge = useCallback(async (sourceId: string, targetId: string) => {
     const source = nodes.find((n) => n.id === sourceId)
     const target = nodes.find((n) => n.id === targetId)
-    if (!window.confirm(`Merge "${source?.fullPath}" into "${target?.fullPath}"? The source node will be deleted.`)) return
-    setMergingNodeId(null)
+    if (!window.confirm(`Merge "${source?.fullPath}" into "${target?.fullPath}"? Source will be deleted.`)) return
+    setMergingNodeId(null); setMergeAnchor(null)
     try {
       await ipc.taxonomy.mergeNodes(sourceId, targetId)
-      await loadData()
-      await refreshMetadata()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to merge nodes')
-    }
+      await loadData(); await refreshMetadata()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to merge') }
   }, [nodes, loadData, refreshMetadata])
 
   const handleAddChild = useCallback(async (parentPath: string) => {
     if (!addName.trim()) return
     const fullPath = `${parentPath}|${addName.trim()}`
-    if (!window.confirm(`Add node "${fullPath}"?`)) return
+    if (!window.confirm(`Add "${fullPath}"?`)) return
     setAddSaving(true)
     try {
       await ipc.taxonomy.addNode(fullPath, addDescription.trim() || undefined)
-      setAddingUnder(null)
-      setAddName('')
-      setAddDescription('')
-      await loadData()
-      await refreshMetadata()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to add node')
-    } finally {
-      setAddSaving(false)
-    }
+      setAddingUnder(null); setAddName(''); setAddDescription('')
+      await loadData(); await refreshMetadata()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to add node') }
+    finally { setAddSaving(false) }
   }, [addName, addDescription, loadData, refreshMetadata])
 
   const handleImport = useCallback(async () => {
-    setImporting(true)
-    setError(null)
+    setImporting(true); setError(null)
     try {
       const result = await ipc.taxonomy.importFromFile('')
       await ipc.project.updateMetadata({ taxonomyName: `${result.fileName} (${result.nodeCount} nodes)` })
-      await loadData()
-      await refreshMetadata()
+      await loadData(); await refreshMetadata()
     } catch (e) {
-      if ((e as Error).message === 'No file selected') {
-        setImporting(false)
-        return
-      }
-      setError(e instanceof Error ? e.message : 'Failed to import taxonomy')
-    } finally {
-      setImporting(false)
-    }
+      if ((e as Error).message === 'No file selected') { setImporting(false); return }
+      setError(e instanceof Error ? e.message : 'Failed to import')
+    } finally { setImporting(false) }
   }, [loadData, refreshMetadata])
 
-  // ── Merge target finder (L3 nodes only, any parent, excluding self) ─
   const getMergeTargets = useCallback((node: TaxonomyNode): TaxonomyNode[] => {
     return nodes.filter((n) => n.depth === 3 && n.id !== node.id)
   }, [nodes])
 
-  // ── Stats ─────────────────────────────────────────────────────────
+  // ── Stats ───────────────────────────────────────────────────────────
   const l1Count = tree.length
   const l2Count = tree.reduce((a, l1) => a + l1.children.length, 0)
   const l3Count = tree.reduce((a, l1) => a + l1.children.reduce((b, l2) => b + l2.children.length, 0), 0)
 
-  // ── Inline add form ───────────────────────────────────────────────
-  const renderAddForm = (parentPath: string, parentDepth: number) => {
-    if (addingUnder !== parentPath) return null
-    const childLevel = parentDepth === 1 ? 'L2' : 'L3'
-    const parentLabel = parentPath.split('|').pop()
-    return (
-      <div className="mx-3 my-1 flex items-center gap-2 rounded border border-blue-200 bg-blue-50/40 px-3 py-1.5">
-        <span className="text-[11px] text-gray-400 whitespace-nowrap">Add {childLevel} under {parentLabel}:</span>
-        <input
-          value={addName}
-          onChange={(e) => setAddName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleAddChild(parentPath)
-            else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
-          }}
-          className="rounded border border-gray-200 bg-white px-2 py-0.5 text-xs focus:border-blue-400 focus:outline-none"
-          placeholder={`${childLevel} name`}
-          autoFocus
-        />
-        {parentDepth === 2 && (
-          <input
-            value={addDescription}
-            onChange={(e) => setAddDescription(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddChild(parentPath)
-              else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
-            }}
-            className="rounded border border-gray-200 bg-white px-2 py-0.5 text-xs focus:border-blue-400 focus:outline-none"
-            placeholder="Description (optional)"
-          />
-        )}
-        <button
-          onClick={() => handleAddChild(parentPath)}
-          disabled={addSaving || !addName.trim()}
-          className="rounded bg-blue-600 px-2.5 py-0.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
-        >
-          {addSaving ? '...' : 'Add'}
-        </button>
-        <button
-          onClick={() => { setAddingUnder(null); setAddName(''); setAddDescription('') }}
-          className="text-[11px] text-gray-400 hover:text-gray-600"
-        >
-          Cancel
-        </button>
-      </div>
-    )
-  }
-
-  // ── Merge picker ──────────────────────────────────────────────────
-  const renderMergePicker = (node: TaxonomyNode) => {
-    if (mergingNodeId !== node.id) return null
-    const targets = getMergeTargets(node)
-    const query = mergeSearch.toLowerCase()
-    const filtered = query ? targets.filter((t) => t.fullPath.toLowerCase().includes(query)) : []
-    return (
-      <div className="ml-16 my-1 rounded border border-blue-200 bg-blue-50/40 px-3 py-1.5">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-gray-500 whitespace-nowrap">Merge into:</span>
-          <input
-            value={mergeSearch}
-            onChange={(e) => setMergeSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { setMergingNodeId(null); setMergeSearch('') } }}
-            className="flex-1 rounded border border-gray-200 bg-white px-2 py-0.5 text-xs focus:border-blue-400 focus:outline-none"
-            placeholder="Search target node..."
-            autoFocus
-          />
-          <button onClick={() => { setMergingNodeId(null); setMergeSearch('') }} className="text-[11px] text-gray-400 hover:text-gray-600">Cancel</button>
-        </div>
-        {query && (
-          <div className="mt-1 max-h-32 overflow-y-auto">
-            {filtered.length === 0 ? (
-              <div className="py-1 text-[11px] text-gray-400">No matches</div>
-            ) : (
-              <div className="flex flex-col gap-0.5">
-                {filtered.slice(0, 20).map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => { handleMerge(node.id, s.id); setMergeSearch('') }}
-                    className="rounded px-2 py-0.5 text-left text-[11px] text-gray-600 hover:bg-blue-50 transition-colors"
-                  >
-                    {s.fullPath}
-                  </button>
-                ))}
-                {filtered.length > 20 && (
-                  <div className="py-0.5 text-[11px] text-gray-300">...and {filtered.length - 20} more</div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // ── Hover action buttons ──────────────────────────────────────────
-  const renderActions = (node: TaxonomyNode, showAdd: boolean) => (
-    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
-      {showAdd && (
-        <button
-          onClick={(e) => { e.stopPropagation(); setAddingUnder(node.fullPath); setAddName(''); setAddDescription(''); setMergingNodeId(null) }}
-          className="rounded px-1.5 py-0.5 text-[11px] text-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-colors"
-          title={`Add child under ${node.fullPath.split('|').pop()}`}
-        >
-          +
-        </button>
-      )}
-      {node.depth === 3 && (
-        <button
-          onClick={(e) => { e.stopPropagation(); setMergingNodeId(node.id); setMergeSearch(''); setAddingUnder(null) }}
-          className="rounded px-1.5 py-0.5 text-[11px] text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-        >
-          merge
-        </button>
-      )}
-      <button
-        onClick={(e) => { e.stopPropagation(); handleDelete(node.id) }}
-        className="rounded px-1.5 py-0.5 text-[11px] text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-      >
-        &times;
-      </button>
-    </div>
-  )
-
-  // ── Loading state ─────────────────────────────────────────────────
+  // ── Loading ─────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -374,163 +446,316 @@ export default function TaxonomyPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Taxonomy</h2>
-          <div className="mt-1 flex items-center gap-3 text-xs text-gray-400">
-            <span>{nodes.length} nodes</span>
-            <span className="text-gray-200">|</span>
-            <span>{l1Count} L1</span>
-            <span className="text-gray-200">&middot;</span>
-            <span>{l2Count} L2</span>
-            <span className="text-gray-200">&middot;</span>
-            <span>{l3Count} L3</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleImport}
-            disabled={importing}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            {importing ? 'Importing...' : 'Import from File'}
-          </button>
-          <button onClick={expandAll} title="Expand all" className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors">
-            <Maximize2 size={14} />
-          </button>
-          <button onClick={collapseAll} title="Collapse all" className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors">
-            <Minimize2 size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* Error banner */}
-      {error && (
-        <div className="flex items-center justify-between rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600">&times;</button>
-        </div>
-      )}
-
-      {/* Tree */}
-      <div className="rounded-lg border border-gray-200 bg-white">
-        {tree.length === 0 ? (
-          <div className="p-12 text-center">
-            <div className="text-sm text-gray-400">No taxonomy nodes yet</div>
-            <div className="mt-1 text-xs text-gray-300">Import a taxonomy file to get started</div>
-          </div>
-        ) : (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* ── Header ─────────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 px-6 pt-5 pb-4">
+        <div className="flex items-center justify-between">
           <div>
-            {tree.map((l1, i) => {
-              const l1Collapsed = collapsed.has(l1.fullPath)
-              const childCount = l1.children.reduce((a, l2) => a + 1 + l2.children.length, 0)
-              return (
-                <div key={l1.id} className={i < tree.length - 1 ? 'border-b border-gray-100' : ''}>
-                  {/* L1 row */}
-                  <div className="group flex items-center gap-2 px-3 py-2 hover:bg-gray-50/50 transition-colors">
-                    <button
-                      onClick={() => toggle(l1.fullPath)}
-                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-gray-300 hover:text-gray-500 transition-colors"
-                    >
-                      <svg className={`h-3.5 w-3.5 transition-transform ${l1Collapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                    <EditableText
-                      value={l1.l1}
-                      onSave={(newName) => handleRename(l1.id, newName)}
-                      className="text-sm font-medium text-gray-800"
-                    />
-                    <span className="text-[11px] text-gray-300">{childCount}</span>
-                    <div className="flex-1" />
-                    {renderActions(l1, true)}
-                  </div>
-                  {renderAddForm(l1.fullPath, 1)}
+            <h2 className="text-lg font-semibold text-gray-900">Taxonomy</h2>
+            <div className="mt-1 flex items-center gap-4 text-xs text-gray-400">
+              <span>{nodes.length} total</span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-2 w-2 rounded-sm bg-blue-500" />
+                {l1Count} L1
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-2 w-2 rounded-sm bg-emerald-500" />
+                {l2Count} L2
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-2 w-2 rounded-sm bg-gray-400" />
+                {l3Count} L3
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search..."
+                className="rounded-md border border-gray-200 bg-white pl-8 pr-3 py-1.5 text-xs text-gray-700 placeholder:text-gray-300 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 w-48"
+              />
+              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              )}
+            </div>
+            <button onClick={handleImport} disabled={importing} className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50">
+              <Upload size={13} />
+              {importing ? 'Importing...' : 'Import'}
+            </button>
+            <div className="flex items-center rounded-md border border-gray-200 bg-white">
+              <button onClick={expandAll} title="Expand all" className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors border-r border-gray-200">
+                <Maximize2 size={13} />
+              </button>
+              <button onClick={collapseAll} title="Collapse all" className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors">
+                <Minimize2 size={13} />
+              </button>
+            </div>
+          </div>
+        </div>
 
-                  {/* L2 children */}
-                  {!l1Collapsed && l1.children.length > 0 && (
-                    <div className="pb-1">
-                      {l1.children.map((l2) => {
-                        const l2Collapsed = collapsed.has(l2.fullPath)
-                        return (
-                          <div key={l2.id}>
-                            {/* L2 row */}
-                            <div className="group flex items-center gap-2 py-1.5 pl-9 pr-3 hover:bg-gray-50/50 transition-colors">
-                              {l2.children.length > 0 ? (
-                                <button
-                                  onClick={() => toggle(l2.fullPath)}
-                                  className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-gray-300 hover:text-gray-500 transition-colors"
-                                >
-                                  <svg className={`h-3 w-3 transition-transform ${l2Collapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                                  </svg>
-                                </button>
-                              ) : (
-                                <div className="h-4 w-4 flex-shrink-0" />
-                              )}
-                              <EditableText
-                                value={l2.l2 ?? ''}
-                                onSave={(newName) => handleRename(l2.id, newName)}
-                                className="text-xs font-medium text-gray-600"
-                              />
-                              {l2.children.length > 0 && (
-                                <span className="text-[10px] text-gray-300">{l2.children.length}</span>
-                              )}
-                              <div className="flex-1" />
-                              {renderActions(l2, true)}
-                            </div>
-                            {renderAddForm(l2.fullPath, 2)}
-
-                            {/* L3 children */}
-                            {!l2Collapsed && l2.children.length > 0 && (
-                              <div className="pb-0.5">
-                                {l2.children.map((l3) => (
-                                  <div key={l3.id}>
-                                    <div className="group flex items-center gap-2 py-1 pl-16 pr-3 hover:bg-gray-50/50 transition-colors min-w-0">
-                                      <div className="h-1 w-1 flex-shrink-0 rounded-full bg-gray-300" />
-                                      <EditableText
-                                        value={l3.l3 ?? ''}
-                                        onSave={(newName) => handleRename(l3.id, newName)}
-                                        className="text-[11px] text-gray-500 flex-shrink-0"
-                                      />
-                                      <div className="min-w-0 flex-1 truncate">
-                                        {l3.description ? (
-                                          <EditableText
-                                            value={l3.description}
-                                            onSave={(desc) => handleUpdateDescription(l3.id, desc)}
-                                            className="text-[11px] italic text-gray-300"
-                                            placeholder="add description"
-                                          />
-                                        ) : (
-                                          <span
-                                            className="cursor-pointer text-[11px] italic text-gray-200 opacity-0 group-hover:opacity-100 hover:text-blue-400 transition-all"
-                                            onClick={() => handleUpdateDescription(l3.id, 'description')}
-                                            title="Add description"
-                                          >
-                                            + desc
-                                          </span>
-                                        )}
-                                      </div>
-                                      {renderActions(l3, false)}
-                                    </div>
-                                    {renderMergePicker(l3)}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+        {error && (
+          <div className="mt-3 flex items-center justify-between rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600">&times;</button>
           </div>
         )}
       </div>
+
+      {/* ── Table ──────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-auto px-6 pb-6">
+        {tree.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-200 py-16">
+            <div className="text-sm text-gray-400">No taxonomy nodes yet</div>
+            <div className="mt-1 text-xs text-gray-300">Import a taxonomy file to get started</div>
+            <button onClick={handleImport} className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-700 transition-colors">
+              Import from File
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+            <table className="w-full border-collapse table-fixed">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="w-[22%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L1 — Category</th>
+                  <th className="w-[22%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L2 — Subcategory</th>
+                  <th className="w-[20%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L3 — Item</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">Description</th>
+                  <th className="w-20 px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider text-gray-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flatRows.map((row, idx) => {
+                  const l1Idx = tree.findIndex(l1 => l1.id === row.l1Node.id)
+                  const stripe = l1Idx % 2 === 1 ? 'bg-gray-50/50' : 'bg-white'
+
+                  return (
+                    <tr key={`${row.node.id}-${idx}`} className={`${stripe} group hover:bg-blue-50/40 transition-colors`}>
+
+                      {/* ── L1 cell ── */}
+                      {row.isFirstInL1 && (
+                        <td
+                          rowSpan={row.l1RowSpan}
+                          className="px-3 align-top border-r border-gray-100 border-b border-b-gray-200"
+                        >
+                          <div className="flex items-center gap-1.5 py-2.5 sticky top-0">
+                            <button
+                              onClick={() => toggleL1(row.l1Node.fullPath)}
+                              className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                            >
+                              {collapsedL1.has(row.l1Node.fullPath) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                            </button>
+                            <EditableCell
+                              value={row.l1Node.l1}
+                              onSave={(n) => handleRename(row.l1Node.id, n)}
+                              className="text-xs font-semibold text-gray-800"
+                            />
+                            <span className="ml-auto flex-shrink-0 rounded-full bg-blue-100/60 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 tabular-nums">
+                              {row.l1Node.children.length}
+                            </span>
+                          </div>
+                        </td>
+                      )}
+
+                      {/* ── L2 cell ── */}
+                      {row.level === 1 ? (
+                        // L1-only row (collapsed or empty)
+                        <>
+                          <td colSpan={3} className="px-4 py-2.5 text-xs text-gray-300 italic border-r border-gray-100 border-b border-gray-100">
+                            {collapsedL1.has(row.l1Node.fullPath)
+                              ? `${row.l1Node.children.reduce((a, l2) => a + 1 + l2.children.length, 0)} children hidden`
+                              : 'No subcategories'}
+                          </td>
+                          <td className="px-2 py-2 text-center border-b border-gray-100">
+                            <div className="flex items-center justify-center gap-0.5 ">
+                              <button onClick={() => { setAddingUnder(row.l1Node.fullPath); setAddName(''); setAddDescription(''); setMergingNodeId(null) }} className="rounded p-1 text-blue-500 hover:bg-blue-50" title="Add L2"><Plus size={13} /></button>
+                              <button onClick={() => handleDelete(row.l1Node.id)} className="rounded p-1 text-red-400 hover:bg-red-50" title="Delete"><Trash2 size={13} /></button>
+                            </div>
+                          </td>
+                        </>
+                      ) : row.isFirstInL2 && row.l2Node ? (
+                        <td
+                          rowSpan={row.l2RowSpan}
+                          className="px-3 align-top border-r border-gray-100 border-b border-gray-100"
+                        >
+                          <div className="flex items-center gap-1.5 py-2">
+                            {row.l2Node.children.length > 0 ? (
+                              <button
+                                onClick={() => toggleL2(row.l2Node!.fullPath)}
+                                className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                              >
+                                {collapsedL2.has(row.l2Node.fullPath) ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                              </button>
+                            ) : (
+                              <div className="h-4 w-4 flex-shrink-0" />
+                            )}
+                            <EditableCell
+                              value={row.l2Node.l2 ?? ''}
+                              onSave={(n) => handleRename(row.l2Node!.id, n)}
+                              className="text-xs font-medium text-gray-600"
+                            />
+                            {row.l2Node.children.length > 0 && (
+                              <span className="ml-auto flex-shrink-0 rounded-full bg-emerald-100/60 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 tabular-nums">
+                                {row.l2Node.children.length}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      ) : null}
+
+                      {/* ── L3 + Description + Actions cells ── */}
+                      {row.level === 2 ? (
+                        // L2-only row (collapsed or no children)
+                        <>
+                          <td className="px-4 py-2 text-xs text-gray-300 italic border-r border-gray-100 border-b border-gray-100">
+                            {collapsedL2.has(row.l2Node?.fullPath ?? '')
+                              ? `${row.l2Node?.children.length ?? 0} items hidden`
+                              : 'No items'}
+                          </td>
+                          <td className="px-4 py-2 border-r border-gray-100 border-b border-gray-100">
+                            <span className="text-xs text-gray-200">—</span>
+                          </td>
+                          <td className="px-2 py-2 text-center border-b border-gray-100">
+                            <div className="flex items-center justify-center gap-0.5 ">
+                              <button onClick={() => { setAddingUnder(row.l2Node!.fullPath); setAddName(''); setAddDescription(''); setMergingNodeId(null) }} className="rounded p-1 text-blue-500 hover:bg-blue-50" title="Add L3"><Plus size={13} /></button>
+                              <button onClick={() => handleDelete(row.l2Node!.id)} className="rounded p-1 text-red-400 hover:bg-red-50" title="Delete"><Trash2 size={13} /></button>
+                            </div>
+                          </td>
+                        </>
+                      ) : row.level === 3 ? (
+                        <>
+                          <td className="px-4 py-1.5 border-r border-gray-100 border-b border-gray-100">
+                            <EditableCell
+                              value={row.node.l3 ?? ''}
+                              onSave={(n) => handleRename(row.node.id, n)}
+                              className="text-xs text-gray-700"
+                            />
+                          </td>
+                          <td className="px-4 py-1.5 border-r border-gray-100 border-b border-gray-100">
+                            <DescriptionCell
+                              value={row.node.description ?? ''}
+                              onSave={(d) => handleUpdateDescription(row.node.id, d)}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 text-center border-b border-gray-100">
+                            <div className="flex items-center justify-center gap-0.5 ">
+                              <button onClick={(e) => openMergeAt(row.node.id, e.currentTarget)} className="rounded p-1 text-amber-500 hover:bg-amber-50" title="Merge"><Merge size={13} /></button>
+                              <button onClick={() => handleDelete(row.node.id)} className="rounded p-1 text-red-400 hover:bg-red-50" title="Delete"><Trash2 size={13} /></button>
+                            </div>
+                          </td>
+                        </>
+                      ) : null}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+
+            {/* ── Add child bar ────────────────────────────────────── */}
+            {addingUnder && (
+              <div className="border-t border-gray-200 bg-blue-50/50 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-medium text-gray-500">
+                    Add under <span className="text-blue-600">{addingUnder.split('|').join(' > ')}</span>
+                  </span>
+                  <input
+                    value={addName}
+                    onChange={(e) => setAddName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddChild(addingUnder)
+                      else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
+                    }}
+                    className="rounded border border-gray-200 bg-white px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 w-48"
+                    placeholder="Name"
+                    autoFocus
+                  />
+                  {addingUnder.split('|').length >= 2 && (
+                    <input
+                      value={addDescription}
+                      onChange={(e) => setAddDescription(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddChild(addingUnder)
+                        else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
+                      }}
+                      className="rounded border border-gray-200 bg-white px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 flex-1"
+                      placeholder="Description (optional)"
+                    />
+                  )}
+                  <button onClick={() => handleAddChild(addingUnder)} disabled={addSaving || !addName.trim()} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                    {addSaving ? 'Adding...' : 'Add'}
+                  </button>
+                  <button onClick={() => { setAddingUnder(null); setAddName(''); setAddDescription('') }} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Merge picker is now rendered as a fixed popover — see below */}
+          </div>
+        )}
+      </div>
+
+      {/* ── Merge popover (fixed position near click) ──────────────── */}
+      {mergingNodeId && mergeAnchor && (() => {
+        const source = nodes.find(n => n.id === mergingNodeId)
+        if (!source) return null
+        const targets = getMergeTargets(source)
+        const q = mergeSearch.toLowerCase()
+        const filtered = q ? targets.filter((t) => t.fullPath.toLowerCase().includes(q)) : []
+
+        return (
+          <div
+            ref={mergePopoverRef}
+            className="fixed z-50 w-80 rounded-lg border border-amber-200 bg-white shadow-lg"
+            style={{ top: mergeAnchor.top, left: mergeAnchor.left }}
+          >
+            <div className="px-3 py-2.5 border-b border-amber-100 bg-amber-50/60 rounded-t-lg">
+              <div className="text-[11px] font-medium text-gray-500 mb-1.5">
+                Merge <span className="text-amber-600">{source.fullPath.split('|').join(' > ')}</span> into:
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={mergeInputRef}
+                  value={mergeSearch}
+                  onChange={(e) => setMergeSearch(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { setMergingNodeId(null); setMergeSearch(''); setMergeAnchor(null) } }}
+                  className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  placeholder="Search target..."
+                />
+                <button
+                  onClick={() => { setMergingNodeId(null); setMergeSearch(''); setMergeAnchor(null) }}
+                  className="text-gray-400 hover:text-gray-600 p-0.5"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {!q ? (
+                <div className="py-3 px-3 text-xs text-gray-400 text-center">Type to search targets...</div>
+              ) : filtered.length === 0 ? (
+                <div className="py-3 px-3 text-xs text-gray-400 text-center">No matches</div>
+              ) : filtered.slice(0, 20).map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => { handleMerge(mergingNodeId!, t.id); setMergeSearch(''); setMergeAnchor(null) }}
+                  className="w-full px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-amber-50 transition-colors border-b border-gray-50 last:border-b-0"
+                >
+                  {t.fullPath.split('|').join(' > ')}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

@@ -1,26 +1,45 @@
 import { useState } from 'react'
 import { ipc } from '../../lib/ipc'
 import { useWorkflowStore } from '../../stores/workflowStore'
-import type { ClassificationScope } from '../../../shared/types/classification'
+import type { FilterCondition } from '../../../shared/types/transactions'
 
 interface Props {
   isRunning: boolean
-  runId: string | null
+  conditions: FilterCondition[]
   onStarted: () => void
   onError: (msg: string) => void
   onCancelled: () => void
 }
 
-export default function ClassificationControls({ isRunning, runId, onStarted, onError, onCancelled }: Props) {
-  const [scope, setScope] = useState<ClassificationScope>('all')
+export default function ClassificationControls({ isRunning, conditions, onStarted, onError, onCancelled }: Props) {
   const [starting, setStarting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [confirmCount, setConfirmCount] = useState<number | null>(null)
+  const [loadingCount, setLoadingCount] = useState(false)
 
-  const handleStart = async () => {
-    setStarting(true)
+  const handleStartClick = async () => {
+    setLoadingCount(true)
     onError('')
     try {
-      await ipc.classification.start({ scope })
+      const count = await ipc.classification.scopeCount(
+        conditions.length > 0 ? conditions : undefined
+      )
+      setConfirmCount(count)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to get scope count'
+      onError(msg)
+    } finally {
+      setLoadingCount(false)
+    }
+  }
+
+  const handleConfirm = async () => {
+    setConfirmCount(null)
+    setStarting(true)
+    try {
+      await ipc.classification.start(
+        conditions.length > 0 ? conditions : undefined
+      )
       onStarted()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to start classification'
@@ -30,20 +49,20 @@ export default function ClassificationControls({ isRunning, runId, onStarted, on
     }
   }
 
+  const handleCancelConfirm = () => {
+    setConfirmCount(null)
+  }
+
   const handleCancel = async () => {
-    if (!runId) return
     setCancelling(true)
     try {
-      await ipc.classification.cancel(runId)
-      // Force the cancelled state into the store immediately so the UI updates
-      // even if the backend progress event gets lost or overwritten by stale events
+      await ipc.classification.cancel()
       useWorkflowStore.getState().setClassificationProgress({
-        runId,
         status: 'cancelled',
-        phase: 'researching',
-        total: 0,
-        processed: 0,
+        totalSuppliers: 0,
+        processedSuppliers: 0,
         percentage: 0,
+        currentSupplier: null,
         currentStep: 'Cancelled',
       })
       onCancelled()
@@ -54,22 +73,37 @@ export default function ClassificationControls({ isRunning, runId, onStarted, on
     }
   }
 
+  // Confirmation dialog
+  if (confirmCount !== null) {
+    return (
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <p className="text-sm text-blue-800">
+          Start classification on <strong>{confirmCount.toLocaleString()}</strong> {confirmCount === 1 ? 'row' : 'rows'}?
+        </p>
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            onClick={handleConfirm}
+            disabled={starting || confirmCount === 0}
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {starting ? 'Starting...' : 'Start Classification'}
+          </button>
+          <button
+            onClick={handleCancelConfirm}
+            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          {confirmCount === 0 && (
+            <span className="text-sm text-gray-500">No rows match the current filter.</span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-center gap-4">
-      <div className="flex items-center gap-2">
-        <label className="text-sm font-medium text-gray-700">Scope:</label>
-        <select
-          value={scope}
-          onChange={(e) => setScope(e.target.value as ClassificationScope)}
-          disabled={isRunning}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-        >
-          <option value="all">All transactions</option>
-          <option value="new">New / unclassified only</option>
-          <option value="filtered">Current filter</option>
-        </select>
-      </div>
-
       {isRunning ? (
         <button
           onClick={handleCancel}
@@ -80,11 +114,11 @@ export default function ClassificationControls({ isRunning, runId, onStarted, on
         </button>
       ) : (
         <button
-          onClick={handleStart}
-          disabled={starting}
+          onClick={handleStartClick}
+          disabled={loadingCount}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {starting ? 'Starting...' : 'Start Classification'}
+          {loadingCount ? 'Checking...' : 'Start Classification'}
         </button>
       )}
     </div>

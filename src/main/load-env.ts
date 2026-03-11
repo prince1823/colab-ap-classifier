@@ -7,7 +7,7 @@
  * KEY=VALUE pairs.
  *
  * Call this as early as possible — before importing any service that
- * reads process.env at module-load time (e.g., settings.ts).
+ * reads process.env at module-load time (e.g., llm-client.ts).
  */
 import fs from 'fs';
 import path from 'path';

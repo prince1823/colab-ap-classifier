@@ -555,3 +555,37 @@
   margin-left: 4px;
   font-weight: 400;
 }
+
+/* ── Keyboard navigation: focused row ── */
+.pivot-tree-row[data-focused] {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+  z-index: 1;
+  position: relative;
+}
+
+/* ── Keyboard navigation: selected row ── */
+.pivot-tree-row[data-selected] {
+  background: #dbeafe !important;
+}
+.pivot-tree-row[data-selected] .pivot-tree-label-cell,
+.pivot-tree-row[data-selected] .pivot-tree-total-cell {
+  background: #dbeafe !important;
+}
+
+/* Both focused and selected */
+.pivot-tree-row[data-focused][data-selected] {
+  outline-color: #2563eb;
+  background: #bfdbfe !important;
+}
+.pivot-tree-row[data-focused][data-selected] .pivot-tree-label-cell,
+.pivot-tree-row[data-focused][data-selected] .pivot-tree-total-cell {
+  background: #bfdbfe !important;
+}
+
+/* Active state for spend toggle button */
+.pivot-toolbar-icon-btn[data-active] {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}

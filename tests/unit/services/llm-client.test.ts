@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { chat, LLMClientError } from '../../../src/main/services/llm-client';
-import * as settingsService from '../../../src/main/services/settings';
 
 // Save original env
 const originalEnv = { ...process.env };
@@ -16,12 +15,10 @@ beforeEach(() => {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
   delete process.env.OPENROUTER_API_KEY;
-  settingsService.resetSettings();
 });
 
 afterEach(() => {
   process.env = { ...originalEnv };
-  settingsService.resetSettings();
 });
 
 /**
@@ -40,10 +37,8 @@ function mockResponse(body: unknown, status = 200): Response {
 describe('llm-client chat', () => {
   describe('Anthropic provider', () => {
     beforeEach(() => {
-      settingsService.updateSettings({
-        provider: 'anthropic',
-        apiKeys: { anthropic: 'sk-ant-test-key' },
-      });
+      process.env.CLASSIFIER_LLM_PROVIDER = 'anthropic';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key';
     });
 
     it('should send correct request to Anthropic API and return text', async () => {
@@ -119,11 +114,9 @@ describe('llm-client chat', () => {
 
   describe('OpenAI provider', () => {
     beforeEach(() => {
-      settingsService.updateSettings({
-        provider: 'openai',
-        model: 'gpt-4o',
-        apiKeys: { openai: 'sk-openai-test-key' },
-      });
+      process.env.CLASSIFIER_LLM_PROVIDER = 'openai';
+      process.env.CLASSIFIER_MODEL = 'gpt-4o';
+      process.env.OPENAI_API_KEY = 'sk-openai-test-key';
     });
 
     it('should send correct request to OpenAI API and return text', async () => {
@@ -173,11 +166,9 @@ describe('llm-client chat', () => {
 
   describe('OpenRouter provider', () => {
     beforeEach(() => {
-      settingsService.updateSettings({
-        provider: 'openrouter',
-        model: 'claude-3-5-haiku-latest',
-        apiKeys: { openrouter: 'sk-or-test-key' },
-      });
+      process.env.CLASSIFIER_LLM_PROVIDER = 'openrouter';
+      process.env.CLASSIFIER_MODEL = 'claude-3-5-haiku-latest';
+      process.env.OPENROUTER_API_KEY = 'sk-or-test-key';
     });
 
     it('should send correct request to OpenRouter API with extra headers', async () => {
@@ -206,11 +197,9 @@ describe('llm-client chat', () => {
   });
 
   describe('provider override via options', () => {
-    it('should use the provider specified in options instead of settings', async () => {
-      // Default provider is anthropic, but we override to openai
-      settingsService.updateSettings({
-        apiKeys: { openai: 'sk-openai-override' },
-      });
+    it('should use the provider specified in options instead of env', async () => {
+      // Default provider is openrouter (from env), but we override to openai
+      process.env.OPENAI_API_KEY = 'sk-openai-override';
 
       const openAIResponse = {
         choices: [{ message: { content: 'Overridden!' } }],
@@ -227,7 +216,7 @@ describe('llm-client chat', () => {
 
   describe('error handling', () => {
     it('should throw MISSING_API_KEY when no API key is available', async () => {
-      // No API key set for anthropic
+      // Default provider is openrouter, no key set
       await expect(chat('sys', 'user')).rejects.toThrow(LLMClientError);
 
       try {
@@ -249,9 +238,8 @@ describe('llm-client chat', () => {
     });
 
     it('should throw API_ERROR on non-OK HTTP response', async () => {
-      settingsService.updateSettings({
-        apiKeys: { anthropic: 'sk-ant-test' },
-      });
+      process.env.CLASSIFIER_LLM_PROVIDER = 'anthropic';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
       // Use a non-retryable status (400) so it throws immediately without retries
       mockFetch.mockResolvedValueOnce(
         mockResponse({ error: { message: 'Bad request' } }, 400)
@@ -267,9 +255,8 @@ describe('llm-client chat', () => {
     });
 
     it('should throw TIMEOUT when the request is aborted', async () => {
-      settingsService.updateSettings({
-        apiKeys: { anthropic: 'sk-ant-test' },
-      });
+      process.env.CLASSIFIER_LLM_PROVIDER = 'anthropic';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
 
       mockFetch.mockImplementationOnce(() => {
         const err = new DOMException('The operation was aborted.', 'AbortError');
@@ -285,9 +272,8 @@ describe('llm-client chat', () => {
     });
 
     it('should throw API_ERROR on network failure', async () => {
-      settingsService.updateSettings({
-        apiKeys: { anthropic: 'sk-ant-test' },
-      });
+      process.env.CLASSIFIER_LLM_PROVIDER = 'anthropic';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
 
       mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
@@ -301,9 +287,8 @@ describe('llm-client chat', () => {
     });
 
     it('should throw INVALID_RESPONSE when JSON parsing fails', async () => {
-      settingsService.updateSettings({
-        apiKeys: { anthropic: 'sk-ant-test' },
-      });
+      process.env.CLASSIFIER_LLM_PROVIDER = 'anthropic';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
 
       const badResponse = {
         ok: true,

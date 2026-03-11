@@ -1,38 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ChevronDownIcon, FolderOpenIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useWorkflowStore } from '../stores/workflowStore'
-import { ipc } from '../lib/ipc'
-import type { RecentProject } from '../../shared/types/project'
 
-/**
- * Determine the best page to navigate to based on the current project state.
- * Navigates to the furthest completed workflow step.
- */
-function getBestRoute(): string {
-  const s = useWorkflowStore.getState()
-  if (s.hasClassifiedData) return '/workflow/review'
-  if (s.hasCanonicalizedData && s.hasTaxonomy) return '/workflow/classification'
-  if (s.hasCanonicalizedData) return '/workflow/data-review'
-  if (s.hasUploadedData) return '/workflow/canonicalization'
-  return '/workflow/upload'
-}
 
 export default function ProjectSelector() {
   const { projectMetadata, loadProject, createProject, closeProject } = useWorkflowStore()
   const navigate = useNavigate()
-  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
-
-  useEffect(() => {
-    ipc.recentProjects.list().then(setRecentProjects).catch(() => {})
-  }, [projectMetadata])
 
   const handleNewProject = async () => {
     if (!newProjectName.trim()) return
@@ -51,20 +32,9 @@ export default function ProjectSelector() {
 
   const handleOpenProject = async () => {
     try {
-      const filePath = await ipc.project.selectOpenPath()
-      if (filePath) {
-        await loadProject(filePath)
-        navigate(getBestRoute())
-      }
-    } catch (e) {
-      setOpenError(e instanceof Error ? e.message : 'Failed to open project')
-    }
-  }
-
-  const handleOpenRecent = async (path: string) => {
-    try {
-      await loadProject(path)
-      navigate(getBestRoute())
+      // project:open with no filePath triggers the native file dialog in the IPC handler
+      await loadProject('')
+      navigate('/project')
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : 'Failed to open project')
     }
@@ -81,7 +51,7 @@ export default function ProjectSelector() {
           <button className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-gray-100 transition-colors">
             <span className="font-medium text-gray-600">Project:</span>
             <span className="text-gray-800">
-              {projectMetadata?.name || 'No Project'}
+              {projectMetadata?.projectName || 'No Project'}
             </span>
             <ChevronDownIcon className="h-4 w-4 text-gray-400" />
           </button>
@@ -119,24 +89,6 @@ export default function ProjectSelector() {
                   <XMarkIcon className="h-4 w-4" />
                   Close Project
                 </DropdownMenu.Item>
-              </>
-            )}
-
-            {recentProjects.length > 0 && (
-              <>
-                <DropdownMenu.Separator className="my-1 h-px bg-gray-200" />
-                <DropdownMenu.Label className="px-3 py-1.5 text-xs font-medium text-gray-400">
-                  Recent Projects
-                </DropdownMenu.Label>
-                {recentProjects.slice(0, 5).map((rp) => (
-                  <DropdownMenu.Item
-                    key={rp.path}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-700 outline-none hover:bg-blue-50 hover:text-blue-700"
-                    onSelect={() => handleOpenRecent(rp.path)}
-                  >
-                    <span className="truncate">{rp.name}</span>
-                  </DropdownMenu.Item>
-                ))}
               </>
             )}
           </DropdownMenu.Content>

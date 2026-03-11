@@ -1,147 +1,168 @@
 import type { IPCResponse } from '../../shared/types/ipc';
-import type { ProjectMetadata, ProjectMetadataUpdate, RecentProject } from '../../shared/types/project';
-import type { CSVPreviewWithMappings, CanonicalColumnMapping } from '../../shared/types/canonicalization';
-import type { ClassificationStartOptions, ClassificationProgress, ProjectRun } from '../../shared/types/classification';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions } from '../../shared/types/transactions';
-import type { TaxonomyNode, TaxonomyMetadata, TaxonomySetInput, TaxonomyInfo, RulePackInfo } from '../../shared/types/taxonomy';
-import type { ProjectSupplier, SupplierUpdateInput, SupplierResearchResult } from '../../shared/types/suppliers';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
-import type { SystemFeedback, FeedbackActionDetails } from '../../shared/types/feedback';
-import type { ChangeLog } from '../../shared/types/changelog';
-import type { AppSettings, SettingsUpdateInput, ModelInfo, ProviderInfo } from '../../shared/types/settings';
+import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
+import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
+import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
+import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
+import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
+import type { ProjectMetadataUpdate } from '../../shared/types/project';
+import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
 
 /**
- * Generic invoke wrapper that unwraps the IPCResponse envelope.
- * Throws on `success: false`.
+ * Typed invoke wrapper that unwraps the IPCResponse envelope.
+ * Channel name, args, and return type are compile-checked via IPCInvokeMap.
  */
-async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-  const result: IPCResponse<T> = await window.electronAPI.invoke(channel, ...args);
+async function invoke<K extends IPCChannel>(channel: K, ...args: IPCArgs<K>): Promise<IPCResult<K>> {
+  const result: IPCResponse<IPCResult<K>> = await window.electronAPI.invoke(channel, ...args);
   if (!result.success) {
     throw new Error(result.error || `IPC call failed: ${channel}`);
   }
-  return result.data as T;
+  return result.data as IPCResult<K>;
 }
 
 /**
- * Event listener wrapper. Returns an unsubscribe function.
+ * Typed event listener wrapper. Channel and callback type are compile-checked via IPCEventMap.
+ * Returns an unsubscribe function.
  */
-function on<T>(channel: string, callback: (data: T) => void): () => void {
-  return window.electronAPI.on(channel, (data: unknown) => callback(data as T));
+function on<K extends keyof IPCEventMap>(channel: K, callback: (data: IPCEventMap[K]) => void): () => void {
+  return window.electronAPI.on(channel, (data: unknown) => callback(data as IPCEventMap[K]));
 }
 
 /**
- * Typed IPC client — all 14 namespaces covering 48 channels.
+ * Typed IPC client — all types inferred from IPCInvokeMap via channel string.
  */
 export const ipc = {
-  // ── Project (8 channels) ──
+  // ── Project (10 channels) ──
   project: {
-    isOpen: () => invoke<boolean>('project:isOpen'),
-    selectSavePath: () => invoke<string | null>('project:selectSavePath'),
-    selectOpenPath: () => invoke<string | null>('project:selectOpenPath'),
-    new: (name: string) => invoke<{ filePath: string; name: string }>('project:new', name),
-    open: (path: string) => invoke<{ filePath: string; name: string }>('project:open', path),
-    close: () => invoke<void>('project:close'),
-    getMetadata: () => invoke<ProjectMetadata>('project:getMetadata'),
-    updateMetadata: (updates: ProjectMetadataUpdate) => invoke<void>('project:updateMetadata', updates),
+    new: (name: string, filePath?: string) =>
+      invoke('project:new', name, filePath),
+    open: (filePath?: string) =>
+      invoke('project:open', filePath),
+    close: () => invoke('project:close'),
+    finalizeOpen: () => invoke('project:finalizeOpen'),
+    getSetting: (key: string) => invoke('project:getSetting', key),
+    setSetting: (key: string, value: unknown) => invoke('project:setSetting', key, value),
+    deleteSetting: (key: string) => invoke('project:deleteSetting', key),
+    getAllSettings: () => invoke('project:getAllSettings'),
+    getMetadata: () => invoke('project:getMetadata'),
+    updateMetadata: (updates: ProjectMetadataUpdate) =>
+      invoke('project:updateMetadata', updates),
   },
 
-  // ── Recent Projects (3 channels) ──
-  recentProjects: {
-    list: () => invoke<RecentProject[]>('recentProjects:list'),
-    clear: () => invoke<void>('recentProjects:clear'),
-    remove: (path: string) => invoke<void>('recentProjects:remove', path),
-  },
-
-  // ── Upload (3 channels) ──
-  upload: {
-    selectFile: () => invoke<string | null>('upload:selectFile'),
-    parsePreview: (filePath: string) => invoke<CSVPreviewWithMappings>('upload:parsePreview', filePath),
-    csv: (filePath: string) => invoke<{ rowsInserted: number }>('upload:csv', filePath),
-  },
-
-  // ── Canonicalization (1 channel) ──
-  canonicalization: {
-    save: (mapping: CanonicalColumnMapping, groupingColumns: string[]) =>
-      invoke<void>('canonicalization:save', mapping, groupingColumns),
+  // ── Ingest (8 channels) ──
+  ingest: {
+    selectFile: () => invoke('ingest:selectFile'),
+    parseCSV: (filePath: string) =>
+      invoke('ingest:parseCSV', filePath),
+    suggestMappings: (columns: string[], sampleRows: Record<string, string>[]) =>
+      invoke('ingest:suggestMappings', columns, sampleRows),
+    importCSV: (filePath: string, mapping?: ColumnMapping) =>
+      invoke('ingest:importCSV', filePath, mapping),
+    getUpload: () => invoke('ingest:getUpload'),
+    getUploadHistory: () => invoke('ingest:getUploadHistory'),
+    deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
+      invoke('ingest:deriveMappings', columns, sampleRows, source),
+    getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
   },
 
   // ── Classification (3 channels + 1 event) ──
   classification: {
-    start: (options: ClassificationStartOptions) => invoke<{ runId: string }>('classification:start', options),
-    getStatus: () => invoke<ProjectRun | null>('classification:getStatus'),
-    cancel: (runId: string) => invoke<void>('classification:cancel', runId),
+    start: (conditions?: FilterCondition[]) => invoke('classification:start', conditions),
+    cancel: () => invoke('classification:cancel'),
+    scopeCount: (conditions?: FilterCondition[]) => invoke('classification:scopeCount', conditions),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
-      on<ClassificationProgress>('classification:progress', callback),
+      on('classification:progress', callback),
   },
 
-  // ── Transactions (6 channels) ──
+  // ── Transactions (8 channels) ──
   transactions: {
-    query: (filters?: TransactionFilter) => invoke<Transaction[]>('transactions:query', filters),
-    queryPaginated: (filters?: TransactionFilter) =>
-      invoke<PaginatedTransactions>('transactions:queryPaginated', filters),
-    count: (filters?: TransactionFilter) => invoke<number>('transactions:count', filters),
-    stats: () => invoke<TransactionStats>('transactions:stats'),
-    getColumns: () => invoke<string[]>('transactions:getColumns'),
-    reclassify: (transactionIds: string[], taxonomyNodeId: string, feedback?: string) =>
-      invoke<void>('transactions:reclassify', transactionIds, taxonomyNodeId, feedback),
+    query: (filters?: TransactionFilter) =>
+      invoke('transactions:query', filters),
+    stats: () => invoke('transactions:stats'),
+    getColumns: () => invoke('transactions:getColumns'),
+    update: (update: TransactionUpdate) =>
+      invoke('transactions:update', update),
+    queryGrouped: (column: string, filters?: TransactionFilter) =>
+      invoke('transactions:queryGrouped', column, filters),
+    distinctValues: (column: string, limit?: number) =>
+      invoke('transactions:distinctValues', column, limit),
+    getIdsByValue: (column: string, value: string, filters?: TransactionFilter) =>
+      invoke('transactions:getIdsByValue', column, value, filters),
+    pivotAggregation: (dimensions: string[], valueDimension: string, filters?: TransactionFilter) =>
+      invoke('transactions:pivotAggregation', dimensions, valueDimension, filters),
+    getIdsByConditions: (conditions: FilterCondition[]) =>
+      invoke('transactions:getIdsByConditions', conditions),
+    getFilterFields: () => invoke('transactions:getFilterFields'),
   },
 
-  // ── Taxonomy (4 channels) ──
+  // ── Taxonomy (8 channels) ──
   taxonomy: {
-    get: () => invoke<TaxonomyMetadata>('taxonomy:get'),
-    getNodes: () => invoke<TaxonomyNode[]>('taxonomy:getNodes'),
-    set: (input: TaxonomySetInput) => invoke<void>('taxonomy:set', input),
-    importFromColabip: (industryName: string) => invoke<void>('taxonomy:importFromColabip', industryName),
+    getNodeCount: () => invoke('taxonomy:getNodeCount'),
+    getNodes: () => invoke('taxonomy:getNodes'),
+    addNode: (fullPath: string, description?: string) =>
+      invoke('taxonomy:addNode', fullPath, description),
+    updateNode: (nodeId: string, updates: { description?: string }) =>
+      invoke('taxonomy:updateNode', nodeId, updates),
+    renameNode: (nodeId: string, newName: string) =>
+      invoke('taxonomy:renameNode', nodeId, newName),
+    mergeNodes: (sourceId: string, targetId: string) =>
+      invoke('taxonomy:mergeNodes', sourceId, targetId),
+    deleteNode: (nodeId: string) =>
+      invoke('taxonomy:deleteNode', nodeId),
+    importFromFile: (filePath: string) =>
+      invoke('taxonomy:importFromFile', filePath),
   },
 
-  // ── ColabIP (2 channels) ──
-  colabip: {
-    listTaxonomies: () => invoke<TaxonomyInfo[]>('colabip:listTaxonomies'),
-    listRulePacks: () => invoke<RulePackInfo[]>('colabip:listRulePacks'),
-  },
-
-  // ── Suppliers (3 channels) ──
+  // ── Suppliers (3 channels + research) ──
   suppliers: {
-    list: () => invoke<ProjectSupplier[]>('suppliers:list'),
+    list: (filter?: { conditions: FilterCondition[] }) => invoke('suppliers:list', filter),
     update: (supplierName: string, updates: SupplierUpdateInput) =>
-      invoke<void>('suppliers:update', supplierName, updates),
-    research: (supplierName: string) => invoke<SupplierResearchResult>('suppliers:research', supplierName),
+      invoke('suppliers:update', supplierName, updates),
+    confirm: (id: string, status: SupplierConfirmationStatus) =>
+      invoke('suppliers:confirm', id, status),
+    researchAll: () => invoke('suppliers:researchAll'),
+    researchSingle: (supplierName: string) =>
+      invoke('suppliers:researchSingle', supplierName),
+    onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
+      on('suppliers:research:progress', callback),
+    filterTailSpend: (threshold: number) =>
+      invoke('suppliers:filterTailSpend', threshold),
+    getFilterFields: () => invoke('suppliers:getFilterFields'),
   },
 
-  // ── Rules (5 channels) ──
+  // ── Rules (4 channels) ──
   rules: {
-    list: () => invoke<OverrideRule[]>('rules:list'),
-    create: (input: OverrideRuleCreate) => invoke<OverrideRule>('rules:create', input),
-    update: (ruleId: string, updates: OverrideRuleUpdate) => invoke<void>('rules:update', ruleId, updates),
-    delete: (ruleId: string) => invoke<void>('rules:delete', ruleId),
-    importFromColabip: (rulePack: string) => invoke<void>('rules:importFromColabip', rulePack),
-  },
-
-  // ── Feedback (3 channels) ──
-  feedback: {
-    list: () => invoke<SystemFeedback[]>('feedback:list'),
-    approve: (feedbackId: string, modifications?: Partial<FeedbackActionDetails>) =>
-      invoke<void>('feedback:approve', feedbackId, modifications),
-    reject: (feedbackId: string, reason?: string) => invoke<void>('feedback:reject', feedbackId, reason),
+    list: () => invoke('rules:list'),
+    create: (input: OverrideRuleCreate) =>
+      invoke('rules:create', input),
+    update: (ruleId: string, updates: OverrideRuleUpdate) =>
+      invoke('rules:update', ruleId, updates),
+    delete: (ruleId: string) => invoke('rules:delete', ruleId),
   },
 
   // ── Changelog (2 channels) ──
   changelog: {
-    list: () => invoke<ChangeLog[]>('changelog:list'),
-    revert: (changeId: string) => invoke<string>('changelog:revert', changeId),
+    list: () => invoke('changelog:list'),
+    revert: (changeId: string) => invoke('changelog:revert', changeId),
   },
 
-  // ── Export (2 channels) ──
+  // ── Export (1 channel) ──
   export: {
-    selectPath: () => invoke<string | null>('export:selectPath'),
-    export: (filePath: string) => invoke<void>('export:export', filePath),
+    csv: () => invoke('export:csv'),
   },
 
-  // ── Settings (4 channels) ──
+  // ── Settings (5 channels) ──
   settings: {
-    get: () => invoke<AppSettings>('settings:get'),
-    update: (input: SettingsUpdateInput) => invoke<void>('settings:update', input),
-    getModels: (provider?: string) => invoke<ModelInfo[]>('settings:getModels', provider),
-    getProviders: () => invoke<ProviderInfo[]>('settings:getProviders'),
+    getLLMConfig: () => invoke('settings:getLLMConfig'),
+    setApiKey: (provider: string, key: string) => invoke('settings:setApiKey', provider, key),
+    setProvider: (provider: string) => invoke('settings:setProvider', provider),
+    setModel: (model: string) => invoke('settings:setModel', model),
+    validateApiKey: (provider: string, key: string) => invoke('settings:validateApiKey', provider, key),
+  },
+
+  // ── Supplier Universe (3 channels) ──
+  supplierUniverse: {
+    getPath: () => invoke('supplier-universe:getPath'),
+    selectFile: () => invoke('supplier-universe:selectFile'),
+    createNew: () => invoke('supplier-universe:createNew'),
   },
 };

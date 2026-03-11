@@ -1,19 +1,31 @@
 import { registerHandler } from './register';
-import * as classificationPipeline from '../services/classification-pipeline';
-import type { ClassificationStartOptions } from '../../shared/types';
+import type { ClassificationRunner, EventBus } from '../../shared/types/services';
+import type { FilterCondition } from '../../shared/types/transactions';
 
-export function registerClassificationHandlers(): void {
-  registerHandler('classification:start', async (_event, options: unknown) => {
-    return classificationPipeline.startClassification(
-      options as ClassificationStartOptions
-    );
+export function registerClassificationHandlers(classifier: ClassificationRunner, eventBus: EventBus): void {
+  registerHandler('classification:start', async (_event, ...args: unknown[]) => {
+    const conditions = args[0] as FilterCondition[] | undefined;
+    // Fire-and-forget — progress is streamed via EventBus
+    classifier.classifyAll(conditions).catch((err) => {
+      console.error('[IPC] Classification failed:', err);
+      // Safety net: emit failed event so renderer is always notified
+      eventBus.emit('classification:progress', {
+        status: 'failed',
+        totalSuppliers: 0,
+        processedSuppliers: 0,
+        percentage: 0,
+        currentSupplier: null,
+        currentStep: err instanceof Error ? err.message : String(err),
+      });
+    });
   });
 
-  registerHandler('classification:getStatus', async () => {
-    return classificationPipeline.getStatus();
+  registerHandler('classification:cancel', async () => {
+    await classifier.cancel();
   });
 
-  registerHandler('classification:cancel', async (_event, runId: unknown) => {
-    return classificationPipeline.cancelClassification(runId as string);
+  registerHandler('classification:scopeCount', async (_event, ...args: unknown[]) => {
+    const conditions = args[0] as FilterCondition[] | undefined;
+    return classifier.getScopeCount(conditions);
   });
 }

@@ -2,13 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { X, ChevronDown, ChevronUp, Filter } from 'lucide-react'
 import '../../styles/ActiveFilters.css'
 
-const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters = {}, tables = [], onRemoveFilter, onClearAll, onRemoveLocalFilter, compact = false }) => {
+interface ActiveFiltersProps {
+  activeFilters?: Record<string, unknown>
+  filterState?: Record<string, unknown>
+  onRemoveFilter: (key: string, value: string | null) => void
+  onClearAll: () => void
+  compact?: boolean
+}
+
+const ActiveFilters: React.FC<ActiveFiltersProps> = ({ activeFilters = {}, filterState = {}, onRemoveFilter, onClearAll, compact = false }) => {
   const [isExpanded, setIsExpanded] = useState(false)
   // When the user clicks a remove/clear action inside the dropdown, filters will change.
   // We don't want that change to auto-close the dropdown.
   const skipNextAutoCloseRef = useRef(false)
   // Map UI filter keys to human-readable labels
-  const uiFilterLabels = {
+  const uiFilterLabels: Record<string, string> = {
     supplier: 'Supplier',
     classificationL1: 'Classification L1',
     classificationL2: 'Classification L2',
@@ -24,7 +32,7 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
   }
 
   // Map backend/activeFilters keys to human-readable labels
-  const backendFilterLabels = {
+  const backendFilterLabels: Record<string, string> = {
     supplier_name: 'Supplier',
     classification_l1: 'Classification L1',
     classification_l2: 'Classification L2',
@@ -42,33 +50,33 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
   const combined = useMemo(() => {
     // Collect filters from the UI filterState (handle arrays for OR logic)
     const uiFilters = Object.entries(filterState)
-      .filter(([, value]) => {
+      .filter(([, value]: [string, unknown]) => {
         if (Array.isArray(value)) {
           return value.length > 0
         }
-        return value && value.toString().trim() !== ''
+        return value && String(value).trim() !== ''
       })
-      .flatMap(([key, value]) => {
+      .flatMap(([key, value]: [string, unknown]) => {
         if (Array.isArray(value)) {
-          return value.map(v => ({
+          return value.map((v: unknown) => ({
             key,
             label: uiFilterLabels[key] || key,
-            value: v.toString(),
+            value: String(v),
             isArrayItem: true,
-            source: 'filterState'
+            source: 'filterState' as const
           }))
         }
         return [{
           key,
           label: uiFilterLabels[key] || key,
-          value: value.toString(),
-          source: 'filterState'
+          value: String(value),
+          source: 'filterState' as const
         }]
       })
 
     // Collect filters from activeFilters (e.g., drag/drop, chart clicks) - handle arrays
     // Map backend keys to UI keys to avoid duplicates
-    const keyMapping = {
+    const keyMapping: Record<string, string> = {
       supplier_name: 'supplier',
       classification_l1: 'classificationL1',
       classification_l2: 'classificationL2',
@@ -78,10 +86,10 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
     }
 
     const backendFilters = Object.entries(activeFilters)
-      .filter(([key, value]) => {
+      .filter(([key, value]: [string, unknown]) => {
         // Only show backend filters that aren't already in filterState
         const uiKey = keyMapping[key] || key
-        const filterStateValue = filterState[uiKey]
+        const filterStateValue = (filterState as Record<string, unknown>)[uiKey]
         
         // Skip if this filter is already managed by filterState
         if (filterStateValue !== undefined && filterStateValue !== null && filterStateValue !== '') {
@@ -92,29 +100,30 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
         if (Array.isArray(value)) {
           return value.length > 0
         }
-        return value && value.toString().trim() !== ''
+        return value && String(value).trim() !== ''
       })
-      .flatMap(([key, value]) => {
+      .flatMap(([key, value]: [string, unknown]) => {
         if (Array.isArray(value)) {
-          return value.map(v => ({
+          return value.map((v: unknown) => ({
             key,
             label: backendFilterLabels[key] || key,
-            value: v.toString(),
+            value: String(v),
             isArrayItem: true,
-            source: 'activeFilters'
+            source: 'activeFilters' as const
           }))
         }
         return [{
           key,
           label: backendFilterLabels[key] || key,
-          value: value.toString(),
-          source: 'activeFilters'
+          value: String(value),
+          source: 'activeFilters' as const
         }]
       })
 
     // Merge and de-duplicate filters (by label+value - prioritize filterState over activeFilters)
-    const combined = []
-    const seen = new Set()
+    type FilterEntry = { key: string; label: string; value: string; isArrayItem?: boolean; source: string; tableId?: string; tableTitle?: string }
+    const combined: FilterEntry[] = []
+    const seen = new Set<string>()
 
     // First add filterState filters
     uiFilters.forEach((f) => {
@@ -134,49 +143,8 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
       }
     })
 
-    // Add local filters from tables (per-table filters from drag-drop)
-    Object.entries(tableLocalFilters).forEach(([tableId, localFilters]) => {
-      const table = tables.find(t => t.id === tableId)
-      const tableTitle = table ? table.title : `Table ${tableId}`
-      
-      Object.entries(localFilters).forEach(([key, value]) => {
-        const label = backendFilterLabels[key] || key
-        
-        if (Array.isArray(value)) {
-          value.forEach(v => {
-            const id = `${tableId}:${label}:${v}`
-            if (!seen.has(id)) {
-              seen.add(id)
-              combined.push({
-                key,
-                label: `${label} (${tableTitle})`,
-                value: v.toString(),
-                isArrayItem: true,
-                source: 'localFilters',
-                tableId,
-                tableTitle
-              })
-            }
-          })
-        } else if (value) {
-          const id = `${tableId}:${label}:${value}`
-          if (!seen.has(id)) {
-            seen.add(id)
-            combined.push({
-              key,
-              label: `${label} (${tableTitle})`,
-              value: value.toString(),
-              source: 'localFilters',
-              tableId,
-              tableTitle
-            })
-          }
-        }
-      })
-    })
-
     return combined
-  }, [activeFilters, backendFilterLabels, filterState, tableLocalFilters, tables, uiFilterLabels])
+  }, [activeFilters, backendFilterLabels, filterState, uiFilterLabels])
 
   // Prevent "click-through" / unintended opens when filters change (e.g., right after applying filters)
   const combinedKey = useMemo(() => {
@@ -238,16 +206,12 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
               <div className="active-filters-list-compact">
                 {combined.map((filter, index) => (
                   <div key={`${filter.key}-${filter.value}-${index}`} className="active-filter-chip-compact">
-                    <span className="filter-value-compact">{filter.value}</span>
+                    <span className="filter-value-compact">{filter.key === 'classification_path' && filter.value.includes('|') ? filter.value.split('|').map(p => p.trim()).filter(Boolean).pop() : filter.value}</span>
                     <button
                       className="remove-filter-btn-compact"
                       onClick={() => {
                         skipNextAutoCloseRef.current = true
-                        if (filter.source === 'localFilters' && onRemoveLocalFilter) {
-                          onRemoveLocalFilter(filter.tableId, filter.key, filter.isArrayItem ? filter.value : null)
-                        } else {
-                          onRemoveFilter(filter.key, filter.isArrayItem ? filter.value : null)
-                        }
+                        onRemoveFilter(filter.key, filter.isArrayItem ? filter.value : null)
                       }}
                       title={`Remove ${filter.label} filter`}
                     >
@@ -302,15 +266,11 @@ const ActiveFilters = ({ activeFilters = {}, filterState = {}, tableLocalFilters
         <div className="active-filters-list">
           {combined.map((filter, index) => (
             <div key={`${filter.key}-${filter.value}-${index}`} className="active-filter-chip">
-              <span className="filter-value">{filter.value}</span>
+              <span className="filter-value">{filter.key === 'classification_path' && filter.value.includes('|') ? filter.value.split('|').map(p => p.trim()).filter(Boolean).pop() : filter.value}</span>
               <button
                 className="remove-filter-btn"
                 onClick={() => {
-                  if (filter.source === 'localFilters' && onRemoveLocalFilter) {
-                    onRemoveLocalFilter(filter.tableId, filter.key, filter.isArrayItem ? filter.value : null)
-                  } else {
-                    onRemoveFilter(filter.key, filter.isArrayItem ? filter.value : null)
-                  }
+                  onRemoveFilter(filter.key, filter.isArrayItem ? filter.value : null)
                 }}
                 title={`Remove ${filter.label} filter`}
               >

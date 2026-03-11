@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
-import type { ProjectSupplier, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
+import type { ProjectSupplierView, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
+import type { ResearchProgress } from '../../shared/types/classification'
+import type { FilterCondition } from '../../shared/types/transactions'
+import type { FieldDefinition } from '../components/FilterConditionBuilder'
+import FilterConditionBuilder from '../components/FilterConditionBuilder'
 import '../styles/SuppliersPage.css'
+import { fmtAbbrev } from '../utils/formatSpend'
 
 const SUPPLIER_TYPES: SupplierType[] = ['company', 'individual', 'government']
 
@@ -75,7 +80,6 @@ function EditableCell({
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value)
-              // Auto-commit on select change
               setEditing(false)
               if (e.target.value !== value) {
                 onSave(e.target.value)
@@ -114,44 +118,110 @@ function EditableCell({
   )
 }
 
+/** Status badge component */
+function StatusBadge({ status }: { status: string }) {
+  const cls = status === 'confirmed' ? 'status-badge confirmed'
+    : status === 'rejected' ? 'status-badge rejected'
+    : 'status-badge pending'
+  return <span className={cls}>{status}</span>
+}
 
 export default function SuppliersPage() {
-  const [suppliers, setSuppliers] = useState<ProjectSupplier[]>([])
+  const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [search, setSearch] = useState('')
-  const searchRef = useRef<HTMLInputElement>(null)
-  const [catAFilter, setCatAFilter] = useState<'all' | 'catA' | 'nonCatA'>('all')
+  const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
+  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([])
+  const [debouncedConditions, setDebouncedConditions] = useState<FilterCondition[]>([])
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  const loadData = async () => {
-    setLoading(true)
+  // Debounce filter conditions — 300ms delay before triggering backend call
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedConditions(filterConditions), 300)
+    return () => clearTimeout(timer)
+  }, [filterConditions])
+  const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
+  const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
+  const [tailSpendSet, setTailSpendSet] = useState(false)
+  const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
+
+  // Build backend filter from FilterConditionBuilder conditions
+  const NO_VALUE_OPS = new Set(['is_null', 'is_true', 'is_false'])
+  const buildFilter = useCallback(() => {
+    // Only send conditions that have a field and a value (or a no-value operator)
+    const valid = debouncedConditions.filter(c => c.field && (NO_VALUE_OPS.has(c.operator) || c.value !== ''))
+    return valid.length > 0 ? { conditions: valid } : undefined
+  }, [debouncedConditions])
+
+  // Load settings and filter fields once on mount
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const [threshold, suPath, fields] = await Promise.all([
+          ipc.project.getSetting('tail_spend_threshold'),
+          ipc.supplierUniverse.getPath(),
+          ipc.suppliers.getFilterFields(),
+        ])
+        if (threshold && Number(threshold) > 0) {
+          setTailSpendThreshold(String(threshold))
+          setTailSpendSet(true)
+        }
+        setSupplierUniversePath(suPath)
+        setFilterFields(fields as FieldDefinition[])
+      } catch {
+        // settings load failure is non-fatal
+      }
+    }
+    loadSettings()
+  }, [])
+
+  const loadData = useCallback(async () => {
+    if (suppliers.length === 0) setLoading(true)
     setError(null)
     try {
-      const data = await ipc.suppliers.list()
-      setSuppliers(data)
+      const filter = buildFilter()
+      const data = await ipc.suppliers.list(filter as Parameters<typeof ipc.suppliers.list>[0])
+      setSuppliers(data as ProjectSupplierView[])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load suppliers')
     } finally {
       setLoading(false)
     }
-  }
+  }, [buildFilter])
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData() }, [loadData])
+
+  // Subscribe to research progress
+  useEffect(() => {
+    const unsub = ipc.suppliers.onResearchProgress((progress: ResearchProgress) => {
+      setResearchProgress(progress)
+      if (progress.status === 'complete' || progress.status === 'error') {
+        setTimeout(() => {
+          setResearchProgress(null)
+          loadData()
+        }, 1500)
+      }
+    })
+    return unsub
+  }, [loadData])
+
+  /** Update local state */
+  const updateSuppliers = useCallback((updater: (prev: ProjectSupplierView[]) => ProjectSupplierView[]) => {
+    setSuppliers(prev => updater(prev))
+  }, [])
 
   /** Save a single supplierInfo field for a supplier */
-  const saveField = useCallback(async (supplier: ProjectSupplier, field: keyof SupplierInfo, newValue: string) => {
+  const saveField = useCallback(async (supplier: ProjectSupplierView, field: keyof SupplierInfo, newValue: string) => {
     setSaving(true)
     try {
       const existingInfo = supplier.supplierInfo ?? {}
       const updatedInfo: SupplierInfo = {
         ...existingInfo,
-        [field]: newValue || undefined, // clear empty strings
+        [field]: newValue || undefined,
       }
       await ipc.suppliers.update(supplier.supplierName, { supplierInfo: updatedInfo })
-
-      // Update local state immediately
-      setSuppliers(prev => prev.map(s =>
+      updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, supplierInfo: updatedInfo } : s
       ))
     } catch (e) {
@@ -159,15 +229,15 @@ export default function SuppliersPage() {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [updateSuppliers])
 
   /** Save parentName for a supplier */
-  const saveParentName = useCallback(async (supplier: ProjectSupplier, newValue: string) => {
+  const saveParentName = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
     setSaving(true)
     try {
       const parentName = newValue || null
       await ipc.suppliers.update(supplier.supplierName, { parentName })
-      setSuppliers(prev => prev.map(s =>
+      updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, parentName } : s
       ))
     } catch (e) {
@@ -175,25 +245,98 @@ export default function SuppliersPage() {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [updateSuppliers])
 
-  /** Save categoryA toggle */
-  const saveCategoryA = useCallback(async (supplier: ProjectSupplier, checked: boolean) => {
+  /** Research a single supplier */
+  const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
     setSaving(true)
     try {
-      await ipc.suppliers.update(supplier.supplierName, { categoryA: checked })
-      setSuppliers(prev => prev.map(s =>
-        s.id === supplier.id ? { ...s, categoryA: checked } : s
-      ))
+      await ipc.suppliers.researchSingle(supplier.supplierName)
+      await loadData()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update')
+      setError(e instanceof Error ? e.message : 'Research failed')
     } finally {
       setSaving(false)
+    }
+  }, [loadData])
+
+  /** Confirm a single supplier */
+  const confirmSupplier = useCallback(async (supplier: ProjectSupplierView) => {
+    setSaving(true)
+    try {
+      await ipc.suppliers.confirm(supplier.id, 'confirmed')
+      updateSuppliers(prev => prev.map(s =>
+        s.id === supplier.id ? { ...s, confirmationStatus: 'confirmed' } : s
+      ))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to confirm')
+    } finally {
+      setSaving(false)
+    }
+  }, [updateSuppliers])
+
+  /** Batch research selected suppliers */
+  const researchSelected = useCallback(async () => {
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
+    if (selected.length === 0) return
+    for (const s of selected) {
+      try {
+        await ipc.suppliers.researchSingle(s.supplierName)
+      } catch {
+        // Continue with next supplier
+      }
+    }
+    setSelectedIds(new Set())
+    await loadData()
+  }, [suppliers, selectedIds, loadData])
+
+  /** Batch confirm selected suppliers */
+  const confirmSelected = useCallback(async () => {
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.confirmationStatus !== 'confirmed')
+    if (selected.length === 0) return
+    for (const s of selected) {
+      try {
+        await ipc.suppliers.confirm(s.id, 'confirmed')
+      } catch {
+        // Continue with next
+      }
+    }
+    updateSuppliers(prev => prev.map(s =>
+      selectedIds.has(s.id) ? { ...s, confirmationStatus: 'confirmed' } : s
+    ))
+    setSelectedIds(new Set())
+  }, [suppliers, selectedIds, updateSuppliers])
+
+  /** Apply tail spend threshold */
+  const applyTailSpend = useCallback(async () => {
+    const val = Number(tailSpendThreshold)
+    if (!val || val <= 0) return
+    setSaving(true)
+    try {
+      await ipc.project.setSetting('tail_spend_threshold', val)
+      await ipc.suppliers.filterTailSpend(val)
+      setTailSpendSet(true)
+      await loadData()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to apply threshold')
+    } finally {
+      setSaving(false)
+    }
+  }, [tailSpendThreshold, loadData])
+
+  /** Change supplier universe DB via file picker */
+  const changeSupplierUniverse = useCallback(async () => {
+    try {
+      const selected = await ipc.supplierUniverse.selectFile()
+      if (!selected) return
+      setSupplierUniversePath(selected)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to set supplier universe path')
     }
   }, [])
 
   /** Get display value for a supplierInfo field */
-  const getFieldValue = (supplier: ProjectSupplier, field: keyof SupplierInfo): string => {
+  const getFieldValue = (supplier: ProjectSupplierView, field: keyof SupplierInfo): string => {
     const info = supplier.supplierInfo
     if (!info) return ''
     const val = info[field]
@@ -202,34 +345,31 @@ export default function SuppliersPage() {
     return String(val)
   }
 
-  /** Sort by spend descending, then filter by catA and search */
+  /** Sort by spend descending — filtering is handled by backend */
   const filteredSuppliers = useMemo(() => {
-    let result = [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
+    return [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
+  }, [suppliers])
 
-    // Category A filter
-    if (catAFilter === 'catA') result = result.filter(s => s.categoryA)
-    else if (catAFilter === 'nonCatA') result = result.filter(s => !s.categoryA)
+  // Select all logic
+  const allSelected = filteredSuppliers.length > 0 && filteredSuppliers.every(s => selectedIds.has(s.id))
+  const someSelected = selectedIds.size > 0
 
-    // Search filter
-    const q = search.trim().toLowerCase()
-    if (q) {
-      result = result.filter(s => {
-        if (s.supplierName.toLowerCase().includes(q)) return true
-        if (s.parentName && s.parentName.toLowerCase().includes(q)) return true
-        const info = s.supplierInfo
-        if (!info) return false
-        return INFO_COLUMNS.some(col => {
-          if (col.key === 'websiteUrl' || col.key === 'sources') return false
-          const val = info[col.key]
-          if (val == null) return false
-          const str = Array.isArray(val) ? val.join(' ') : String(val)
-          return str.toLowerCase().includes(q)
-        })
-      })
+  const toggleSelectAll = useCallback(() => {
+    if (allSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredSuppliers.map(s => s.id)))
     }
+  }, [allSelected, filteredSuppliers])
 
-    return result
-  }, [suppliers, search, catAFilter])
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   if (loading) {
     return (
@@ -246,45 +386,91 @@ export default function SuppliersPage() {
     <div className="suppliers-page">
       {error && <div className="suppliers-error">{error}</div>}
 
-      <div className="flex items-center justify-end gap-2 mb-2">
-        <select
-          className="rounded border border-gray-300 px-2 py-0.5 text-[11px] bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-          value={catAFilter}
-          onChange={(e) => setCatAFilter(e.target.value as 'all' | 'catA' | 'nonCatA')}
-        >
-          <option value="all">All</option>
-          <option value="catA">Cat. A</option>
-          <option value="nonCatA">Non Cat. A</option>
-        </select>
-        <div className="relative">
-          <input
-            ref={searchRef}
-            type="text"
-            placeholder="Search suppliers…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); searchRef.current?.blur() } }}
-            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] bg-white shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none w-40"
-          />
-          {search && (
-            <button
-              onClick={() => { setSearch(''); searchRef.current?.focus() }}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
-            >
-              ✕
-            </button>
-          )}
-        </div>
+      {/* Supplier universe status */}
+      <div className="suppliers-banner" style={{ background: '#f0f4f8', borderColor: '#d0d7de' }}>
+        <span className="text-xs text-gray-500" title={supplierUniversePath || 'Default location'}>
+          Supplier DB: <strong>{supplierUniversePath ? supplierUniversePath.split('/').slice(-2).join('/') : 'Default'}</strong>
+        </span>
+        <button onClick={changeSupplierUniverse} className="banner-btn" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
+          Change
+        </button>
       </div>
+
+      {/* Tail spend threshold banner */}
+      {!tailSpendSet && (
+        <div className="suppliers-banner">
+          <span>Tail spend threshold not set.</span>
+          <input
+            type="number"
+            placeholder="$ amount"
+            value={tailSpendThreshold}
+            onChange={(e) => setTailSpendThreshold(e.target.value)}
+            className="banner-input"
+          />
+          <button onClick={applyTailSpend} className="banner-btn" disabled={!tailSpendThreshold}>
+            Apply
+          </button>
+        </div>
+      )}
+
+      {/* Research progress bar */}
+      {researchProgress && researchProgress.status === 'researching' && (
+        <div className="suppliers-progress">
+          Researching: {researchProgress.currentSupplier}
+          ({researchProgress.processedSuppliers}/{researchProgress.totalSuppliers})
+          <div className="progress-bar">
+            <div
+              className="progress-fill"
+              style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Batch actions */}
+      {someSelected && (
+        <div className="suppliers-actions-bar">
+          <div className="batch-actions">
+            <button onClick={researchSelected} className="action-btn research">
+              Research Selected
+            </button>
+            <button onClick={confirmSelected} className="action-btn confirm">
+              Confirm Selected
+            </button>
+            <span className="selected-count">{selectedIds.size} selected</span>
+          </div>
+        </div>
+      )}
+
+      {/* Filter bar */}
+      {filterFields.length > 0 && (
+        <div className="suppliers-filter-bar">
+          <FilterConditionBuilder
+            conditions={filterConditions.length > 0 ? filterConditions : [{ field: '', operator: 'equals', value: '', connector: 'AND' }]}
+            onChange={setFilterConditions}
+            availableFields={filterFields}
+            compact
+          />
+        </div>
+      )}
 
       <div className="suppliers-table-wrap">
         <table className="suppliers-table">
           <thead>
             <tr>
+              <th className="col-check">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  className="supplier-checkbox"
+                />
+              </th>
               <th className="col-supplier">Supplier</th>
               <th className="col-right">Txns</th>
               <th className="col-right">Spend</th>
-              <th className="col-center">Cat. A</th>
+              <th>Status</th>
+              <th>Actions</th>
               {INFO_COLUMNS.map(col => (
                 <React.Fragment key={col.key}>
                   <th>{col.label}</th>
@@ -295,25 +481,43 @@ export default function SuppliersPage() {
           </thead>
           <tbody>
             {filteredSuppliers.map((s) => (
-              <tr key={s.id}>
-                <td className="col-supplier" title={s.supplierName}>{s.supplierName}</td>
-                <td className="col-right">{s.transactionCount}</td>
-                <td className="col-right">
-                  ${s.totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </td>
-                <td className="col-center">
+              <tr key={s.id} className={selectedIds.has(s.id) ? 'row-selected' : ''}>
+                <td className="col-check">
                   <input
                     type="checkbox"
-                    className="supplier-cata-check"
-                    checked={s.categoryA}
-                    onChange={(e) => saveCategoryA(s, e.target.checked)}
+                    checked={selectedIds.has(s.id)}
+                    onChange={() => toggleSelect(s.id)}
+                    className="supplier-checkbox"
                   />
+                </td>
+                <td className="col-supplier" title={s.supplierName}>{s.supplierName}</td>
+                <td className="col-right">{s.transactionCount}</td>
+                <td className="col-right">{fmtAbbrev(s.totalSpend)}</td>
+                <td><StatusBadge status={s.confirmationStatus} /></td>
+                <td className="col-actions">
+                  {!s.isResearched ? (
+                    <button
+                      className="row-action-btn research"
+                      onClick={() => researchSupplier(s)}
+                      title="Research this supplier"
+                    >
+                      Research
+                    </button>
+                  ) : s.confirmationStatus === 'pending' ? (
+                    <button
+                      className="row-action-btn confirm"
+                      onClick={() => confirmSupplier(s)}
+                      title="Confirm this supplier"
+                    >
+                      Confirm
+                    </button>
+                  ) : null}
                 </td>
 
                 {INFO_COLUMNS.map(col => {
                   const val = getFieldValue(s, col.key)
                   const parentCell = col.key === 'officialBusinessName' ? (
-                    <td>
+                    <td key={`parent-${s.id}`}>
                       <EditableCell
                         value={s.parentName || ''}
                         onSave={(newVal) => saveParentName(s, newVal)}
@@ -344,7 +548,7 @@ export default function SuppliersPage() {
                           <td>
                             {sources && sources.length > 0 ? (
                               <div className="sources-list">
-                                {sources.map((src, i) => (
+                                {sources.map((src: string, i: number) => (
                                   <a
                                     key={i}
                                     className="source-tag source-link"
@@ -395,8 +599,8 @@ export default function SuppliersPage() {
             ))}
             {filteredSuppliers.length === 0 && (
               <tr>
-                <td colSpan={4 + INFO_COLUMNS.length + 1} className="suppliers-empty">
-                  {search ? `No suppliers matching "${search}"` : 'No suppliers found. Upload a CSV and run classification to populate suppliers.'}
+                <td colSpan={7 + INFO_COLUMNS.length + 1} className="suppliers-empty">
+                  {filterConditions.some(c => c.field) ? 'No suppliers match the current filters.' : 'No suppliers found. Upload a CSV to populate suppliers.'}
                 </td>
               </tr>
             )}

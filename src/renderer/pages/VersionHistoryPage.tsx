@@ -6,8 +6,8 @@ import type { TaxonomyNode } from '../../shared/types/taxonomy'
 /** Friendly labels for known fields */
 const FIELD_LABELS: Record<string, string> = {
   taxonomy_node_id: 'Classification',
+  classification_status: 'Classification Status',
   status: 'Status',
-  review_score: 'Review Score',
   suggestion: 'Suggestion',
 }
 
@@ -81,7 +81,7 @@ export default function VersionHistoryPage() {
     try {
       const [data, nodes] = await Promise.all([
         ipc.changelog.list(),
-        ipc.taxonomy.getNodes().catch(() => [] as TaxonomyNode[]),
+        ipc.taxonomy.getNodes(),
       ])
       setEntries(data)
       setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))

@@ -1,201 +1,202 @@
 import { useState, useEffect, useRef } from 'react'
-import type { CanonicalColumnMapping, CanonicalizationResult } from '../../../shared/types/canonicalization'
-import { CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
+import type { ColumnMappingResult, ColumnMappingWithPriority } from '../../../shared/types/column-mapping'
+import { REQUIRED_CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
 
-interface Props {
-  suggestion: CanonicalizationResult
-  csvColumns: string[]
-  onMappingChange: (mapping: CanonicalColumnMapping) => void
-  groupingColumns: string[]
-  onGroupingChange: (columns: string[]) => void
+interface ColSettings {
+  action: 'include' | 'drop'
+  priority: number
 }
 
-const UNMAPPED = '__unmapped__'
+interface Props {
+  suggestion: ColumnMappingResult
+  csvColumns: string[]
+  onMappingChange: (mapping: ColumnMappingWithPriority) => void
+}
 
-// Build aliases map from shared canonical column definitions
-const ALIASES: Record<string, string[]> = Object.fromEntries(
-  CANONICAL_COLUMNS.map((col) => [
-    col.name,
-    col.aliases.map((a) => a.toLowerCase()),
-  ])
-)
+function toSnakeCase(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+}
 
-// Build a lookup for relevance badges
-const RELEVANCE_MAP: Record<string, string> = Object.fromEntries(
-  CANONICAL_COLUMNS.map((col) => [col.name, col.relevance])
-)
-
-const DESCRIPTION_MAP: Record<string, string> = Object.fromEntries(
-  CANONICAL_COLUMNS.map((col) => [col.name, col.description])
-)
-
-function autoMap(llmMappings: CanonicalColumnMapping, unmappedCanonical: string[], csvColumns: string[]): CanonicalColumnMapping {
-  const result = { ...llmMappings }
-  const usedCsvCols = new Set(Object.values(result).map((v) => v.toLowerCase()))
-
-  for (const canonical of unmappedCanonical) {
-    if (result[canonical]) continue
-    const aliases = ALIASES[canonical] || []
-    const candidates = [canonical, ...aliases]
-
-    for (const candidate of candidates) {
-      const match = csvColumns.find(
-        (csv) => csv.toLowerCase() === candidate.toLowerCase() && !usedCsvCols.has(csv.toLowerCase())
-      )
-      if (match) {
-        result[canonical] = match
-        usedCsvCols.add(match.toLowerCase())
-        break
-      }
-    }
+function buildMapping(
+  requiredMappings: Record<string, string>,
+  csvColumns: string[],
+  optionalSettings: Record<string, ColSettings>
+): ColumnMappingWithPriority {
+  const result: ColumnMappingWithPriority = {}
+  for (const [canonical, csv] of Object.entries(requiredMappings)) {
+    if (csv) result[canonical] = { csvColumn: csv }
   }
-
+  const usedRequired = new Set(Object.values(requiredMappings).filter(Boolean))
+  const included = csvColumns
+    .filter((col) => !usedRequired.has(col))
+    .map((col) => ({ col, s: optionalSettings[col] ?? { action: 'drop' as const, priority: 1 } }))
+    .filter(({ s }) => s.action === 'include')
+    .sort((a, b) => a.s.priority - b.s.priority)
+  for (const { col, s } of included) {
+    result[toSnakeCase(col)] = { csvColumn: col, classificationPriority: s.priority }
+  }
   return result
 }
 
-const RELEVANCE_STYLES: Record<string, string> = {
-  critical: 'bg-red-100 text-red-700',
-  high: 'bg-orange-100 text-orange-700',
-  medium: 'bg-blue-100 text-blue-700',
-  low: 'bg-gray-100 text-gray-500',
+function deriveInitialState(
+  suggestion: ColumnMappingResult,
+  csvColumns: string[]
+): { requiredMappings: Record<string, string>; optionalSettings: Record<string, ColSettings> } {
+  const REQUIRED = REQUIRED_CANONICAL_COLUMNS as readonly string[]
+
+  const requiredMappings: Record<string, string> = {}
+  for (const canonical of REQUIRED) {
+    requiredMappings[canonical] = suggestion.mappings[canonical] ?? ''
+  }
+
+  const usedRequired = new Set(Object.values(requiredMappings).filter(Boolean))
+
+  // CSV cols the LLM mapped to non-required canonicals → default to Include
+  const llmNonRequired = new Set<string>()
+  for (const [canonical, csv] of Object.entries(suggestion.mappings)) {
+    if (!REQUIRED.includes(canonical) && csv && !usedRequired.has(csv)) {
+      llmNonRequired.add(csv)
+    }
+  }
+
+  const optionalSettings: Record<string, ColSettings> = {}
+  let autoPriority = 1
+  for (const col of csvColumns) {
+    if (usedRequired.has(col)) continue
+    optionalSettings[col] = llmNonRequired.has(col)
+      ? { action: 'include', priority: autoPriority++ }
+      : { action: 'drop', priority: 1 }
+  }
+
+  return { requiredMappings, optionalSettings }
 }
 
-export default function ColumnMappingEditor({
-  suggestion,
-  csvColumns,
-  onMappingChange,
-  groupingColumns,
-  onGroupingChange,
-}: Props) {
-  const [mapping, setMapping] = useState<CanonicalColumnMapping>(() =>
-    autoMap(suggestion.mappings, suggestion.unmappedCanonicalColumns, csvColumns)
-  )
+const REQUIRED_LABELS: Record<string, string> = {
+  supplier_name: 'Supplier Name',
+  spend_amount: 'Spend Amount',
+  invoice_date: 'Invoice Date',
+}
 
-  // Track the suggestion identity to avoid re-render loops.
-  // Only re-run autoMap when the suggestion's underlying data actually changes.
-  const prevSuggestionKey = useRef<string>('')
+const CONFIDENCE_STYLES: Record<string, string> = {
+  high: 'bg-green-100 text-green-700',
+  medium: 'bg-yellow-100 text-yellow-700',
+  low: 'bg-red-100 text-red-700',
+}
+
+export default function ColumnMappingEditor({ suggestion, csvColumns, onMappingChange }: Props) {
+  const { requiredMappings: initReq, optionalSettings: initOpt } = deriveInitialState(suggestion, csvColumns)
+
+  const [requiredMappings, setRequiredMappings] = useState<Record<string, string>>(initReq)
+  const [optionalSettings, setOptionalSettings] = useState<Record<string, ColSettings>>(initOpt)
+
+  const prevKey = useRef('')
   useEffect(() => {
-    const key = JSON.stringify(suggestion.mappings) + '|' + JSON.stringify(suggestion.unmappedCanonicalColumns)
-    if (key === prevSuggestionKey.current) return // No actual change — skip
-    prevSuggestionKey.current = key
-    const enhanced = autoMap(suggestion.mappings, suggestion.unmappedCanonicalColumns, csvColumns)
-    setMapping(enhanced)
-    onMappingChange(enhanced)
+    const key = JSON.stringify(suggestion.mappings)
+    if (key === prevKey.current) return
+    prevKey.current = key
+    const { requiredMappings: req, optionalSettings: opt } = deriveInitialState(suggestion, csvColumns)
+    setRequiredMappings(req)
+    setOptionalSettings(opt)
+    onMappingChange(buildMapping(req, csvColumns, opt))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestion])
 
-  const handleChange = (canonicalName: string, csvColumn: string) => {
-    const updated = { ...mapping }
-    if (csvColumn === UNMAPPED) {
-      delete updated[canonicalName]
-    } else {
-      updated[canonicalName] = csvColumn
-    }
-    setMapping(updated)
-    onMappingChange(updated)
+  const usedRequired = new Set(Object.values(requiredMappings).filter(Boolean))
+  const optionalCols = csvColumns.filter((col) => !usedRequired.has(col))
+
+  const handleRequiredChange = (canonical: string, csvCol: string) => {
+    const updated = { ...requiredMappings, [canonical]: csvCol }
+    setRequiredMappings(updated)
+    onMappingChange(buildMapping(updated, csvColumns, optionalSettings))
   }
 
-  const toggleGroupingColumn = (col: string) => {
-    if (groupingColumns.includes(col)) {
-      onGroupingChange(groupingColumns.filter((c) => c !== col))
-    } else {
-      onGroupingChange([...groupingColumns, col])
-    }
+  const handleAction = (col: string, action: 'include' | 'drop') => {
+    const updated = { ...optionalSettings, [col]: { ...optionalSettings[col], action } }
+    setOptionalSettings(updated)
+    onMappingChange(buildMapping(requiredMappings, csvColumns, updated))
   }
 
-  // Use all 14 canonical columns from shared definition, ordered by relevance
-  const allCanonical = CANONICAL_COLUMNS.map((col) => col.name)
+  const handlePriority = (col: string, priority: number) => {
+    const updated = { ...optionalSettings, [col]: { ...optionalSettings[col], priority } }
+    setOptionalSettings(updated)
+    onMappingChange(buildMapping(requiredMappings, csvColumns, updated))
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="mb-2 flex items-center gap-2">
-          <h3 className="text-sm font-medium text-gray-700">Column Mappings</h3>
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-              suggestion.confidence === 'high'
-                ? 'bg-green-100 text-green-700'
-                : suggestion.confidence === 'medium'
-                  ? 'bg-yellow-100 text-yellow-700'
-                  : 'bg-red-100 text-red-700'
-            }`}
-          >
-            {suggestion.confidence} confidence
-          </span>
-        </div>
-        {suggestion.reasoning && (
-          <p className="mb-3 text-xs text-gray-500">{suggestion.reasoning}</p>
-        )}
-        <div className="space-y-2">
-          {allCanonical.map((canonicalName) => {
-            const relevance = RELEVANCE_MAP[canonicalName]
-            const description = DESCRIPTION_MAP[canonicalName]
-            return (
-              <div key={canonicalName} className="flex items-center gap-3">
-                <div className="w-52 flex-shrink-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700">{canonicalName}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${RELEVANCE_STYLES[relevance] || ''}`}>
-                      {relevance}
-                    </span>
-                  </div>
-                  {description && (
-                    <p className="text-[11px] text-gray-400">{description}</p>
-                  )}
-                </div>
-                <span className="text-gray-400">&rarr;</span>
-                <select
-                  value={mapping[canonicalName] ?? UNMAPPED}
-                  onChange={(e) => handleChange(canonicalName, e.target.value)}
-                  className="flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value={UNMAPPED}>-- Not mapped --</option>
-                  {csvColumns.map((col) => (
-                    <option key={col} value={col}>
-                      {col}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )
-          })}
-        </div>
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-medium text-gray-700">Column Mappings</h3>
+        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${CONFIDENCE_STYLES[suggestion.confidence] ?? ''}`}>
+          {suggestion.confidence} confidence
+        </span>
       </div>
+      {suggestion.reasoning && <p className="text-xs text-gray-500">{suggestion.reasoning}</p>}
 
-      {suggestion.unmappedClientColumns.length > 0 && (
-        <div>
-          <h4 className="mb-1 text-xs font-medium text-amber-700">Unmapped CSV columns</h4>
-          <div className="flex flex-wrap gap-1">
-            {suggestion.unmappedClientColumns.map((col) => (
-              <span key={col} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-600">
-                {col}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
+      {/* Required section */}
       <div>
-        <h3 className="mb-2 text-sm font-medium text-gray-700">Invoice Grouping Columns</h3>
-        <p className="mb-2 text-xs text-gray-500">
-          Select columns that together identify a unique invoice for grouping.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {csvColumns.map((col) => (
-            <button
-              key={col}
-              onClick={() => toggleGroupingColumn(col)}
-              className={`rounded-md border px-3 py-1 text-xs transition-colors ${
-                groupingColumns.includes(col)
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {col}
-            </button>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Required</h4>
+        <div className="space-y-2">
+          {(REQUIRED_CANONICAL_COLUMNS as readonly string[]).map((canonical) => (
+            <div key={canonical} className="flex items-center gap-3">
+              <div className="w-44 flex-shrink-0 flex items-center gap-1.5">
+                <span className="text-sm font-medium text-gray-700">{REQUIRED_LABELS[canonical]}</span>
+                <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-700">required</span>
+              </div>
+              <span className="text-gray-400">&rarr;</span>
+              <select
+                value={requiredMappings[canonical] ?? ''}
+                onChange={(e) => handleRequiredChange(canonical, e.target.value)}
+                className="flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">-- Not mapped --</option>
+                {csvColumns.map((col) => (
+                  <option key={col} value={col}>{col}</option>
+                ))}
+              </select>
+            </div>
           ))}
         </div>
       </div>
+
+      {/* Optional section */}
+      {optionalCols.length > 0 && (
+        <div>
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Other Columns</h4>
+          <p className="mb-2 text-xs text-gray-400">
+            Included columns are sent to the classifier. Set priority (1 = highest) to control ordering.
+          </p>
+          <div className="space-y-1.5">
+            {optionalCols.map((col) => {
+              const s = optionalSettings[col] ?? { action: 'drop' as const, priority: 1 }
+              return (
+                <div key={col} className="flex items-center gap-3">
+                  <span className="flex-1 text-sm text-gray-700 truncate">{col}</span>
+                  <select
+                    value={s.action}
+                    onChange={(e) => handleAction(col, e.target.value as 'include' | 'drop')}
+                    className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="include">Include</option>
+                    <option value="drop">Drop</option>
+                  </select>
+                  {s.action === 'include' ? (
+                    <input
+                      type="number"
+                      min={1}
+                      value={s.priority}
+                      onChange={(e) => handlePriority(col, Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-16 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-center"
+                      title="Priority (1 = highest)"
+                    />
+                  ) : (
+                    <div className="w-16" />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

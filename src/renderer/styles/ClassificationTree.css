@@ -554,16 +554,17 @@
   align-items: center;
   position: relative;
   gap: 12px;
+  padding: 2px 4px;
+  border-radius: 6px;
 }
 
 .node-content {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 6px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  transition: var(--transition);
   background: transparent;
   border: 1px solid #e5e7eb;
   white-space: nowrap;
@@ -619,6 +620,18 @@
 }
 
 .node-content.drag-over {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  border-style: dashed;
+}
+
+/* Drag-over on the wrapper — larger hit zone */
+.node-wrapper.drag-over {
+  background: rgba(59, 130, 246, 0.06);
+  border-radius: 8px;
+}
+
+.node-wrapper.drag-over > .node-content {
   background: #dbeafe;
   border-color: #3b82f6;
   border-style: dashed;

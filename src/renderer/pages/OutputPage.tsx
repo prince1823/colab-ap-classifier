@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ipc } from '../lib/ipc'
 import type { TransactionStats } from '../../shared/types/transactions'
+import { fmtAbbrev } from '../utils/formatSpend'
 
 interface ClassificationBreakdown {
   path: string
@@ -23,13 +24,14 @@ export default function OutputPage() {
     setLoading(true)
     try {
       // Fetch stats and transactions in parallel
-      const [s, transactions] = await Promise.all([
+      const [s, paginatedResult] = await Promise.all([
         ipc.transactions.stats(),
         ipc.transactions.query(),
       ])
       setStats(s)
 
       // Build classification breakdown from transactions
+      const transactions = paginatedResult.rows
       const groups = new Map<string, { count: number; spend: number }>()
       for (const t of transactions) {
         const path = t.classificationPath || 'Unclassified'
@@ -70,13 +72,10 @@ export default function OutputPage() {
     setExported(false)
     setError(null)
     try {
-      const filePath = await ipc.export.selectPath()
-      if (!filePath) {
-        setExporting(false)
-        return
+      const result = await ipc.export.csv()
+      if (result) {
+        setExported(true)
       }
-      await ipc.export.export(filePath)
-      setExported(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Export failed')
     } finally {
@@ -130,7 +129,7 @@ export default function OutputPage() {
               <div>
                 <p className="text-xs text-gray-500">Total Spend</p>
                 <p className="text-lg font-semibold text-gray-900">
-                  ${stats.totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {fmtAbbrev(stats.totalSpend)}
                 </p>
               </div>
               <div>
@@ -165,7 +164,7 @@ export default function OutputPage() {
                         </td>
                         <td className="px-4 py-2 text-right text-sm text-gray-700">{item.count.toLocaleString()}</td>
                         <td className="px-4 py-2 text-right text-sm text-gray-700">
-                          ${item.spend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {fmtAbbrev(item.spend)}
                         </td>
                         <td className="px-4 py-2 text-right text-sm text-gray-700">
                           {stats.totalSpend > 0 ? ((item.spend / stats.totalSpend) * 100).toFixed(1) : '0.0'}%

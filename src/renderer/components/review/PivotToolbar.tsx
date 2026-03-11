@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { Plus, X, ChevronUp, ChevronDown, Maximize2, Minimize2, Filter, ExternalLink } from 'lucide-react'
-import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { Plus, X, ChevronUp, ChevronDown, Filter, Layers } from 'lucide-react'
 import * as Popover from '@radix-ui/react-popover'
-import type { Aggregation } from '../../hooks/useHierarchicalPivotData'
+import type { Aggregation, SpendDisplayMode } from '../../types/pivot'
 import type { PivotFilterState } from './PivotFilterBar'
 import '../../styles/PivotHierarchy.css'
 
@@ -35,30 +34,29 @@ interface PivotToolbarProps {
   rowDimensions: string[]
   valueDimension: string
   aggregation: Aggregation
-  search: string
   onRowDimensionsChange: (dims: string[]) => void
   onValueDimensionChange: (dim: string) => void
   onAggregationChange: (agg: Aggregation) => void
-  onSearchChange: (search: string) => void
-  onExpandAll: () => void
-  onCollapseAll: () => void
+  /* Expand/collapse cycle */
+  collapseLevel: number
+  onCycleCollapse: () => void
+  cycleLevelLabel: string
   /* Filter props */
-  rows: Record<string, unknown>[]
+  rows?: Record<string, unknown>[]
+  filterOptions?: Record<string, string[]>
   filterState: PivotFilterState
   onFilterStateChange: (state: PivotFilterState) => void
   onClearAllFilters: () => void
-  /* Export */
-  onExport: () => void
-  exportDisabled: boolean
-  /* Open in Review */
-  onOpenInReview: () => void
-  openInReviewDisabled: boolean
+  /* Spend display toggle */
+  spendDisplayMode: SpendDisplayMode
+  onSpendDisplayModeChange: (mode: SpendDisplayMode) => void
+  showSpendToggle: boolean
 }
 
 /** Columns to exclude from the filter list (non-filterable) */
 const FILTER_EXCLUDE = new Set([
   'id', 'row_index', 'taxonomy_node_id', 'classification_reasoning',
-  'invoice_group_key', 'spend_amount', 'amount', 'invoice_amount',
+  'classification_status', 'spend_amount', 'amount', 'invoice_amount',
 ])
 
 export default function PivotToolbar({
@@ -66,21 +64,20 @@ export default function PivotToolbar({
   rowDimensions,
   valueDimension,
   aggregation,
-  search,
   onRowDimensionsChange,
   onValueDimensionChange,
   onAggregationChange,
-  onSearchChange,
-  onExpandAll,
-  onCollapseAll,
+  collapseLevel,
+  onCycleCollapse,
+  cycleLevelLabel,
   rows,
+  filterOptions: filterOptionsProp,
   filterState,
   onFilterStateChange,
   onClearAllFilters,
-  onExport,
-  exportDisabled,
-  onOpenInReview,
-  openInReviewDisabled,
+  spendDisplayMode,
+  onSpendDisplayModeChange,
+  showSpendToggle,
 }: PivotToolbarProps) {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [addMenuSearch, setAddMenuSearch] = useState('')
@@ -88,8 +85,10 @@ export default function PivotToolbar({
   const addMenuRef = useRef<HTMLDivElement>(null)
   const overflowRef = useRef<HTMLDivElement>(null)
 
-  // Compute unique filter options per column
+  // Use pre-fetched filter options when available, otherwise compute from rows
   const filterOptions = useMemo(() => {
+    if (filterOptionsProp) return filterOptionsProp
+    if (!rows) return {} as Record<string, string[]>
     const opts: Record<string, string[]> = {}
     for (const dim of rowDimensions) {
       if (FILTER_EXCLUDE.has(dim)) continue
@@ -104,7 +103,7 @@ export default function PivotToolbar({
       opts[dim] = [...vals].sort().slice(0, 200)
     }
     return opts
-  }, [rows, rowDimensions])
+  }, [filterOptionsProp, rows, rowDimensions])
 
   const toggleFilterOption = (col: string, value: string) => {
     const current = filterState[col] || []
@@ -166,7 +165,10 @@ export default function PivotToolbar({
     onRowDimensionsChange(next)
   }
 
+  const MAX_ROW_DIMS = 6
+
   const addRowDim = (col: string) => {
+    if (rowDimensions.length >= MAX_ROW_DIMS) return
     onRowDimensionsChange([...rowDimensions, col])
     setShowAddMenu(false)
   }
@@ -261,8 +263,8 @@ export default function PivotToolbar({
             )}
           </div>
         )}
-        {/* Add field button */}
-        {availableForRows.length > 0 && (
+        {/* Add field button — hidden once max dimensions reached */}
+        {availableForRows.length > 0 && rowDimensions.length < MAX_ROW_DIMS && (
           <div ref={addMenuRef} style={{ position: 'relative', display: 'inline-flex' }}>
             <button
               className="pivot-add-field-btn"
@@ -326,7 +328,7 @@ export default function PivotToolbar({
         )}
       </div>
 
-      {/* Value + Aggregation */}
+      {/* Value + Aggregation + Spend toggle */}
       <div className="pivot-toolbar-section">
         <span className="pivot-toolbar-label">Value:</span>
         <select
@@ -348,58 +350,31 @@ export default function PivotToolbar({
           <option value="count">Count</option>
           <option value="average">Avg</option>
         </select>
+        {showSpendToggle && (
+          <button
+            className="pivot-toolbar-icon-btn"
+            onClick={() => onSpendDisplayModeChange(spendDisplayMode === 'absolute' ? 'percentage' : 'absolute')}
+            title={spendDisplayMode === 'absolute' ? 'Show as percentage of top-level total' : 'Show absolute values'}
+            data-active={spendDisplayMode === 'percentage' ? '' : undefined}
+          >
+            <span style={{ fontSize: 11, fontWeight: 600, minWidth: 14, textAlign: 'center' }}>
+              {spendDisplayMode === 'absolute' ? '$' : '%'}
+            </span>
+          </button>
+        )}
       </div>
 
-      {/* Search + Expand / Collapse all + Export */}
-      <input
-        type="text"
-        className="pivot-toolbar-search"
-        placeholder="Search rows..."
-        value={search}
-        onChange={e => onSearchChange(e.target.value)}
-        style={{ marginLeft: 'auto' }}
-      />
-      {search && (
+      {/* Collapse cycle + Review — right side */}
+      <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
         <button
-          className="pivot-dim-chip-x"
-          onClick={() => onSearchChange('')}
-          style={{ opacity: 1, padding: 2 }}
+          className="pivot-toolbar-icon-btn"
+          onClick={onCycleCollapse}
+          title={`Showing: ${cycleLevelLabel}. Click to cycle collapse level.`}
         >
-          <X size={10} />
+          <Layers size={12} />
+          <span style={{ fontSize: 9, fontWeight: 700, marginLeft: 2 }}>{cycleLevelLabel}</span>
         </button>
-      )}
-      <button
-        className="pivot-toolbar-icon-btn"
-        onClick={onExpandAll}
-        title="Expand all"
-      >
-        <Maximize2 size={12} />
-      </button>
-      <button
-        className="pivot-toolbar-icon-btn"
-        onClick={onCollapseAll}
-        title="Collapse all"
-      >
-        <Minimize2 size={12} />
-      </button>
-      <button
-        onClick={onExport}
-        disabled={exportDisabled}
-        className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-        title="Export as Excel"
-      >
-        <ArrowDownTrayIcon className="h-3 w-3" />
-        <span>.xlsx</span>
-      </button>
-      <button
-        onClick={onOpenInReview}
-        disabled={openInReviewDisabled}
-        className="inline-flex items-center gap-0.5 rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-        title="Open filtered transactions in Review tab"
-      >
-        <ExternalLink size={12} />
-        <span>Review</span>
-      </button>
+      </div>
     </div>
   )
 }

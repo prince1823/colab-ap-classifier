@@ -10,7 +10,7 @@ import type {
   SupplierConfirmationStatus,
   SupplierUpdateInput,
 } from '../../shared/types/suppliers';
-import type { FilterCondition } from '../../shared/types/transactions';
+import type { FilterCondition, FieldDefinition } from '../../shared/types/transactions';
 import { buildWhereClause, type ColumnResolver } from '../utils/query-builder';
 
 export class SupplierService implements ISupplierService {
@@ -166,6 +166,23 @@ export class SupplierService implements ISupplierService {
     total_spend: 'sub.total_spend',
     transaction_count: 'sub.transaction_count',
   };
+
+  /** Typed field definitions for the FilterConditionBuilder UI. */
+  private static readonly SUPPLIER_FIELD_DEFINITIONS: FieldDefinition[] = [
+    { name: 'supplier_name', label: 'Supplier Name', type: 'string' },
+    { name: 'confirmation_status', label: 'Status', type: 'enum', enumValues: ['pending', 'confirmed', 'rejected', 'merged'] },
+    { name: 'is_researched', label: 'Researched', type: 'boolean' },
+    { name: 'is_tail_spend', label: 'Tail Spend', type: 'boolean' },
+    { name: 'universe_match', label: 'Universe Match', type: 'boolean' },
+    { name: 'parent_supplier_name', label: 'Parent Supplier', type: 'string' },
+    { name: 'data_source', label: 'Data Source', type: 'string' },
+    { name: 'total_spend', label: 'Total Spend', type: 'number', group: 'Aggregates' },
+    { name: 'transaction_count', label: 'Transaction Count', type: 'number', group: 'Aggregates' },
+  ];
+
+  getFilterFields(): FieldDefinition[] {
+    return SupplierService.SUPPLIER_FIELD_DEFINITIONS;
+  }
 
   /** Column resolver that validates against known fields and throws for unknown ones. */
   private static readonly SUPPLIER_COLUMN_RESOLVER: ColumnResolver = (field: string) => {

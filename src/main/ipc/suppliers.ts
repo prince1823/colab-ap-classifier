@@ -29,4 +29,8 @@ export function registerSuppliersHandlers(
     const ids = await suppliers.filterTailSpend(threshold as number);
     return { markedCount: ids.length };
   });
+
+  registerHandler('suppliers:getFilterFields', async () => {
+    return suppliers.getFilterFields();
+  });
 }

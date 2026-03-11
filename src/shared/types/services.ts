@@ -1,6 +1,6 @@
 import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition } from './transactions';
+import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
 import type { ChangeLog, ChangeSource } from './changelog';
@@ -110,6 +110,7 @@ export interface TransactionStore {
   queryTransactionsPaginated(filters?: TransactionFilter): Promise<PaginatedTransactions>;
   getStats(): Promise<TransactionStats>;
   getColumns(): Promise<string[]>;
+  getFilterFields(): Promise<FieldDefinition[]>;
   getCount(filters?: TransactionFilter): Promise<number>;
   updateTransactions(update: TransactionUpdate, source?: ChangeSource): Promise<string | undefined>;
   invalidateColumnCache(): void;
@@ -145,6 +146,7 @@ export interface SupplierService {
   assignParent(id: string, parentId: string): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;
   markResearched(supplierName: string): Promise<void>;
+  getFilterFields(): FieldDefinition[];
 }
 
 export interface RuleStore {

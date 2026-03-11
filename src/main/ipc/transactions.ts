@@ -52,4 +52,8 @@ export function registerTransactionsHandlers(transactions: TransactionStore): vo
   registerHandler('transactions:getIdsByConditions', async (_event, conditions: unknown) => {
     return transactions.getIdsByConditions(conditions as FilterCondition[]);
   });
+
+  registerHandler('transactions:getFilterFields', async () => {
+    return transactions.getFilterFields();
+  });
 }

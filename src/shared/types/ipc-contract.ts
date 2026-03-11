@@ -11,6 +11,7 @@ import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithP
 import type {
   TransactionFilter,
   FilterCondition,
+  FieldDefinition,
   TransactionStats,
   PaginatedTransactions,
   TransactionUpdate,
@@ -57,6 +58,7 @@ export interface IPCInvokeMap {
   'transactions:getIdsByValue':     { args: [column: string, value: string, filters?: TransactionFilter]; result: string[] };
   'transactions:pivotAggregation':  { args: [dimensions: string[], valueDimension: string, filters?: TransactionFilter]; result: PivotAggregationResult };
   'transactions:getIdsByConditions': { args: [conditions: FilterCondition[]]; result: string[] };
+  'transactions:getFilterFields':    { args: []; result: FieldDefinition[] };
 
   // Classification
   'classification:start':  { args: []; result: void };
@@ -79,6 +81,7 @@ export interface IPCInvokeMap {
   'suppliers:researchAll':    { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierName: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
+  'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
 
   // Rules
   'rules:list':   { args: []; result: OverrideRule[] };

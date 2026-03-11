@@ -203,6 +203,12 @@
 .suppliers-search-clear:hover { color: #374151; background: #f3f4f6; }
 .suppliers-search-clear svg { width: 14px; height: 14px; }
 
+/* Filter bar */
+.suppliers-filter-bar {
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
 /* Table */
 .suppliers-table-wrap {
   flex: 1;

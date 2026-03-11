@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
 import type { ResearchProgress } from '../../shared/types/classification'
+import type { FilterCondition } from '../../shared/types/transactions'
+import type { FieldDefinition } from '../components/FilterConditionBuilder'
+import FilterConditionBuilder from '../components/FilterConditionBuilder'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
 
@@ -128,51 +131,44 @@ export default function SuppliersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const searchRef = useRef<HTMLInputElement>(null)
+  const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
+  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([])
+  const [debouncedConditions, setDebouncedConditions] = useState<FilterCondition[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unconfirmed' | 'unresearched'>('all')
 
-  // Debounce search input — 300ms delay before triggering backend call
+  // Debounce filter conditions — 300ms delay before triggering backend call
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300)
+    const timer = setTimeout(() => setDebouncedConditions(filterConditions), 300)
     return () => clearTimeout(timer)
-  }, [search])
+  }, [filterConditions])
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
   const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
   const [tailSpendSet, setTailSpendSet] = useState(false)
   const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
 
-  // Build backend filter conditions from current search/status UI
+  // Build backend filter from FilterConditionBuilder conditions
+  const NO_VALUE_OPS = new Set(['is_null', 'is_true', 'is_false'])
   const buildFilter = useCallback(() => {
-    const conditions: Array<{ field: string; operator: string; value: string | number | string[] }> = []
+    // Only send conditions that have a field and a value (or a no-value operator)
+    const valid = debouncedConditions.filter(c => c.field && (NO_VALUE_OPS.has(c.operator) || c.value !== ''))
+    return valid.length > 0 ? { conditions: valid } : undefined
+  }, [debouncedConditions])
 
-    if (statusFilter === 'unconfirmed') {
-      conditions.push({ field: 'confirmation_status', operator: 'not_equals', value: 'confirmed' })
-    } else if (statusFilter === 'unresearched') {
-      conditions.push({ field: 'is_researched', operator: 'is_false', value: '' })
-    }
-
-    const q = debouncedSearch.trim()
-    if (q) {
-      conditions.push({ field: 'supplier_name', operator: 'contains', value: q })
-    }
-
-    return conditions.length > 0 ? { conditions } : undefined
-  }, [debouncedSearch, statusFilter])
-
-  // Load settings once on mount — not re-fetched on filter changes
+  // Load settings and filter fields once on mount
   useEffect(() => {
     async function loadSettings() {
       try {
-        const threshold = await ipc.project.getSetting('tail_spend_threshold')
+        const [threshold, suPath, fields] = await Promise.all([
+          ipc.project.getSetting('tail_spend_threshold'),
+          ipc.supplierUniverse.getPath(),
+          ipc.suppliers.getFilterFields(),
+        ])
         if (threshold && Number(threshold) > 0) {
           setTailSpendThreshold(String(threshold))
           setTailSpendSet(true)
         }
-        const suPath = await ipc.supplierUniverse.getPath()
         setSupplierUniversePath(suPath)
+        setFilterFields(fields as FieldDefinition[])
       } catch {
         // settings load failure is non-fatal
       }
@@ -349,15 +345,6 @@ export default function SuppliersPage() {
     return String(val)
   }
 
-  // Computed counts
-  const unconfirmedCount = useMemo(() =>
-    suppliers.filter(s => s.confirmationStatus !== 'confirmed').length
-  , [suppliers])
-
-  const unresearchedCount = useMemo(() =>
-    suppliers.filter(s => !s.isResearched).length
-  , [suppliers])
-
   /** Sort by spend descending — filtering is handled by backend */
   const filteredSuppliers = useMemo(() => {
     return [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
@@ -440,9 +427,9 @@ export default function SuppliersPage() {
         </div>
       )}
 
-      {/* Batch actions + warning buttons */}
-      <div className="suppliers-actions-bar">
-        {someSelected && (
+      {/* Batch actions */}
+      {someSelected && (
+        <div className="suppliers-actions-bar">
           <div className="batch-actions">
             <button onClick={researchSelected} className="action-btn research">
               Research Selected
@@ -452,45 +439,20 @@ export default function SuppliersPage() {
             </button>
             <span className="selected-count">{selectedIds.size} selected</span>
           </div>
-        )}
-        <div className="warning-buttons">
-          {unconfirmedCount > 0 && (
-            <button
-              className={`warning-btn ${statusFilter === 'unconfirmed' ? 'active' : ''}`}
-              onClick={() => setStatusFilter(statusFilter === 'unconfirmed' ? 'all' : 'unconfirmed')}
-            >
-              {unconfirmedCount} unconfirmed
-            </button>
-          )}
-          {unresearchedCount > 0 && (
-            <button
-              className={`warning-btn ${statusFilter === 'unresearched' ? 'active' : ''}`}
-              onClick={() => setStatusFilter(statusFilter === 'unresearched' ? 'all' : 'unresearched')}
-            >
-              {unresearchedCount} unresearched
-            </button>
-          )}
         </div>
-        <div className="suppliers-search-area">
-          <input
-            ref={searchRef}
-            type="text"
-            placeholder="Search suppliers..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); searchRef.current?.blur() } }}
-            className="suppliers-search-input"
+      )}
+
+      {/* Filter bar */}
+      {filterFields.length > 0 && (
+        <div className="suppliers-filter-bar">
+          <FilterConditionBuilder
+            conditions={filterConditions.length > 0 ? filterConditions : [{ field: '', operator: 'equals', value: '', connector: 'AND' }]}
+            onChange={setFilterConditions}
+            availableFields={filterFields}
+            compact
           />
-          {search && (
-            <button
-              onClick={() => { setSearch(''); searchRef.current?.focus() }}
-              className="suppliers-search-clear"
-            >
-              <svg viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-            </button>
-          )}
         </div>
-      </div>
+      )}
 
       <div className="suppliers-table-wrap">
         <table className="suppliers-table">
@@ -638,7 +600,7 @@ export default function SuppliersPage() {
             {filteredSuppliers.length === 0 && (
               <tr>
                 <td colSpan={7 + INFO_COLUMNS.length + 1} className="suppliers-empty">
-                  {search ? `No suppliers matching "${search}"` : 'No suppliers found. Upload a CSV to populate suppliers.'}
+                  {filterConditions.some(c => c.field) ? 'No suppliers match the current filters.' : 'No suppliers found. Upload a CSV to populate suppliers.'}
                 </td>
               </tr>
             )}

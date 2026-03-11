@@ -15,6 +15,7 @@ import type {
   PivotAggregationResult,
   ClassificationStatus,
   FilterCondition,
+  FieldDefinition,
 } from '../../shared/types';
 import type { ChangeSource } from '../../shared/types/changelog';
 import { buildWhereClause } from '../utils/query-builder';
@@ -211,6 +212,42 @@ export class TransactionStore implements ITransactionStore {
     }
     this.cachedColumns = physical;
     return this.cachedColumns;
+  }
+
+  /** Known column types for richer FilterConditionBuilder UI. */
+  private static readonly KNOWN_FIELD_TYPES: Record<string, Omit<FieldDefinition, 'name'>> = {
+    classification_status: { label: 'Classification Status', type: 'enum', enumValues: ['unclassified', 'classified_by_ai', 'classified_by_rule', 'classification_failed'] },
+    human_reviewed: { label: 'Human Reviewed', type: 'boolean' },
+    spend_amount: { label: 'Spend Amount', type: 'number' },
+    supplier_name: { label: 'Supplier Name', type: 'string' },
+    classification_l1: { label: 'Classification L1', type: 'string' },
+    classification_l2: { label: 'Classification L2', type: 'string' },
+    classification_l3: { label: 'Classification L3', type: 'string' },
+  };
+
+  async getFilterFields(): Promise<FieldDefinition[]> {
+    const columns = await this.getColumns();
+    // Exclude internal columns not useful for filtering
+    const excluded = new Set(['id', 'row_index', 'upload_id', 'taxonomy_node_id', 'project_supplier_id', 'created_at', 'updated_at']);
+    const fields: FieldDefinition[] = [];
+    for (const col of columns) {
+      if (excluded.has(col)) continue;
+      const known = TransactionStore.KNOWN_FIELD_TYPES[col];
+      if (known) {
+        fields.push({ name: col, ...known });
+      } else {
+        // Dynamic canonical columns — default to string, humanize the label
+        fields.push({ name: col, label: col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), type: 'string' });
+      }
+    }
+    // Add virtual classification dimensions if not already present
+    for (const virt of ['classification_l1', 'classification_l2', 'classification_l3']) {
+      if (!fields.some(f => f.name === virt)) {
+        const known = TransactionStore.KNOWN_FIELD_TYPES[virt]!;
+        fields.push({ name: virt, ...known });
+      }
+    }
+    return fields;
   }
 
   async getCount(filters?: TransactionFilter): Promise<number> {

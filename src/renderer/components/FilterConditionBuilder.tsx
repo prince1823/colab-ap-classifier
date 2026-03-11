@@ -1,8 +1,9 @@
-import type { FilterCondition, FilterOperator } from '../../shared/types/transactions'
+import { useMemo } from 'react'
+import type { FilterCondition, FilterOperator, FieldType, FieldDefinition } from '../../shared/types/transactions'
 
-const OPERATORS: FilterOperator[] = [
+const ALL_OPERATORS: FilterOperator[] = [
   'equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with',
-  'regex', 'in_list', 'is_null',
+  'regex', 'in_list', 'is_null', 'is_true', 'is_false',
   'greater_than', 'less_than', 'greater_than_or_equal', 'less_than_or_equal',
 ]
 
@@ -16,17 +17,40 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   regex: 'matches regex',
   in_list: 'in list',
   is_null: 'is null',
+  is_true: 'is true',
+  is_false: 'is false',
   greater_than: '>',
   less_than: '<',
   greater_than_or_equal: '≥',
   less_than_or_equal: '≤',
 }
 
+/** No-value operators — hide the value input for these */
+const NO_VALUE_OPERATORS = new Set<FilterOperator>(['is_null', 'is_true', 'is_false'])
+
+/** Operators available per field type */
+const OPERATORS_BY_TYPE: Record<FieldType, FilterOperator[]> = {
+  string: ['equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with', 'regex', 'in_list', 'is_null'],
+  number: ['equals', 'not_equals', 'greater_than', 'less_than', 'greater_than_or_equal', 'less_than_or_equal', 'is_null'],
+  boolean: ['is_true', 'is_false'],
+  enum: ['equals', 'not_equals', 'in_list'],
+}
+
 interface FilterConditionBuilderProps {
   conditions: FilterCondition[]
   onChange: (conditions: FilterCondition[]) => void
-  availableFields: string[]
+  /** Accept either string[] (backward compat) or FieldDefinition[] for richer UI */
+  availableFields: string[] | FieldDefinition[]
   compact?: boolean
+}
+
+/** Normalize string[] to FieldDefinition[] for internal use */
+function normalizeFields(fields: string[] | FieldDefinition[]): FieldDefinition[] {
+  if (fields.length === 0) return []
+  if (typeof fields[0] === 'string') {
+    return (fields as string[]).map(name => ({ name, label: name, type: 'string' as const }))
+  }
+  return fields as FieldDefinition[]
 }
 
 export default function FilterConditionBuilder({
@@ -35,8 +59,41 @@ export default function FilterConditionBuilder({
   availableFields,
   compact = false,
 }: FilterConditionBuilderProps) {
-  const updateCondition = (index: number, field: keyof FilterCondition, value: string) => {
-    onChange(conditions.map((c, i) => (i === index ? { ...c, [field]: value } : c)))
+  const fields = normalizeFields(availableFields)
+  const fieldMap = new Map(fields.map(f => [f.name, f]))
+
+  /** Group fields for <optgroup> rendering. Returns null if no groups are used. */
+  const groupedFields = useMemo(() => {
+    const hasGroups = fields.some(f => f.group)
+    if (!hasGroups) return null
+    const groups = new Map<string, FieldDefinition[]>()
+    for (const f of fields) {
+      const g = f.group ?? ''
+      if (!groups.has(g)) groups.set(g, [])
+      groups.get(g)!.push(f)
+    }
+    return groups
+  }, [fields])
+
+  const getFieldDef = (fieldName: string): FieldDefinition =>
+    fieldMap.get(fieldName) ?? { name: fieldName, label: fieldName, type: 'string' }
+
+  const getOperatorsForField = (fieldName: string): FilterOperator[] => {
+    const def = getFieldDef(fieldName)
+    return OPERATORS_BY_TYPE[def.type] ?? ALL_OPERATORS
+  }
+
+  const updateCondition = (index: number, key: keyof FilterCondition, value: string) => {
+    onChange(conditions.map((c, i) => (i === index ? { ...c, [key]: value } : c)))
+  }
+
+  const updateField = (index: number, newField: string) => {
+    const def = getFieldDef(newField)
+    const validOps = OPERATORS_BY_TYPE[def.type]
+    const currentOp = conditions[index].operator
+    // Auto-switch operator if current one isn't valid for new field type
+    const operator = validOps.includes(currentOp) ? currentOp : validOps[0]
+    onChange(conditions.map((c, i) => (i === index ? { ...c, field: newField, operator, value: '' } : c)))
   }
 
   const addCondition = () => {
@@ -61,63 +118,95 @@ export default function FilterConditionBuilder({
         <button onClick={addCondition} className={`${textSize} text-blue-600 hover:text-blue-800`}>+ Add condition</button>
       </div>
       <div className="space-y-0">
-        {conditions.map((c, i) => (
-          <div key={i}>
-            <div className={`flex items-center gap-0 rounded-lg border border-gray-200 bg-gray-50 px-1 py-1`}>
-              <select
-                value={c.field as string}
-                onChange={(e) => updateCondition(i, 'field', e.target.value)}
-                className={`rounded-md border-0 bg-white ${padSize} ${textSize} font-medium text-gray-800 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
-              >
-                <option value="">field...</option>
-                {availableFields.map((col) => (
-                  <option key={col} value={col}>{col}</option>
-                ))}
-              </select>
-              <span className={`px-1.5 text-[10px] text-gray-400 select-none`}>&rarr;</span>
-              <select
-                value={c.operator}
-                onChange={(e) => updateCondition(i, 'operator', e.target.value)}
-                className={`rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-600 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
-              >
-                {OPERATORS.map((op) => <option key={op} value={op}>{OPERATOR_LABELS[op]}</option>)}
-              </select>
-              {c.operator !== 'is_null' && (
-                <>
-                  <span className={`px-1.5 text-[10px] text-gray-400 select-none`}>&rarr;</span>
-                  <input
-                    value={String(c.value)}
-                    onChange={(e) => updateCondition(i, 'value', e.target.value)}
-                    placeholder="value"
-                    className={`min-w-0 flex-1 rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-800 shadow-sm ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-blue-400`}
-                  />
-                </>
-              )}
-              {conditions.length > 1 && (
-                <button onClick={() => removeCondition(i)} className="ml-1 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Remove condition">
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
+        {conditions.map((c, i) => {
+          const fieldDef = getFieldDef(c.field)
+          const operators = c.field ? getOperatorsForField(c.field) : ALL_OPERATORS
+          const needsValue = !NO_VALUE_OPERATORS.has(c.operator)
+          const isEnum = fieldDef.type === 'enum' && fieldDef.enumValues
+
+          return (
+            <div key={i}>
+              <div className={`flex items-center gap-0 rounded-lg border border-gray-200 bg-gray-50 px-1 py-1`}>
+                <select
+                  value={c.field as string}
+                  onChange={(e) => updateField(i, e.target.value)}
+                  className={`rounded-md border-0 bg-white ${padSize} ${textSize} font-medium text-gray-800 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
+                >
+                  <option value="">field...</option>
+                  {groupedFields ? (
+                    Array.from(groupedFields.entries()).map(([group, gFields]) =>
+                      group ? (
+                        <optgroup key={group} label={group}>
+                          {gFields.map((f) => <option key={f.name} value={f.name}>{f.label}</option>)}
+                        </optgroup>
+                      ) : (
+                        gFields.map((f) => <option key={f.name} value={f.name}>{f.label}</option>)
+                      )
+                    )
+                  ) : (
+                    fields.map((f) => <option key={f.name} value={f.name}>{f.label}</option>)
+                  )}
+                </select>
+                <span className={`px-1.5 text-[10px] text-gray-400 select-none`}>&rarr;</span>
+                <select
+                  value={c.operator}
+                  onChange={(e) => updateCondition(i, 'operator', e.target.value)}
+                  className={`rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-600 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
+                >
+                  {operators.map((op) => <option key={op} value={op}>{OPERATOR_LABELS[op]}</option>)}
+                </select>
+                {needsValue && (
+                  <>
+                    <span className={`px-1.5 text-[10px] text-gray-400 select-none`}>&rarr;</span>
+                    {isEnum ? (
+                      <select
+                        value={String(c.value)}
+                        onChange={(e) => updateCondition(i, 'value', e.target.value)}
+                        className={`min-w-0 flex-1 rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-800 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
+                      >
+                        <option value="">select...</option>
+                        {fieldDef.enumValues!.map((v) => (
+                          <option key={v} value={v}>{v}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={String(c.value)}
+                        onChange={(e) => updateCondition(i, 'value', e.target.value)}
+                        placeholder="value"
+                        type={fieldDef.type === 'number' ? 'number' : 'text'}
+                        className={`min-w-0 flex-1 rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-800 shadow-sm ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-blue-400`}
+                      />
+                    )}
+                  </>
+                )}
+                {conditions.length > 1 && (
+                  <button onClick={() => removeCondition(i)} className="ml-1 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Remove condition">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                )}
+              </div>
+              {i < conditions.length - 1 && (
+                <div className="flex justify-center py-1.5">
+                  <button
+                    onClick={() => toggleConnector(i)}
+                    className={`rounded-full px-4 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                      c.connector === 'OR'
+                        ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                        : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+                    }`}
+                  >
+                    {c.connector || 'AND'}
+                  </button>
+                </div>
               )}
             </div>
-            {i < conditions.length - 1 && (
-              <div className="flex justify-center py-1.5">
-                <button
-                  onClick={() => toggleConnector(i)}
-                  className={`rounded-full px-4 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                    c.connector === 'OR'
-                      ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                      : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
-                  }`}
-                >
-                  {c.connector || 'AND'}
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
 }
 
-export { OPERATOR_LABELS }
+export { OPERATOR_LABELS, ALL_OPERATORS as OPERATORS, NO_VALUE_OPERATORS }
+export type { FieldDefinition, FieldType } from '../../shared/types/transactions'

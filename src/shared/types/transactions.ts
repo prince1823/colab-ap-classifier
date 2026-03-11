@@ -52,6 +52,17 @@ export type FilterOperator =
   | 'greater_than_or_equal'
   | 'less_than_or_equal';
 
+export type FieldType = 'string' | 'number' | 'boolean' | 'enum';
+
+export interface FieldDefinition {
+  name: string;
+  label: string;
+  type: FieldType;
+  enumValues?: string[];
+  /** Optional group name — fields with the same group render under a shared <optgroup> */
+  group?: string;
+}
+
 export interface TransactionStats {
   totalRows: number;
   totalSpend: number;

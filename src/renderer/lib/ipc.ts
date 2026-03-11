@@ -90,6 +90,7 @@ export const ipc = {
       invoke('transactions:pivotAggregation', dimensions, valueDimension, filters),
     getIdsByConditions: (conditions: FilterCondition[]) =>
       invoke('transactions:getIdsByConditions', conditions),
+    getFilterFields: () => invoke('transactions:getFilterFields'),
   },
 
   // ── Taxonomy (8 channels) ──
@@ -124,6 +125,7 @@ export const ipc = {
       on('suppliers:research:progress', callback),
     filterTailSpend: (threshold: number) =>
       invoke('suppliers:filterTailSpend', threshold),
+    getFilterFields: () => invoke('suppliers:getFilterFields'),
   },
 
   // ── Rules (4 channels) ──

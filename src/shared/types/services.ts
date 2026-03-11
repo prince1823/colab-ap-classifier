@@ -1,3 +1,4 @@
+import type { LicenseStatus, LicenseActivationResult } from './license';
 import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
@@ -20,10 +21,32 @@ export interface ILLMConfig {
 
 // ─── App Config ──────────────────────────────────────────────────────────────
 
+// ─── License ────────────────────────────────────────────────────────────────
+
+export interface ILicenseService {
+  activate(licenseKey: string): Promise<LicenseActivationResult>;
+  getStatus(): LicenseStatus;
+  checkNow(): Promise<LicenseStatus>;
+  startPeriodicChecks(): void;
+  stopPeriodicChecks(): void;
+}
+
+// ─── App Config ─────────────────────────────────────────────────────────────
+
 export interface IAppConfigService extends ILLMConfig {
   getSupplierUniversePath(): string | null;
   setSupplierUniversePath(p: string): Promise<void>;
   clearSupplierUniversePath(): Promise<void>;
+  // License storage (encrypted via safeStorage)
+  getLicenseKey(): string | null;
+  setLicenseKey(key: string): Promise<void>;
+  clearLicenseKey(): Promise<void>;
+  getLicenseData(): { lastResult?: LicenseStatus; lastChecked?: number } | null;
+  setLicenseData(data: { lastResult?: LicenseStatus; lastChecked?: number }): Promise<void>;
+  getLicenseServerUrl(): string | null;
+  setLicenseServerUrl(url: string): Promise<void>;
+  getLicensePublicKey(): string | null;
+  setLicensePublicKey(key: string): Promise<void>;
 }
 
 // ─── Database Layer ──────────────────────────────────────────────────────────

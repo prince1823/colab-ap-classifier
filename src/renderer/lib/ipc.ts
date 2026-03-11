@@ -1,6 +1,7 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
 import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
+import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
@@ -164,5 +165,14 @@ export const ipc = {
     getPath: () => invoke('supplier-universe:getPath'),
     selectFile: () => invoke('supplier-universe:selectFile'),
     createNew: () => invoke('supplier-universe:createNew'),
+  },
+
+  // ── License (3 channels + 1 event) ──
+  license: {
+    activate: (key: string) => invoke('license:activate', key),
+    getStatus: () => invoke('license:getStatus'),
+    checkNow: () => invoke('license:checkNow'),
+    onStatusChanged: (callback: (status: LicenseStatus) => void) =>
+      on('license:statusChanged', callback),
   },
 };

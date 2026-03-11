@@ -1,4 +1,5 @@
 import type { ProjectMetadata, ProjectMetadataUpdate } from './project';
+import type { LicenseStatus, LicenseActivationResult } from './license';
 
 export interface LLMConfigResponse {
   provider: string;
@@ -108,11 +109,17 @@ export interface IPCInvokeMap {
   'supplier-universe:getPath':    { args: []; result: string | null };
   'supplier-universe:selectFile': { args: []; result: string | null };
   'supplier-universe:createNew':  { args: []; result: string | null };
+
+  // License
+  'license:activate':  { args: [licenseKey: string]; result: LicenseActivationResult };
+  'license:getStatus': { args: []; result: LicenseStatus };
+  'license:checkNow':  { args: []; result: LicenseStatus };
 }
 
 export interface IPCEventMap {
   'classification:progress':     ClassificationProgress;
   'suppliers:research:progress': ResearchProgress;
+  'license:statusChanged':       LicenseStatus;
 }
 
 export type IPCChannel = keyof IPCInvokeMap;

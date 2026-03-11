@@ -2,6 +2,12 @@ import { app, safeStorage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { IAppConfigService } from '../../shared/types/services';
+import type { LicenseStatus } from '../../shared/types/license';
+
+interface LicenseDataShape {
+  lastResult?: Record<string, unknown>;
+  lastChecked?: number;
+}
 
 interface ConfigFileShape {
   provider?: string;
@@ -9,6 +15,11 @@ interface ConfigFileShape {
   // base64-encoded encrypted (or plaintext if encryption unavailable) key per provider
   keys?: Record<string, string>;
   supplierUniversePath?: string;
+  // License — key encrypted same as API keys; data is plaintext (no secrets)
+  licenseKey?: string;
+  licenseData?: LicenseDataShape;
+  licenseServerUrl?: string;
+  licensePublicKey?: string;
 }
 
 function isConfigFileShape(v: unknown): v is ConfigFileShape {
@@ -23,6 +34,9 @@ function isConfigFileShape(v: unknown): v is ConfigFileShape {
     }
   }
   if (obj.supplierUniversePath !== undefined && typeof obj.supplierUniversePath !== 'string') return false;
+  if (obj.licenseKey !== undefined && typeof obj.licenseKey !== 'string') return false;
+  if (obj.licenseServerUrl !== undefined && typeof obj.licenseServerUrl !== 'string') return false;
+  if (obj.licensePublicKey !== undefined && typeof obj.licensePublicKey !== 'string') return false;
   return true;
 }
 
@@ -129,6 +143,68 @@ export class AppConfigService implements IAppConfigService {
 
   async clearSupplierUniversePath(): Promise<void> {
     delete this.config.supplierUniversePath;
+    this.save();
+  }
+
+  // ─── License ──────────────────────────────────────────────────────────────
+
+  getLicenseKey(): string | null {
+    const stored = this.config.licenseKey;
+    if (stored) {
+      try {
+        if (safeStorage.isEncryptionAvailable()) {
+          return safeStorage.decryptString(Buffer.from(stored, 'base64'));
+        }
+        return stored;
+      } catch {
+        // decryption failed
+      }
+    }
+    return process.env.LICENSE_KEY || null;
+  }
+
+  async setLicenseKey(key: string): Promise<void> {
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(key);
+      this.config.licenseKey = encrypted.toString('base64');
+    } else {
+      this.config.licenseKey = key;
+    }
+    this.save();
+  }
+
+  async clearLicenseKey(): Promise<void> {
+    delete this.config.licenseKey;
+    delete this.config.licenseData;
+    this.save();
+  }
+
+  getLicenseData(): { lastResult?: LicenseStatus; lastChecked?: number } | null {
+    const d = this.config.licenseData;
+    if (!d) return null;
+    return { lastResult: d.lastResult as LicenseStatus | undefined, lastChecked: d.lastChecked };
+  }
+
+  async setLicenseData(data: { lastResult?: LicenseStatus; lastChecked?: number }): Promise<void> {
+    this.config.licenseData = data as LicenseDataShape;
+    this.save();
+  }
+
+  getLicenseServerUrl(): string | null {
+    return this.config.licenseServerUrl || process.env.LICENSE_SERVER_URL || null;
+  }
+
+  async setLicenseServerUrl(url: string): Promise<void> {
+    this.config.licenseServerUrl = url;
+    this.save();
+  }
+
+  getLicensePublicKey(): string | null {
+    return this.config.licensePublicKey || process.env.LICENSE_PUBLIC_KEY || null;
+  }
+
+  async setLicensePublicKey(key: string): Promise<void> {
+    this.config.licensePublicKey = key;
     this.save();
   }
 }

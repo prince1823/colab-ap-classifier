@@ -63,6 +63,14 @@ app.whenReady().then(() => {
       mainWindow.webContents.send('suppliers:research:progress', ...args);
     }
   });
+  services.eventBus.on('license:statusChanged', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('license:statusChanged', ...args);
+    }
+  });
+
+  // Start silent license checks
+  services.license.startPeriodicChecks();
 });
 
 app.on('window-all-closed', () => {

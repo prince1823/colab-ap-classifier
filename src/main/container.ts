@@ -8,6 +8,7 @@ import type {
   ResearchAgent,
   ColumnMappingAgent,
   IAppConfigService,
+  ILicenseService,
   ChangelogStore as IChangelogStore,
   TransactionStore as ITransactionStore,
   ProjectStore as IProjectStore,
@@ -39,6 +40,7 @@ import { IngestService } from './services/ingest';
 import { ExportService } from './services/export';
 import { SupplierResearcher } from './services/supplier-research';
 import { ClassificationRunner } from './services/classification';
+import { LicenseService } from './services/license-service';
 
 export interface ServiceContainer {
   // Leaf
@@ -48,6 +50,7 @@ export interface ServiceContainer {
   llm: LLMClient;
   appConfig: IAppConfigService;
   webSearch: WebSearch;
+  license: ILicenseService;
   // Agents
   classificationAgent: ClassificationAgent;
   researchAgent: ResearchAgent;
@@ -73,6 +76,7 @@ export function createContainer(): ServiceContainer {
   const supplierUniverse = new DuckDBSupplierUniverse(appConfig);
   const llm = new OpenRouterLLMClient(appConfig);
   const webSearch = new ExaWebSearch();
+  const license = new LicenseService(appConfig, eventBus);
 
   // Agents
   const classificationAgent = new LLMClassificationAgent(llm);
@@ -99,7 +103,7 @@ export function createContainer(): ServiceContainer {
   );
 
   return {
-    db, supplierUniverse, eventBus, llm, appConfig, webSearch,
+    db, supplierUniverse, eventBus, llm, appConfig, webSearch, license,
     classificationAgent, researchAgent, columnMappingAgent,
     changelog, transactions, project, taxonomy, suppliers, rules,
     ingest, export: exportSvc, researcher, classifier,

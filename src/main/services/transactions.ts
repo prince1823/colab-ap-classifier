@@ -96,6 +96,7 @@ export class TransactionStore implements ITransactionStore {
         classification_l2: 'tax.l2',
         classification_l3: 'tax.l3',
         supplier_name: 'ps.supplier_name',
+        is_researched: 'ps.is_researched',
       };
       const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
       const built = buildWhereClause(filters.conditions, resolver);
@@ -219,7 +220,8 @@ export class TransactionStore implements ITransactionStore {
     classification_status: { label: 'Classification Status', type: 'enum', enumValues: ['unclassified', 'classified_by_ai', 'classified_by_rule', 'classification_failed'] },
     human_reviewed: { label: 'Human Reviewed', type: 'boolean' },
     spend_amount: { label: 'Spend Amount', type: 'number' },
-    supplier_name: { label: 'Supplier Name', type: 'string' },
+    supplier_name: { label: 'Supplier Name', type: 'string', group: 'Supplier' },
+    is_researched: { label: 'Researched', type: 'boolean', group: 'Supplier' },
     classification_l1: { label: 'Classification L1', type: 'string' },
     classification_l2: { label: 'Classification L2', type: 'string' },
     classification_l3: { label: 'Classification L3', type: 'string' },
@@ -240,8 +242,8 @@ export class TransactionStore implements ITransactionStore {
         fields.push({ name: col, label: col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), type: 'string' });
       }
     }
-    // Add virtual classification dimensions if not already present
-    for (const virt of ['classification_l1', 'classification_l2', 'classification_l3']) {
+    // Add virtual dimensions (classification levels, supplier fields) if not already present
+    for (const virt of ['classification_l1', 'classification_l2', 'classification_l3', 'is_researched']) {
       if (!fields.some(f => f.name === virt)) {
         const known = TransactionStore.KNOWN_FIELD_TYPES[virt]!;
         fields.push({ name: virt, ...known });
@@ -606,6 +608,7 @@ export class TransactionStore implements ITransactionStore {
       classification_l2: 'tax.l2',
       classification_l3: 'tax.l3',
       supplier_name: 'ps.supplier_name',
+      is_researched: 'ps.is_researched',
     };
 
     const resolveColumn = (field: string) =>

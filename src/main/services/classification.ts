@@ -13,6 +13,7 @@ import type {
 import type { TaxonomyNode } from '../../shared/types';
 import type { CompanyContext } from '../../shared/types/project';
 import type { ClassificationProgress } from '../../shared/types/classification';
+import type { FilterCondition } from '../../shared/types/transactions';
 import { cleanDescription } from '../utils/text';
 
 export class ClassificationRunner implements IClassificationRunner {
@@ -51,7 +52,29 @@ export class ClassificationRunner implements IClassificationRunner {
     });
   }
 
-  async classifyAll(): Promise<void> {
+  /**
+   * Resolve filter conditions to a set of matching transaction IDs.
+   * Returns null when no conditions are provided (meaning: use default behavior).
+   */
+  private async resolveScopedIds(conditions?: FilterCondition[]): Promise<Set<string> | null> {
+    if (!conditions || conditions.length === 0) return null;
+    const ids = await this.transactions.getIdsByConditions(conditions);
+    return new Set(ids);
+  }
+
+  async getScopeCount(conditions?: FilterCondition[]): Promise<number> {
+    if (!conditions || conditions.length === 0) {
+      // Default: count all unclassified
+      const result = await this.db.get<{ cnt: number | bigint }>(
+        `SELECT COUNT(*) as cnt FROM transactions WHERE classification_status = 'unclassified'`
+      );
+      return Number(result?.cnt ?? 0);
+    }
+    const ids = await this.transactions.getIdsByConditions(conditions);
+    return ids.length;
+  }
+
+  async classifyAll(conditions?: FilterCondition[]): Promise<void> {
     if (this.isRunningFlag) {
       throw new Error('Classification is already running');
     }
@@ -60,14 +83,44 @@ export class ClassificationRunner implements IClassificationRunner {
     this.isCancelled = false;
 
     try {
-      // Get all project suppliers with unclassified transactions
-      const supplierRows = await this.db.all<{ id: string; supplier_name: string }>(
-        `SELECT DISTINCT ps.id, ps.supplier_name
-         FROM project_suppliers ps
-         JOIN transactions t ON t.project_supplier_id = ps.id
-         WHERE t.classification_status = 'unclassified'
-         ORDER BY ps.supplier_name`
-      );
+      const scopedIds = await this.resolveScopedIds(conditions);
+
+      // Get suppliers with transactions in scope
+      let supplierRows: { id: string; supplier_name: string }[];
+
+      if (scopedIds !== null) {
+        if (scopedIds.size === 0) {
+          this.emitProgress({
+            status: 'completed',
+            totalSuppliers: 0,
+            processedSuppliers: 0,
+            percentage: 100,
+            currentSupplier: null,
+            currentStep: 'No transactions match the filter',
+          });
+          return;
+        }
+
+        // Get suppliers that have transactions in the scoped set
+        const placeholders = Array.from(scopedIds).map(() => '?').join(',');
+        supplierRows = await this.db.all<{ id: string; supplier_name: string }>(
+          `SELECT DISTINCT ps.id, ps.supplier_name
+           FROM project_suppliers ps
+           JOIN transactions t ON t.project_supplier_id = ps.id
+           WHERE t.id IN (${placeholders})
+           ORDER BY ps.supplier_name`,
+          ...Array.from(scopedIds)
+        );
+      } else {
+        // Default: all suppliers with unclassified transactions
+        supplierRows = await this.db.all<{ id: string; supplier_name: string }>(
+          `SELECT DISTINCT ps.id, ps.supplier_name
+           FROM project_suppliers ps
+           JOIN transactions t ON t.project_supplier_id = ps.id
+           WHERE t.classification_status = 'unclassified'
+           ORDER BY ps.supplier_name`
+        );
+      }
 
       if (supplierRows.length === 0) {
         this.emitProgress({
@@ -76,7 +129,7 @@ export class ClassificationRunner implements IClassificationRunner {
           processedSuppliers: 0,
           percentage: 100,
           currentSupplier: null,
-          currentStep: 'No unclassified transactions',
+          currentStep: 'No transactions to classify',
         });
         return;
       }
@@ -129,14 +182,22 @@ export class ClassificationRunner implements IClassificationRunner {
         });
 
         try {
-          await this.classifySupplier(supplier.id, taxonomyNodes, companyContext, columnPriorities);
+          await this.classifySupplier(supplier.id, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined);
         } catch (err) {
           console.error(`[Classification] Failed for "${supplier.supplier_name}":`, err);
-          // Mark failed transactions
-          const failedTxns = await this.db.all<{ id: string }>(
-            `SELECT id FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-            supplier.id
-          );
+          // Mark failed transactions — scope to scoped IDs if provided
+          let failedQuery = `SELECT id FROM transactions WHERE project_supplier_id = ?`;
+          const failedParams: unknown[] = [supplier.id];
+
+          if (scopedIds) {
+            const supplierScopedIds = Array.from(scopedIds);
+            failedQuery += ` AND id IN (${supplierScopedIds.map(() => '?').join(',')})`;
+            failedParams.push(...supplierScopedIds);
+          } else {
+            failedQuery += ` AND classification_status = 'unclassified'`;
+          }
+
+          const failedTxns = await this.db.all<{ id: string }>(failedQuery, ...failedParams);
           if (failedTxns.length > 0) {
             const errMsg = err instanceof Error ? err.message : String(err);
             await this.transactions.updateTransactions(
@@ -199,13 +260,25 @@ export class ClassificationRunner implements IClassificationRunner {
     projectSupplierId: string,
     taxonomy: TaxonomyNode[],
     companyContext: CompanyContext,
-    columnPriorities: string[]
+    columnPriorities: string[],
+    scopedTxnIds?: Set<string>
   ): Promise<void> {
-    // Step 1: Get unclassified transactions for this supplier
-    const txnRows = await this.db.all<Record<string, unknown>>(
-      `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-      projectSupplierId
-    );
+    // Step 1: Get transactions for this supplier (scoped or default unclassified)
+    let txnRows: Record<string, unknown>[];
+
+    if (scopedTxnIds) {
+      // Get all transactions for this supplier, then filter to scoped IDs
+      const allTxns = await this.db.all<Record<string, unknown>>(
+        `SELECT * FROM transactions WHERE project_supplier_id = ?`,
+        projectSupplierId
+      );
+      txnRows = allTxns.filter((r) => scopedTxnIds.has(String(r.id)));
+    } else {
+      txnRows = await this.db.all<Record<string, unknown>>(
+        `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
+        projectSupplierId
+      );
+    }
 
     if (txnRows.length === 0) return;
 

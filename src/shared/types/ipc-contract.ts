@@ -61,8 +61,9 @@ export interface IPCInvokeMap {
   'transactions:getFilterFields':    { args: []; result: FieldDefinition[] };
 
   // Classification
-  'classification:start':  { args: []; result: void };
-  'classification:cancel': { args: []; result: void };
+  'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
+  'classification:cancel':     { args: []; result: void };
+  'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
 
   // Taxonomy
   'taxonomy:getNodeCount':   { args: []; result: number };

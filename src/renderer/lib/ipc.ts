@@ -64,10 +64,11 @@ export const ipc = {
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
   },
 
-  // ── Classification (2 channels + 1 event) ──
+  // ── Classification (3 channels + 1 event) ──
   classification: {
-    start: () => invoke('classification:start'),
+    start: (conditions?: FilterCondition[]) => invoke('classification:start', conditions),
     cancel: () => invoke('classification:cancel'),
+    scopeCount: (conditions?: FilterCondition[]) => invoke('classification:scopeCount', conditions),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on('classification:progress', callback),
   },

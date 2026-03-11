@@ -1,14 +1,11 @@
 {
   "amazon": {
-    "classificationPath": "non clinical|general & administrative|office supplies & equipment",
-    "reasoning": "Online retail marketplace commonly used for office supplies and general business purchases"
+    "classificationPath": "non clinical|general & administrative|office supplies & equipment"
   },
   "cintas corporation": {
-    "classificationPath": "non clinical|mro supplies|uniforms",
-    "reasoning": "Uniform rental and facility services provider for clinical and non-clinical staff"
+    "classificationPath": "non clinical|mro supplies|uniforms"
   },
   "_default": {
-    "classificationPath": "non clinical|general & administrative|other general & administrative",
-    "reasoning": "Default classification for unrecognized suppliers"
+    "classificationPath": "non clinical|general & administrative|other general & administrative"
   }
 }

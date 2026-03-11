@@ -85,8 +85,8 @@ describe('Integration: Transaction Update & Changelog', () => {
     vi.mocked(db.all).mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT id, taxonomy_node_id')) {
         return [
-          { id: 'tx1', taxonomy_node_id: 'tid-old', classification_status: 'unclassified', classification_reasoning: null },
-          { id: 'tx2', taxonomy_node_id: 'tid-old', classification_status: 'unclassified', classification_reasoning: null },
+          { id: 'tx1', taxonomy_node_id: 'tid-old', classification_status: 'unclassified' },
+          { id: 'tx2', taxonomy_node_id: 'tid-old', classification_status: 'unclassified' },
         ];
       }
       return [];
@@ -98,16 +98,14 @@ describe('Integration: Transaction Update & Changelog', () => {
       {
         ids: ['tx1', 'tx2'],
         taxonomyNodeId: 'tid-new',
-        classificationStatus: 'human_reviewed',
-        classificationReasoning: 'Manual reclassification',
+        classificationStatus: 'classified_by_ai',
       },
       'manual'
     );
 
-    // Verify UPDATE was called
+    // Verify UPDATE was called (SQL + taxonomyNodeId + classificationStatus + 2 tx IDs)
     expect(db.run).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE transactions SET'),
-      expect.anything(),
       expect.anything(),
       expect.anything(),
       expect.anything(),
@@ -142,7 +140,6 @@ describe('Integration: Transaction Queries', () => {
       { column_name: 'project_supplier_id' },
       { column_name: 'taxonomy_node_id' },
       { column_name: 'classification_status' },
-      { column_name: 'classification_reasoning' },
       { column_name: 'created_at' },
       { column_name: 'updated_at' },
     ]);

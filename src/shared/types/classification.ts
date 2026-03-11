@@ -6,7 +6,7 @@ export type ClassificationStatus =
   | 'unclassified'
   | 'classified_by_rule'
   | 'classified_by_ai'
-  | 'classification_failed';
+  | 'classification_error';
 
 export interface ResearchProgress {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
@@ -32,12 +32,15 @@ export interface ClassificationInput {
   companyContext: CompanyContext;
   supplierResearch: SupplierInfo | null;
   parentName?: string | null;
-  historicalClassifications: { l1: string; l2: string; l3: string; count: number }[];
   columnPriorities: string[];
 }
 
-export interface ClassificationResult {
+export interface ClassificationEntry {
+  id: number;
   classificationPath: string;
-  reasoning: string;
-  descriptionSupplierAligned: boolean;
+}
+
+export interface ClassificationResult {
+  classifications: ClassificationEntry[];
+  assignments: Record<string, number[]>;
 }

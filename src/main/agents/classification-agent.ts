@@ -1,12 +1,8 @@
 import type { TaxonomyNode } from '../../shared/types/taxonomy';
-import type { CompanyContext } from '../../shared/types/project';
 import type { SupplierInfo } from '../../shared/types/suppliers';
-import type { ClassificationInput, ClassificationResult } from '../../shared/types/classification';
+import type { ClassificationInput, ClassificationResult, ClassificationEntry } from '../../shared/types/classification';
 import type { ClassificationAgent, LLMClient } from '../../shared/types/services';
-import * as llmClient from '../services/llm-client';
-
-// Re-export from shared types for backward compatibility
-export type { ClassificationInput, ClassificationResult };
+import { extractFields, buildDedupGroups } from '../utils/dedup-groups';
 
 /**
  * Build the system prompt for the classification agent.
@@ -77,14 +73,25 @@ Taxonomy descriptions are AUTHORITATIVE — they define category boundaries.
 - Distinguish consumption expenses (meals, services consumed) from operational purchases
 
 ## Response Format
-You MUST respond with valid JSON only (no markdown fencing, no explanation text outside JSON):
+Respond with valid JSON only. No markdown fencing, no text outside the JSON.
+
 {
-  "classificationPath": "L1|L2|L3",
-  "reasoning": "<concise explanation (2-3 sentences): key signals and why this category was chosen>",
-  "descriptionSupplierAligned": true/false
+  "classifications": [
+    { "id": 1, "classificationPath": "L1|L2|L3" },
+    { "id": 2, "classificationPath": "L1|L2|L3" }
+  ],
+  "assignments": {
+    "1": [1, 2, 3],
+    "2": [4, 5]
+  }
 }
 
-The descriptionSupplierAligned field should be true if the transaction description and supplier research point to the same classification, false if they conflict or if no supplier research is available.`;
+Rules:
+- Each classification has a unique integer id and a pipe-delimited taxonomy path at depth 3
+- "assignments" maps each classification id to the Group numbers it applies to
+- Every Group number from the Transactions section must appear in exactly one assignment entry
+- Prefer a SINGLE classification when the supplier operates in one domain. Use multiple only when groups clearly belong to different taxonomy categories
+- Do NOT include "reasoning" or any fields other than "classifications" and "assignments"`;
 }
 
 /**
@@ -141,51 +148,6 @@ export function formatSupplierResearch(supplier: SupplierInfo | null, parentName
 }
 
 /**
- * Format historical classifications into a readable block for the prompt.
- */
-export function formatHistoricalClassifications(
-  classifications: { l1: string; l2: string; l3: string; count: number }[]
-): string {
-  if (classifications.length === 0) {
-    return '(No historical classifications available)';
-  }
-
-  return classifications
-    .map((c) => `  ${c.l1}|${c.l2}|${c.l3} (used ${c.count} time${c.count !== 1 ? 's' : ''})`)
-    .join('\n');
-}
-
-/** System/metadata columns to exclude from LLM prompts — not useful for classification. */
-const EXCLUDED_FIELDS = new Set([
-  'id',
-  'row_index',
-  'created_at',
-  'updated_at',
-  'taxonomy_node_id',
-  'classification_reasoning',
-  'classification_status',
-]);
-
-/**
- * Extract the display fields for a transaction row based on column priorities.
- * Returns an array of [key, stringValue] pairs.
- */
-function extractFields(
-  txn: Record<string, unknown>,
-  columnPriorities?: string[]
-): Array<[string, string]> {
-  if (columnPriorities && columnPriorities.length > 0) {
-    return columnPriorities
-      .filter((k) => !EXCLUDED_FIELDS.has(k))
-      .filter((k) => txn[k] !== null && txn[k] !== undefined && txn[k] !== '')
-      .map((k) => [k, String(txn[k])] as [string, string]);
-  }
-  return Object.entries(txn)
-    .filter(([k, v]) => v !== null && v !== undefined && v !== '' && !EXCLUDED_FIELDS.has(k))
-    .map(([k, v]) => [k, String(v)] as [string, string]);
-}
-
-/**
  * Format transaction details into a readable block for the prompt.
  * When columnPriorities is provided, rows are deduplicated by their priority column values
  * and grouped with a count. Otherwise falls back to all columns, no dedup.
@@ -200,28 +162,8 @@ export function formatTransactions(
 
   // Deduplicate when column priorities are set
   if (columnPriorities && columnPriorities.length > 0) {
-    const groups = new Map<string, { fields: Array<[string, string]>; count: number }>();
-
-    for (const txn of transactions) {
-      const fields = extractFields(txn, columnPriorities);
-      const key = JSON.stringify(fields);
-      const existing = groups.get(key);
-      if (existing) {
-        existing.count++;
-      } else {
-        groups.set(key, { fields, count: 1 });
-      }
-    }
-
-    let groupIdx = 0;
-    const parts: string[] = [];
-    for (const { fields, count } of groups.values()) {
-      groupIdx++;
-      const label = count === 1 ? '1 row' : `${count} rows`;
-      const fieldStr = fields.map(([k, v]) => `  ${k}: ${v}`).join('\n');
-      parts.push(`Group ${groupIdx} (${label}):\n${fieldStr}`);
-    }
-    return parts.join('\n\n');
+    const result = buildDedupGroups(transactions, columnPriorities);
+    return result.promptText;
   }
 
   // No priorities: send all columns, no dedup
@@ -239,7 +181,7 @@ export function formatTransactions(
  * Build the user prompt with all classification context.
  */
 export function buildUserPrompt(input: ClassificationInput): string {
-  const { taxonomy, companyContext, supplierResearch, parentName, historicalClassifications, transactions, columnPriorities } = input;
+  const { taxonomy, companyContext, supplierResearch, parentName, transactions, columnPriorities } = input;
 
   const contextParts: string[] = [];
   contextParts.push(`Industry: ${companyContext.industry}`);
@@ -261,9 +203,6 @@ ${contextParts.join('\n')}
 ## Supplier Research
 ${formatSupplierResearch(supplierResearch, parentName)}
 
-## Historical Classifications
-${formatHistoricalClassifications(historicalClassifications)}
-
 ## Transactions
 ${columnPriorityNote}${formatTransactions(transactions, columnPriorities)}
 
@@ -274,83 +213,62 @@ Classify the above transactions into the taxonomy. Respond with JSON only.`;
  * Parse the LLM response text into a ClassificationResult.
  */
 export function parseResponse(responseText: string): ClassificationResult {
+  // 1. Strip markdown code fences if present
   let cleaned = responseText.trim();
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) cleaned = fenceMatch[1].trim();
 
-  // Strip markdown code fences if present
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, '');
-    cleaned = cleaned.replace(/\n?```\s*$/, '');
-    cleaned = cleaned.trim();
-  }
-
+  // 2. Parse JSON
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
-  } catch (error) {
-    throw new Error(`Failed to parse LLM response as JSON: ${cleaned.substring(0, 200)}`);
+  } catch {
+    throw new Error(`Failed to parse classification response as JSON: ${cleaned.slice(0, 200)}`);
   }
 
-  // Handle array, object, and { transactions: [...] } wrapper responses from LLM
-  let data: Record<string, unknown>;
-  if (Array.isArray(parsed)) {
-    // If LLM returned an array, take the first element
-    if (parsed.length === 0) {
-      throw new Error('LLM response is an empty array');
-    }
-    data = parsed[0] as Record<string, unknown>;
-  } else {
-    data = parsed as Record<string, unknown>;
-  }
-
-  // Unwrap { "transactions": [...] } envelope — some LLMs wrap per-transaction
-  // results in an array even when we ask for a single classification.
-  if (
-    Array.isArray(data.transactions) &&
-    data.transactions.length > 0 &&
-    !data.classificationPath &&
-    !data.classification_path
-  ) {
-    data = data.transactions[0] as Record<string, unknown>;
-  }
-
-  // Unwrap single-element arrays — some LLMs return classificationPath as
-  // ["Non Clinical|Telecom|Telecom"] instead of a plain string.
-  for (const key of ['classificationPath', 'classification_path', 'path', 'taxonomyPath', 'taxonomy_path']) {
-    const val = data[key];
-    if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'string') {
-      data[key] = val[0];
+  // 3. Handle wrapper objects (e.g., {"result": {...}})
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    if (!obj.classifications && obj.result && typeof obj.result === 'object') {
+      parsed = obj.result;
     }
   }
 
-  // Try multiple field name variations for classification path
-  const classificationPath =
-    (typeof data.classificationPath === 'string' && data.classificationPath) ||
-    (typeof data.classification_path === 'string' && data.classification_path) ||
-    (typeof data.path === 'string' && data.path) ||
-    (typeof data.taxonomyPath === 'string' && data.taxonomyPath) ||
-    (typeof data.taxonomy_path === 'string' && data.taxonomy_path) ||
-    '';
+  const result = parsed as Record<string, unknown>;
 
-  if (!classificationPath) {
-    // Provide helpful error with available fields
-    const availableFields = Object.keys(data).join(', ');
-    throw new Error(
-      `LLM response missing classification path field. ` +
-      `Expected "classificationPath" but got fields: ${availableFields}. ` +
-      `Response preview: ${JSON.stringify(data).substring(0, 200)}`
-    );
+  // 4. Validate classifications array
+  if (!Array.isArray(result.classifications)) {
+    throw new Error(`Expected "classifications" array in response, got: ${JSON.stringify(result).slice(0, 200)}`);
   }
 
-  return {
-    classificationPath,
-    reasoning: typeof data.reasoning === 'string' ? data.reasoning : '',
-    descriptionSupplierAligned:
-      typeof data.descriptionSupplierAligned === 'boolean'
-        ? data.descriptionSupplierAligned
-        : (typeof data.description_supplier_aligned === 'boolean'
-          ? data.description_supplier_aligned
-          : false),
-  };
+  const classifications: ClassificationEntry[] = result.classifications.map((c: any, i: number) => {
+    if (!c || typeof c !== 'object') {
+      throw new Error(`Classification entry ${i} is not an object`);
+    }
+    let path = c.classificationPath ?? c.classification_path ?? c.path;
+    // Handle single-element array quirk
+    if (Array.isArray(path) && path.length === 1) path = path[0];
+    if (typeof path !== 'string' || !path) {
+      throw new Error(`Classification entry ${i} missing classificationPath`);
+    }
+    return { id: Number(c.id ?? i + 1), classificationPath: path };
+  });
+
+  // 5. Validate assignments
+  const rawAssignments = result.assignments;
+  if (!rawAssignments || typeof rawAssignments !== 'object' || Array.isArray(rawAssignments)) {
+    throw new Error(`Expected "assignments" object in response`);
+  }
+
+  const assignments: Record<string, number[]> = {};
+  for (const [key, value] of Object.entries(rawAssignments as Record<string, unknown>)) {
+    if (!Array.isArray(value)) {
+      throw new Error(`Assignment for classification ${key} is not an array`);
+    }
+    assignments[String(key)] = value.map(Number);
+  }
+
+  return { classifications, assignments };
 }
 
 /**
@@ -466,86 +384,31 @@ export function validateClassification(
   result: ClassificationResult,
   taxonomy: TaxonomyNode[]
 ): ClassificationResult {
-  let path = result.classificationPath;
+  const validatedClassifications = result.classifications.map((entry) => {
+    let path = entry.classificationPath;
 
-  // Validate L1
-  const validatedL1 = validateL1(path, taxonomy);
-  if (validatedL1 === null) {
-    // L1 is unrecognizable - attempt to find a taxonomy match
-    const closestMatch = findClosestTaxonomyMatch(path, taxonomy);
-    if (closestMatch !== path) {
-      path = closestMatch;
-    } else {
-      // Cannot fix L1; keep what we have and let depth validation handle it
+    // Validate L1
+    const l1Fix = validateL1(path, taxonomy);
+    if (l1Fix) path = l1Fix;
+
+    // Validate depth
+    const depthFix = validateDepth(path);
+    if (depthFix) {
+      path = depthFix;
+    } else if (path.split('|').length < 3) {
+      // Pad with Uncategorized
       const parts = path.split('|');
-      if (parts.length > 0 && taxonomy.length > 0) {
-        // Default to first L1 in taxonomy if L1 is invalid
-        parts[0] = taxonomy[0].l1;
-        path = parts.join('|');
-      }
-    }
-  } else {
-    path = validatedL1;
-  }
-
-  // Validate depth
-  const validatedDepth = validateDepth(path);
-  if (validatedDepth === null) {
-    // Depth < 3 - attempt to find a taxonomy match to fill in
-    const closestMatch = findClosestTaxonomyMatch(path, taxonomy);
-    const matchParts = closestMatch.split('|');
-    if (matchParts.length >= 3) {
-      path = matchParts.slice(0, 3).join('|');
-    } else {
-      // Cannot recover depth; keep what we have and pad with "Uncategorized"
-      const parts = path.split('|').filter((p) => p.trim().length > 0);
-      while (parts.length < 3) {
-        parts.push('Uncategorized');
-      }
+      while (parts.length < 3) parts.push('Uncategorized');
       path = parts.join('|');
     }
-  } else {
-    path = validatedDepth;
-  }
 
-  // Validate path exists in taxonomy
-  if (taxonomy.length > 0) {
+    // Find closest taxonomy match
     path = findClosestTaxonomyMatch(path, taxonomy);
-  }
 
-  return {
-    classificationPath: path,
-    reasoning: result.reasoning,
-    descriptionSupplierAligned: result.descriptionSupplierAligned,
-  };
-}
-
-/**
- * Classify an invoice group using the LLM (standalone function — backward compat).
- */
-export async function classifyInvoiceGroup(
-  input: ClassificationInput
-): Promise<ClassificationResult> {
-  const { taxonomy } = input;
-
-  if (input.transactions.length === 0) {
-    return {
-      classificationPath: 'Indirect|Uncategorized|Uncategorized',
-      reasoning: 'No transactions provided for classification.',
-      descriptionSupplierAligned: false,
-    };
-  }
-
-  const systemPrompt = buildSystemPrompt();
-  const userPrompt = buildUserPrompt(input);
-
-  const responseText = await llmClient.chat(systemPrompt, userPrompt, {
-    temperature: 0,
-    maxTokens: 512,
+    return { ...entry, classificationPath: path };
   });
 
-  const rawResult = parseResponse(responseText);
-  return validateClassification(rawResult, taxonomy);
+  return { classifications: validatedClassifications, assignments: result.assignments };
 }
 
 /**
@@ -559,9 +422,8 @@ export class LLMClassificationAgent implements ClassificationAgent {
 
     if (input.transactions.length === 0) {
       return {
-        classificationPath: 'Indirect|Uncategorized|Uncategorized',
-        reasoning: 'No transactions provided for classification.',
-        descriptionSupplierAligned: false,
+        classifications: [{ id: 1, classificationPath: 'Indirect|Uncategorized|Uncategorized' }],
+        assignments: {},
       };
     }
 
@@ -570,7 +432,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
 
     const responseText = await this.llm.chat(systemPrompt, userPrompt, {
       temperature: 0,
-      maxTokens: 512,
+      maxTokens: 2048,
     });
 
     const rawResult = parseResponse(responseText);

@@ -22,7 +22,7 @@ import { buildWhereClause } from '../utils/query-builder';
 
 const BASE_COLUMNS = [
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
-  'classification_status', 'human_reviewed', 'classification_reasoning',
+  'classification_status', 'human_reviewed',
   'original_supplier_name', 'project_supplier_id',
   'created_at', 'updated_at',
 ];
@@ -152,7 +152,6 @@ export class TransactionStore implements ITransactionStore {
         taxonomyNodeId: row.taxonomy_node_id ? String(row.taxonomy_node_id) : null,
         classificationPath: row.classification_path ? String(row.classification_path) : null,
         classificationStatus: (row.classification_status as ClassificationStatus) || 'unclassified',
-        classificationReasoning: row.classification_reasoning ? String(row.classification_reasoning) : null,
         humanReviewed: Boolean(row.human_reviewed),
         canonicalFields,
         createdAt: String(row.created_at),
@@ -187,7 +186,7 @@ export class TransactionStore implements ITransactionStore {
         ${spendExpr} as total_spend,
         COUNT(DISTINCT project_supplier_id) as unique_suppliers,
         COUNT(CASE WHEN classification_status IN ('classified_by_ai', 'classified_by_rule') THEN 1 END) as classified_rows,
-        COUNT(CASE WHEN classification_status = 'unclassified' OR classification_status = 'classification_failed' THEN 1 END) as unclassified_rows
+        COUNT(CASE WHEN classification_status = 'unclassified' OR classification_status = 'classification_error' THEN 1 END) as unclassified_rows
       FROM transactions`
     );
 
@@ -265,7 +264,7 @@ export class TransactionStore implements ITransactionStore {
 
     const placeholders = update.ids.map(() => '?').join(',');
     const oldRows = await this.db.all<Record<string, unknown>>(
-      `SELECT id, taxonomy_node_id, classification_status, classification_reasoning FROM transactions WHERE id IN (${placeholders})`,
+      `SELECT id, taxonomy_node_id, classification_status FROM transactions WHERE id IN (${placeholders})`,
       ...update.ids
     );
 
@@ -273,7 +272,6 @@ export class TransactionStore implements ITransactionStore {
     if (oldRows.length > 0) {
       oldValues.taxonomy_node_id = oldRows[0].taxonomy_node_id;
       oldValues.classification_status = oldRows[0].classification_status;
-      oldValues.classification_reasoning = oldRows[0].classification_reasoning;
     }
 
     const setClauses: string[] = [];
@@ -290,12 +288,6 @@ export class TransactionStore implements ITransactionStore {
       params.push(update.classificationStatus);
       newValues.classification_status = update.classificationStatus;
     }
-    if (update.classificationReasoning !== undefined) {
-      setClauses.push('classification_reasoning = ?');
-      params.push(update.classificationReasoning);
-      newValues.classification_reasoning = update.classificationReasoning;
-    }
-
     if (setClauses.length === 0) return undefined;
     setClauses.push('updated_at = CURRENT_TIMESTAMP');
 

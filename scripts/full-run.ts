@@ -178,7 +178,7 @@ async function exportCSV(db: DuckDBDatabase, outPath: string): Promise<number> {
   const allColumns = colRows.map((r) => r.column_name);
 
   const metaColumns = ['id', 'row_index', 'upload_id', 'taxonomy_node_id',
-    'classification_status', 'human_reviewed', 'classification_reasoning',
+    'classification_status', 'human_reviewed',
     'original_supplier_name', 'supplier_name', 'project_supplier_id', 'created_at', 'updated_at'];
 
   const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
@@ -199,7 +199,6 @@ async function exportCSV(db: DuckDBDatabase, outPath: string): Promise<number> {
     'classification_l2',
     'classification_l3',
     'classification_status',
-    'classification_reasoning',
   ];
 
   const csvLines: string[] = [headers.map(escapeCSV).join(',')];
@@ -215,7 +214,6 @@ async function exportCSV(db: DuckDBDatabase, outPath: string): Promise<number> {
       parts[1] || '',
       parts[2] || '',
       row.classification_status ?? 'unclassified',
-      row.classification_reasoning ?? '',
     ];
     csvLines.push(values.map((v) => escapeCSV(String(v))).join(','));
   }

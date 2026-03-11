@@ -30,7 +30,7 @@ export class ExportService implements IExportService {
     const allColumns = colRows.map((r) => r.column_name);
 
     const metaColumns = ['id', 'row_index', 'upload_id', 'taxonomy_node_id',
-      'classification_status', 'human_reviewed', 'classification_reasoning',
+      'classification_status', 'human_reviewed',
       'original_supplier_name', 'project_supplier_id', 'created_at', 'updated_at'];
 
     const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
@@ -51,7 +51,6 @@ export class ExportService implements IExportService {
       'classification_l2',
       'classification_l3',
       'classification_status',
-      'classification_reasoning',
     ];
 
     const csvLines: string[] = [headers.map(escapeCSV).join(',')];
@@ -68,7 +67,6 @@ export class ExportService implements IExportService {
         parts[1] || '',
         parts[2] || '',
         row.classification_status ?? 'unclassified',
-        row.classification_reasoning ?? '',
       ];
 
       csvLines.push(values.map((v) => escapeCSV(String(v))).join(','));

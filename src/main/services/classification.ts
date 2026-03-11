@@ -12,9 +12,11 @@ import type {
 } from '../../shared/types/services';
 import type { TaxonomyNode } from '../../shared/types';
 import type { CompanyContext } from '../../shared/types/project';
-import type { ClassificationProgress } from '../../shared/types/classification';
+import type { ClassificationProgress, ClassificationResult } from '../../shared/types/classification';
 import type { FilterCondition } from '../../shared/types/transactions';
 import { cleanDescription } from '../utils/text';
+import { buildDedupGroups } from '../utils/dedup-groups';
+import { debugLog } from '../utils/debug-log';
 
 export class ClassificationRunner implements IClassificationRunner {
   private isRunningFlag = false;
@@ -184,7 +186,8 @@ export class ClassificationRunner implements IClassificationRunner {
         try {
           await this.classifySupplier(supplier.id, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined);
         } catch (err) {
-          console.error(`[Classification] Failed for "${supplier.supplier_name}":`, err);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          debugLog('ERROR', `Classification failed for supplier "${supplier.supplier_name}"`, { error: errMsg });
           // Mark failed transactions — scope to scoped IDs if provided
           let failedQuery = `SELECT id FROM transactions WHERE project_supplier_id = ?`;
           const failedParams: unknown[] = [supplier.id];
@@ -199,12 +202,10 @@ export class ClassificationRunner implements IClassificationRunner {
 
           const failedTxns = await this.db.all<{ id: string }>(failedQuery, ...failedParams);
           if (failedTxns.length > 0) {
-            const errMsg = err instanceof Error ? err.message : String(err);
             await this.transactions.updateTransactions(
               {
                 ids: failedTxns.map((t) => t.id),
-                classificationStatus: 'classification_failed',
-                classificationReasoning: `Classification failed: ${errMsg}`,
+                classificationStatus: 'classification_error',
               },
               'pipeline'
             );
@@ -306,7 +307,6 @@ export class ClassificationRunner implements IClassificationRunner {
           ids,
           taxonomyNodeId: targetNodeId,
           classificationStatus: 'classified_by_rule',
-          classificationReasoning: 'Matched override rule',
         },
         'rule'
       );
@@ -339,41 +339,99 @@ export class ClassificationRunner implements IClassificationRunner {
       return cleaned;
     });
 
-    // Classify the batch
-    const result = await this.classificationAgent.classifyInvoiceGroup({
-      transactions: cleanedTxns,
-      taxonomy,
-      companyContext,
-      supplierResearch,
-      parentName,
-      historicalClassifications: [],
-      columnPriorities,
-    });
+    // Build dedup groups for mapping
+    const { groupToTransactionIds, groupCount } = buildDedupGroups(cleanedTxns, columnPriorities);
 
-    const taxonomyNode = taxonomy.find(
-      (n) => n.fullPath === result.classificationPath
-    );
+    // Retry loop
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const result = await this.classificationAgent.classifyInvoiceGroup({
+          transactions: cleanedTxns,
+          taxonomy,
+          companyContext,
+          supplierResearch,
+          parentName,
+          columnPriorities,
+        });
 
-    if (!taxonomyNode) {
-      console.warn(
-        `[Classification] Taxonomy node not found for path "${result.classificationPath}" — transaction(s) will be classified without a node`
-      );
+        // Validate assignments
+        this.validateAssignments(result, groupCount);
+
+        // Apply multi-classification
+        await this.applyMultiClassification(result, groupToTransactionIds, taxonomy);
+        return; // success
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        debugLog('WARN', `Classification attempt ${attempt}/${MAX_ATTEMPTS} failed for supplier ${supplierName ?? projectSupplierId}`, { error: errMsg });
+        if (attempt === MAX_ATTEMPTS) {
+          debugLog('ERROR', `All ${MAX_ATTEMPTS} classification attempts failed for supplier ${supplierName ?? projectSupplierId}`, { error: errMsg });
+          // Mark all unmatched as classification_error
+          const unmatchedIds = unmatchedTxns.map((r) => String(r.id));
+          await this.transactions.updateTransactions({
+            ids: unmatchedIds,
+            classificationStatus: 'classification_error',
+          }, 'pipeline');
+        }
+      }
+    }
+  }
+
+  private validateAssignments(result: ClassificationResult, groupCount: number): void {
+    const classificationIds = new Set(result.classifications.map((c) => c.id));
+    const assignedGroups = new Set<number>();
+
+    for (const [classIdStr, groupNumbers] of Object.entries(result.assignments)) {
+      const classId = Number(classIdStr);
+      if (!classificationIds.has(classId)) {
+        throw new Error(`Assignment references unknown classification id ${classId}`);
+      }
+      for (const g of groupNumbers) {
+        if (g < 1 || g > groupCount) {
+          throw new Error(`Assignment references invalid group number ${g} (expected 1-${groupCount})`);
+        }
+        if (assignedGroups.has(g)) {
+          throw new Error(`Group ${g} assigned to multiple classifications`);
+        }
+        assignedGroups.add(g);
+      }
     }
 
-    // Apply classification
-    const unmatchedIds = unmatchedTxns.map((r) => String(r.id));
-    const reasoning = taxonomyNode
-      ? result.reasoning
-      : `${result.reasoning}\n[Warning: LLM returned path "${result.classificationPath}" which did not match any taxonomy node]`;
+    // Check all groups are assigned
+    for (let g = 1; g <= groupCount; g++) {
+      if (!assignedGroups.has(g)) {
+        throw new Error(`Group ${g} not assigned to any classification (groups: 1-${groupCount})`);
+      }
+    }
+  }
 
-    await this.transactions.updateTransactions(
-      {
-        ids: unmatchedIds,
+  private async applyMultiClassification(
+    result: ClassificationResult,
+    groupToTransactionIds: Map<number, string[]>,
+    taxonomy: TaxonomyNode[]
+  ): Promise<void> {
+    for (const classification of result.classifications) {
+      const assignedGroups = result.assignments[String(classification.id)];
+      if (!assignedGroups || assignedGroups.length === 0) continue;
+
+      // Collect all transaction IDs for this classification
+      const txnIds: string[] = [];
+      for (const groupNum of assignedGroups) {
+        const ids = groupToTransactionIds.get(groupNum);
+        if (ids) txnIds.push(...ids);
+      }
+      if (txnIds.length === 0) continue;
+
+      const taxonomyNode = taxonomy.find((n) => n.fullPath === classification.classificationPath);
+      if (!taxonomyNode) {
+        debugLog('WARN', `Taxonomy node not found for path "${classification.classificationPath}"`);
+      }
+
+      await this.transactions.updateTransactions({
+        ids: txnIds,
         taxonomyNodeId: taxonomyNode?.id ?? undefined,
         classificationStatus: 'classified_by_ai',
-        classificationReasoning: reasoning,
-      },
-      'pipeline'
-    );
+      }, 'pipeline');
+    }
   }
 }

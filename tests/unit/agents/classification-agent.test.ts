@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  classifyInvoiceGroup,
   buildSystemPrompt,
   buildUserPrompt,
   parseResponse,
@@ -10,24 +9,17 @@ import {
   validateClassification,
   formatTaxonomyTree,
   formatSupplierResearch,
-  formatHistoricalClassifications,
   formatTransactions,
+  LLMClassificationAgent,
 } from '../../../src/main/agents/classification-agent';
 import type {
   ClassificationInput,
   ClassificationResult,
-} from '../../../src/main/agents/classification-agent';
+} from '../../../src/shared/types/classification';
 import type { TaxonomyNode } from '../../../src/shared/types/taxonomy';
 import type { CompanyContext } from '../../../src/shared/types/project';
 import type { SupplierInfo } from '../../../src/shared/types/suppliers';
-import * as llmClient from '../../../src/main/services/llm-client';
-
-// Mock the llm-client module
-vi.mock('../../../src/main/services/llm-client', () => ({
-  chat: vi.fn(),
-}));
-
-const mockChat = vi.mocked(llmClient.chat);
+import type { LLMClient } from '../../../src/shared/types/services';
 
 // --- Test fixtures ---
 
@@ -102,11 +94,6 @@ const SAMPLE_TRANSACTIONS: Array<Record<string, unknown>> = [
   },
 ];
 
-const SAMPLE_HISTORICAL: { l1: string; l2: string; l3: string; count: number }[] = [
-  { l1: 'Indirect', l2: 'IT Services', l3: 'Software Licenses', count: 15 },
-  { l1: 'Indirect', l2: 'IT Services', l3: 'Cloud Hosting', count: 8 },
-];
-
 const SAMPLE_COLUMN_PRIORITIES = ['supplier_name', 'line_description', 'spend_amount', 'gl_code', 'invoice_date'];
 
 function makeInput(overrides?: Partial<ClassificationInput>): ClassificationInput {
@@ -119,15 +106,13 @@ function makeInput(overrides?: Partial<ClassificationInput>): ClassificationInpu
         ? overrides.supplierResearch ?? null
         : SAMPLE_SUPPLIER_RESEARCH,
     parentName: overrides?.parentName ?? undefined,
-    historicalClassifications: overrides?.historicalClassifications ?? SAMPLE_HISTORICAL,
     columnPriorities: overrides?.columnPriorities ?? SAMPLE_COLUMN_PRIORITIES,
   };
 }
 
 const MOCK_LLM_RESPONSE = JSON.stringify({
-  classificationPath: 'Indirect|IT Services|Software Licenses',
-  reasoning: 'TechSoft Inc is a software company. The transactions are for ERP license renewal and cloud hosting, which fall under IT Services.',
-  descriptionSupplierAligned: true,
+  classifications: [{ id: 1, classificationPath: 'Indirect|IT Services|Software Licenses' }],
+  assignments: { '1': [1, 2] },
 });
 
 beforeEach(() => {
@@ -164,11 +149,12 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('Return JSON list');
   });
 
-  it('should include JSON response format', () => {
+  it('should include new response format keywords', () => {
     const prompt = buildSystemPrompt();
-    expect(prompt).toContain('classificationPath');
-    expect(prompt).toContain('reasoning');
-    expect(prompt).toContain('descriptionSupplierAligned');
+    expect(prompt).toContain('classifications');
+    expect(prompt).toContain('assignments');
+    // Should not ask for descriptionSupplierAligned in response format
+    expect(prompt).not.toContain('"descriptionSupplierAligned"');
   });
 });
 
@@ -198,11 +184,9 @@ describe('buildUserPrompt', () => {
     expect(prompt).toContain('511210');
   });
 
-  it('should include historical classifications', () => {
+  it('should not include historical classifications section', () => {
     const prompt = buildUserPrompt(makeInput());
-    expect(prompt).toContain('## Historical Classifications');
-    expect(prompt).toContain('Indirect|IT Services|Software Licenses');
-    expect(prompt).toContain('15 times');
+    expect(prompt).not.toContain('## Historical Classifications');
   });
 
   it('should include transaction details', () => {
@@ -213,23 +197,17 @@ describe('buildUserPrompt', () => {
     expect(prompt).toContain('Cloud hosting fees');
   });
 
-  it('should include all required sections for full prompt', () => {
+  it('should include required sections for full prompt', () => {
     const prompt = buildUserPrompt(makeInput());
     expect(prompt).toContain('## Taxonomy');
     expect(prompt).toContain('## Company Context');
     expect(prompt).toContain('## Supplier Research');
-    expect(prompt).toContain('## Historical Classifications');
     expect(prompt).toContain('## Transactions');
   });
 
   it('should handle null supplier research', () => {
     const prompt = buildUserPrompt(makeInput({ supplierResearch: null }));
     expect(prompt).toContain('No supplier research available');
-  });
-
-  it('should handle empty historical classifications', () => {
-    const prompt = buildUserPrompt(makeInput({ historicalClassifications: [] }));
-    expect(prompt).toContain('No historical classifications available');
   });
 
   it('should handle empty transactions', () => {
@@ -268,7 +246,6 @@ describe('formatTaxonomyTree', () => {
     expect(result).toContain('Direct|Raw Materials|Steel');
     expect(result).toContain('Indirect|IT Services|Software Licenses');
     // Depth-1 and depth-2 only nodes should not be on their own lines
-    // (They appear as part of depth-3 paths, but not as standalone entries)
     expect(result).not.toMatch(/^\s*Direct$/m);
     expect(result).not.toMatch(/^\s*Indirect\|IT Services$/m);
   });
@@ -326,29 +303,6 @@ describe('formatSupplierResearch', () => {
   it('should not include parent company line when parentName is null', () => {
     const result = formatSupplierResearch(SAMPLE_SUPPLIER_RESEARCH, null);
     expect(result).not.toContain('Parent Company');
-  });
-});
-
-// --- formatHistoricalClassifications ---
-
-describe('formatHistoricalClassifications', () => {
-  it('should format classifications with counts', () => {
-    const result = formatHistoricalClassifications(SAMPLE_HISTORICAL);
-    expect(result).toContain('Indirect|IT Services|Software Licenses (used 15 times)');
-    expect(result).toContain('Indirect|IT Services|Cloud Hosting (used 8 times)');
-  });
-
-  it('should handle singular count', () => {
-    const result = formatHistoricalClassifications([
-      { l1: 'Direct', l2: 'Raw Materials', l3: 'Steel', count: 1 },
-    ]);
-    expect(result).toContain('used 1 time)');
-    expect(result).not.toContain('times');
-  });
-
-  it('should handle empty array', () => {
-    const result = formatHistoricalClassifications([]);
-    expect(result).toContain('No historical classifications available');
   });
 });
 
@@ -482,80 +436,90 @@ describe('formatTransactions', () => {
 // --- parseResponse ---
 
 describe('parseResponse', () => {
-  it('should parse a valid JSON response', () => {
+  it('should parse a valid multi-classification response', () => {
     const result = parseResponse(MOCK_LLM_RESPONSE);
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
-    expect(result.reasoning).toContain('TechSoft');
-    expect(result.descriptionSupplierAligned).toBe(true);
+    expect(result.classifications).toHaveLength(1);
+    expect(result.classifications[0].id).toBe(1);
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.assignments).toEqual({ '1': [1, 2] });
+  });
+
+  it('should parse a response with multiple classifications', () => {
+    const response = JSON.stringify({
+      classifications: [
+        { id: 1, classificationPath: 'Indirect|IT Services|Software Licenses' },
+        { id: 2, classificationPath: 'Indirect|IT Services|Cloud Hosting' },
+      ],
+      assignments: { '1': [1, 2], '2': [3] },
+    });
+    const result = parseResponse(response);
+    expect(result.classifications).toHaveLength(2);
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.classifications[1].classificationPath).toBe('Indirect|IT Services|Cloud Hosting');
+    expect(result.assignments['1']).toEqual([1, 2]);
+    expect(result.assignments['2']).toEqual([3]);
   });
 
   it('should handle markdown code fences', () => {
     const wrapped = '```json\n' + MOCK_LLM_RESPONSE + '\n```';
     const result = parseResponse(wrapped);
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
   });
 
   it('should handle code fences without language tag', () => {
     const wrapped = '```\n' + MOCK_LLM_RESPONSE + '\n```';
     const result = parseResponse(wrapped);
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
-  });
-
-  it('should default reasoning to empty string if missing', () => {
-    const response = JSON.stringify({
-      classificationPath: 'Indirect|IT Services|Software Licenses',
-    });
-    const result = parseResponse(response);
-    expect(result.reasoning).toBe('');
-  });
-
-  it('should default descriptionSupplierAligned to false if missing', () => {
-    const response = JSON.stringify({
-      classificationPath: 'Indirect|IT Services|Software Licenses',
-    });
-    const result = parseResponse(response);
-    expect(result.descriptionSupplierAligned).toBe(false);
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
   });
 
   it('should throw when response is not valid JSON', () => {
     expect(() => parseResponse('not json at all')).toThrow(
-      'Failed to parse LLM response as JSON'
+      'Failed to parse classification response as JSON'
     );
   });
 
-  it('should throw when classificationPath is missing', () => {
-    const response = JSON.stringify({ reasoning: 'test' });
+  it('should throw when classifications array is missing', () => {
+    const response = JSON.stringify({ assignments: { '1': [1] } });
     expect(() => parseResponse(response)).toThrow(
-      'LLM response missing classification path field'
+      'Expected "classifications" array'
     );
   });
 
-  it('should throw when classificationPath is empty string', () => {
-    const response = JSON.stringify({ classificationPath: '' });
-    expect(() => parseResponse(response)).toThrow(
-      'LLM response missing classification path field'
-    );
-  });
-
-  it('should unwrap { transactions: [...] } envelope from LLM', () => {
+  it('should throw when assignments is missing', () => {
     const response = JSON.stringify({
-      transactions: [
-        {
-          classificationPath: 'Non Clinical|Professional Services|Consulting',
-          reasoning: 'Unwrapped from transactions array',
-          descriptionSupplierAligned: true,
-        },
-        {
-          classificationPath: 'Non Clinical|IT|Software',
-          reasoning: 'Second item ignored',
-          descriptionSupplierAligned: false,
-        },
-      ],
+      classifications: [{ id: 1, classificationPath: 'A|B|C' }],
+    });
+    expect(() => parseResponse(response)).toThrow(
+      'Expected "assignments" object'
+    );
+  });
+
+  it('should unwrap single-element array classificationPath', () => {
+    const response = JSON.stringify({
+      classifications: [{ id: 1, classificationPath: ['Indirect|IT Services|Software Licenses'] }],
+      assignments: { '1': [1] },
     });
     const result = parseResponse(response);
-    expect(result.classificationPath).toBe('Non Clinical|Professional Services|Consulting');
-    expect(result.reasoning).toBe('Unwrapped from transactions array');
-    expect(result.descriptionSupplierAligned).toBe(true);
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+  });
+
+  it('should handle alternative field names (classification_path)', () => {
+    const response = JSON.stringify({
+      classifications: [{ id: 1, classification_path: 'Indirect|IT Services|Software Licenses' }],
+      assignments: { '1': [1] },
+    });
+    const result = parseResponse(response);
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+  });
+
+  it('should throw when classificationPath is missing from entry', () => {
+    const response = JSON.stringify({
+      classifications: [{ id: 1 }],
+      assignments: { '1': [1] },
+    });
+    expect(() => parseResponse(response)).toThrow(
+      'Classification entry 0 missing classificationPath'
+    );
   });
 });
 
@@ -642,104 +606,118 @@ describe('findClosestTaxonomyMatch', () => {
 describe('validateClassification', () => {
   it('should pass through a valid classification', () => {
     const input: ClassificationResult = {
-      classificationPath: 'Indirect|IT Services|Software Licenses',
-      reasoning: 'test',
-      descriptionSupplierAligned: true,
+      classifications: [{ id: 1, classificationPath: 'Indirect|IT Services|Software Licenses' }],
+      assignments: { '1': [1] },
     };
     const result = validateClassification(input, SAMPLE_TAXONOMY);
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
-    expect(result.reasoning).toBe('test');
-    expect(result.descriptionSupplierAligned).toBe(true);
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.assignments).toEqual({ '1': [1] });
   });
 
-  it('should fix invalid L1 by defaulting to first taxonomy L1', () => {
+  it('should validate each classification entry in the array', () => {
     const input: ClassificationResult = {
-      classificationPath: 'Unknown|Services|Software',
-      reasoning: 'test',
-      descriptionSupplierAligned: false,
+      classifications: [
+        { id: 1, classificationPath: 'indirect|IT Services|Software Licenses' },
+        { id: 2, classificationPath: 'Direct|Raw Materials|Steel|Extra' },
+      ],
+      assignments: { '1': [1], '2': [2] },
     };
     const result = validateClassification(input, SAMPLE_TAXONOMY);
-    // When L1 is invalid, it defaults to the first L1 in the taxonomy
-    expect(result.classificationPath.split('|')[0]).toBe('Direct');
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.classifications[1].classificationPath).toBe('Direct|Raw Materials|Steel');
+  });
+
+  it('should keep path unchanged when L1 is not in taxonomy and no close match exists', () => {
+    const input: ClassificationResult = {
+      classifications: [{ id: 1, classificationPath: 'Unknown|Services|Software' }],
+      assignments: { '1': [1] },
+    };
+    const result = validateClassification(input, SAMPLE_TAXONOMY);
+    // When L1 is invalid and no close taxonomy match, path is returned as-is
+    expect(result.classifications[0].classificationPath).toBe('Unknown|Services|Software');
   });
 
   it('should fix case-insensitive L1', () => {
     const input: ClassificationResult = {
-      classificationPath: 'indirect|IT Services|Software Licenses',
-      reasoning: 'test',
-      descriptionSupplierAligned: true,
+      classifications: [{ id: 1, classificationPath: 'indirect|IT Services|Software Licenses' }],
+      assignments: { '1': [1] },
     };
     const result = validateClassification(input, SAMPLE_TAXONOMY);
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
   });
 
   it('should truncate path deeper than 3', () => {
     const input: ClassificationResult = {
-      classificationPath: 'Indirect|IT Services|Software Licenses|Extra',
-      reasoning: 'test',
-      descriptionSupplierAligned: true,
+      classifications: [{ id: 1, classificationPath: 'Indirect|IT Services|Software Licenses|Extra' }],
+      assignments: { '1': [1] },
     };
     const result = validateClassification(input, SAMPLE_TAXONOMY);
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
   });
 
   it('should attempt to fill in path shallower than 3', () => {
     const input: ClassificationResult = {
-      classificationPath: 'Indirect|IT Services',
-      reasoning: 'test',
-      descriptionSupplierAligned: false,
+      classifications: [{ id: 1, classificationPath: 'Indirect|IT Services' }],
+      assignments: { '1': [1] },
     };
     const result = validateClassification(input, SAMPLE_TAXONOMY);
     // Should find a depth-3 node under Indirect|IT Services
-    expect(result.classificationPath.split('|')).toHaveLength(3);
-    expect(result.classificationPath).toMatch(/^Indirect\|IT Services\|/);
+    expect(result.classifications[0].classificationPath.split('|')).toHaveLength(3);
+    expect(result.classifications[0].classificationPath).toMatch(/^Indirect\|IT Services\|/);
   });
 
   it('should pad with Uncategorized when depth cannot be resolved from taxonomy', () => {
     const input: ClassificationResult = {
-      classificationPath: 'Indirect',
-      reasoning: 'test',
-      descriptionSupplierAligned: false,
+      classifications: [{ id: 1, classificationPath: 'Indirect' }],
+      assignments: { '1': [1] },
     };
     // Use empty taxonomy so no match can be found
     const result = validateClassification(input, []);
-    expect(result.classificationPath.split('|')).toHaveLength(3);
-    expect(result.classificationPath).toContain('Uncategorized');
+    expect(result.classifications[0].classificationPath.split('|')).toHaveLength(3);
+    expect(result.classifications[0].classificationPath).toContain('Uncategorized');
   });
 });
 
-// --- classifyInvoiceGroup ---
+// --- LLMClassificationAgent ---
 
-describe('classifyInvoiceGroup', () => {
-  it('should call LLM client and return validated result', async () => {
-    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+describe('LLMClassificationAgent', () => {
+  let mockLLM: LLMClient;
+  let agent: LLMClassificationAgent;
 
-    const result = await classifyInvoiceGroup(makeInput());
-
-    expect(mockChat).toHaveBeenCalledOnce();
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
-    expect(result.reasoning).toContain('TechSoft');
-    expect(result.descriptionSupplierAligned).toBe(true);
+  beforeEach(() => {
+    mockLLM = { chat: vi.fn() };
+    agent = new LLMClassificationAgent(mockLLM);
   });
 
-  it('should pass correct model options to LLM client', async () => {
-    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+  it('should call LLM client and return validated result', async () => {
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(MOCK_LLM_RESPONSE);
 
-    await classifyInvoiceGroup(makeInput());
+    const result = await agent.classifyInvoiceGroup(makeInput());
 
-    const [, , options] = mockChat.mock.calls[0];
+    expect(mockLLM.chat).toHaveBeenCalledOnce();
+    expect(result.classifications).toHaveLength(1);
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.assignments).toEqual({ '1': [1, 2] });
+  });
+
+  it('should pass maxTokens=2048 to LLM client', async () => {
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+
+    await agent.classifyInvoiceGroup(makeInput());
+
+    const [, , options] = vi.mocked(mockLLM.chat).mock.calls[0];
     expect(options).toEqual({
       temperature: 0,
-      maxTokens: 512,
+      maxTokens: 2048,
     });
   });
 
   it('should include all required sections in prompts', async () => {
-    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(MOCK_LLM_RESPONSE);
 
-    await classifyInvoiceGroup(makeInput());
+    await agent.classifyInvoiceGroup(makeInput());
 
-    const [systemPrompt, userPrompt] = mockChat.mock.calls[0];
+    const [systemPrompt, userPrompt] = vi.mocked(mockLLM.chat).mock.calls[0];
 
     // System prompt requirements
     expect(systemPrompt).toContain('exactly 3 levels');
@@ -749,99 +727,97 @@ describe('classifyInvoiceGroup', () => {
     expect(userPrompt).toContain('## Taxonomy');
     expect(userPrompt).toContain('## Company Context');
     expect(userPrompt).toContain('## Supplier Research');
-    expect(userPrompt).toContain('## Historical Classifications');
     expect(userPrompt).toContain('## Transactions');
+    // No historical classifications in new format
+    expect(userPrompt).not.toContain('## Historical Classifications');
   });
 
   it('should return default classification for empty transactions', async () => {
-    const result = await classifyInvoiceGroup(makeInput({ transactions: [] }));
+    const result = await agent.classifyInvoiceGroup(makeInput({ transactions: [] }));
 
-    expect(mockChat).not.toHaveBeenCalled();
-    expect(result.classificationPath).toBe('Indirect|Uncategorized|Uncategorized');
-    expect(result.reasoning).toContain('No transactions provided');
-    expect(result.descriptionSupplierAligned).toBe(false);
+    expect(mockLLM.chat).not.toHaveBeenCalled();
+    expect(result.classifications).toHaveLength(1);
+    expect(result.classifications[0].classificationPath).toBe('Indirect|Uncategorized|Uncategorized');
+    expect(result.assignments).toEqual({});
   });
 
   it('should validate and fix L1 in LLM response', async () => {
     const badL1Response = JSON.stringify({
-      classificationPath: 'indirect|IT Services|Software Licenses',
-      reasoning: 'test',
-      descriptionSupplierAligned: true,
+      classifications: [{ id: 1, classificationPath: 'indirect|IT Services|Software Licenses' }],
+      assignments: { '1': [1] },
     });
-    mockChat.mockResolvedValueOnce(badL1Response);
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(badL1Response);
 
-    const result = await classifyInvoiceGroup(makeInput());
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    const result = await agent.classifyInvoiceGroup(makeInput());
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
   });
 
   it('should validate and fix depth in LLM response', async () => {
     const deepResponse = JSON.stringify({
-      classificationPath: 'Indirect|IT Services|Software Licenses|Enterprise',
-      reasoning: 'test',
-      descriptionSupplierAligned: true,
+      classifications: [{ id: 1, classificationPath: 'Indirect|IT Services|Software Licenses|Enterprise' }],
+      assignments: { '1': [1] },
     });
-    mockChat.mockResolvedValueOnce(deepResponse);
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(deepResponse);
 
-    const result = await classifyInvoiceGroup(makeInput());
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
-    expect(result.classificationPath.split('|')).toHaveLength(3);
+    const result = await agent.classifyInvoiceGroup(makeInput());
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    expect(result.classifications[0].classificationPath.split('|')).toHaveLength(3);
   });
 
   it('should find closest taxonomy match for unknown paths', async () => {
     const unknownPathResponse = JSON.stringify({
-      classificationPath: 'Indirect|IT Services|Unknown Stuff',
-      reasoning: 'test',
-      descriptionSupplierAligned: false,
+      classifications: [{ id: 1, classificationPath: 'Indirect|IT Services|Unknown Stuff' }],
+      assignments: { '1': [1] },
     });
-    mockChat.mockResolvedValueOnce(unknownPathResponse);
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(unknownPathResponse);
 
-    const result = await classifyInvoiceGroup(makeInput());
+    const result = await agent.classifyInvoiceGroup(makeInput());
     // Should find a match under Indirect|IT Services
-    expect(result.classificationPath).toMatch(/^Indirect\|IT Services\|/);
-    expect(SAMPLE_TAXONOMY.some((n) => n.fullPath === result.classificationPath)).toBe(true);
+    expect(result.classifications[0].classificationPath).toMatch(/^Indirect\|IT Services\|/);
+    expect(SAMPLE_TAXONOMY.some((n) => n.fullPath === result.classifications[0].classificationPath)).toBe(true);
   });
 
   it('should propagate LLM client errors', async () => {
-    mockChat.mockRejectedValueOnce(new Error('API timeout'));
+    vi.mocked(mockLLM.chat).mockRejectedValueOnce(new Error('API timeout'));
 
-    await expect(classifyInvoiceGroup(makeInput())).rejects.toThrow('API timeout');
+    await expect(agent.classifyInvoiceGroup(makeInput())).rejects.toThrow('API timeout');
   });
 
   it('should handle LLM response with markdown-wrapped JSON', async () => {
     const wrapped = '```json\n' + MOCK_LLM_RESPONSE + '\n```';
-    mockChat.mockResolvedValueOnce(wrapped);
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(wrapped);
 
-    const result = await classifyInvoiceGroup(makeInput());
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    const result = await agent.classifyInvoiceGroup(makeInput());
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
   });
 
   it('should handle classification with null supplier research', async () => {
-    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(MOCK_LLM_RESPONSE);
 
-    const result = await classifyInvoiceGroup(makeInput({ supplierResearch: null }));
+    const result = await agent.classifyInvoiceGroup(makeInput({ supplierResearch: null }));
 
-    expect(result.classificationPath).toBe('Indirect|IT Services|Software Licenses');
-    const [, userPrompt] = mockChat.mock.calls[0];
+    expect(result.classifications[0].classificationPath).toBe('Indirect|IT Services|Software Licenses');
+    const [, userPrompt] = vi.mocked(mockLLM.chat).mock.calls[0];
     expect(userPrompt).toContain('No supplier research available');
   });
 
   it('should include supplier research fields in user prompt', async () => {
-    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(MOCK_LLM_RESPONSE);
 
-    await classifyInvoiceGroup(makeInput());
+    await agent.classifyInvoiceGroup(makeInput());
 
-    const [, userPrompt] = mockChat.mock.calls[0];
+    const [, userPrompt] = vi.mocked(mockLLM.chat).mock.calls[0];
     expect(userPrompt).toContain('Business Name: TechSoft Inc');
     expect(userPrompt).toContain('Industry: Technology');
     expect(userPrompt).toContain('Products/Services: ERP software, cloud services');
   });
 
   it('should include company context fields in user prompt', async () => {
-    mockChat.mockResolvedValueOnce(MOCK_LLM_RESPONSE);
+    vi.mocked(mockLLM.chat).mockResolvedValueOnce(MOCK_LLM_RESPONSE);
 
-    await classifyInvoiceGroup(makeInput());
+    await agent.classifyInvoiceGroup(makeInput());
 
-    const [, userPrompt] = mockChat.mock.calls[0];
+    const [, userPrompt] = vi.mocked(mockLLM.chat).mock.calls[0];
     expect(userPrompt).toContain('Industry: Manufacturing');
     expect(userPrompt).toContain('Sector: Industrial Goods');
     expect(userPrompt).toContain('Business Focus: Steel production');

@@ -23,7 +23,7 @@ const SAMPLE_TRANSACTIONS: Transaction[] = [
     taxonomyNodeId: 'tid1',
     classificationPath: 'Non Clinical|Facilities|Facilities Maintenance Services',
     classificationStatus: 'classified_by_ai',
-    classificationReasoning: 'Pest prevention service',
+    humanReviewed: false,
     canonicalFields: {
       supplier_name: 'massey services',
       gl_description: '6600:repair & maintenance',
@@ -38,8 +38,8 @@ const SAMPLE_TRANSACTIONS: Transaction[] = [
     rowIndex: 1,
     taxonomyNodeId: 'tid2',
     classificationPath: 'Non Clinical|Facilities|MRO Supplies',
-    classificationStatus: 'human_reviewed',
-    classificationReasoning: 'Manual reclassification',
+    classificationStatus: 'classified_by_ai',
+    humanReviewed: true,
     canonicalFields: {
       supplier_name: 'cintas corporation',
       gl_description: '6350:other expenses',
@@ -55,7 +55,7 @@ const SAMPLE_TRANSACTIONS: Transaction[] = [
     taxonomyNodeId: null,
     classificationPath: null,
     classificationStatus: 'unclassified',
-    classificationReasoning: null,
+    humanReviewed: false,
     canonicalFields: {
       supplier_name: 'unknown vendor',
       gl_description: '7000:miscellaneous',
@@ -101,10 +101,10 @@ describe('ReviewPage data integration (v2)', () => {
     expect(row.spend_amount).toBe('53.5');
   });
 
-  it('handles human_reviewed classification status', () => {
+  it('handles classified_by_ai status with human review flag', () => {
     const row = transactionToDashboardRow(SAMPLE_TRANSACTIONS[1], 1);
 
-    expect(row.classification_status).toBe('human_reviewed');
+    expect(row.classification_status).toBe('classified_by_ai');
     expect(row.L1).toBe('Non Clinical');
     expect(row.L2).toBe('Facilities');
     expect(row.L3).toBe('MRO Supplies');
@@ -128,7 +128,7 @@ describe('ReviewPage data integration (v2)', () => {
     expect(row.id).toBe('tx1');
     expect(row.row_index).toBe(0);
     expect(row.taxonomy_node_id).toBe('tid1');
-    expect(row.classification_reasoning).toBe('Pest prevention service');
+    expect(row.taxonomy_node_id).toBe('tid1');
   });
 
   it('transforms all transactions without errors', () => {

@@ -42,7 +42,6 @@ describe('ExportService', () => {
             { column_name: 'row_index' },
             { column_name: 'taxonomy_node_id' },
             { column_name: 'classification_status' },
-            { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
             { column_name: 'supplier_name' },
@@ -52,7 +51,7 @@ describe('ExportService', () => {
         return [
           {
             id: 'tx1', row_index: 0, taxonomy_node_id: 'tid1',
-            classification_status: 'classified', classification_reasoning: 'Matched',
+            classification_status: 'classified',
             created_at: '2026-01-01', updated_at: '2026-01-01',
             supplier_name: 'Acme Corp', spend_amount: 5000,
             classification_path: 'Indirect|IT|Software',
@@ -98,7 +97,6 @@ describe('ExportService', () => {
             { column_name: 'row_index' },
             { column_name: 'taxonomy_node_id' },
             { column_name: 'classification_status' },
-            { column_name: 'classification_reasoning' },
             { column_name: 'created_at' },
             { column_name: 'updated_at' },
           ];

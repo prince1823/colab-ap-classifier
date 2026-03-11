@@ -145,6 +145,11 @@ export class DuckDBDatabase implements Database {
         UPDATE project_suppliers SET is_researched = TRUE WHERE supplier_info IS NOT NULL;
       `);
     }
+
+    // Migrate: drop classification_reasoning column from transactions if it exists
+    try {
+      await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
+    } catch { /* column doesn't exist, ignore */ }
   }
 
   async closeDatabase(): Promise<void> {
@@ -243,7 +248,6 @@ export class DuckDBDatabase implements Database {
         taxonomy_node_id VARCHAR,
         classification_status VARCHAR DEFAULT 'unclassified',
         human_reviewed BOOLEAN DEFAULT FALSE,
-        classification_reasoning TEXT,
         original_supplier_name VARCHAR,
         project_supplier_id VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -73,9 +73,8 @@ export function createMockWebSearch(): WebSearch {
 export function createMockClassificationAgent(): ClassificationAgent {
   return {
     classifyInvoiceGroup: vi.fn().mockResolvedValue({
-      classificationPath: 'L1|L2|L3',
-      reasoning: 'test',
-      descriptionSupplierAligned: true,
+      classifications: [{ id: 1, classificationPath: 'L1|L2|L3' }],
+      assignments: { '1': [1] },
     }),
   };
 }

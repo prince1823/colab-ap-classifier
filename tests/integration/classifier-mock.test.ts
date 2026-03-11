@@ -43,6 +43,7 @@ import { SupplierResearcher } from '../../src/main/services/supplier-research';
 import { eventBus } from '../../src/main/event-bus';
 import type { ClassificationAgent, ResearchAgent, WebSearch, ColumnMappingAgent } from '../../src/shared/types/services';
 import type { SupplierInfo } from '../../src/shared/types/suppliers';
+import { buildDedupGroups } from '../../src/main/utils/dedup-groups';
 
 // ─── Fixture paths ──────────────────────────────────────────────────────────
 
@@ -72,7 +73,6 @@ interface RuleFixture {
 
 interface MockClassification {
   classificationPath: string;
-  reasoning: string;
 }
 
 interface SupplierResearchFixture {
@@ -118,10 +118,15 @@ function createMockClassificationAgentFromFixture(
         }
       }
       const match = mockClassifications[supplierKey] || mockClassifications['_default'];
+
+      // Compute group count from dedup groups so assignments cover all groups
+      const columnPriorities = invoiceGroup.columnPriorities ?? [];
+      const { groupCount } = buildDedupGroups(invoiceGroup.transactions, columnPriorities);
+      const allGroups = Array.from({ length: groupCount }, (_, i) => i + 1);
+
       return {
-        classificationPath: match.classificationPath,
-        reasoning: match.reasoning,
-        descriptionSupplierAligned: true,
+        classifications: [{ id: 1, classificationPath: match.classificationPath }],
+        assignments: { '1': allGroups },
       };
     }),
   } as unknown as ClassificationAgent;

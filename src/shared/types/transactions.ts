@@ -6,7 +6,6 @@ export interface Transaction {
   taxonomyNodeId: string | null;
   classificationPath: string | null;
   classificationStatus: ClassificationStatus;
-  classificationReasoning: string | null;
   humanReviewed: boolean;
   canonicalFields: Record<string, unknown>;
   createdAt: string;
@@ -82,7 +81,6 @@ export interface TransactionUpdate {
   ids: string[];
   taxonomyNodeId?: string;
   classificationStatus?: ClassificationStatus;
-  classificationReasoning?: string;
 }
 
 /**

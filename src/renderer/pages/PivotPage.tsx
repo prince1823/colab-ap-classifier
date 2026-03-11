@@ -55,7 +55,7 @@ export default function PivotPage() {
 
   const INTERNAL_COLS = new Set([
     'id', 'row_index', 'upload_id', 'taxonomy_node_id',
-    'classification_status', 'human_reviewed', 'classification_reasoning',
+    'classification_status', 'human_reviewed',
     'original_supplier_name', 'project_supplier_id',
     'created_at', 'updated_at',
   ])

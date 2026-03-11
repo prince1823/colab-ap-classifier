@@ -29,8 +29,7 @@ async function main() {
       classification_l1,
       classification_l2,
       classification_l3,
-      review_score,
-      substr(classification_reasoning, 1, 80) || '...' as reasoning_preview
+      review_score
     FROM transactions
   `);
   const transactions = txReader.getRowObjectsJson();
@@ -44,7 +43,6 @@ async function main() {
     console.log(`    L2: ${row.classification_l2}`);
     console.log(`    L3: ${row.classification_l3}`);
     console.log(`  Review Score: ${row.review_score}/100`);
-    console.log(`  Reasoning: ${row.reasoning_preview}`);
   });
 
   // Taxonomy stats

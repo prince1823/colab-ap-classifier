@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import AppShell from './components/AppShell'
+import LicenseGate from './components/LicenseGate'
 import ProjectView from './views/ProjectView'
 import TaxonomyView from './views/TaxonomyView'
 import DataView from './views/DataView'
@@ -11,6 +12,7 @@ import VersionHistoryView from './views/VersionHistoryView'
 
 function App() {
   return (
+    <LicenseGate>
       <Routes>
         <Route path="/" element={<AppShell />}>
           <Route index element={<Navigate to="/project" replace />} />
@@ -24,6 +26,7 @@ function App() {
           <Route path="version-history" element={<VersionHistoryView />} />
         </Route>
       </Routes>
+    </LicenseGate>
   )
 }
 

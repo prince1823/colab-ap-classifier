@@ -62,3 +62,6 @@ docs/review-pivot-guide.md
 logs/colab91-2026-02-25.ndjson
 .gitignore
 internal_docs/daily_logs/4m-row-optimization.md
+
+# License server local state
+license-server/.wrangler/

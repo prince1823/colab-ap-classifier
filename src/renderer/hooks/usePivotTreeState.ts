@@ -46,14 +46,37 @@ export function usePivotTreeState(
     return keys
   })
 
-  // Reset expand state ONLY when dimensions change (user adds/removes a
-  // dimension from the pivot). Data re-fetches with the same dimensions
-  // should NOT reset user's expand/collapse choices.
+  // Track previous state for smart merging
   const prevDimFingerprintRef = useRef(dimensionFingerprint)
+  const prevExpandableKeysRef = useRef(allExpandableKeys)
+
   useEffect(() => {
     if (prevDimFingerprintRef.current !== dimensionFingerprint) {
+      // Dimension change (user added/removed a pivot dimension) → full reset
       prevDimFingerprintRef.current = dimensionFingerprint
+      prevExpandableKeysRef.current = allExpandableKeys
       setExpandedKeys(allExpandableKeys)
+    } else if (allExpandableKeys !== prevExpandableKeysRef.current) {
+      // Data change with same dimensions (e.g. after reclassification) →
+      // preserve user's expand/collapse choices, auto-expand NEW nodes
+      const prevKeys = prevExpandableKeysRef.current
+      prevExpandableKeysRef.current = allExpandableKeys
+      setExpandedKeys((currentExpanded) => {
+        const merged = new Set(currentExpanded)
+        // Auto-expand nodes that are new to this tree
+        for (const key of allExpandableKeys) {
+          if (!prevKeys.has(key)) {
+            merged.add(key)
+          }
+        }
+        // Remove keys that no longer exist in the new tree
+        for (const key of merged) {
+          if (!allExpandableKeys.has(key)) {
+            merged.delete(key)
+          }
+        }
+        return merged
+      })
     }
   }, [dimensionFingerprint, allExpandableKeys])
 

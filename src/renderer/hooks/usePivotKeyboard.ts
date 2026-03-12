@@ -63,6 +63,7 @@ export function usePivotKeyboard({
     })
   }, [visibleRows])
 
+  // For filter (Cmd+K): fall back to focused row if nothing selected
   const getSelectedRows = useCallback((): FlattenedPivotRow[] => {
     if (selectedKeys.size === 0) {
       const focused = visibleRows[focusedIndex]
@@ -70,6 +71,12 @@ export function usePivotKeyboard({
     }
     return visibleRows.filter(r => selectedKeys.has(r.key))
   }, [selectedKeys, visibleRows, focusedIndex])
+
+  // For reclassify (Cmd+F): only explicitly selected rows, no fallback
+  const getExplicitlySelectedRows = useCallback((): FlattenedPivotRow[] => {
+    if (selectedKeys.size === 0) return []
+    return visibleRows.filter(r => selectedKeys.has(r.key))
+  }, [selectedKeys, visibleRows])
 
   const clearSelection = useCallback(() => {
     setSelectedKeys(new Set())
@@ -140,7 +147,7 @@ export function usePivotKeyboard({
       case 'f': {
         if (metaKey) {
           e.preventDefault()
-          onCmdF(getSelectedRows())
+          onCmdF(getExplicitlySelectedRows())
         }
         break
       }
@@ -150,7 +157,7 @@ export function usePivotKeyboard({
         break
       }
     }
-  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onToggleExpand, getSelectedRows, clearSelection])
+  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onToggleExpand, getSelectedRows, getExplicitlySelectedRows, clearSelection])
 
   return {
     focusedIndex,

@@ -32,8 +32,8 @@ interface WorkflowState {
   confirmedSupplierCount: number
 
   // Actions
-  createProject: (name: string) => Promise<{ needsSupplierUniverseSetup?: boolean }>
-  loadProject: (filePath: string) => Promise<{ needsSupplierUniverseSetup?: boolean }>
+  createProject: (name: string) => Promise<{ needsSupplierUniverseSetup?: boolean; missingSupplierUniversePath?: string }>
+  loadProject: (filePath: string) => Promise<{ needsSupplierUniverseSetup?: boolean; missingSupplierUniversePath?: string }>
   finalizeProjectOpen: () => Promise<void>
   closeProject: () => Promise<void>
   refreshMetadata: () => Promise<void>
@@ -72,7 +72,7 @@ export const useWorkflowStore = create<WorkflowState>()(
 
         const result = await ipc.project.new(name)
         if (result?.needsSupplierUniverseSetup) {
-          return { needsSupplierUniverseSetup: true }
+          return { needsSupplierUniverseSetup: true, missingSupplierUniversePath: result.missingSupplierUniversePath }
         }
         const metadata = await ipc.project.getMetadata()
         set({
@@ -91,7 +91,7 @@ export const useWorkflowStore = create<WorkflowState>()(
 
         const result = await ipc.project.open(filePath)
         if (result?.needsSupplierUniverseSetup) {
-          return { needsSupplierUniverseSetup: true }
+          return { needsSupplierUniverseSetup: true, missingSupplierUniversePath: result.missingSupplierUniversePath }
         }
 
         let metadata: ProjectMetadata | null = null

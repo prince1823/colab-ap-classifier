@@ -7,7 +7,7 @@ import type {
   ProjectStore as IProjectStore,
   TransactionStore as ITransactionStore,
 } from '../../shared/types/services';
-import { SupplierUniverseNotConfiguredError } from './supplier-universe';
+import { SupplierUniverseNotConfiguredError, SupplierUniverseFileMissingError } from './supplier-universe';
 
 const C91_EXTENSION = '.c91';
 
@@ -23,7 +23,7 @@ export class ProjectStore implements IProjectStore {
   async createProject(
     name: string,
     filePath: string
-  ): Promise<{ filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean }> {
+  ): Promise<{ filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean; missingSupplierUniversePath?: string }> {
     if (!name || name.trim().length === 0) {
       throw new Error('Project name must not be empty');
     }
@@ -55,8 +55,9 @@ export class ProjectStore implements IProjectStore {
         : undefined;
       return { filePath, name, warning };
     } catch (err) {
-      if (err instanceof SupplierUniverseNotConfiguredError) {
-        return { filePath, name, needsSupplierUniverseSetup: true };
+      if (err instanceof SupplierUniverseNotConfiguredError || err instanceof SupplierUniverseFileMissingError) {
+        const missingSupplierUniversePath = err instanceof SupplierUniverseFileMissingError ? err.missingPath : undefined;
+        return { filePath, name, needsSupplierUniverseSetup: true, missingSupplierUniversePath };
       }
       throw err;
     }
@@ -64,7 +65,7 @@ export class ProjectStore implements IProjectStore {
 
   async openProject(
     filePath: string
-  ): Promise<{ filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean }> {
+  ): Promise<{ filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean; missingSupplierUniversePath?: string }> {
     if (!filePath || filePath.trim().length === 0) {
       throw new Error('File path must not be empty');
     }
@@ -109,8 +110,9 @@ export class ProjectStore implements IProjectStore {
 
       return { filePath, name, warning };
     } catch (err) {
-      if (err instanceof SupplierUniverseNotConfiguredError) {
-        return { filePath, name, needsSupplierUniverseSetup: true };
+      if (err instanceof SupplierUniverseNotConfiguredError || err instanceof SupplierUniverseFileMissingError) {
+        const missingSupplierUniversePath = err instanceof SupplierUniverseFileMissingError ? err.missingPath : undefined;
+        return { filePath, name, needsSupplierUniverseSetup: true, missingSupplierUniversePath };
       }
       throw err;
     }

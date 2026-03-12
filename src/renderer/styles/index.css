@@ -246,7 +246,10 @@ html, body, #root {
   letter-spacing: 0.04em;
   color: #6b7280;
   white-space: nowrap;
-  max-width: 180px;
+  min-width: 120px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border-right: 1px solid #f3f4f6;
   transition: opacity 0.2s, background-color 0.2s;
 }
@@ -275,6 +278,7 @@ html, body, #root {
   padding: 6px 10px;
   text-align: center;
   min-height: 36px;
+  min-width: 120px;
   vertical-align: middle;
   border-right: 1px solid #f3f4f6;
   transition: background-color 0.15s, box-shadow 0.15s;
@@ -306,6 +310,7 @@ html, body, #root {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 120px;
   max-width: 200px;
   color: #374151;
   font-size: 12px;

@@ -214,11 +214,20 @@ export default function HierarchicalPivotView({
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevModalOpenRef = useRef(modalOpen)
 
+  // Auto-focus the table on mount so keyboard navigation works immediately
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.focus()
+    }
+  }, [pivotData])
+
   const rowVirtualizer = useVirtualizer({
     count: visibleRows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 32,
     overscan: 20,
+    scrollPaddingStart: 40,
+    scrollPaddingEnd: 40,
   })
 
   // Keyboard navigation
@@ -301,10 +310,15 @@ export default function HierarchicalPivotView({
 
   const totalFilterCount = groupedFilters.reduce((sum, g) => sum + g.values.length, 0)
 
+  const refocusTable = () => {
+    requestAnimationFrame(() => scrollRef.current?.focus())
+  }
+
   const removeFilter = (col: string, value: string) => {
     const current = filterState[col] || []
     const next = current.filter(v => v !== value)
     onFilterStateChange({ ...filterState, [col]: next })
+    refocusTable()
   }
 
   return (
@@ -326,7 +340,7 @@ export default function HierarchicalPivotView({
                 />
               ))}
               <button
-                onClick={onClearAllFilters}
+                onClick={() => { onClearAllFilters(); refocusTable() }}
                 className="text-[9px] font-medium text-red-500 hover:text-red-600 flex-shrink-0 ml-0.5 transition-colors"
               >
                 Clear all
@@ -361,7 +375,7 @@ export default function HierarchicalPivotView({
             />
             {search && (
               <button
-                onClick={() => setSearch('')}
+                onClick={() => { setSearch(''); refocusTable() }}
                 className="absolute right-1 rounded-full hover:bg-gray-100 p-px"
               >
                 <X size={8} />
@@ -413,9 +427,15 @@ export default function HierarchicalPivotView({
       {hasData && pivotData && <div
         ref={scrollRef}
         className="overflow-auto flex-1 border border-gray-200 rounded-lg"
-        style={{ position: 'relative', outline: 'none' }}
+        style={{ position: 'relative', outline: 'none', scrollPaddingBottom: 40, scrollPaddingTop: 40 }}
         tabIndex={0}
         onKeyDown={handleKeyDown}
+        onBlur={(e) => {
+          // Auto-reclaim focus unless it moved to the search input or a modal is open
+          const target = e.relatedTarget as HTMLElement | null
+          if (modalOpen || target?.tagName === 'INPUT') return
+          requestAnimationFrame(() => scrollRef.current?.focus())
+        }}
         role="grid"
       >
         <table className="pivot-hierarchy-table" style={{ minWidth: '100%' }}>

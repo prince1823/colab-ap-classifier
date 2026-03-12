@@ -35,6 +35,16 @@ export function usePivotKeyboard({
     setFocusedIndex(prev => Math.min(prev, visibleRows.length - 1))
   }, [visibleRows.length])
 
+  // After render, scroll the focused row into view (handles sticky header/footer)
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      const el = document.querySelector('tr[data-focused]')
+      if (el) {
+        (el as HTMLElement).scrollIntoView({ block: 'nearest' })
+      }
+    })
+  }, [focusedIndex])
+
   // Clean up stale selected keys when rows change (e.g. after reclassification)
   useEffect(() => {
     setSelectedKeys(prev => {

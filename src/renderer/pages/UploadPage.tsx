@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import FileDropZone from '../components/upload/FileDropZone'
-import CSVPreviewTable from '../components/upload/CSVPreviewTable'
 import ColumnMappingEditor from '../components/upload/ColumnMappingEditor'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
 import type { CSVPreviewWithMappings, ColumnMappingWithPriority } from '../../shared/types/column-mapping'
 import { toSimpleMapping } from '../../shared/types/column-mapping'
+import type { UploadRecord } from '../../shared/types/services'
 
 const REQUIRED_COLS = ['supplier_name', 'spend_amount', 'invoice_date']
 
@@ -23,13 +23,15 @@ export default function UploadPage() {
   const [preview, setPreview] = useState<CSVPreviewWithMappings | null>(null)
   const [mapping, setMapping] = useState<ColumnMappingWithPriority>({})
 
+  // Upload history for "Apply Previous Mappings"
+  const [uploadHistory, setUploadHistory] = useState<UploadRecord[]>([])
+
   // Transient UI state
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showMappingEditor, setShowMappingEditor] = useState(false)
 
-  // Check for existing upload on mount
+  // Check for existing upload + load history on mount
   useEffect(() => {
     ipc.ingest.getUpload().then((upload) => {
       if (upload) {
@@ -41,13 +43,14 @@ export default function UploadPage() {
     }).catch(() => {
       setShowUploader(true)
     })
+
+    ipc.ingest.getUploadHistory().then(setUploadHistory).catch(() => {})
   }, [])
 
   const handleFileSelected = async (path: string) => {
     setFilePath(path)
     setLoading(true)
     setError(null)
-    setShowMappingEditor(false)
     try {
       const parsed = await ipc.ingest.parseCSV(path)
       const mappingSuggestion = await ipc.ingest.suggestMappings(parsed.columns, parsed.sampleRows)
@@ -131,8 +134,8 @@ export default function UploadPage() {
       <div>
         <h2 className="text-lg font-semibold text-gray-900">Upload CSV</h2>
         <p className="mt-1 text-sm text-gray-500">
-          {showMappingEditor
-            ? 'Review and adjust column mappings, then import.'
+          {preview
+            ? 'Review column mappings. Drag canonical names between columns to reassign. Then import.'
             : 'Select a CSV file to upload and preview the data.'}
         </p>
       </div>
@@ -155,10 +158,17 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Step 1: CSV preview — show before mapping editor */}
-      {preview && !loading && !showMappingEditor && (
+      {/* Combined: column mapping table with inline data preview */}
+      {preview && !loading && (
         <>
-          <CSVPreviewTable preview={preview} />
+          <ColumnMappingEditor
+            suggestion={preview.mappingSuggestion}
+            csvColumns={preview.columns}
+            sampleRows={preview.sampleRows}
+            totalRows={preview.totalRows}
+            onMappingChange={setMapping}
+            uploadHistory={uploadHistory}
+          />
 
           <div className="flex items-center justify-between border-t border-gray-200 pt-4">
             <button
@@ -169,32 +179,6 @@ export default function UploadPage() {
               className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
               Choose Different File
-            </button>
-            <button
-              onClick={() => setShowMappingEditor(true)}
-              className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Next: Configure Mappings →
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* Step 2: Column mapping editor + import */}
-      {preview && !loading && showMappingEditor && (
-        <>
-          <ColumnMappingEditor
-            suggestion={preview.mappingSuggestion}
-            csvColumns={preview.columns}
-            onMappingChange={setMapping}
-          />
-
-          <div className="flex items-center justify-between border-t border-gray-200 pt-4">
-            <button
-              onClick={() => setShowMappingEditor(false)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              ← Back to Preview
             </button>
             <button
               onClick={handleImport}

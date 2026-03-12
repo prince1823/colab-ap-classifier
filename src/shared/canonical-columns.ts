@@ -31,3 +31,12 @@ export const CANONICAL_COLUMNS: CanonicalColumnDefinition[] = [
 
 /** The 3 required canonical column names. Always sent to the classifier first. */
 export const REQUIRED_CANONICAL_COLUMNS = ['supplier_name', 'spend_amount', 'invoice_date'] as const;
+
+/** All 14 canonical column names the LLM agent knows about. Used to populate the unassigned pool in the mapping UI. */
+export const KNOWN_CANONICALS = [
+  'supplier_name', 'spend_amount', 'invoice_date',
+  'line_description', 'gl_description', 'gl_code',
+  'department', 'company', 'cost_center',
+  'supplier_address', 'currency', 'memo',
+  'po_number', 'creation_date',
+] as const;

@@ -210,6 +210,16 @@ export default function HierarchicalPivotView({
   )
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  const prevModalOpenRef = useRef(modalOpen)
+
+  // Restore focus to the table when modal closes, and clear stale selection
+  useEffect(() => {
+    if (prevModalOpenRef.current && !modalOpen) {
+      // Modal just closed → refocus the scroll container so keyboard works
+      requestAnimationFrame(() => scrollRef.current?.focus())
+    }
+    prevModalOpenRef.current = modalOpen
+  }, [modalOpen])
 
   const rowVirtualizer = useVirtualizer({
     count: visibleRows.length,

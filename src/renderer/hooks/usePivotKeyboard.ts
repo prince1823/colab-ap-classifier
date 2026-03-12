@@ -35,6 +35,24 @@ export function usePivotKeyboard({
     setFocusedIndex(prev => Math.min(prev, visibleRows.length - 1))
   }, [visibleRows.length])
 
+  // Clean up stale selected keys when rows change (e.g. after reclassification)
+  useEffect(() => {
+    setSelectedKeys(prev => {
+      if (prev.size === 0) return prev
+      const validKeys = new Set(visibleRows.map(r => r.key))
+      const cleaned = new Set<string>()
+      let changed = false
+      for (const key of prev) {
+        if (validKeys.has(key)) {
+          cleaned.add(key)
+        } else {
+          changed = true
+        }
+      }
+      return changed ? cleaned : prev
+    })
+  }, [visibleRows])
+
   const getSelectedRows = useCallback((): FlattenedPivotRow[] => {
     if (selectedKeys.size === 0) {
       const focused = visibleRows[focusedIndex]

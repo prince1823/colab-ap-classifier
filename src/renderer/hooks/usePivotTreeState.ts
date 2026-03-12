@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import type { PivotTreeNode, FlattenedPivotRow, PathSegment } from '../types/pivot'
 
 /**
@@ -20,14 +20,42 @@ export function usePivotTreeState(
     return keys
   }, [root])
 
-  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(allExpandableKeys)
+  // Build a stable fingerprint from the tree's dimension fields.
+  // This only changes when the actual row dimensions change (e.g. user
+  // adds/removes a dimension), NOT when data is re-fetched with same dims.
+  const dimensionFingerprint = useMemo(() => {
+    if (!root || root.children.length === 0) return ''
+    // Walk one path to the deepest leaf and collect dimension fields
+    const dims: string[] = []
+    let node = root.children[0]
+    while (node) {
+      dims.push(node.dimensionField)
+      node = node.children[0]
+    }
+    return dims.join('|')
+  }, [root])
 
-  // When tree structure changes (e.g. dimension added/removed), expand all immediately
-  const prevRootRef = useRef(root)
-  if (prevRootRef.current !== root) {
-    prevRootRef.current = root
-    setExpandedKeys(allExpandableKeys)
-  }
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => {
+    if (!root) return new Set<string>()
+    const keys = new Set<string>()
+    const walk = (node: PivotTreeNode) => {
+      if (node.children.length > 0) keys.add(node.key)
+      for (const child of node.children) walk(child)
+    }
+    for (const child of root.children) walk(child)
+    return keys
+  })
+
+  // Reset expand state ONLY when dimensions change (user adds/removes a
+  // dimension from the pivot). Data re-fetches with the same dimensions
+  // should NOT reset user's expand/collapse choices.
+  const prevDimFingerprintRef = useRef(dimensionFingerprint)
+  useEffect(() => {
+    if (prevDimFingerprintRef.current !== dimensionFingerprint) {
+      prevDimFingerprintRef.current = dimensionFingerprint
+      setExpandedKeys(allExpandableKeys)
+    }
+  }, [dimensionFingerprint, allExpandableKeys])
 
   const toggleExpand = useCallback((key: string) => {
     setExpandedKeys(prev => {

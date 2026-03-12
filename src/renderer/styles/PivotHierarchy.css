@@ -562,6 +562,8 @@
   outline-offset: -2px;
   z-index: 1;
   position: relative;
+  scroll-margin-top: 40px;
+  scroll-margin-bottom: 40px;
 }
 
 /* ── Keyboard navigation: selected row ── */

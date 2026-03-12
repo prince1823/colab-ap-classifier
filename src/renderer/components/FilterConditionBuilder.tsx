@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import type { FilterCondition, FilterOperator, FieldType, FieldDefinition } from '../../shared/types/transactions'
 
 const ALL_OPERATORS: FilterOperator[] = [
@@ -36,12 +36,152 @@ const OPERATORS_BY_TYPE: Record<FieldType, FilterOperator[]> = {
   enum: ['equals', 'not_equals', 'in_list'],
 }
 
+/** Autocomplete input — text input with dropdown suggestions */
+function AutocompleteInput({
+  value,
+  onChange,
+  onFetchSuggestions,
+  field,
+  placeholder = 'value',
+  type = 'text',
+  className,
+}: {
+  value: string
+  onChange: (val: string) => void
+  onFetchSuggestions: (field: string, query: string) => Promise<string[]>
+  field: string
+  placeholder?: string
+  type?: string
+  className?: string
+}) {
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [open, setOpen] = useState(false)
+  const [highlightIdx, setHighlightIdx] = useState(-1)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+
+  // Fetch suggestions on input change
+  const fetchSuggestions = useCallback(
+    (query: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(async () => {
+        if (!field) {
+          setSuggestions([])
+          return
+        }
+        try {
+          const results = await onFetchSuggestions(field, query)
+          setSuggestions(results)
+          setOpen(results.length > 0)
+          setHighlightIdx(-1)
+        } catch {
+          setSuggestions([])
+        }
+      }, 150)
+    },
+    [field, onFetchSuggestions],
+  )
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // Cleanup debounce on unmount
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current) }, [])
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value
+    onChange(val)
+    fetchSuggestions(val)
+  }
+
+  const handleFocus = () => {
+    // Show suggestions on focus (fetch with current value)
+    fetchSuggestions(value)
+  }
+
+  const selectSuggestion = (val: string) => {
+    onChange(val)
+    setOpen(false)
+    inputRef.current?.focus()
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!open || suggestions.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setHighlightIdx((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHighlightIdx((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1))
+    } else if (e.key === 'Enter' && highlightIdx >= 0) {
+      e.preventDefault()
+      selectSuggestion(suggestions[highlightIdx])
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div ref={wrapRef} className="autocomplete-wrap">
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        type={type}
+        className={className}
+        autoComplete="off"
+      />
+      {open && suggestions.length > 0 && (
+        <div className="autocomplete-dropdown">
+          {suggestions.map((s, idx) => (
+            <div
+              key={s}
+              className={`autocomplete-option ${idx === highlightIdx ? 'highlighted' : ''}`}
+              onMouseDown={(e) => { e.preventDefault(); selectSuggestion(s) }}
+              onMouseEnter={() => setHighlightIdx(idx)}
+            >
+              {value ? highlightMatch(s, value) : s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Highlight the matching substring in a suggestion */
+function highlightMatch(text: string, query: string) {
+  const idx = text.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, idx)}
+      <strong className="autocomplete-match">{text.slice(idx, idx + query.length)}</strong>
+      {text.slice(idx + query.length)}
+    </>
+  )
+}
+
 interface FilterConditionBuilderProps {
   conditions: FilterCondition[]
   onChange: (conditions: FilterCondition[]) => void
   /** Accept either string[] (backward compat) or FieldDefinition[] for richer UI */
   availableFields: string[] | FieldDefinition[]
   compact?: boolean
+  /** Optional callback to fetch autocomplete suggestions for a field. Receives field name and current query string. */
+  onFetchSuggestions?: (field: string, query: string) => Promise<string[]>
 }
 
 /** Normalize string[] to FieldDefinition[] for internal use */
@@ -58,6 +198,7 @@ export default function FilterConditionBuilder({
   onChange,
   availableFields,
   compact = false,
+  onFetchSuggestions,
 }: FilterConditionBuilderProps) {
   const fields = normalizeFields(availableFields)
   const fieldMap = new Map(fields.map(f => [f.name, f]))
@@ -93,7 +234,12 @@ export default function FilterConditionBuilder({
     const currentOp = conditions[index].operator
     // Auto-switch operator if current one isn't valid for new field type
     const operator = validOps.includes(currentOp) ? currentOp : validOps[0]
-    onChange(conditions.map((c, i) => (i === index ? { ...c, field: newField, operator, value: '' } : c)))
+    onChange(conditions.map((c, i) => {
+      if (i === index) return { ...c, field: newField, operator, value: '' }
+      // Auto-set previous condition's connector to OR when same field is selected
+      if (i === index - 1 && c.field === newField) return { ...c, connector: 'OR' }
+      return c
+    }))
   }
 
   const addCondition = () => {
@@ -169,6 +315,16 @@ export default function FilterConditionBuilder({
                           <option key={v} value={v}>{v}</option>
                         ))}
                       </select>
+                    ) : onFetchSuggestions && fieldDef.type === 'string' ? (
+                      <AutocompleteInput
+                        value={String(c.value)}
+                        onChange={(val) => updateCondition(i, 'value', val)}
+                        onFetchSuggestions={onFetchSuggestions}
+                        field={c.field}
+                        placeholder="value"
+                        type="text"
+                        className={`min-w-0 flex-1 rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-800 shadow-sm ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-blue-400`}
+                      />
                     ) : (
                       <input
                         value={String(c.value)}

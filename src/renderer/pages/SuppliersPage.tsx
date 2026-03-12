@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import { FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
 import type { ResearchProgress } from '../../shared/types/classification'
 import type { FilterCondition } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
-import FilterConditionBuilder from '../components/FilterConditionBuilder'
+import FilterConditionBuilder, { OPERATOR_LABELS, NO_VALUE_OPERATORS } from '../components/FilterConditionBuilder'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
 
@@ -128,6 +130,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
+  const [allSuppliers, setAllSuppliers] = useState<ProjectSupplierView[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -135,6 +138,9 @@ export default function SuppliersPage() {
   const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([])
   const [debouncedConditions, setDebouncedConditions] = useState<FilterCondition[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false)
+  // Draft conditions inside dialog — committed on Apply
+  const [draftConditions, setDraftConditions] = useState<FilterCondition[]>([{ field: '', operator: 'equals', value: '', connector: 'AND' }])
 
   // Debounce filter conditions — 300ms delay before triggering backend call
   useEffect(() => {
@@ -153,6 +159,139 @@ export default function SuppliersPage() {
     const valid = debouncedConditions.filter(c => c.field && (NO_VALUE_OPS.has(c.operator) || c.value !== ''))
     return valid.length > 0 ? { conditions: valid } : undefined
   }, [debouncedConditions])
+
+  // Active (valid) filter conditions for display chips
+  const activeFilters = useMemo(() => {
+    return filterConditions.filter(c => c.field && (NO_VALUE_OPS.has(c.operator) || c.value !== ''))
+  }, [filterConditions])
+
+  // Get the label for a field name
+  const getFieldLabel = useCallback((fieldName: string) => {
+    const f = filterFields.find(fd => fd.name === fieldName)
+    return f ? f.label : fieldName
+  }, [filterFields])
+
+  // Group consecutive same-field filters for collapsed chip display
+  type FilterGroup = { field: string; items: { filter: FilterCondition; activeIndex: number }[]; connectorBefore?: string }
+  const filterGroups = useMemo((): FilterGroup[] => {
+    const groups: FilterGroup[] = []
+    for (let i = 0; i < activeFilters.length; i++) {
+      const c = activeFilters[i]
+      const connectorBefore = i > 0 ? (activeFilters[i - 1]?.connector || 'AND') : undefined
+      const lastGroup = groups[groups.length - 1]
+      // Merge into previous group if same field AND connected by OR (same-field = match any)
+      if (lastGroup && lastGroup.field === c.field && connectorBefore === 'OR') {
+        lastGroup.items.push({ filter: c, activeIndex: i })
+      } else {
+        groups.push({ field: c.field, items: [{ filter: c, activeIndex: i }], connectorBefore })
+      }
+    }
+    return groups
+  }, [activeFilters])
+
+  // Track which group's value dropdown is open
+  const [openValueDropdown, setOpenValueDropdown] = useState<number | null>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (openValueDropdown === null) return
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpenValueDropdown(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [openValueDropdown])
+
+  // Build logic expression string like (A AND B) OR C
+  const logicExpression = useMemo(() => {
+    if (activeFilters.length < 2) return ''
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    // Build tokens with grouping based on filterGroups
+    const parts: string[] = []
+    let letterIdx = 0
+    for (let gi = 0; gi < filterGroups.length; gi++) {
+      const group = filterGroups[gi]
+      if (gi > 0 && group.connectorBefore) {
+        parts.push(group.connectorBefore)
+      }
+      if (group.items.length === 1) {
+        parts.push(letters[letterIdx] || `F${letterIdx + 1}`)
+        letterIdx++
+      } else {
+        // Multiple items in group — wrap in parens with OR (same-field = match any)
+        const inner = group.items.map(() => {
+          const l = letters[letterIdx] || `F${letterIdx + 1}`
+          letterIdx++
+          return l
+        }).join(' OR ')
+        parts.push(`(${inner})`)
+      }
+    }
+    return parts.join(' ')
+  }, [filterGroups, activeFilters.length])
+
+  // Open filter dialog — seed draft from current conditions
+  const openFilterDialog = useCallback(() => {
+    setDraftConditions(
+      filterConditions.length > 0
+        ? filterConditions
+        : [{ field: '', operator: 'equals', value: '', connector: 'AND' }]
+    )
+    setFilterDialogOpen(true)
+  }, [filterConditions])
+
+  // Apply filters from dialog
+  const applyFilters = useCallback(() => {
+    setFilterConditions(draftConditions)
+    setFilterDialogOpen(false)
+  }, [draftConditions])
+
+  // Clear all filters
+  const clearFilters = useCallback(() => {
+    setFilterConditions([])
+    setDraftConditions([{ field: '', operator: 'equals', value: '', connector: 'AND' }])
+    setFilterDialogOpen(false)
+  }, [])
+
+  // Remove a single active filter chip
+  const removeFilterChip = useCallback((index: number) => {
+    // Find the actual index in filterConditions for this active filter
+    let activeIdx = -1
+    const newConditions = filterConditions.filter(c => {
+      if (c.field && (NO_VALUE_OPS.has(c.operator) || c.value !== '')) {
+        activeIdx++
+        return activeIdx !== index
+      }
+      return false // also drop empty conditions
+    })
+    setFilterConditions(newConditions)
+  }, [filterConditions])
+
+  // Autocomplete suggestions from ALL suppliers (unfiltered) so dropdown always shows full list
+  const fetchFilterSuggestions = useCallback(async (field: string, query: string): Promise<string[]> => {
+    const q = query.toLowerCase()
+    let values: string[] = []
+
+    if (field === 'supplier_name') {
+      values = allSuppliers.map(s => s.supplierName).filter(Boolean)
+    } else if (field === 'parent_supplier_name') {
+      values = allSuppliers.map(s => s.parentName).filter((v): v is string => !!v)
+    } else if (field === 'data_source') {
+      values = allSuppliers.map(s => (s as Record<string, unknown>).dataSource).filter((v): v is string => typeof v === 'string' && !!v)
+    } else {
+      return []
+    }
+
+    // Deduplicate
+    const unique = [...new Set(values)]
+    // Filter by query
+    const filtered = q ? unique.filter(v => v.toLowerCase().includes(q)) : unique
+    // Sort alphabetically and limit
+    return filtered.sort((a, b) => a.localeCompare(b)).slice(0, 30)
+  }, [allSuppliers])
 
   // Load settings and filter fields once on mount
   useEffect(() => {
@@ -175,6 +314,18 @@ export default function SuppliersPage() {
     }
     loadSettings()
   }, [])
+
+  // Load all suppliers (unfiltered) for autocomplete suggestions
+  const loadAllSuppliers = useCallback(async () => {
+    try {
+      const data = await ipc.suppliers.list(undefined as unknown as Parameters<typeof ipc.suppliers.list>[0])
+      setAllSuppliers(data as ProjectSupplierView[])
+    } catch {
+      // non-fatal — autocomplete just won't have full list
+    }
+  }, [])
+
+  useEffect(() => { loadAllSuppliers() }, [loadAllSuppliers])
 
   const loadData = useCallback(async () => {
     if (suppliers.length === 0) setLoading(true)
@@ -253,12 +404,13 @@ export default function SuppliersPage() {
     try {
       await ipc.suppliers.researchSingle(supplier.supplierName)
       await loadData()
+      loadAllSuppliers()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Research failed')
     } finally {
       setSaving(false)
     }
-  }, [loadData])
+  }, [loadData, loadAllSuppliers])
 
   /** Confirm a single supplier */
   const confirmSupplier = useCallback(async (supplier: ProjectSupplierView) => {
@@ -288,7 +440,8 @@ export default function SuppliersPage() {
     }
     setSelectedIds(new Set())
     await loadData()
-  }, [suppliers, selectedIds, loadData])
+    loadAllSuppliers()
+  }, [suppliers, selectedIds, loadData, loadAllSuppliers])
 
   /** Batch confirm selected suppliers */
   const confirmSelected = useCallback(async () => {
@@ -317,6 +470,7 @@ export default function SuppliersPage() {
       await ipc.suppliers.filterTailSpend(val)
       setTailSpendSet(true)
       await loadData()
+      loadAllSuppliers()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply threshold')
     } finally {
@@ -442,15 +596,123 @@ export default function SuppliersPage() {
         </div>
       )}
 
-      {/* Filter bar */}
+      {/* Filter bar — button + active filter chips */}
       {filterFields.length > 0 && (
         <div className="suppliers-filter-bar">
-          <FilterConditionBuilder
-            conditions={filterConditions.length > 0 ? filterConditions : [{ field: '', operator: 'equals', value: '', connector: 'AND' }]}
-            onChange={setFilterConditions}
-            availableFields={filterFields}
-            compact
-          />
+          <button onClick={openFilterDialog} className={`filter-trigger-btn ${activeFilters.length > 0 ? 'has-filters' : ''}`}>
+            <FunnelIcon className="filter-trigger-icon" />
+            Filter
+            {activeFilters.length > 0 && <span className="filter-count-badge">{activeFilters.length}</span>}
+          </button>
+
+          {activeFilters.length > 0 && (
+            <div className="filter-chips">
+              {filterGroups.map((group, gi) => {
+                const first = group.items[0].filter
+
+                return (
+                  <React.Fragment key={gi}>
+                    {gi > 0 && group.connectorBefore && (
+                      <span className="filter-chip-connector">{group.connectorBefore}</span>
+                    )}
+
+                    {/* Single chip: field name once, values as clickable tags */}
+                    <div className="filter-chip-wrap" ref={openValueDropdown === gi ? dropdownRef : undefined}>
+                      <span className="filter-chip">
+                        <span className="filter-chip-field">{getFieldLabel(group.field)}</span>
+                        <span className="filter-chip-op">{OPERATOR_LABELS[first.operator]}</span>
+                        {!NO_VALUE_OPERATORS.has(first.operator) && (
+                          group.items.length > 1 ? (
+                            <button
+                              className="filter-chip-values-btn"
+                              onClick={() => setOpenValueDropdown(openValueDropdown === gi ? null : gi)}
+                            >
+                              {group.items.map((item, ii) => (
+                                <React.Fragment key={item.activeIndex}>
+                                  {ii > 0 && <span className="filter-chip-separator">|</span>}
+                                  <span>{String(item.filter.value)}</span>
+                                </React.Fragment>
+                              ))}
+                            </button>
+                          ) : (
+                            <span className="filter-chip-value">{String(first.value)}</span>
+                          )
+                        )}
+                        <button className="filter-chip-remove" onClick={() => removeFilterChip(group.items[0].activeIndex)} title="Remove filter">
+                          <XMarkIcon className="filter-chip-x" />
+                        </button>
+                      </span>
+
+                      {/* Dropdown for individual value removal */}
+                      {openValueDropdown === gi && group.items.length > 1 && (
+                        <div className="filter-chip-dropdown">
+                          {group.items.map((item) => (
+                            <div key={item.activeIndex} className="filter-chip-dropdown-item">
+                              <span className="filter-chip-dropdown-value">{String(item.filter.value)}</span>
+                              <button
+                                className="filter-chip-dropdown-remove"
+                                onClick={() => {
+                                  removeFilterChip(item.activeIndex)
+                                  if (group.items.length <= 2) setOpenValueDropdown(null)
+                                }}
+                                title="Remove this value"
+                              >
+                                <XMarkIcon className="filter-chip-x" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </React.Fragment>
+                )
+              })}
+              {logicExpression && (
+                <span className="filter-logic-expr" title="Filter logic">{logicExpression}</span>
+              )}
+              <button className="filter-clear-all" onClick={clearFilters}>Clear all</button>
+            </div>
+          )}
+
+          {/* Filter dialog */}
+          <Dialog.Root open={filterDialogOpen} onOpenChange={setFilterDialogOpen}>
+            <Dialog.Portal>
+              <Dialog.Overlay className="filter-dialog-overlay" />
+              <Dialog.Content className="filter-dialog-content">
+                <div className="filter-dialog-header">
+                  <Dialog.Title className="filter-dialog-title">Filter Suppliers</Dialog.Title>
+                  <Dialog.Close asChild>
+                    <button className="filter-dialog-close" aria-label="Close">
+                      <XMarkIcon className="filter-dialog-close-icon" />
+                    </button>
+                  </Dialog.Close>
+                </div>
+
+                <div className="filter-dialog-body">
+                  <FilterConditionBuilder
+                    conditions={draftConditions}
+                    onChange={setDraftConditions}
+                    availableFields={filterFields}
+                    onFetchSuggestions={fetchFilterSuggestions}
+                  />
+                </div>
+
+                <div className="filter-dialog-footer">
+                  <button className="filter-dialog-btn secondary" onClick={clearFilters}>
+                    Clear All
+                  </button>
+                  <div className="filter-dialog-footer-right">
+                    <Dialog.Close asChild>
+                      <button className="filter-dialog-btn secondary">Cancel</button>
+                    </Dialog.Close>
+                    <button className="filter-dialog-btn primary" onClick={applyFilters}>
+                      Apply Filters
+                    </button>
+                  </div>
+                </div>
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
         </div>
       )}
 

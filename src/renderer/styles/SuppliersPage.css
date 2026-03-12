@@ -203,10 +203,412 @@
 .suppliers-search-clear:hover { color: #374151; background: #f3f4f6; }
 .suppliers-search-clear svg { width: 14px; height: 14px; }
 
-/* Filter bar */
+/* Filter bar — button + chips layout */
 .suppliers-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 12px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  min-height: 34px;
+}
+
+/* Filter trigger button */
+.filter-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.filter-trigger-btn:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.filter-trigger-btn.has-filters {
+  border-color: #3b82f6;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.filter-trigger-btn.has-filters:hover {
+  background: #dbeafe;
+}
+
+.filter-trigger-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.filter-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* Filter chips container */
+.filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 8px;
+  background: #f0f4ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 14px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #374151;
+  white-space: nowrap;
+  max-width: 450px;
+  overflow: hidden;
+}
+
+.filter-chip-field {
+  font-weight: 600;
+  color: #1e40af;
+}
+
+.filter-chip-op {
+  color: #6b7280;
+}
+
+.filter-chip-value {
+  color: #111827;
+  font-weight: 500;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-chip-connector {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #9ca3af;
+  letter-spacing: 0.04em;
+}
+
+.filter-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.filter-chip-remove:hover {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.filter-chip-x {
+  width: 12px;
+  height: 12px;
+}
+
+/* Chip wrapper for positioning dropdown */
+.filter-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Clickable values button inside chip */
+.filter-chip-values-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  background: none;
+  border: none;
+  padding: 1px 3px;
+  cursor: pointer;
+  font: inherit;
+  color: #111827;
+  font-weight: 500;
+  border-radius: 3px;
+  transition: background 0.15s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+.filter-chip-values-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.filter-chip-values-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Separator between multiple values in a grouped chip */
+.filter-chip-separator {
+  color: #a5b4fc;
+  font-weight: 600;
+  font-size: 11px;
+  margin: 0 2px;
+  user-select: none;
+}
+
+/* Dropdown for individual value removal */
+.filter-chip-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 180px;
+  max-width: 320px;
+  background: #fff;
+  border: 1px solid #e0e7ff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.filter-chip-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+.filter-chip-dropdown-item:hover {
+  background: #f5f3ff;
+}
+
+.filter-chip-dropdown-value {
+  font-size: 12px;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.filter-chip-dropdown-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: #9ca3af;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.filter-chip-dropdown-remove:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+/* Logic expression badge */
+.filter-logic-expr {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  color: #7c3aed;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.filter-clear-all {
+  border: none;
+  background: none;
+  font-size: 11px;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.filter-clear-all:hover {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+/* Filter dialog overlay */
+.filter-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 200;
+  animation: overlayFadeIn 0.15s ease;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Filter dialog content */
+.filter-dialog-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 201;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  animation: dialogSlideIn 0.2s ease;
+}
+
+@keyframes dialogSlideIn {
+  from { opacity: 0; transform: translate(-50%, -48%); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.filter-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.filter-dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.filter-dialog-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-dialog-close:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.filter-dialog-close-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.filter-dialog-body {
+  padding: 20px;
+  padding-bottom: 220px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.filter-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-top: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.filter-dialog-footer-right {
+  display: flex;
+  gap: 8px;
+}
+
+.filter-dialog-btn {
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-dialog-btn.primary {
+  background: #3b82f6;
+  color: #fff;
+  border: 1px solid #3b82f6;
+}
+
+.filter-dialog-btn.primary:hover {
+  background: #2563eb;
+}
+
+.filter-dialog-btn.secondary {
+  background: #fff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.filter-dialog-btn.secondary:hover {
+  background: #f9fafb;
 }
 
 /* Table */

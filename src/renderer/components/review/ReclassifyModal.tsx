@@ -111,25 +111,37 @@ export default function ReclassifyModal({
           />
         </div>
 
-        {/* Taxonomy list */}
+        {/* Taxonomy list — grouped by L1 */}
         <div ref={listRef} className="flex-1 overflow-y-auto px-2 py-1">
-          {filteredNodes.map((node, idx) => (
-            <div
-              key={node.id}
-              className={`px-3 py-1.5 rounded cursor-pointer text-sm transition-colors ${
-                idx === focusedIdx
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              onClick={() => onApply(node)}
-              onMouseEnter={() => onFocusedIdxChange(idx)}
-            >
-              <span className="font-medium">{node.l3 || node.l2 || node.l1}</span>
-              <span className="text-xs text-gray-400 ml-2">
-                {node.fullPath.split('|').map(s => s.trim()).join(' > ')}
-              </span>
-            </div>
-          ))}
+          {filteredNodes.map((node, idx) => {
+            const prevL1 = idx > 0 ? filteredNodes[idx - 1].l1 : null
+            const showL1Header = node.l1 !== prevL1
+            return (
+              <React.Fragment key={node.id}>
+                {showL1Header && (
+                  <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 select-none">
+                    {node.l1}
+                  </div>
+                )}
+                <div
+                  className={`px-3 py-1.5 rounded cursor-pointer text-sm transition-colors ${
+                    idx === focusedIdx
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  onClick={() => onApply(node)}
+                  onMouseEnter={() => onFocusedIdxChange(idx)}
+                >
+                  <span className="font-medium">{node.l3 || node.l2 || node.l1}</span>
+                  {node.l2 && (
+                    <span className="text-xs text-gray-400 ml-2">
+                      {[node.l2, node.l3].filter(Boolean).join(' > ')}
+                    </span>
+                  )}
+                </div>
+              </React.Fragment>
+            )
+          })}
           {filteredNodes.length === 0 && (
             <p className="text-sm text-gray-400 text-center py-4">No matching taxonomy nodes</p>
           )}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { DndProvider, useDrag, useDrop } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
-import { Eye, EyeOff, GripHorizontal, RotateCcw } from 'lucide-react'
+import { GripHorizontal, RotateCcw } from 'lucide-react'
 import type { ColumnMappingWithPriority, DerivedMappings, CompletedUpload, ConfidenceLevel } from '../../../shared/types/column-mapping'
 import { REQUIRED_CANONICAL_COLUMNS, KNOWN_CANONICALS } from '../../../shared/canonical-columns'
 
@@ -52,11 +52,58 @@ function isRequired(canonical: string): boolean {
   return REQUIRED_SET.has(canonical)
 }
 
+// ── Fuzzy matching helpers for auto-assigning canonicals ─────────────
+
+/** Known aliases for each canonical — used for smarter auto-matching */
+const CANONICAL_ALIASES: Record<string, string[]> = {
+  supplier_name: ['vendor', 'supplier', 'vendor name', 'payee'],
+  spend_amount: ['amount', 'cost', 'total', 'price', 'value', 'spend', 'net amount', 'gross amount'],
+  invoice_date: ['date', 'invoice date', 'transaction date', 'accounting date', 'posting date'],
+  line_description: ['description', 'line description', 'item description', 'line desc', 'text'],
+  gl_description: ['gl description', 'gl desc', 'ledger description', 'ledger desc', 'account description', 'account desc'],
+  gl_code: ['gl code', 'gl account', 'account code', 'ledger code', 'account number', 'gl number', 'gl', 'account'],
+  department: ['department', 'dept'],
+  company: ['company', 'entity', 'business unit', 'company code'],
+  cost_center: ['cost center', 'cost centre', 'cc', 'costcenter'],
+  supplier_address: ['address', 'supplier address', 'vendor address'],
+  currency: ['currency', 'curr', 'ccy'],
+  memo: ['memo', 'notes', 'comment', 'remarks', 'note'],
+  po_number: ['po number', 'po', 'purchase order', 'po #', 'po no'],
+  creation_date: ['creation date', 'created', 'created date', 'entry date', 'creation'],
+}
+
+function normalizeForMatch(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function fuzzyMatchScore(canonical: string, csvColumn: string): number {
+  const csvNorm = normalizeForMatch(csvColumn)
+  const aliases = CANONICAL_ALIASES[canonical] || []
+
+  // Exact alias match (highest confidence)
+  if (aliases.some((a) => csvNorm === a || csvNorm.startsWith(a + ' ') || csvNorm.endsWith(' ' + a))) {
+    return 1.0
+  }
+
+  // Token overlap: what fraction of canonical's tokens appear in the CSV column?
+  const canonTokens = canonical.split('_').filter(Boolean)
+  const csvTokens = csvNorm.split(/\s+/).filter(Boolean)
+
+  let matchCount = 0
+  for (const ct of canonTokens) {
+    if (csvTokens.some((csvt) => csvt.includes(ct) || ct.includes(csvt))) {
+      matchCount++
+    }
+  }
+
+  return canonTokens.length > 0 ? matchCount / canonTokens.length : 0
+}
+
 function deriveInitialState(
   derivedMappings: DerivedMappings,
   csvColumns: string[],
 ): { columns: ColumnState[]; unassignedCanonicals: string[] } {
-  // Build csv → canonical lookup from mapping rows
+  // Step 1: Apply LLM-suggested mappings
   const csvToCanonical: Record<string, string> = {}
   for (const row of derivedMappings.rows) {
     if (row.csvColumn) {
@@ -67,13 +114,44 @@ function deriveInitialState(
   const columns: ColumnState[] = csvColumns.map((csvColumn) => ({
     csvColumn,
     canonical: csvToCanonical[csvColumn] ?? null,
-    excluded: false, // all included by default
+    excluded: false,
   }))
 
-  const assignedCanonicals = new Set(derivedMappings.rows.filter((r) => r.csvColumn).map((r) => r.canonical))
-  const unassignedCanonicals = KNOWN_CANONICALS.filter((c) => !assignedCanonicals.has(c))
+  const assignedSet = new Set(columns.filter((c) => c.canonical).map((c) => c.canonical!))
+  const stillUnassigned = KNOWN_CANONICALS.filter((c) => !assignedSet.has(c))
 
-  return { columns, unassignedCanonicals: [...unassignedCanonicals] }
+  // Step 2: Auto-assign remaining canonicals via fuzzy matching
+  const unmappedIndices = columns
+    .map((c, i) => (c.canonical === null ? i : -1))
+    .filter((i) => i >= 0)
+
+  // Score every (canonical, csvColumn) pair
+  const candidates: { canonical: string; colIdx: number; score: number }[] = []
+  for (const canonical of stillUnassigned) {
+    for (const idx of unmappedIndices) {
+      const score = fuzzyMatchScore(canonical, columns[idx].csvColumn)
+      if (score >= 0.5) {
+        candidates.push({ canonical, colIdx: idx, score })
+      }
+    }
+  }
+
+  // Greedy assignment: best scores first, no double-assigning
+  candidates.sort((a, b) => b.score - a.score)
+  const usedCanonicals = new Set<string>()
+  const usedColumns = new Set<number>()
+
+  for (const { canonical, colIdx } of candidates) {
+    if (usedCanonicals.has(canonical) || usedColumns.has(colIdx)) continue
+    columns[colIdx].canonical = canonical
+    usedCanonicals.add(canonical)
+    usedColumns.add(colIdx)
+  }
+
+  // Whatever is left truly has no matching CSV column
+  const unassignedCanonicals = stillUnassigned.filter((c) => !usedCanonicals.has(c))
+
+  return { columns, unassignedCanonicals }
 }
 
 function buildMapping(columns: ColumnState[]): ColumnMappingWithPriority {
@@ -265,22 +343,6 @@ function ColumnMappingEditorInner({
     setUnassigned((prev) => (prev.includes(canonical) ? prev : [...prev, canonical]))
   }, [])
 
-  const handleToggleExclude = useCallback((csvColumn: string) => {
-    setColumns((prev) => {
-      const next = prev.map((c) => {
-        if (c.csvColumn !== csvColumn) return c
-        const newExcluded = !c.excluded
-        if (newExcluded && c.canonical) {
-          // Move canonical to unassigned
-          setUnassigned((u) => [...u, c.canonical!])
-          return { ...c, excluded: true, canonical: null }
-        }
-        return { ...c, excluded: newExcluded }
-      })
-      return next
-    })
-  }, [])
-
   const handleApplyPrevious = useCallback(() => {
     if (!completedUploads || completedUploads.length === 0) return
     const prevMappings = completedUploads[0].mappings // MappingRow[]
@@ -347,23 +409,21 @@ function ColumnMappingEditorInner({
 
 
 
-      {/* ── Unassigned canonical pool ────────────────────────────── */}
-      {unassigned.length > 0 && (
-        <UnassignedDropZone onReturn={handleReturnToPool}>
-          <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mr-2">
-            Unassigned
-          </span>
-          {unassigned.map((c) => (
-            <CanonicalBadge key={c} canonical={c} sourceColumn={null} />
-          ))}
-        </UnassignedDropZone>
-      )}
+      {/* ── Unassigned canonical pool (always visible as drop target) */}
+      <UnassignedDropZone onReturn={handleReturnToPool}>
+        <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mr-2">
+          {unassigned.length > 0 ? 'Unassigned' : 'Drag here to unmap'}
+        </span>
+        {unassigned.map((c) => (
+          <CanonicalBadge key={c} canonical={c} sourceColumn={null} />
+        ))}
+      </UnassignedDropZone>
 
       {/* ── Main table ───────────────────────────────────────────── */}
       <div className="mapping-table-wrap">
         <table className="min-w-full text-sm border-collapse">
           <thead className="sticky top-0 z-10">
-            {/* Row 1: CSV column names + exclude toggles */}
+            {/* Row 1: CSV column names */}
             <tr className="bg-gray-50 border-b border-gray-200">
               <th className="mapping-th-hash">#</th>
               {columns.map((col) => (
@@ -371,16 +431,7 @@ function ColumnMappingEditorInner({
                   key={col.csvColumn}
                   className={`mapping-th-col ${col.excluded ? 'col-excluded' : ''}`}
                 >
-                  <div className="flex items-center gap-1">
-                    <span className="truncate flex-1 text-left">{col.csvColumn}</span>
-                    <button
-                      onClick={() => handleToggleExclude(col.csvColumn)}
-                      className="mapping-eye-btn"
-                      title={col.excluded ? 'Include column' : 'Exclude column'}
-                    >
-                      {col.excluded ? <EyeOff size={12} /> : <Eye size={12} />}
-                    </button>
-                  </div>
+                  <span className="truncate text-left">{col.csvColumn}</span>
                 </th>
               ))}
             </tr>

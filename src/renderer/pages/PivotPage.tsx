@@ -2,12 +2,10 @@ import { useState, useMemo, useCallback } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
-import MetricsTabContainer from '../components/review/MetricsTabContainer'
 import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useReclassification } from '../hooks/useReclassification'
 import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
-import { X } from 'lucide-react'
 import type { Aggregation, SpendDisplayMode, FlattenedPivotRow } from '../types/pivot'
 import type { PivotFilterState } from '../components/review/PivotFilterBar'
 import type { TransactionFilter } from '../../shared/types/transactions'
@@ -32,7 +30,6 @@ export default function PivotPage() {
   const [filterState, setFilterState] = useState<PivotFilterState>({})
   const [spendDisplayMode, setSpendDisplayMode] = useState<SpendDisplayMode>('absolute')
   const [drillDownRow, setDrillDownRow] = useState<FlattenedPivotRow | null>(null)
-  const [showDashboard, setShowDashboard] = useState(false)
 
   const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
 
@@ -83,14 +80,6 @@ export default function PivotPage() {
             <span className="text-gray-400 ml-1">⌘K filter | ⌘F classify | Double-click to filter</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowDashboard(true)}
-            className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            Dashboard
-          </button>
-        </div>
       </div>
 
       <div className="flex-1 min-h-0">
@@ -123,30 +112,6 @@ export default function PivotPage() {
           row={drillDownRow}
           onClose={() => setDrillDownRow(null)}
         />
-      )}
-
-      {/* Dashboard modal */}
-      {showDashboard && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/30"
-            onClick={() => setShowDashboard(false)}
-          />
-          <div className="fixed inset-8 z-50 bg-white rounded-lg shadow-xl flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200">
-              <h2 className="text-base font-semibold text-gray-900">Dashboard</h2>
-              <button
-                onClick={() => setShowDashboard(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              <MetricsTabContainer filter={filter} />
-            </div>
-          </div>
-        </>
       )}
 
       <ReclassifyModal

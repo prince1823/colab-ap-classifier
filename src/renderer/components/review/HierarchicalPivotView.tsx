@@ -431,9 +431,10 @@ export default function HierarchicalPivotView({
         tabIndex={0}
         onKeyDown={handleKeyDown}
         onBlur={(e) => {
-          // Auto-reclaim focus unless it moved to the search input or a modal is open
+          // Auto-reclaim focus unless it moved to an interactive element or a modal is open
           const target = e.relatedTarget as HTMLElement | null
-          if (modalOpen || target?.tagName === 'INPUT') return
+          const tag = target?.tagName
+          if (modalOpen || tag === 'INPUT' || tag === 'SELECT' || tag === 'BUTTON' || tag === 'TEXTAREA') return
           requestAnimationFrame(() => scrollRef.current?.focus())
         }}
         role="grid"

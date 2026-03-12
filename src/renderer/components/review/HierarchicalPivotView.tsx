@@ -247,6 +247,7 @@ export default function HierarchicalPivotView({
   }, [filterState, onFilterStateChange])
 
   const handleCmdF = useMemo(() => (rows: FlattenedPivotRow[]) => {
+    if (rows.length === 0) return  // no explicit selection → don't open
     onReclassify?.(rows)
   }, [onReclassify])
 

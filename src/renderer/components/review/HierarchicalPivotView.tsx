@@ -200,13 +200,15 @@ export default function HierarchicalPivotView({
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
 
-  const { flatRows, toggleExpand, expandToLevel, depth0TotalMap } = usePivotTreeState(
+  const { flatRows, allFlatRows, toggleExpand, expandToLevel, depth0TotalMap } = usePivotTreeState(
     pivotData?.root ?? null
   )
 
+  // When searching, use allFlatRows (ignores expand/collapse) so collapsed children are found.
+  // When not searching, use flatRows (respects expand/collapse state).
   const visibleRows = useMemo(
-    () => filterRowsBySearch(flatRows, search),
-    [flatRows, search]
+    () => search.trim() ? filterRowsBySearch(allFlatRows, search) : flatRows,
+    [flatRows, allFlatRows, search]
   )
 
   const scrollRef = useRef<HTMLDivElement>(null)

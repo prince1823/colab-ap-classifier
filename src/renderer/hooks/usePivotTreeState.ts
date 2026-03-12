@@ -130,9 +130,11 @@ export function usePivotTreeState(
     return map
   }, [root])
 
-  // Flatten tree via DFS, respecting expand/collapse state
-  const flatRows = useMemo((): FlattenedPivotRow[] => {
-    if (!root) return []
+  // Helper: flatten tree via DFS
+  const flattenTree = useCallback((
+    treeRoot: PivotTreeNode,
+    respectExpanded: boolean
+  ): FlattenedPivotRow[] => {
     const rows: FlattenedPivotRow[] = []
     let prevL1Key = ''
     let prevL2Key = ''
@@ -141,12 +143,10 @@ export function usePivotTreeState(
       const isExpanded = expandedKeys.has(node.key)
       const hasChildren = node.children.length > 0
 
-      // Build path segments for this node
       const segment: PathSegment = { dimensionField: node.dimensionField, value: node.label }
       const pathSegments = [...pathStack, segment]
       const depth0Key = node.depth === 0 ? node.key : currentDepth0Key
 
-      // Determine group separators
       let isFirstInL1Group = false
       let isFirstInL2Group = false
       if (node.depth === 0) {
@@ -175,22 +175,35 @@ export function usePivotTreeState(
         dimensionField: node.dimensionField,
       })
 
-      if (isExpanded && hasChildren) {
+      if (hasChildren && (!respectExpanded || isExpanded)) {
         for (const child of node.children) {
           walk(child, pathSegments, depth0Key)
         }
       }
     }
 
-    for (const child of root.children) {
+    for (const child of treeRoot.children) {
       walk(child, [], '')
     }
 
     return rows
-  }, [root, expandedKeys])
+  }, [expandedKeys])
+
+  // Flatten tree respecting expand/collapse state (normal view)
+  const flatRows = useMemo(
+    () => root ? flattenTree(root, true) : [],
+    [root, flattenTree]
+  )
+
+  // Flatten entire tree ignoring expand/collapse (for search)
+  const allFlatRows = useMemo(
+    () => root ? flattenTree(root, false) : [],
+    [root, flattenTree]
+  )
 
   return {
     flatRows,
+    allFlatRows,
     toggleExpand,
     expandAll,
     collapseAll,
@@ -202,7 +215,9 @@ export function usePivotTreeState(
 
 /**
  * Filter flat rows by search term, preserving ancestor context.
- * Returns a new array with only matching rows and their ancestors.
+ * Uses DFS position (walk-backward) to find true ancestors — safe even when
+ * labels contain the `|` delimiter.  Ancestors are forced to isExpanded: true
+ * so matching children are always visible during search.
  */
 export function filterRowsBySearch(
   flatRows: FlattenedPivotRow[],
@@ -211,20 +226,36 @@ export function filterRowsBySearch(
   if (!search.trim()) return flatRows
   const q = search.trim().toLowerCase()
 
-  // Find all matching keys
-  const matchingKeys = new Set<string>()
-  for (const row of flatRows) {
-    if (row.label.toLowerCase().includes(q)) {
-      matchingKeys.add(row.key)
-      // Add all ancestor keys (split by | and build prefixes)
-      const parts = row.key.split('|')
-      let prefix = ''
-      for (let i = 0; i < parts.length - 1; i++) {
-        prefix = i === 0 ? parts[i] : `${prefix}|${parts[i]}`
-        matchingKeys.add(prefix)
+  // Find indices of all matching rows
+  const matchIndices: number[] = []
+  for (let i = 0; i < flatRows.length; i++) {
+    if (flatRows[i].label.toLowerCase().includes(q)) {
+      matchIndices.push(i)
+    }
+  }
+
+  if (matchIndices.length === 0) return []
+
+  // For each match, walk backward in the DFS-ordered list to find true ancestors
+  const includeKeys = new Set<string>()
+  for (const idx of matchIndices) {
+    includeKeys.add(flatRows[idx].key)
+    // Walk back, collecting the first row at each decreasing depth
+    let targetDepth = flatRows[idx].depth - 1
+    for (let j = idx - 1; j >= 0 && targetDepth >= 0; j--) {
+      if (flatRows[j].depth === targetDepth) {
+        includeKeys.add(flatRows[j].key)
+        targetDepth--
       }
     }
   }
 
-  return flatRows.filter(row => matchingKeys.has(row.key))
+  // Return filtered rows; force ancestors to show expanded chevron
+  return flatRows
+    .filter(row => includeKeys.has(row.key))
+    .map(row =>
+      row.hasChildren && !row.isExpanded
+        ? { ...row, isExpanded: true }
+        : row
+    )
 }

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { ipc } from '../lib/ipc'
+import { usePivotStore } from './pivotStore'
 import type { ProjectMetadata } from '../../shared/types/project'
 import type { ClassificationProgress } from '../../shared/types/classification'
 
@@ -88,6 +89,8 @@ export const useWorkflowStore = create<WorkflowState>()(
       loadProject: async (filePath: string) => {
         try { await ipc.project.close() } catch { /* already closed */ }
         set({ projectMetadata: null, classificationProgress: null, hasProject: false, isClassifying: false, ...INITIAL_GATE_STATE })
+        // Clear pivot page state so stale filters from previous project don't carry over
+        usePivotStore.getState().reset()
 
         const result = await ipc.project.open(filePath)
         if (result?.needsSupplierUniverseSetup) {

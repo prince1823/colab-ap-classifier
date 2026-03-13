@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useMemo, useCallback } from 'react'
+import { useState } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
@@ -7,18 +8,16 @@ import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useReclassification } from '../hooks/useReclassification'
 import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
-import type { Aggregation, SpendDisplayMode, FlattenedPivotRow } from '../types/pivot'
-import type { PivotFilterState } from '../components/review/PivotFilterBar'
-import type { TransactionFilter, FilterCondition, GroupedFilter } from '../../shared/types/transactions'
+import { usePivotStore } from '../stores/pivotStore'
+import type { FlattenedPivotRow } from '../types/pivot'
+import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
-import { groupedToConditions, makeEmptyGroup } from '../components/FilterConditionBuilder'
-
-const DEFAULT_ROW_DIMENSIONS: string[] = []
+import { groupedToConditions } from '../components/FilterConditionBuilder'
 
 /**
  * Convert dimension pill filters into a TransactionFilter.
  */
-function buildTransactionFilter(pillState: PivotFilterState): TransactionFilter | undefined {
+function buildTransactionFilter(pillState: Record<string, string[]>): TransactionFilter | undefined {
   const conditions = Object.entries(pillState)
     .filter(([, values]) => values.length > 0)
     .map(([field, values]) => ({ field, operator: 'in_list' as const, value: values }))
@@ -27,14 +26,20 @@ function buildTransactionFilter(pillState: PivotFilterState): TransactionFilter 
 }
 
 export default function PivotPage() {
-  const [rowDimensions, setRowDimensions] = useState<string[]>(DEFAULT_ROW_DIMENSIONS)
-  const [valueDimension, setValueDimension] = useState('spend_amount')
-  const [aggregation, setAggregation] = useState<Aggregation>('sum')
-  const [filterState, setFilterState] = useState<PivotFilterState>({})
-  const [spendDisplayMode, setSpendDisplayMode] = useState<SpendDisplayMode>('absolute')
+  // Persisted state from Zustand store (survives tab switches)
+  const {
+    rowDimensions, setRowDimensions,
+    valueDimension, setValueDimension,
+    aggregation, setAggregation,
+    filterState, setFilterState,
+    spendDisplayMode, setSpendDisplayMode,
+    advancedGrouped, setAdvancedGrouped,
+    showAdvancedFilter, setShowAdvancedFilter,
+    clearAllFilters,
+  } = usePivotStore()
+
+  // Transient UI state (OK to lose on tab switch)
   const [drillDownRow, setDrillDownRow] = useState<FlattenedPivotRow | null>(null)
-  const [advancedGrouped, setAdvancedGrouped] = useState<GroupedFilter | null>(null)
-  const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
 
   // Flat conditions derived from grouped for backward compat (chips, badge count, etc.)
   const advancedConditions = useMemo(() =>
@@ -148,7 +153,7 @@ export default function PivotPage() {
           onAggregationChange={setAggregation}
           filterState={filterState}
           onFilterStateChange={setFilterState}
-          onClearAllFilters={() => { setFilterState({}); setAdvancedGrouped(null) }}
+          onClearAllFilters={clearAllFilters}
           onExport={handleExport}
           exportDisabled={!pivotData}
           totalCount={totalCount}

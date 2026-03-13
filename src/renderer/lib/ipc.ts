@@ -148,7 +148,7 @@ export const ipc = {
 
   // ── Export (1 channel) ──
   export: {
-    csv: () => invoke('export:csv'),
+    csv: (filters?: TransactionFilter) => invoke('export:csv', filters),
   },
 
   // ── Settings (5 channels) ──

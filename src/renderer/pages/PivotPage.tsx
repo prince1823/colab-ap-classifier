@@ -124,8 +124,8 @@ export default function PivotPage() {
   )
 
   const handleExport = useCallback(async () => {
-    await ipc.export.csv()
-  }, [])
+    await ipc.export.csv(filter)
+  }, [filter])
 
   const handleReclassify = useCallback((rows: FlattenedPivotRow[]) => {
     reclassify.open(rows)

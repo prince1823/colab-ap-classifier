@@ -1,6 +1,8 @@
 import { dialog, BrowserWindow } from 'electron';
 import fs from 'fs';
 import type { Database, ExportService as IExportService } from '../../shared/types/services';
+import type { TransactionFilter } from '../../shared/types/transactions';
+import { buildWhereClause, buildGroupedWhereClause } from '../utils/query-builder';
 
 function escapeCSV(value: string): string {
   if (value.includes(',') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
@@ -9,10 +11,65 @@ function escapeCSV(value: string): string {
   return value;
 }
 
+const FILTER_VIRTUAL_DIMS: Record<string, string> = {
+  classification_l1: 'tax.l1',
+  classification_l2: 'tax.l2',
+  classification_l3: 'tax.l3',
+  supplier_name: 'ps.supplier_name',
+  is_researched: 'ps.is_researched',
+};
+
+function buildExportFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[] } {
+  if (!filters) return { whereSQL: '', params: [] };
+
+  const whereClauses: string[] = [];
+  const params: unknown[] = [];
+  const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
+
+  if (filters.supplierName) {
+    whereClauses.push('ps.supplier_name = ?');
+    params.push(filters.supplierName);
+  }
+  if (filters.taxonomyNodeId) {
+    whereClauses.push('t.taxonomy_node_id = ?');
+    params.push(filters.taxonomyNodeId);
+  }
+  if (filters.classificationStatus) {
+    whereClauses.push('t.classification_status = ?');
+    params.push(filters.classificationStatus);
+  }
+  if (filters.spendMin !== undefined) {
+    whereClauses.push('CAST(t.spend_amount AS DOUBLE) >= ?');
+    params.push(filters.spendMin);
+  }
+  if (filters.spendMax !== undefined) {
+    whereClauses.push('CAST(t.spend_amount AS DOUBLE) <= ?');
+    params.push(filters.spendMax);
+  }
+
+  // Prefer groupedConditions over flat conditions
+  if (filters.groupedConditions && filters.groupedConditions.groups.length > 0) {
+    const built = buildGroupedWhereClause(filters.groupedConditions, resolver);
+    if (built) {
+      whereClauses.push(`(${built.sql})`);
+      params.push(...built.params);
+    }
+  } else if (filters.conditions && filters.conditions.length > 0) {
+    const built = buildWhereClause(filters.conditions, resolver);
+    if (built) {
+      whereClauses.push(`(${built.sql})`);
+      params.push(...built.params);
+    }
+  }
+
+  const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  return { whereSQL, params };
+}
+
 export class ExportService implements IExportService {
   constructor(private db: Database) {}
 
-  async exportCSV(): Promise<{ rowsExported: number } | null> {
+  async exportCSV(filters?: TransactionFilter): Promise<{ rowsExported: number } | null> {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
     const result = await dialog.showSaveDialog(win!, {
       title: 'Export Classified Transactions',
@@ -35,12 +92,16 @@ export class ExportService implements IExportService {
 
     const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
 
+    const { whereSQL, params } = buildExportFilterSQL(filters);
+
     const rows = await this.db.all<Record<string, unknown>>(
       `SELECT t.*, ps.supplier_name, tax.full_path as classification_path
        FROM transactions t
        LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
        LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
-       ORDER BY t.row_index`
+       ${whereSQL}
+       ORDER BY t.row_index`,
+      ...params
     );
 
     const headers = [

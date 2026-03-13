@@ -96,7 +96,7 @@ export interface IPCInvokeMap {
   'changelog:revert': { args: [changeId: string]; result: void };
 
   // Export
-  'export:csv': { args: []; result: { rowsExported: number } | null };
+  'export:csv': { args: [filters?: TransactionFilter]; result: { rowsExported: number } | null };
 
   // Settings — LLM
   'settings:getLLMConfig':   { args: []; result: LLMConfigResponse };

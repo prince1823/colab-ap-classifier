@@ -30,7 +30,7 @@ const NO_VALUE_OPERATORS = new Set<FilterOperator>(['is_null', 'is_true', 'is_fa
 
 /** Operators available per field type */
 const OPERATORS_BY_TYPE: Record<FieldType, FilterOperator[]> = {
-  string: ['equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with', 'regex', 'in_list', 'is_null'],
+  string: ['equals', 'not_equals', 'contains', 'not_contains'],
   number: ['equals', 'not_equals', 'greater_than', 'less_than', 'greater_than_or_equal', 'less_than_or_equal', 'is_null'],
   boolean: ['is_true', 'is_false'],
   enum: ['equals', 'not_equals', 'in_list'],
@@ -269,10 +269,10 @@ export default function FilterConditionBuilder({
       <div className="space-y-0">
         {conditions.map((c, i) => {
           const fieldDef = getFieldDef(c.field)
-          const operators = c.field ? getOperatorsForField(c.field) : ALL_OPERATORS
+          const operators = c.field ? getOperatorsForField(c.field) : OPERATORS_BY_TYPE.string
           const needsValue = !NO_VALUE_OPERATORS.has(c.operator)
           const isEnum = fieldDef.type === 'enum' && fieldDef.enumValues
-          const hasSuggestions = fieldDef.type === 'string' && fieldDef.suggestions && fieldDef.suggestions.length > 0
+          const hasSuggestions = fieldDef.type === 'string' && fieldDef.suggestions && fieldDef.suggestions.length > 0 && (c.operator === 'equals' || c.operator === 'not_equals')
 
           const conditionLabel = String.fromCharCode(65 + i)
 

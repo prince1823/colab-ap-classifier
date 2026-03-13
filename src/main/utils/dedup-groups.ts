@@ -101,3 +101,85 @@ export function buildDedupGroups(
     groupCount: groupIdx,
   };
 }
+
+/** Default maximum number of dedup groups per LLM call */
+export const DEFAULT_GROUP_BATCH_SIZE = 300;
+
+/**
+ * Split a DedupGroupResult into batches of at most `batchSize` groups.
+ *
+ * Each batch gets its own contiguous 1-based group numbering so the LLM
+ * prompt and validation stay consistent within a batch.
+ */
+export function batchDedupGroups(
+  dedupResult: DedupGroupResult,
+  batchSize: number = DEFAULT_GROUP_BATCH_SIZE
+): DedupGroupResult[] {
+  const { groupToTransactionIds, groupCount, promptText } = dedupResult;
+
+  if (groupCount <= batchSize) {
+    return [dedupResult];
+  }
+
+  const allEntries = Array.from(groupToTransactionIds.entries());
+  const promptBlocks = promptText.split('\n\n');
+  const batches: DedupGroupResult[] = [];
+
+  for (let offset = 0; offset < allEntries.length; offset += batchSize) {
+    const slice = allEntries.slice(offset, offset + batchSize);
+    const batchMap = new Map<number, string[]>();
+
+    slice.forEach(([, ids], idx) => {
+      batchMap.set(idx + 1, ids);
+    });
+
+    const batchLines = promptBlocks.slice(offset, offset + batchSize).map((block, idx) => {
+      return block.replace(/^Group \d+/, `Group ${idx + 1}`);
+    });
+
+    batches.push({
+      promptText: batchLines.join('\n\n'),
+      groupToTransactionIds: batchMap,
+      groupCount: slice.length,
+    });
+  }
+
+  return batches;
+}
+
+/**
+ * Extract a sub-batch containing only the specified group numbers from an existing batch.
+ *
+ * Groups are re-numbered 1-based in the returned result so the LLM prompt
+ * and validation stay consistent.
+ *
+ * @param batch - The original DedupGroupResult
+ * @param groupNumbers - The 1-based group numbers to extract
+ */
+export function extractSubBatch(
+  batch: DedupGroupResult,
+  groupNumbers: number[]
+): DedupGroupResult {
+  const promptBlocks = batch.promptText.split('\n\n');
+  const newMap = new Map<number, string[]>();
+  const newParts: string[] = [];
+
+  let newIdx = 0;
+  for (const g of groupNumbers) {
+    const ids = batch.groupToTransactionIds.get(g);
+    if (!ids) continue;
+    newIdx++;
+    newMap.set(newIdx, ids);
+    // promptBlocks are 0-indexed, group numbers are 1-indexed
+    const block = promptBlocks[g - 1];
+    if (block) {
+      newParts.push(block.replace(/^Group \d+/, `Group ${newIdx}`));
+    }
+  }
+
+  return {
+    promptText: newParts.join('\n\n'),
+    groupToTransactionIds: newMap,
+    groupCount: newIdx,
+  };
+}

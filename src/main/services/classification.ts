@@ -15,7 +15,7 @@ import type { CompanyContext } from '../../shared/types/project';
 import type { ClassificationProgress, ClassificationResult } from '../../shared/types/classification';
 import type { FilterCondition } from '../../shared/types/transactions';
 import { cleanDescription } from '../utils/text';
-import { buildDedupGroups } from '../utils/dedup-groups';
+import { buildDedupGroups, batchDedupGroups, extractSubBatch } from '../utils/dedup-groups';
 import { debugLog } from '../utils/debug-log';
 
 export class ClassificationRunner implements IClassificationRunner {
@@ -339,70 +339,134 @@ export class ClassificationRunner implements IClassificationRunner {
       return cleaned;
     });
 
-    // Build dedup groups for mapping
-    const { groupToTransactionIds, groupCount } = buildDedupGroups(cleanedTxns, columnPriorities);
+    // Build dedup groups and split into batches
+    const dedupResult = buildDedupGroups(cleanedTxns, columnPriorities);
+    const batches = batchDedupGroups(dedupResult);
 
-    // Retry loop
-    const MAX_ATTEMPTS = 3;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const result = await this.classificationAgent.classifyInvoiceGroup({
-          transactions: cleanedTxns,
-          taxonomy,
-          companyContext,
-          supplierResearch,
-          parentName,
-          columnPriorities,
-        });
+    debugLog('INFO', `Supplier ${supplierName ?? projectSupplierId}: ${dedupResult.groupCount} groups in ${batches.length} batch(es)`);
 
-        // Validate assignments
-        this.validateAssignments(result, groupCount);
+    for (const batch of batches) {
+      if (this.isCancelled) return;
 
-        // Apply multi-classification
-        await this.applyMultiClassification(result, groupToTransactionIds, taxonomy);
-        return; // success
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        debugLog('WARN', `Classification attempt ${attempt}/${MAX_ATTEMPTS} failed for supplier ${supplierName ?? projectSupplierId}`, { error: errMsg });
-        if (attempt === MAX_ATTEMPTS) {
-          debugLog('ERROR', `All ${MAX_ATTEMPTS} classification attempts failed for supplier ${supplierName ?? projectSupplierId}`, { error: errMsg });
-          // Mark all unmatched as classification_error
-          const unmatchedIds = unmatchedTxns.map((r) => String(r.id));
-          await this.transactions.updateTransactions({
-            ids: unmatchedIds,
-            classificationStatus: 'classification_error',
-          }, 'pipeline');
+      // Collect all transaction IDs in this batch for fallback error marking
+      const allBatchTxnIds = new Set<string>();
+      for (const ids of batch.groupToTransactionIds.values()) {
+        for (const id of ids) allBatchTxnIds.add(id);
+      }
+
+      const MAX_ATTEMPTS = 3;
+      let remainingBatch = batch;
+
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        if (this.isCancelled) return;
+
+        // Build transaction list for current (possibly narrowed) batch
+        const currentTxnIds = new Set<string>();
+        for (const ids of remainingBatch.groupToTransactionIds.values()) {
+          for (const id of ids) currentTxnIds.add(id);
+        }
+        const currentTxns = cleanedTxns.filter((t) => currentTxnIds.has(String(t.id)));
+
+        try {
+          const result = await this.classificationAgent.classifyInvoiceGroup({
+            transactions: currentTxns,
+            taxonomy,
+            companyContext,
+            supplierResearch,
+            parentName,
+            columnPriorities,
+          });
+
+          const { validResult, missedGroups } = this.extractValidAssignments(result, remainingBatch.groupCount);
+
+          // Apply whatever succeeded
+          if (Object.keys(validResult.assignments).length > 0) {
+            await this.applyMultiClassification(validResult, remainingBatch.groupToTransactionIds, taxonomy);
+          }
+
+          if (missedGroups.length === 0) {
+            break; // fully classified
+          }
+
+          debugLog('WARN', `Supplier ${supplierName ?? projectSupplierId}: ${missedGroups.length} groups missed on attempt ${attempt}/${MAX_ATTEMPTS}, retrying missed groups`);
+
+          if (attempt < MAX_ATTEMPTS) {
+            // Narrow to only missed groups for next attempt
+            remainingBatch = extractSubBatch(remainingBatch, missedGroups);
+          } else {
+            // Final attempt exhausted — mark remaining transactions as error
+            const failedTxnIds: string[] = [];
+            for (const g of missedGroups) {
+              const ids = remainingBatch.groupToTransactionIds.get(g);
+              if (ids) failedTxnIds.push(...ids);
+            }
+            if (failedTxnIds.length > 0) {
+              debugLog('ERROR', `All ${MAX_ATTEMPTS} attempts exhausted for supplier ${supplierName ?? projectSupplierId}: ${failedTxnIds.length} transactions unclassified`);
+              await this.transactions.updateTransactions({
+                ids: failedTxnIds,
+                classificationStatus: 'classification_error',
+              }, 'pipeline');
+            }
+          }
+        } catch (err) {
+          // Total parse/LLM failure — no partial results possible
+          const errMsg = err instanceof Error ? err.message : String(err);
+          debugLog('WARN', `Classification attempt ${attempt}/${MAX_ATTEMPTS} failed for supplier ${supplierName ?? projectSupplierId}`, { error: errMsg });
+          if (attempt === MAX_ATTEMPTS) {
+            debugLog('ERROR', `All ${MAX_ATTEMPTS} classification attempts failed for supplier ${supplierName ?? projectSupplierId}`, { error: errMsg });
+            const failedIds = Array.from(allBatchTxnIds);
+            await this.transactions.updateTransactions({
+              ids: failedIds,
+              classificationStatus: 'classification_error',
+            }, 'pipeline');
+          }
         }
       }
     }
   }
 
-  private validateAssignments(result: ClassificationResult, groupCount: number): void {
+  /**
+   * Extract valid assignments from a classification result, skipping invalid entries.
+   * Returns the cleaned assignments and any group numbers that were not assigned.
+   */
+  private extractValidAssignments(
+    result: ClassificationResult,
+    groupCount: number
+  ): { validResult: ClassificationResult; missedGroups: number[] } {
     const classificationIds = new Set(result.classifications.map((c) => c.id));
     const assignedGroups = new Set<number>();
+    const cleanedAssignments: Record<string, number[]> = {};
 
     for (const [classIdStr, groupNumbers] of Object.entries(result.assignments)) {
       const classId = Number(classIdStr);
-      if (!classificationIds.has(classId)) {
-        throw new Error(`Assignment references unknown classification id ${classId}`);
-      }
+      if (!classificationIds.has(classId)) continue; // skip unknown classification IDs
+
+      const validGroups: number[] = [];
       for (const g of groupNumbers) {
-        if (g < 1 || g > groupCount) {
-          throw new Error(`Assignment references invalid group number ${g} (expected 1-${groupCount})`);
-        }
-        if (assignedGroups.has(g)) {
-          throw new Error(`Group ${g} assigned to multiple classifications`);
-        }
+        if (g < 1 || g > groupCount) continue; // skip out-of-range
+        if (assignedGroups.has(g)) continue; // skip duplicates
         assignedGroups.add(g);
+        validGroups.push(g);
+      }
+      if (validGroups.length > 0) {
+        cleanedAssignments[classIdStr] = validGroups;
       }
     }
 
-    // Check all groups are assigned
+    // Find unassigned groups
+    const missedGroups: number[] = [];
     for (let g = 1; g <= groupCount; g++) {
-      if (!assignedGroups.has(g)) {
-        throw new Error(`Group ${g} not assigned to any classification (groups: 1-${groupCount})`);
-      }
+      if (!assignedGroups.has(g)) missedGroups.push(g);
     }
+
+    // Filter classifications to only those that have assignments
+    const usedClassIds = new Set(Object.keys(cleanedAssignments).map(Number));
+    const validClassifications = result.classifications.filter((c) => usedClassIds.has(c.id));
+
+    return {
+      validResult: { classifications: validClassifications, assignments: cleanedAssignments },
+      missedGroups,
+    };
   }
 
   private async applyMultiClassification(

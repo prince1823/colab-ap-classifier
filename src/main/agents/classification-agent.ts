@@ -432,7 +432,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
 
     const responseText = await this.llm.chat(systemPrompt, userPrompt, {
       temperature: 0,
-      maxTokens: 6144,
+      maxTokens: 16384,
     });
 
     const rawResult = parseResponse(responseText);

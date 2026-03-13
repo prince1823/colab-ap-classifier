@@ -19,13 +19,13 @@ export function conditionToSQL(
       return `${col} = ?`;
     case 'not_equals':
       params.push(value);
-      return `${col} != ?`;
+      return `(${col} IS NULL OR ${col} != ?)`;
     case 'contains':
       params.push(`%${value}%`);
       return `${col} ILIKE ?`;
     case 'not_contains':
       params.push(`%${value}%`);
-      return `${col} NOT ILIKE ?`;
+      return `(${col} IS NULL OR ${col} NOT ILIKE ?)`;
     case 'starts_with':
       params.push(`${value}%`);
       return `${col} ILIKE ?`;

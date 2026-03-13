@@ -41,6 +41,9 @@ interface HierarchicalPivotViewProps {
   onDrillDown?: (row: FlattenedPivotRow) => void
   /** Whether a modal is open (suppresses keyboard) */
   modalOpen?: boolean
+  /* Advanced filter */
+  advancedFilterCount?: number
+  onOpenAdvancedFilter?: () => void
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -196,6 +199,8 @@ export default function HierarchicalPivotView({
   onReclassify,
   onDrillDown,
   modalOpen = false,
+  advancedFilterCount = 0,
+  onOpenAdvancedFilter,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
@@ -417,6 +422,8 @@ export default function HierarchicalPivotView({
         spendDisplayMode={spendDisplayMode}
         onSpendDisplayModeChange={onSpendDisplayModeChange}
         showSpendToggle={aggregation === 'sum'}
+        advancedFilterCount={advancedFilterCount}
+        onOpenAdvancedFilter={onOpenAdvancedFilter}
       />
 
       {(!hasData || rowDimensions.length === 0) && (

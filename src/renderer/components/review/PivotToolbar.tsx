@@ -54,6 +54,9 @@ interface PivotToolbarProps {
   spendDisplayMode: SpendDisplayMode
   onSpendDisplayModeChange: (mode: SpendDisplayMode) => void
   showSpendToggle: boolean
+  /* Advanced filter */
+  advancedFilterCount?: number
+  onOpenAdvancedFilter?: () => void
 }
 
 /** Columns to exclude from the filter list (non-filterable) */
@@ -81,6 +84,8 @@ export default function PivotToolbar({
   spendDisplayMode,
   onSpendDisplayModeChange,
   showSpendToggle,
+  advancedFilterCount = 0,
+  onOpenAdvancedFilter,
 }: PivotToolbarProps) {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [addMenuSearch, setAddMenuSearch] = useState('')
@@ -361,6 +366,29 @@ export default function PivotToolbar({
             <span style={{ fontSize: 11, fontWeight: 600, minWidth: 14, textAlign: 'center' }}>
               {spendDisplayMode === 'absolute' ? '$' : '%'}
             </span>
+          </button>
+        )}
+        {onOpenAdvancedFilter && (
+          <button
+            className="pivot-toolbar-icon-btn"
+            onClick={onOpenAdvancedFilter}
+            title="Advanced filters"
+            data-active={advancedFilterCount > 0 ? '' : undefined}
+            style={{ position: 'relative' }}
+          >
+            <Filter size={12} />
+            {advancedFilterCount > 0 && (
+              <span style={{
+                position: 'absolute', top: -4, right: -4,
+                background: '#3b82f6', color: '#fff',
+                fontSize: 8, fontWeight: 700,
+                width: 14, height: 14,
+                borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {advancedFilterCount}
+              </span>
+            )}
           </button>
         )}
       </div>

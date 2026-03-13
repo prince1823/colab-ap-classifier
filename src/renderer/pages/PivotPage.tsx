@@ -2,13 +2,15 @@ import { useState, useMemo, useCallback } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
+import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useReclassification } from '../hooks/useReclassification'
 import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
 import type { Aggregation, SpendDisplayMode, FlattenedPivotRow } from '../types/pivot'
 import type { PivotFilterState } from '../components/review/PivotFilterBar'
-import type { TransactionFilter } from '../../shared/types/transactions'
+import type { TransactionFilter, FilterCondition } from '../../shared/types/transactions'
+import type { FieldDefinition } from '../components/FilterConditionBuilder'
 
 const DEFAULT_ROW_DIMENSIONS: string[] = []
 
@@ -30,13 +32,17 @@ export default function PivotPage() {
   const [filterState, setFilterState] = useState<PivotFilterState>({})
   const [spendDisplayMode, setSpendDisplayMode] = useState<SpendDisplayMode>('absolute')
   const [drillDownRow, setDrillDownRow] = useState<FlattenedPivotRow | null>(null)
+  const [advancedConditions, setAdvancedConditions] = useState<FilterCondition[]>([])
+  const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
 
   const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
 
-  const filter = useMemo(
-    () => buildTransactionFilter(filterState),
-    [filterState]
-  )
+  const filter = useMemo(() => {
+    const pillFilter = buildTransactionFilter(filterState)
+    const pillConditions = pillFilter?.conditions ?? []
+    const allConditions = [...pillConditions, ...advancedConditions]
+    return allConditions.length > 0 ? { conditions: allConditions } as TransactionFilter : undefined
+  }, [filterState, advancedConditions])
 
   const { pivotData, totalCount, refetch } = useServerPivotData(
     rowDimensions,
@@ -61,6 +67,32 @@ export default function PivotPage() {
     'classification_l1', 'classification_l2', 'classification_l3',
     ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c)),
   ]
+
+  const COLUMN_LABELS: Record<string, string> = {
+    classification_l1: 'Classification L1',
+    classification_l2: 'Classification L2',
+    classification_l3: 'Classification L3',
+    supplier_name: 'Supplier',
+    gl_description: 'GL Description',
+    line_description: 'Line Description',
+    company: 'Company',
+    spend_amount: 'Spend Amount',
+    amount: 'Amount',
+    invoice_amount: 'Invoice Amount',
+    year: 'Year',
+    quarter: 'Quarter',
+    month: 'Month',
+    country: 'Country',
+  }
+
+  const advancedFilterFields: FieldDefinition[] = useMemo(() =>
+    availableColumns.map(col => ({
+      name: col,
+      label: COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      type: ['spend_amount', 'amount', 'invoice_amount'].includes(col) ? 'number' as const : 'string' as const,
+    })),
+    [availableColumns]
+  )
 
   const handleExport = useCallback(async () => {
     await ipc.export.csv()
@@ -102,7 +134,9 @@ export default function PivotPage() {
           onSpendDisplayModeChange={setSpendDisplayMode}
           onReclassify={handleReclassify}
           onDrillDown={setDrillDownRow}
-          modalOpen={reclassify.isOpen}
+          modalOpen={reclassify.isOpen || showAdvancedFilter}
+          advancedFilterCount={advancedConditions.length}
+          onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
         />
       </div>
 
@@ -127,6 +161,14 @@ export default function PivotPage() {
         onApply={reclassify.apply}
         applying={reclassify.applying}
         error={reclassify.error}
+      />
+
+      <AdvancedFilterModal
+        isOpen={showAdvancedFilter}
+        onClose={() => setShowAdvancedFilter(false)}
+        conditions={advancedConditions}
+        onApply={setAdvancedConditions}
+        availableFields={advancedFilterFields}
       />
     </div>
   )

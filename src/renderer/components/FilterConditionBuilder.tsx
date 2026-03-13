@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import type { FilterCondition, FilterOperator, FieldType, FieldDefinition } from '../../shared/types/transactions'
 
 const ALL_OPERATORS: FilterOperator[] = [
@@ -35,6 +35,111 @@ const OPERATORS_BY_TYPE: Record<FieldType, FilterOperator[]> = {
   boolean: ['is_true', 'is_false'],
   enum: ['equals', 'not_equals', 'in_list'],
 }
+
+/* ---------- SuggestInput: inline autocomplete dropdown ---------- */
+
+interface SuggestInputProps {
+  value: string
+  onChange: (val: string) => void
+  suggestions: string[]
+  placeholder?: string
+  className?: string
+}
+
+function SuggestInput({ value, onChange, suggestions, placeholder, className }: SuggestInputProps) {
+  const [open, setOpen] = useState(false)
+  const [focusIdx, setFocusIdx] = useState(-1)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+
+  // Filter suggestions by current value (case-insensitive)
+  const filtered = useMemo(() => {
+    if (!value) return suggestions
+    const q = value.toLowerCase()
+    return suggestions.filter(s => s.toLowerCase().includes(q))
+  }, [value, suggestions])
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // Reset focus index when filtered list changes
+  useEffect(() => { setFocusIdx(-1) }, [filtered])
+
+  // Scroll focused item into view
+  useEffect(() => {
+    if (focusIdx >= 0 && listRef.current) {
+      const item = listRef.current.children[focusIdx] as HTMLElement | undefined
+      item?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [focusIdx])
+
+  const select = useCallback((val: string) => {
+    onChange(val)
+    setOpen(false)
+  }, [onChange])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!open || filtered.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setFocusIdx(prev => (prev + 1) % filtered.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setFocusIdx(prev => (prev <= 0 ? filtered.length - 1 : prev - 1))
+    } else if (e.key === 'Enter' && focusIdx >= 0) {
+      e.preventDefault()
+      select(filtered[focusIdx])
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div ref={wrapRef} className="relative min-w-0 flex-1">
+      <input
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        type="text"
+        className={className}
+      />
+      {open && filtered.length > 0 && (
+        <ul
+          ref={listRef}
+          className="absolute left-0 top-full z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg"
+        >
+          {filtered.slice(0, 50).map((s, idx) => (
+            <li
+              key={s}
+              onMouseDown={(e) => { e.preventDefault(); select(s) }}
+              onMouseEnter={() => setFocusIdx(idx)}
+              className={`cursor-pointer break-words px-2.5 py-1.5 text-xs leading-snug ${
+                idx === focusIdx ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {s}
+            </li>
+          ))}
+          {filtered.length > 50 && (
+            <li className="px-2.5 py-1 text-[10px] text-gray-400 italic">
+              +{filtered.length - 50} more — type to narrow
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/* ---------- Main component ---------- */
 
 interface FilterConditionBuilderProps {
   conditions: FilterCondition[]
@@ -123,14 +228,15 @@ export default function FilterConditionBuilder({
           const operators = c.field ? getOperatorsForField(c.field) : ALL_OPERATORS
           const needsValue = !NO_VALUE_OPERATORS.has(c.operator)
           const isEnum = fieldDef.type === 'enum' && fieldDef.enumValues
+          const hasSuggestions = fieldDef.type === 'string' && fieldDef.suggestions && fieldDef.suggestions.length > 0
 
           return (
             <div key={i}>
-              <div className={`flex items-center gap-0 rounded-lg border border-gray-200 bg-gray-50 px-1 py-1`}>
+              <div className={`flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-1 py-1`}>
                 <select
                   value={c.field as string}
                   onChange={(e) => updateField(i, e.target.value)}
-                  className={`rounded-md border-0 bg-white ${padSize} ${textSize} font-medium text-gray-800 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
+                  className={`max-w-[140px] shrink-0 rounded-md border-0 bg-white ${padSize} ${textSize} font-medium text-gray-800 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
                 >
                   <option value="">field...</option>
                   {groupedFields ? (
@@ -147,11 +253,11 @@ export default function FilterConditionBuilder({
                     fields.map((f) => <option key={f.name} value={f.name}>{f.label}</option>)
                   )}
                 </select>
-                <span className={`px-1.5 text-[10px] text-gray-400 select-none`}>&rarr;</span>
+                <span className={`px-1 text-[10px] text-gray-400 select-none`}>&rarr;</span>
                 <select
                   value={c.operator}
                   onChange={(e) => updateCondition(i, 'operator', e.target.value)}
-                  className={`rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-600 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
+                  className={`max-w-[110px] shrink-0 rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-600 shadow-sm ring-1 ring-gray-200 focus:ring-blue-400`}
                 >
                   {operators.map((op) => <option key={op} value={op}>{OPERATOR_LABELS[op]}</option>)}
                 </select>
@@ -169,6 +275,14 @@ export default function FilterConditionBuilder({
                           <option key={v} value={v}>{v}</option>
                         ))}
                       </select>
+                    ) : hasSuggestions ? (
+                      <SuggestInput
+                        value={String(c.value)}
+                        onChange={(val) => updateCondition(i, 'value', val)}
+                        suggestions={fieldDef.suggestions!}
+                        placeholder="value"
+                        className={`w-full rounded-md border-0 bg-white ${padSize} ${textSize} text-gray-800 shadow-sm ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-blue-400`}
+                      />
                     ) : (
                       <input
                         value={String(c.value)}

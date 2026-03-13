@@ -58,6 +58,8 @@ export interface FieldDefinition {
   label: string;
   type: FieldType;
   enumValues?: string[];
+  /** Autocomplete suggestions for string fields — renders a <datalist> while keeping all string operators */
+  suggestions?: string[];
   /** Optional group name — fields with the same group render under a shared <optgroup> */
   group?: string;
 }

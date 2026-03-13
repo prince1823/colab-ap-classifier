@@ -11,6 +11,13 @@ export class SupplierUniverseNotConfiguredError extends Error {
   }
 }
 
+export class SupplierUniverseFileMissingError extends Error {
+  constructor(public readonly missingPath: string) {
+    super(`Supplier universe database not found at: ${missingPath}`);
+    this.name = 'SupplierUniverseFileMissingError';
+  }
+}
+
 function parseJSON<T>(json: string | null | undefined): T | null {
   if (!json) return null;
   try { return JSON.parse(json) as T; } catch { return null; }
@@ -45,6 +52,10 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
     const dbPath = filePath || this.defaultPath || this.appConfig.getSupplierUniversePath();
     if (!dbPath) {
       throw new SupplierUniverseNotConfiguredError();
+    }
+
+    if (!existsSync(dbPath)) {
+      throw new SupplierUniverseFileMissingError(dbPath);
     }
 
     try {

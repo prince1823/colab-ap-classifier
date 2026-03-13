@@ -13,6 +13,7 @@ export default function LaunchModal({ onProjectReady }: Props) {
   const [projectName, setProjectName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [missingPath, setMissingPath] = useState<string | null>(null)
 
   const handleCreate = async () => {
     if (!projectName.trim()) return
@@ -21,6 +22,7 @@ export default function LaunchModal({ onProjectReady }: Props) {
     try {
       const result = await createProject(projectName.trim())
       if (result.needsSupplierUniverseSetup) {
+        setMissingPath(result.missingSupplierUniversePath ?? null)
         setMode('supplier-universe-setup')
       } else {
         onProjectReady()
@@ -38,6 +40,7 @@ export default function LaunchModal({ onProjectReady }: Props) {
     try {
       const result = await loadProject('')
       if (result.needsSupplierUniverseSetup) {
+        setMissingPath(result.missingSupplierUniversePath ?? null)
         setMode('supplier-universe-setup')
       } else {
         onProjectReady()
@@ -150,8 +153,15 @@ export default function LaunchModal({ onProjectReady }: Props) {
               <CircleStackIcon className="h-4 w-4 text-gray-500" />
               Supplier Universe Database
             </div>
+            {missingPath && (
+              <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 mb-3">
+                Supplier database was expected at <span className="font-mono break-all">{missingPath}</span> but the file was not found.
+              </div>
+            )}
             <p className="text-xs text-gray-500 mb-4">
-              This project needs a supplier database. It can be empty — you can populate it later.
+              {missingPath
+                ? 'Select the database at its new location, or create a new one.'
+                : 'This project needs a supplier database. It can be empty — you can populate it later.'}
             </p>
             <div className="grid grid-cols-2 gap-3">
               <button

@@ -28,8 +28,8 @@ import type { UploadRecord } from './services';
 
 export interface IPCInvokeMap {
   // Project
-  'project:new':            { args: [name: string, filePath?: string]; result: { filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean } | null };
-  'project:open':           { args: [filePath?: string]; result: { filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean } | null };
+  'project:new':            { args: [name: string, filePath?: string]; result: { filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean; missingSupplierUniversePath?: string } | null };
+  'project:open':           { args: [filePath?: string]; result: { filePath: string; name: string; warning?: string; needsSupplierUniverseSetup?: boolean; missingSupplierUniversePath?: string } | null };
   'project:close':          { args: []; result: void };
   'project:finalizeOpen':   { args: []; result: { filePath: string; name: string } };
   'project:getSetting':     { args: [key: string]; result: unknown };

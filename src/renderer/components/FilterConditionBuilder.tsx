@@ -216,12 +216,56 @@ export default function FilterConditionBuilder({
   const textSize = compact ? 'text-[10px]' : 'text-xs'
   const padSize = compact ? 'px-2 py-1' : 'px-2.5 py-1.5'
 
+  /** Build a logic expression string like "(A AND B) OR C" with proper grouping */
+  const logicExpression = useMemo(() => {
+    const validConditions = conditions.filter(c => c.field)
+    if (validConditions.length < 2) return null
+
+    // Label each condition as A, B, C, ...
+    const labels = validConditions.map((_, i) => String.fromCharCode(65 + i))
+
+    // Group consecutive conditions with the same connector, respecting AND > OR precedence
+    // Build tokens: we group AND-connected items in parens when mixed with OR
+    const connectors = validConditions.slice(0, -1).map(c => c.connector || 'AND')
+    const hasMixed = connectors.includes('AND') && connectors.includes('OR')
+
+    if (!hasMixed) {
+      // All same connector — no parens needed
+      const parts: string[] = []
+      for (let i = 0; i < labels.length; i++) {
+        parts.push(labels[i])
+        if (i < connectors.length) parts.push(connectors[i])
+      }
+      return parts.join(' ')
+    }
+
+    // Mixed AND/OR — group AND-connected sequences in parens
+    const groups: string[][] = [[labels[0]]]
+    for (let i = 0; i < connectors.length; i++) {
+      if (connectors[i] === 'AND') {
+        groups[groups.length - 1].push(labels[i + 1])
+      } else {
+        groups.push([labels[i + 1]])
+      }
+    }
+
+    return groups
+      .map(g => g.length > 1 ? `(${g.join(' AND ')})` : g[0])
+      .join(' OR ')
+  }, [conditions])
+
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
         <label className={`${textSize} font-medium text-gray-600`}>Conditions</label>
         <button onClick={addCondition} className={`${textSize} text-blue-600 hover:text-blue-800`}>+ Add condition</button>
       </div>
+      {logicExpression && (
+        <div className="mb-2 rounded-md bg-gray-100 px-3 py-1.5">
+          <span className="text-[10px] text-gray-400 mr-1.5">Logic:</span>
+          <span className="text-[11px] font-mono font-medium text-gray-600">{logicExpression}</span>
+        </div>
+      )}
       <div className="space-y-0">
         {conditions.map((c, i) => {
           const fieldDef = getFieldDef(c.field)
@@ -230,9 +274,14 @@ export default function FilterConditionBuilder({
           const isEnum = fieldDef.type === 'enum' && fieldDef.enumValues
           const hasSuggestions = fieldDef.type === 'string' && fieldDef.suggestions && fieldDef.suggestions.length > 0
 
+          const conditionLabel = String.fromCharCode(65 + i)
+
           return (
             <div key={i}>
               <div className={`flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-1 py-1`}>
+                {conditions.filter(cc => cc.field).length >= 2 && (
+                  <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-gray-200 text-[9px] font-bold text-gray-500">{conditionLabel}</span>
+                )}
                 <select
                   value={c.field as string}
                   onChange={(e) => updateField(i, e.target.value)}

@@ -1,23 +1,23 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useMemo, useCallback } from 'react'
+import { useState } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
-import MetricsTabContainer from '../components/review/MetricsTabContainer'
+import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useReclassification } from '../hooks/useReclassification'
 import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
-import { X } from 'lucide-react'
-import type { Aggregation, SpendDisplayMode, FlattenedPivotRow } from '../types/pivot'
-import type { PivotFilterState } from '../components/review/PivotFilterBar'
-import type { TransactionFilter } from '../../shared/types/transactions'
-
-const DEFAULT_ROW_DIMENSIONS = ['supplier_name', 'classification_l1', 'classification_l2', 'classification_l3']
+import { usePivotStore } from '../stores/pivotStore'
+import type { FlattenedPivotRow } from '../types/pivot'
+import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
+import type { FieldDefinition } from '../components/FilterConditionBuilder'
+import { groupedToConditions } from '../components/FilterConditionBuilder'
 
 /**
  * Convert dimension pill filters into a TransactionFilter.
  */
-function buildTransactionFilter(pillState: PivotFilterState): TransactionFilter | undefined {
+function buildTransactionFilter(pillState: Record<string, string[]>): TransactionFilter | undefined {
   const conditions = Object.entries(pillState)
     .filter(([, values]) => values.length > 0)
     .map(([field, values]) => ({ field, operator: 'in_list' as const, value: values }))
@@ -25,21 +25,81 @@ function buildTransactionFilter(pillState: PivotFilterState): TransactionFilter 
   return conditions.length > 0 ? { conditions } : undefined
 }
 
+/** Columns that are internal DB plumbing — never shown in the UI. */
+const INTERNAL_COLS = new Set([
+  'id', 'row_index', 'upload_id', 'taxonomy_node_id',
+  'classification_status', 'human_reviewed',
+  'original_supplier_name', 'project_supplier_id',
+  'created_at', 'updated_at',
+])
+
+/** Virtual columns resolved via JOIN — not physical on the transactions table. */
+const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3'])
+
+const COLUMN_LABELS: Record<string, string> = {
+  classification_l1: 'Classification L1',
+  classification_l2: 'Classification L2',
+  classification_l3: 'Classification L3',
+  supplier_name: 'Supplier',
+  gl_description: 'GL Description',
+  line_description: 'Line Description',
+  company: 'Company',
+  spend_amount: 'Spend Amount',
+  amount: 'Amount',
+  invoice_amount: 'Invoice Amount',
+  year: 'Year',
+  quarter: 'Quarter',
+  month: 'Month',
+  country: 'Country',
+}
+
+const NUMERIC_COLS = new Set(['spend_amount', 'amount', 'invoice_amount'])
+
 export default function PivotPage() {
-  const [rowDimensions, setRowDimensions] = useState<string[]>(DEFAULT_ROW_DIMENSIONS)
-  const [valueDimension, setValueDimension] = useState('spend_amount')
-  const [aggregation, setAggregation] = useState<Aggregation>('sum')
-  const [filterState, setFilterState] = useState<PivotFilterState>({})
-  const [spendDisplayMode, setSpendDisplayMode] = useState<SpendDisplayMode>('absolute')
+  // Persisted state from Zustand store (survives tab switches)
+  const {
+    rowDimensions, setRowDimensions,
+    valueDimension, setValueDimension,
+    aggregation, setAggregation,
+    filterState, setFilterState,
+    spendDisplayMode, setSpendDisplayMode,
+    advancedGrouped, setAdvancedGrouped,
+    showAdvancedFilter, setShowAdvancedFilter,
+    clearAllFilters,
+  } = usePivotStore()
+
+  // Transient UI state (OK to lose on tab switch)
   const [drillDownRow, setDrillDownRow] = useState<FlattenedPivotRow | null>(null)
-  const [showDashboard, setShowDashboard] = useState(false)
+
+  // Flat conditions derived from grouped for backward compat (chips, badge count, etc.)
+  const advancedConditions = useMemo(() =>
+    advancedGrouped ? groupedToConditions(advancedGrouped).filter(c => c.field) : [],
+    [advancedGrouped]
+  )
 
   const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
 
-  const filter = useMemo(
-    () => buildTransactionFilter(filterState),
-    [filterState]
-  )
+  const filter = useMemo(() => {
+    const pillFilter = buildTransactionFilter(filterState)
+    const pillConditions = pillFilter?.conditions ?? []
+    const allConditions = [...pillConditions, ...advancedConditions]
+    if (allConditions.length === 0) return undefined
+
+    // If we have a grouped filter, merge pill conditions as an extra group
+    if (advancedGrouped && advancedGrouped.groups.some(g => g.conditions.some(c => c.field))) {
+      const pillGroup = pillConditions.length > 0
+        ? [{ connector: 'AND' as const, conditions: pillConditions }]
+        : []
+      const merged: GroupedFilter = {
+        groupConnector: 'AND',
+        groups: [...pillGroup, ...advancedGrouped.groups],
+      }
+      return { conditions: allConditions, groupedConditions: merged } as TransactionFilter
+    }
+
+    // Only pill filters, no grouping needed
+    return { conditions: allConditions } as TransactionFilter
+  }, [filterState, advancedConditions, advancedGrouped])
 
   const { pivotData, totalCount, refetch } = useServerPivotData(
     rowDimensions,
@@ -53,21 +113,23 @@ export default function PivotPage() {
     onSuccess: refetch,
   })
 
-  const INTERNAL_COLS = new Set([
-    'id', 'row_index', 'upload_id', 'taxonomy_node_id',
-    'classification_status', 'human_reviewed',
-    'original_supplier_name', 'project_supplier_id',
-    'created_at', 'updated_at',
-  ])
-
-  const availableColumns = [
+  const availableColumns = useMemo(() => [
     'classification_l1', 'classification_l2', 'classification_l3',
-    ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c)),
-  ]
+    ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
+  ], [columns])
+
+  const advancedFilterFields: FieldDefinition[] = useMemo(() =>
+    availableColumns.map(col => ({
+      name: col,
+      label: COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      type: NUMERIC_COLS.has(col) ? 'number' as const : 'string' as const,
+    })),
+    [availableColumns]
+  )
 
   const handleExport = useCallback(async () => {
-    await ipc.export.csv()
-  }, [])
+    await ipc.export.csv(filter)
+  }, [filter])
 
   const handleReclassify = useCallback((rows: FlattenedPivotRow[]) => {
     reclassify.open(rows)
@@ -80,16 +142,8 @@ export default function PivotPage() {
           <h2 className="text-lg font-semibold text-gray-900">Review</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Navigate with arrow keys, Enter to select rows.
-            <span className="text-gray-400 ml-1">⌘K filter | ⌘F classify | Double-click to filter</span>
+            <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | Double-click to filter</span>
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowDashboard(true)}
-            className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            Dashboard
-          </button>
         </div>
       </div>
 
@@ -105,7 +159,7 @@ export default function PivotPage() {
           onAggregationChange={setAggregation}
           filterState={filterState}
           onFilterStateChange={setFilterState}
-          onClearAllFilters={() => setFilterState({})}
+          onClearAllFilters={clearAllFilters}
           onExport={handleExport}
           exportDisabled={!pivotData}
           totalCount={totalCount}
@@ -113,7 +167,28 @@ export default function PivotPage() {
           onSpendDisplayModeChange={setSpendDisplayMode}
           onReclassify={handleReclassify}
           onDrillDown={setDrillDownRow}
-          modalOpen={reclassify.isOpen}
+          modalOpen={reclassify.isOpen || showAdvancedFilter}
+          advancedFilterCount={advancedConditions.length}
+          onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
+          advancedConditions={advancedConditions}
+          onRemoveAdvancedCondition={(idx) => {
+            // Remove condition by flat index from the grouped structure
+            if (!advancedGrouped) return
+            let flatIdx = 0
+            const newGroups = advancedGrouped.groups.map(g => ({
+              ...g,
+              conditions: g.conditions.filter(c => {
+                if (!c.field) return true
+                const keep = flatIdx !== idx
+                flatIdx++
+                return keep
+              }),
+            })).filter(g => g.conditions.some(c => c.field))
+            setAdvancedGrouped(newGroups.length > 0
+              ? { ...advancedGrouped, groups: newGroups }
+              : null
+            )
+          }}
         />
       </div>
 
@@ -123,30 +198,6 @@ export default function PivotPage() {
           row={drillDownRow}
           onClose={() => setDrillDownRow(null)}
         />
-      )}
-
-      {/* Dashboard modal */}
-      {showDashboard && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/30"
-            onClick={() => setShowDashboard(false)}
-          />
-          <div className="fixed inset-8 z-50 bg-white rounded-lg shadow-xl flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200">
-              <h2 className="text-base font-semibold text-gray-900">Dashboard</h2>
-              <button
-                onClick={() => setShowDashboard(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              <MetricsTabContainer filter={filter} />
-            </div>
-          </div>
-        </>
       )}
 
       <ReclassifyModal
@@ -162,6 +213,16 @@ export default function PivotPage() {
         onApply={reclassify.apply}
         applying={reclassify.applying}
         error={reclassify.error}
+      />
+
+      <AdvancedFilterModal
+        isOpen={showAdvancedFilter}
+        onClose={() => setShowAdvancedFilter(false)}
+        groupedFilter={advancedGrouped}
+        onApply={setAdvancedGrouped}
+        availableFields={advancedFilterFields}
+        pillFilterState={filterState}
+        onClearPillFilters={() => setFilterState({})}
       />
     </div>
   )

@@ -197,7 +197,7 @@ export interface IngestService {
 }
 
 export interface ExportService {
-  exportCSV(): Promise<{ rowsExported: number } | null>;
+  exportCSV(filters?: TransactionFilter): Promise<{ rowsExported: number } | null>;
 }
 
 // ─── Orchestrators ───────────────────────────────────────────────────────────

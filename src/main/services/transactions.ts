@@ -18,7 +18,7 @@ import type {
   FieldDefinition,
 } from '../../shared/types';
 import type { ChangeSource } from '../../shared/types/changelog';
-import { buildWhereClause } from '../utils/query-builder';
+import { buildWhereClause, buildGroupedWhereClause } from '../utils/query-builder';
 
 const BASE_COLUMNS = [
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
@@ -30,9 +30,13 @@ const BASE_COLUMNS = [
 /** Columns that don't exist on transactions but are resolved via JOINs. */
 const VIRTUAL_COLUMNS: Record<string, string> = {
   supplier_name: 'ps.supplier_name',
+  classification_l1: 'tax.l1',
+  classification_l2: 'tax.l2',
+  classification_l3: 'tax.l3',
 };
 
 const SUPPLIER_JOIN = 'LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id';
+const TAXONOMY_JOIN = 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id';
 
 export class TransactionStore implements ITransactionStore {
   private cachedColumns: string[] | null = null;
@@ -58,7 +62,12 @@ export class TransactionStore implements ITransactionStore {
 
   /** Whether any columns in use require the supplier JOIN. */
   private needsSupplierJoin(columns: string[]): boolean {
-    return columns.some((c) => c in VIRTUAL_COLUMNS);
+    return columns.some((c) => c === 'supplier_name');
+  }
+
+  /** Whether any columns in use require the taxonomy JOIN. */
+  private needsTaxonomyJoinForColumns(columns: string[]): boolean {
+    return columns.some((c) => c.startsWith('classification_l'));
   }
 
   private buildFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[]; needsTaxonomyJoin: boolean } {
@@ -87,18 +96,32 @@ export class TransactionStore implements ITransactionStore {
       params.push(filters.spendMax);
     }
 
-    if (filters?.conditions && filters.conditions.length > 0) {
-      if (filters.conditions.some((c) => c.field.startsWith('classification_l'))) {
-        needsTaxonomyJoin = true;
+    // Resolve virtual columns used in conditions
+    const FILTER_VIRTUAL_DIMS: Record<string, string> = {
+      classification_l1: 'tax.l1',
+      classification_l2: 'tax.l2',
+      classification_l3: 'tax.l3',
+      supplier_name: 'ps.supplier_name',
+      is_researched: 'ps.is_researched',
+    };
+    const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
+
+    // Check if any conditions reference taxonomy columns
+    const allConditionFields = filters?.groupedConditions
+      ? filters.groupedConditions.groups.flatMap(g => g.conditions.map(c => c.field))
+      : (filters?.conditions ?? []).map(c => c.field);
+    if (allConditionFields.some(f => f.startsWith('classification_l'))) {
+      needsTaxonomyJoin = true;
+    }
+
+    // Prefer groupedConditions (proper parenthesization) over flat conditions
+    if (filters?.groupedConditions && filters.groupedConditions.groups.length > 0) {
+      const built = buildGroupedWhereClause(filters.groupedConditions, resolver);
+      if (built) {
+        whereClauses.push(`(${built.sql})`);
+        params.push(...built.params);
       }
-      const FILTER_VIRTUAL_DIMS: Record<string, string> = {
-        classification_l1: 'tax.l1',
-        classification_l2: 'tax.l2',
-        classification_l3: 'tax.l3',
-        supplier_name: 'ps.supplier_name',
-        is_researched: 'ps.is_researched',
-      };
-      const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
+    } else if (filters?.conditions && filters.conditions.length > 0) {
       const built = buildWhereClause(filters.conditions, resolver);
       if (built) {
         whereClauses.push(`(${built.sql})`);
@@ -335,7 +358,7 @@ export class TransactionStore implements ITransactionStore {
     const hasSpend = validCols.includes('spend_amount');
     const colExpr = this.resolveColumn(column);
     const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
-    const taxonomyJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
+    const taxonomyJoin = (needsTaxonomyJoin || this.needsTaxonomyJoinForColumns([column])) ? TAXONOMY_JOIN : '';
 
     const amountExpr = hasSpend
       ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)'
@@ -381,11 +404,13 @@ export class TransactionStore implements ITransactionStore {
 
     const colExpr = this.resolveColumn(column);
     const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
+    const taxonomyJoin = this.needsTaxonomyJoinForColumns([column]) ? TAXONOMY_JOIN : '';
 
     const sql = `
       SELECT DISTINCT CAST(${colExpr} AS VARCHAR) as value
       FROM transactions t
       ${supplierJoin}
+      ${taxonomyJoin}
       WHERE ${colExpr} IS NOT NULL
       ORDER BY value
       LIMIT ${limit}
@@ -409,7 +434,7 @@ export class TransactionStore implements ITransactionStore {
     const { whereSQL, params, needsTaxonomyJoin } = this.buildFilterSQL(filters);
     const colExpr = this.resolveColumn(column);
     const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
-    const taxonomyJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
+    const taxonomyJoin = (needsTaxonomyJoin || this.needsTaxonomyJoinForColumns([column])) ? TAXONOMY_JOIN : '';
 
     const valueCondition = value === '(blank)'
       ? `${colExpr} IS NULL`

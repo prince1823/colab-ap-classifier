@@ -20,6 +20,8 @@ export interface TransactionFilter {
   spendMax?: number;
   /** Generic conditions using the same shape as override rules */
   conditions?: FilterCondition[];
+  /** Grouped conditions with proper parenthesization (takes precedence over conditions if set) */
+  groupedConditions?: GroupedFilter;
   page?: number;
   pageSize?: number;
   sortBy?: string;
@@ -32,6 +34,22 @@ export interface FilterCondition {
   value: string | number | string[];
   /** How this condition joins to the next. Default: 'AND'. Ignored on last condition. */
   connector?: 'AND' | 'OR';
+}
+
+/** A group of conditions joined by a single connector (all AND or all OR within the group). */
+export interface ConditionGroup {
+  /** How conditions within this group are joined. */
+  connector: 'AND' | 'OR';
+  conditions: FilterCondition[];
+  /** How this group connects to the PREVIOUS group. Ignored on the first group. Defaults to groupConnector if omitted. */
+  groupConnector?: 'AND' | 'OR';
+}
+
+/** Grouped filter: multiple groups joined by a top-level connector. */
+export interface GroupedFilter {
+  /** How groups are joined to each other. */
+  groupConnector: 'AND' | 'OR';
+  groups: ConditionGroup[];
 }
 
 export type FilterOperator =
@@ -58,6 +76,8 @@ export interface FieldDefinition {
   label: string;
   type: FieldType;
   enumValues?: string[];
+  /** Autocomplete suggestions for string fields — renders a <datalist> while keeping all string operators */
+  suggestions?: string[];
   /** Optional group name — fields with the same group render under a shared <optgroup> */
   group?: string;
 }

@@ -13,7 +13,9 @@ const CLASSIFICATION_DIMS = new Set(['classification_l1', 'classification_l2', '
 
 /**
  * Build FilterCondition[] from a pivot row's pathSegments + active filter state.
- * Handles (Unclassified) labels → is_null on taxonomy_node_id.
+ * Handles (Unclassified) labels:
+ *   - L1 unclassified → taxonomy_node_id IS NULL (no taxonomy node at all)
+ *   - L2/L3 unclassified → that specific level IS NULL (node exists but at shallower depth)
  */
 function buildConditionsFromRow(
   pathSegments: PathSegment[],
@@ -23,8 +25,13 @@ function buildConditionsFromRow(
 
   for (const segment of pathSegments) {
     if (segment.value === UNCLASSIFIED_LABEL && CLASSIFICATION_DIMS.has(segment.dimensionField)) {
-      // Unclassified on a classification dim → taxonomy_node_id IS NULL
-      conditions.push({ field: 'taxonomy_node_id', operator: 'is_null', value: '' })
+      if (segment.dimensionField === 'classification_l1') {
+        // L1 unclassified → no taxonomy node assigned at all
+        conditions.push({ field: 'taxonomy_node_id', operator: 'is_null', value: '' })
+      } else {
+        // L2/L3 unclassified → node exists but this level is NULL
+        conditions.push({ field: segment.dimensionField, operator: 'is_null', value: '' })
+      }
     } else {
       conditions.push({ field: segment.dimensionField, operator: 'equals', value: segment.value })
     }
@@ -82,17 +89,29 @@ export function useReclassification({ filterState, onSuccess }: UseReclassificat
     setTimeout(() => searchRef.current?.focus(), 50)
   }, [isOpen])
 
-  // Filter to leaf nodes (depth >= 2)
+  // Filter to full 3-level nodes only (L1 + L2 + L3), sorted by L1 → L2 → L3
   const filteredNodes = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const leafNodes = taxonomyNodes.filter(n => n.depth >= 2)
-    if (!q) return leafNodes.slice(0, 50)
-    return leafNodes.filter(n =>
-      n.fullPath.toLowerCase().includes(q) ||
-      n.l1.toLowerCase().includes(q) ||
-      (n.l2 && n.l2.toLowerCase().includes(q)) ||
-      (n.l3 && n.l3.toLowerCase().includes(q))
-    ).slice(0, 50)
+    const leafNodes = taxonomyNodes.filter(n => n.l1 && n.l2 && n.l3)
+    // Split query into words — every word must match somewhere in the path
+    const words = q ? q.split(/\s+/).filter(Boolean) : []
+    const matched = words.length > 0
+      ? leafNodes.filter(n => {
+          const haystack = `${n.l1} ${n.l2 ?? ''} ${n.l3 ?? ''} ${n.fullPath}`.toLowerCase()
+          return words.every(w => haystack.includes(w))
+        })
+      : leafNodes
+
+    // Sort by L1, then L2, then L3 — groups all categories together
+    const sorted = [...matched].sort((a, b) => {
+      const cmpL1 = a.l1.localeCompare(b.l1)
+      if (cmpL1 !== 0) return cmpL1
+      const cmpL2 = (a.l2 ?? '').localeCompare(b.l2 ?? '')
+      if (cmpL2 !== 0) return cmpL2
+      return (a.l3 ?? '').localeCompare(b.l3 ?? '')
+    })
+
+    return sorted.slice(0, 100)
   }, [taxonomyNodes, search])
 
   // Clamp focused index

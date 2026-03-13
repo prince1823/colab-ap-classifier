@@ -1,9 +1,12 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Plus, X, ChevronUp, ChevronDown, Filter, Layers } from 'lucide-react'
+import { useDrag, useDrop } from 'react-dnd'
 import * as Popover from '@radix-ui/react-popover'
 import type { Aggregation, SpendDisplayMode } from '../../types/pivot'
 import type { PivotFilterState } from './PivotFilterBar'
 import '../../styles/PivotHierarchy.css'
+
+const PIVOT_DIM_TYPE = 'PIVOT_DIM'
 
 // Human-readable labels for common columns
 const COLUMN_LABELS: Record<string, string> = {
@@ -51,6 +54,9 @@ interface PivotToolbarProps {
   spendDisplayMode: SpendDisplayMode
   onSpendDisplayModeChange: (mode: SpendDisplayMode) => void
   showSpendToggle: boolean
+  /* Advanced filter */
+  advancedFilterCount?: number
+  onOpenAdvancedFilter?: () => void
 }
 
 /** Columns to exclude from the filter list (non-filterable) */
@@ -78,6 +84,8 @@ export default function PivotToolbar({
   spendDisplayMode,
   onSpendDisplayModeChange,
   showSpendToggle,
+  advancedFilterCount = 0,
+  onOpenAdvancedFilter,
 }: PivotToolbarProps) {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [addMenuSearch, setAddMenuSearch] = useState('')
@@ -151,11 +159,17 @@ export default function PivotToolbar({
   if (numericColumns.length === 0) numericColumns.push('spend_amount')
 
   const removeRowDim = (idx: number) => {
-    if (rowDimensions.length <= 1) return
     const next = [...rowDimensions]
     next.splice(idx, 1)
     onRowDimensionsChange(next)
   }
+
+  const moveDim = useCallback((fromIndex: number, toIndex: number) => {
+    const next = [...rowDimensions]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    onRowDimensionsChange(next)
+  }, [rowDimensions, onRowDimensionsChange])
 
   const moveRowDim = (idx: number, direction: 'up' | 'down') => {
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1
@@ -198,72 +212,64 @@ export default function PivotToolbar({
 
   return (
     <div className="pivot-toolbar">
-      {/* Row dimensions — show first 2 inline, overflow behind +N more */}
+      {/* Pivot dimensions — shown as arrow-separated path */}
       <div className="pivot-toolbar-section">
-        <span className="pivot-toolbar-label">Rows:</span>
-        {rowDimensions.slice(0, 2).map((dim, idx) => renderDimChip(dim, idx))}
-        {/* +N more overflow button */}
-        {rowDimensions.length > 2 && (
-          <div ref={overflowRef} style={{ position: 'relative', display: 'inline-flex' }}>
-            <button
-              className="pivot-dim-chip"
-              style={{ cursor: 'pointer', color: 'var(--primary-color)', borderColor: 'var(--primary-color)', background: 'rgba(59,130,246,0.06)' }}
-              onClick={() => setShowOverflow(!showOverflow)}
-            >
-              +{rowDimensions.length - 2} more
-            </button>
-            {showOverflow && (
-              <div className="pivot-add-field-menu" style={{ minWidth: 240 }}>
-                {rowDimensions.slice(2).map((dim, i) => {
-                  const realIdx = i + 2
-                  const colFilterCount = (filterState[dim] || []).length
-                  const options = filterOptions[dim] || []
-                  return (
-                    <div key={dim} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px' }}>
-                      <button
-                        className="pivot-dim-chip-arrow"
-                        onClick={() => moveRowDim(realIdx, 'up')}
-                        title="Move up"
-                        style={{ opacity: 0.7 }}
-                      >
-                        <ChevronUp size={9} />
-                      </button>
-                      {realIdx < rowDimensions.length - 1 && (
-                        <button
-                          className="pivot-dim-chip-arrow"
-                          onClick={() => moveRowDim(realIdx, 'down')}
-                          title="Move down"
-                          style={{ opacity: 0.7 }}
-                        >
-                          <ChevronDown size={9} />
-                        </button>
-                      )}
-                      <OverflowFilterBtn
-                        column={dim}
-                        label={colLabel(dim)}
-                        showLabel
-                        options={options}
-                        selected={filterState[dim] || []}
-                        onToggle={(val) => toggleFilterOption(dim, val)}
-                        onClear={() => clearColumnFilter(dim)}
-                        activeCount={colFilterCount}
-                      />
-                      <button
-                        className="pivot-dim-chip-x"
-                        onClick={() => removeRowDim(realIdx)}
-                        title="Remove"
-                        style={{ opacity: 0.7 }}
-                      >
-                        <X size={9} />
-                      </button>
-                    </div>
-                  )
-                })}
+        <span className="pivot-toolbar-label">Pivot:</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {rowDimensions.length === 0 && (
+            <span style={{ fontSize: 10, color: '#9ca3af', fontStyle: 'italic' }}>Add pivot dimensions with +</span>
+          )}
+          {rowDimensions.slice(0, 3).map((dim, idx) => (
+            <React.Fragment key={dim}>
+              {idx > 0 && (
+                <span style={{ fontSize: 9, color: '#9ca3af', margin: '0 1px', userSelect: 'none' }}>→</span>
+              )}
+              <DraggableDimChip
+                dim={dim}
+                index={idx}
+                label={colLabel(dim)}
+                onMove={moveDim}
+                onRemove={() => removeRowDim(idx)}
+              />
+            </React.Fragment>
+          ))}
+          {/* Overflow: +N more button with dropdown */}
+          {rowDimensions.length > 3 && (
+            <React.Fragment>
+              <span style={{ fontSize: 9, color: '#9ca3af', margin: '0 1px', userSelect: 'none' }}>→</span>
+              <div ref={overflowRef} style={{ position: 'relative', display: 'inline-flex' }}>
+                <button
+                  className="pivot-dim-chip"
+                  style={{ cursor: 'pointer', fontSize: 10, color: 'var(--primary-color)', borderColor: 'var(--primary-color)', background: 'rgba(59,130,246,0.06)' }}
+                  onClick={() => setShowOverflow(!showOverflow)}
+                >
+                  +{rowDimensions.length - 3} more
+                </button>
+                {showOverflow && (
+                  <div className="pivot-add-field-menu" style={{ minWidth: 220 }}>
+                    {rowDimensions.slice(3).map((dim, i) => {
+                      const realIdx = i + 3
+                      return (
+                        <div key={dim} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', fontSize: 11 }}>
+                          <span>{colLabel(dim)}</span>
+                          <button
+                            className="pivot-dim-chip-x"
+                            onClick={() => removeRowDim(realIdx)}
+                            title="Remove"
+                            style={{ opacity: 0.7 }}
+                          >
+                            <X size={9} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
-        {/* Add field button — hidden once max dimensions reached */}
+            </React.Fragment>
+          )}
+        </div>
+        {/* Add field button */}
         {availableForRows.length > 0 && rowDimensions.length < MAX_ROW_DIMS && (
           <div ref={addMenuRef} style={{ position: 'relative', display: 'inline-flex' }}>
             <button
@@ -360,6 +366,29 @@ export default function PivotToolbar({
             <span style={{ fontSize: 11, fontWeight: 600, minWidth: 14, textAlign: 'center' }}>
               {spendDisplayMode === 'absolute' ? '$' : '%'}
             </span>
+          </button>
+        )}
+        {onOpenAdvancedFilter && (
+          <button
+            className="pivot-toolbar-icon-btn"
+            onClick={onOpenAdvancedFilter}
+            title="Advanced filters"
+            data-active={advancedFilterCount > 0 ? '' : undefined}
+            style={{ position: 'relative' }}
+          >
+            <Filter size={12} />
+            {advancedFilterCount > 0 && (
+              <span style={{
+                position: 'absolute', top: -4, right: -4,
+                background: '#3b82f6', color: '#fff',
+                fontSize: 8, fontWeight: 700,
+                width: 14, height: 14,
+                borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {advancedFilterCount}
+              </span>
+            )}
           </button>
         )}
       </div>
@@ -503,6 +532,73 @@ function DimFilterChip({
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* DraggableDimChip — drag-and-drop reorderable dimension chip         */
+/* ------------------------------------------------------------------ */
+
+function DraggableDimChip({
+  dim,
+  index,
+  label,
+  onMove,
+  onRemove,
+}: {
+  dim: string
+  index: number
+  label: string
+  onMove: (fromIndex: number, toIndex: number) => void
+  onRemove: () => void
+}) {
+  const chipRef = useRef<HTMLSpanElement>(null)
+
+  const [{ isDragging }, drag] = useDrag({
+    type: PIVOT_DIM_TYPE,
+    item: () => ({ index }),
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  })
+
+  const [{ isOver }, drop] = useDrop({
+    accept: PIVOT_DIM_TYPE,
+    hover: (item: { index: number }) => {
+      if (item.index === index) return
+      onMove(item.index, index)
+      item.index = index
+    },
+    collect: (monitor) => ({
+      isOver: monitor.isOver(),
+    }),
+  })
+
+  drag(drop(chipRef))
+
+  return (
+    <span
+      ref={chipRef}
+      className="pivot-dim-chip"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        cursor: 'grab',
+        opacity: isDragging ? 0.4 : 1,
+        background: isOver ? 'rgba(59,130,246,0.08)' : undefined,
+        transition: 'opacity 0.15s, background 0.15s',
+      }}
+    >
+      <span style={{ fontSize: 10 }}>{label}</span>
+      <button
+        className="pivot-dim-chip-x"
+        onClick={(e) => { e.stopPropagation(); onRemove() }}
+        title="Remove"
+      >
+        <X size={9} />
+      </button>
+    </span>
   )
 }
 

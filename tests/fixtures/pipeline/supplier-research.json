@@ -1,0 +1,31 @@
+{
+  "seed": {
+    "mckesson medical surgical": {
+      "supplierType": "company",
+      "officialBusinessName": "McKesson Medical-Surgical",
+      "description": "McKesson Medical-Surgical is a leading distributor of medical supplies and equipment to physician offices, surgery centers, and home care settings across the United States.",
+      "industry": "Healthcare Distribution",
+      "productsServices": "Medical-surgical supplies, pharmaceuticals, medical equipment distribution",
+      "primaryBusinessModel": "B2B Distribution",
+      "serviceType": "Medical supply distribution"
+    }
+  },
+  "mock": {
+    "amazon": {
+      "supplierType": "company",
+      "officialBusinessName": "Amazon.com, Inc.",
+      "description": "Amazon is a multinational technology and e-commerce company offering online retail, cloud computing, and various digital services.",
+      "industry": "E-commerce / Technology",
+      "productsServices": "Online retail, office supplies, electronics, general merchandise",
+      "primaryBusinessModel": "B2C/B2B Marketplace"
+    },
+    "cintas corporation": {
+      "supplierType": "company",
+      "officialBusinessName": "Cintas Corporation",
+      "description": "Cintas provides corporate identity uniforms, entrance mats, restroom supplies, promotional products, fire protection, and first aid and safety services.",
+      "industry": "Facility Services",
+      "productsServices": "Uniform rental, facility services, fire protection, first aid supplies",
+      "primaryBusinessModel": "B2B Services"
+    }
+  }
+}

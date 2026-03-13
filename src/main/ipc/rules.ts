@@ -1,25 +1,21 @@
 import { registerHandler } from './register';
-import * as rulesService from '../services/rules';
+import type { RuleStore } from '../../shared/types/services';
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types';
 
-export function registerRulesHandlers(): void {
+export function registerRulesHandlers(rules: RuleStore): void {
   registerHandler('rules:list', async () => {
-    return rulesService.listRules();
+    return rules.listRules();
   });
 
   registerHandler('rules:create', async (_event, input: unknown) => {
-    return rulesService.createRule(input as OverrideRuleCreate);
+    return rules.createRule(input as OverrideRuleCreate);
   });
 
   registerHandler('rules:update', async (_event, ruleId: unknown, updates: unknown) => {
-    return rulesService.updateRule(ruleId as string, updates as OverrideRuleUpdate);
+    return rules.updateRule(ruleId as string, updates as OverrideRuleUpdate);
   });
 
   registerHandler('rules:delete', async (_event, ruleId: unknown) => {
-    return rulesService.deleteRule(ruleId as string);
-  });
-
-  registerHandler('rules:importFromColabip', async (_event, rulePack: unknown) => {
-    return rulesService.importFromColabip(rulePack as string);
+    return rules.deleteRule(ruleId as string);
   });
 }

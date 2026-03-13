@@ -1,223 +1,90 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, LabelList
 } from 'recharts'
-import { Sparkles, TrendingUp, TrendingDown, AlertCircle, CheckCircle2, PieChart as PieIcon, BarChart3 } from 'lucide-react'
+import { Sparkles, TrendingUp, TrendingDown, AlertCircle, PieChart as PieIcon, BarChart3 } from 'lucide-react'
+import { fmtAbbrev } from '../../utils/formatSpend'
+import { useIPC } from '../../hooks/useIPC'
+import { ipc } from '../../lib/ipc'
+import type { TransactionStats, TransactionFilter } from '../../../shared/types/transactions'
 import '../../styles/MetricsTab.css'
 
-const formatCurrency = (amount) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount || 0)
-
-const formatCurrencyShort = (amount) => {
-  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`
-  if (amount >= 1000) return `$${(amount / 1000).toFixed(1)}k`
-  return `$${Math.round(amount)}`
+interface MetricsTabProps {
+  stats: TransactionStats | null
+  l1Data: { name: string; value: number }[]
+  supplierData: { name: string; total: number }[]
+  monthlyData: { month: string; spend: number }[]
+  filter?: TransactionFilter
 }
 
-const formatNumber = (num) => new Intl.NumberFormat('en-US').format(num || 0)
+const formatCurrency = (amount: number | string) => fmtAbbrev(Number(amount) || 0)
+const formatCurrencyShort = (amount: number | string) => fmtAbbrev(Number(amount))
+const formatNumber = (num: number) => new Intl.NumberFormat('en-US').format(num || 0)
 
-function getMonthKey(row) {
-  const year = row.year ?? null
-  const month = row.month ?? null
-
-  if (year && month) {
-    const m = String(month).padStart(2, '0')
-    return `${year}-${m}`
-  }
-
-  const dateStr = row.invoice_date || null
-  if (dateStr) {
-    const d = new Date(dateStr)
-    if (!Number.isNaN(d.getTime())) {
-      const y = d.getFullYear()
-      const m = String(d.getMonth() + 1).padStart(2, '0')
-      return `${y}-${m}`
-    }
-  }
-
-  return null
+const DIMENSION_TO_COLUMN: Record<string, string> = {
+  company: 'company',
+  cost_center: 'cost_center',
+  gl: 'gl_description',
+  gl_account_desc: 'gl_description',
+  invoice_desc: 'line_description',
+  country: 'country',
 }
 
-function getAmount(row) {
-  return parseFloat(row.spend_amount || 0) || 0
-}
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
-function getSupplier(row) {
-  return row.supplier_name || 'Unknown'
-}
-
-function isLowConfidence(row) {
-  const score = typeof row.review_score === 'number' ? row.review_score : null
-  if (score !== null) return score < 50
-  return false
-}
-
-const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) => {
-  const [selectedBenchmark, setSelectedBenchmark] = useState('overall') // overall | topSupplier
-  const [particularDimension, setParticularDimension] = useState('company') // company | cost_center | gl | gl_account_desc | invoice_desc | country
+const MetricsTab: React.FC<MetricsTabProps> = ({
+  stats,
+  l1Data,
+  supplierData,
+  monthlyData,
+  filter,
+}) => {
+  const [particularDimension, setParticularDimension] = useState('company')
   const [animateIn, setAnimateIn] = useState(false)
 
   useEffect(() => {
-    // Trigger entrance animations shortly after mount
     const timer = setTimeout(() => setAnimateIn(true), 40)
     return () => clearTimeout(timer)
   }, [])
 
-  const totals = useMemo(() => {
-    const totalSpend = filteredTransactions.reduce((sum, r) => sum + getAmount(r), 0)
-    const totalRows = filteredTransactions.length
-    const suppliers = new Set(filteredTransactions.map(getSupplier))
-    const lowConfRows = filteredTransactions.filter(isLowConfidence)
-    const lowConf = lowConfRows.length
-    const lowConfSpend = lowConfRows.reduce((sum, r) => sum + getAmount(r), 0)
+  // Fetch particular-dimension data via IPC (MetricsTab owns this since it owns the dimension state)
+  const filterKey = useMemo(() => JSON.stringify(filter), [filter])
+  const particularColumn = DIMENSION_TO_COLUMN[particularDimension] ?? 'company'
+  const { data: particularResult } = useIPC(
+    () => ipc.transactions.pivotAggregation([particularColumn], 'spend_amount', filter),
+    [filterKey, particularColumn]
+  )
 
+  const particularData = useMemo(() => {
+    if (!particularResult) return []
+    return particularResult.rows
+      .map(row => ({ name: row.dimensions[0] || 'Unknown', value: row.amount }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8)
+  }, [particularResult])
+
+  const totals = useMemo(() => {
+    if (!stats) return { totalSpend: 0, totalRows: 0, totalSuppliers: 0, lowConf: 0, dataQualityScore: 100 }
+    const { totalSpend, totalRows, uniqueSuppliers, unclassifiedRows } = stats
     return {
       totalSpend,
       totalRows,
-      totalSuppliers: suppliers.size,
-      lowConf,
-      lowConfSpend,
-      dataQualityScore: totalRows > 0 ? Math.round(((totalRows - lowConf) / totalRows) * 100) : 100
+      totalSuppliers: uniqueSuppliers,
+      lowConf: unclassifiedRows,
+      dataQualityScore: totalRows > 0 ? Math.round(((totalRows - unclassifiedRows) / totalRows) * 100) : 100,
     }
-  }, [filteredTransactions])
-
-  const chartData = useMemo(() => {
-    const l1Map = new Map()
-    const particularMap = new Map()
-
-    const getDimensionKey = (row, dim) => {
-      switch (dim) {
-        case 'company': return row.company || 'Unknown'
-        case 'cost_center': return row.cost_center || 'Unknown'
-        case 'gl': return row.gl_description || 'Unknown'
-        case 'gl_account_desc': return row.gl_description || 'Unknown'
-        case 'invoice_desc': return row.line_description || 'Unknown'
-        case 'country': return row.country || 'Unknown'
-        default: return 'Unknown'
-      }
-    }
-
-    filteredTransactions.forEach(row => {
-      // L1 Processing
-      const path = row.classification_path || row.taxonomy_path || ''
-      const l1 = path.split('|')[0]?.trim() || 'Unclassified'
-      const amt = getAmount(row)
-      l1Map.set(l1, (l1Map.get(l1) || 0) + amt)
-
-      // Particular Thing Processing
-      const pKey = getDimensionKey(row, particularDimension)
-      particularMap.set(pKey, (particularMap.get(pKey) || 0) + amt)
-    })
-
-    const l1Data = Array.from(l1Map.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5)
-
-    const particularData = Array.from(particularMap.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8)
-
-    return { l1Data, particularData }
-  }, [filteredTransactions, particularDimension])
-
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
-
-  const topSuppliers = useMemo(() => {
-    const map = new Map()
-    for (const row of filteredTransactions) {
-      const s = getSupplier(row)
-      map.set(s, (map.get(s) || 0) + getAmount(row))
-    }
-    return Array.from(map.entries())
-      .map(([name, total]) => ({ name, total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 8)
-  }, [filteredTransactions])
-
-  const topSupplierName = topSuppliers[0]?.name || 'Unknown'
-
-  const monthlySeries = useMemo(() => {
-    const byMonth = new Map()
-    for (const row of filteredTransactions) {
-      const key = getMonthKey(row)
-      if (!key) continue
-      const amount = getAmount(row)
-      const supplier = getSupplier(row)
-
-      if (!byMonth.has(key)) {
-        byMonth.set(key, { month: key, spend: 0, lowConf: 0, topSupplierSpend: 0 })
-      }
-      const obj = byMonth.get(key)
-      obj.spend += amount
-      if (isLowConfidence(row)) obj.lowConf += 1
-      if (supplier === topSupplierName) obj.topSupplierSpend += amount
-    }
-
-    return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month))
-  }, [filteredTransactions, topSupplierName])
-
-  const supplierGainersDecliners = useMemo(() => {
-    // Simple “gainers/decliners” heuristic: compare last 3 months vs previous 3 months
-    const months = monthlySeries.map(d => d.month)
-    const lastMonths = months.slice(-3)
-    const prevMonths = months.slice(-6, -3)
-    const lastSet = new Set(lastMonths)
-    const prevSet = new Set(prevMonths)
-
-    const spendBySupplierLast = new Map()
-    const spendBySupplierPrev = new Map()
-
-    for (const row of filteredTransactions) {
-      const m = getMonthKey(row)
-      if (!m) continue
-      const supplier = getSupplier(row)
-      const amount = getAmount(row)
-
-      if (lastSet.has(m)) spendBySupplierLast.set(supplier, (spendBySupplierLast.get(supplier) || 0) + amount)
-      if (prevSet.has(m)) spendBySupplierPrev.set(supplier, (spendBySupplierPrev.get(supplier) || 0) + amount)
-    }
-
-    const allSuppliers = new Set([...spendBySupplierLast.keys(), ...spendBySupplierPrev.keys()])
-    const deltas = Array.from(allSuppliers).map((s) => {
-      const last = spendBySupplierLast.get(s) || 0
-      const prev = spendBySupplierPrev.get(s) || 0
-      const delta = last - prev
-      const pct = prev > 0 ? (delta / prev) : (last > 0 ? 1 : 0)
-      return { name: s, last, prev, delta, pct }
-    })
-
-    const gainers = deltas
-      .filter(d => d.delta > 0)
-      .sort((a, b) => b.delta - a.delta)
-      .slice(0, 8)
-
-    const decliners = deltas
-      .filter(d => d.delta < 0)
-      .sort((a, b) => a.delta - b.delta)
-      .slice(0, 8)
-
-    return { gainers, decliners, windowOk: lastMonths.length === 3 && prevMonths.length === 3 }
-  }, [filteredTransactions, monthlySeries])
+  }, [stats])
 
   const insights = useMemo(() => {
-    const result = []
-    const series = monthlySeries
+    const result: Array<{ type: string; text: string }> = []
 
-    // 1) Overall month-over-month spend trend
-    if (series.length >= 2) {
-      const last = series[series.length - 1]
-      const prev = series[series.length - 2]
+    // Month-over-month trend
+    if (monthlyData.length >= 2) {
+      const last = monthlyData[monthlyData.length - 1]
+      const prev = monthlyData[monthlyData.length - 2]
       const delta = last.spend - prev.spend
-      const pct = prev.spend > 0 ? (delta / prev.spend) : 0
-
+      const pct = prev.spend > 0 ? delta / prev.spend : 0
       result.push({
         type: delta >= 0 ? 'up' : 'down',
         text: `Overall spend ${delta >= 0 ? 'increased' : 'decreased'} ${formatCurrency(Math.abs(delta))} (${(Math.abs(pct) * 100).toFixed(1)}%) compared to ${prev.month}.`,
@@ -225,183 +92,47 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
     } else {
       result.push({
         type: 'info',
-        text: 'Not enough time-series data to show month-over-month trends. Add invoice_date to enable richer time insights.',
+        text: 'Not enough time-series data for month-over-month trends. Add invoice_date to enable richer time insights.',
       })
     }
 
-    // 2) Low confidence overview
-    const lowConfRate = totals.totalRows > 0 ? (totals.lowConf / totals.totalRows) : 0
+    // Low-confidence overview
+    const lowConfRate = totals.totalRows > 0 ? totals.lowConf / totals.totalRows : 0
     result.push({
       type: 'info',
-      text: `Low-confidence rate is ${(lowConfRate * 100).toFixed(1)}% (${formatNumber(totals.lowConf)} of ${formatNumber(totals.totalRows)} filtered rows). Focus review on high-spend suppliers and categories with low confidence.`,
+      text: `Low-confidence rate is ${(lowConfRate * 100).toFixed(1)}% (${formatNumber(totals.lowConf)} of ${formatNumber(totals.totalRows)} rows). Focus review on high-spend suppliers and categories.`,
     })
 
-    // Build spend maps for classification levels and suppliers
-    const levelMaps = {
-      L1: new Map(),
-      L2: new Map(),
-      L3: new Map(),
-      L4: new Map(),
-    }
-    const supplierSpend = new Map()
-    const lowConfBySupplier = new Map()
-    const lowConfByL1 = new Map()
-
-    filteredTransactions.forEach((row) => {
-      const amt = getAmount(row)
-      const supplier = getSupplier(row)
-      const path = row.classification_path || row.taxonomy_path || ''
-      const parts = path.split('|').map(p => p.trim()).filter(Boolean)
-
-      parts.forEach((part, idx) => {
-        const levelKey = `L${idx + 1}`
-        if (levelMaps[levelKey]) {
-          levelMaps[levelKey].set(part, (levelMaps[levelKey].get(part) || 0) + amt)
-        }
-      })
-
-      supplierSpend.set(supplier, (supplierSpend.get(supplier) || 0) + amt)
-
-      if (isLowConfidence(row)) {
-        lowConfBySupplier.set(supplier, (lowConfBySupplier.get(supplier) || 0) + amt)
-        if (parts[0]) {
-          lowConfByL1.set(parts[0], (lowConfByL1.get(parts[0]) || 0) + amt)
-        }
-      }
-    })
-
+    // Top L1 categories
     const totalSpend = totals.totalSpend || 0
-
-    const makeTopList = (map) =>
-      Array.from(map.entries())
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value)
-
-    const topL1 = makeTopList(levelMaps.L1)
-    const topL2 = makeTopList(levelMaps.L2)
-    const topL3 = makeTopList(levelMaps.L3)
-    const topL4 = makeTopList(levelMaps.L4)
-    const topSuppliersBySpend = makeTopList(supplierSpend)
-    const topLowConfSuppliers = makeTopList(lowConfBySupplier)
-    const topLowConfL1 = makeTopList(lowConfByL1)
-
-    const addLevelInsights = (levelLabel, list, typeKey) => {
-      list.slice(0, 3).forEach((entry, idx) => {
-        if (result.length >= 15) return
-        const pct = totalSpend > 0 ? (entry.value / totalSpend) * 100 : 0
-        result.push({
-          type: typeKey,
-          text: `${levelLabel} #${idx + 1} "${entry.name}" represents ${formatCurrency(entry.value)} (${pct.toFixed(1)}% of filtered spend). Confirm this category’s description and rules are aligned with current transactions.`,
-        })
-      })
-    }
-
-    addLevelInsights('L1 category', topL1, 'info')
-    addLevelInsights('L2 category', topL2, 'info')
-    addLevelInsights('L3 category', topL3, 'info')
-    addLevelInsights('L4 category', topL4, 'info')
-
-    // Supplier concentration insights
-    topSuppliersBySpend.slice(0, 3).forEach((entry, idx) => {
+    l1Data.slice(0, 3).forEach((entry, idx) => {
       if (result.length >= 15) return
       const pct = totalSpend > 0 ? (entry.value / totalSpend) * 100 : 0
       result.push({
-        type: 'up',
-        text: `Supplier #${idx + 1} by spend "${entry.name}" accounts for ${formatCurrency(entry.value)} (${pct.toFixed(1)}% of filtered spend). Consider dedicated rules or Category A treatment if reclassification is frequent.`,
+        type: 'info',
+        text: `L1 #${idx + 1} "${entry.name}" represents ${formatCurrency(entry.value)} (${pct.toFixed(1)}% of spend). Confirm category rules are aligned with current transactions.`,
       })
     })
 
-    // Suppliers with highest low-confidence spend
-    topLowConfSuppliers.slice(0, 3).forEach((entry) => {
+    // Top suppliers by spend
+    supplierData.slice(0, 3).forEach((entry, idx) => {
       if (result.length >= 15) return
-      result.push({
-        type: 'down',
-        text: `Supplier "${entry.name}" has ${formatCurrency(entry.value)} in low-confidence transactions. Review sample rows and tighten classification for this supplier.`,
-      })
-    })
-
-    // L1 categories with highest low-confidence spend
-    topLowConfL1.slice(0, 3).forEach((entry) => {
-      if (result.length >= 15) return
-      result.push({
-        type: 'down',
-        text: `L1 category "${entry.name}" carries ${formatCurrency(entry.value)} in low-confidence spend. Validate L2–L4 breakdowns and reclassify misaligned rows.`,
-      })
-    })
-
-    // Supplier gainer/decliner context
-    const topGainer = supplierGainersDecliners.gainers[0]
-    const topDecliner = supplierGainersDecliners.decliners[0]
-
-    if (topGainer && result.length < 15) {
+      const pct = totalSpend > 0 ? (entry.total / totalSpend) * 100 : 0
       result.push({
         type: 'up',
-        text: `Spend with "${topGainer.name}" is rising (+${formatCurrency(topGainer.delta)} over the last 3 months vs prior 3). Ensure the classification path (L1–L4) still reflects the current buying pattern.`,
+        text: `Supplier #${idx + 1} "${entry.name}" accounts for ${formatCurrency(entry.total)} (${pct.toFixed(1)}% of spend). Consider dedicated rules if reclassification is frequent.`,
       })
-    }
-    if (topDecliner && result.length < 15) {
-      result.push({
-        type: 'down',
-        text: `Spend with "${topDecliner.name}" is declining (${formatCurrency(topDecliner.delta)} over the last 3 months vs prior 3). Check if contracts moved to other suppliers or categories and reclassify any legacy rows.`,
-      })
-    }
+    })
 
-    // Ensure we return at least 15 items when possible by duplicating general guidance
     while (result.length < 15 && result.length > 0) {
       result.push({
         type: 'info',
-        text: 'Use high-spend, low-confidence combinations of Supplier × L1–L4 to prioritize reclassification. Correcting a few large suppliers often cleans the majority of downstream reports.',
+        text: 'Use high-spend, low-confidence Supplier × L1–L4 combinations to prioritize reclassification. Correcting a few large suppliers often cleans the majority of downstream reports.',
       })
     }
 
     return result
-  }, [monthlySeries, supplierGainersDecliners, totals, filteredTransactions])
-
-  const benchmarkLabel = selectedBenchmark === 'topSupplier' ? `Top Supplier: ${topSupplierName}` : 'Overall Spend'
-
-  const handleTopSupplierClick = (entry) => {
-    if (!onDrillToFilters || !entry) return
-    // Drill into tables board filtered by the clicked supplier
-    onDrillToFilters({ supplier: [entry.name] })
-  }
-
-  const handleL1CategoryClick = (entry) => {
-    if (!onDrillToFilters || !entry) return
-    // Drill into tables board filtered by the clicked L1 category
-    onDrillToFilters({ classificationL1: [entry.name] })
-  }
-
-  const handleParticularClick = (entry) => {
-    if (!onDrillToFilters || !entry) return
-    // Map the current dimension to the appropriate filter key
-    let key = null
-    switch (particularDimension) {
-      case 'company':
-        key = 'company'
-        break
-      case 'cost_center':
-        key = 'costCenter'
-        break
-      case 'gl':
-        key = 'glDescription'
-        break
-      case 'gl_account_desc':
-        // Route to GL Description-style filter so user can inspect GLs
-        key = 'glDescription'
-        break
-      case 'invoice_desc':
-        // No dedicated invoice description filter yet; skip drill if unsupported
-        break
-      case 'country':
-        key = 'country'
-        break
-      default:
-        break
-    }
-
-    if (!key) return
-    onDrillToFilters({ [key]: [entry.name] })
-  }
+  }, [monthlyData, totals, l1Data, supplierData])
 
   return (
     <div className={`metrics-tab ${animateIn ? 'metrics-tab-animate' : ''}`}>
@@ -435,58 +166,62 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
       </div>
 
       <div className="metrics-grid">
+        {/* Monthly spend trend */}
         <div className="metrics-card metrics-card-1 main-chart">
           <div className="metrics-card-header">
             <div>
-              <div className="metrics-card-title">{benchmarkLabel}</div>
+              <div className="metrics-card-title">Overall Spend</div>
               <div className="metrics-card-subtitle">Monthly expenditure trend</div>
             </div>
             <div className="chart-type-badge">Trend</div>
           </div>
-          <div className="metrics-card-body">
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={monthlySeries}>
-                <defs>
-                  <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={(v) => `$${Number(v).toLocaleString()}`} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                  formatter={(v) => [formatCurrency(v), 'Spend']}
-                />
-                <Area
-                  type="monotone"
-                  dataKey={selectedBenchmark === 'topSupplier' ? 'topSupplierSpend' : 'spend'}
-                  stroke="#f97316"
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#colorSpend)"
-                  isAnimationActive={true}
-                  animationDuration={1000}
-                >
-                  <LabelList dataKey={selectedBenchmark === 'topSupplier' ? 'topSupplierSpend' : 'spend'} position="top" formatter={formatCurrencyShort} style={{ fontSize: '10px', fill: 'var(--text-secondary)', fontWeight: '600' }} />
-                </Area>
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="metrics-card-body" style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: Math.max(monthlyData.length * 80, 400) }}>
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={monthlyData}>
+                  <defs>
+                    <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={(v) => fmtAbbrev(Number(v))} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
+                    formatter={(v: number | string) => [formatCurrency(v), 'Spend']}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="spend"
+                    stroke="#f97316"
+                    strokeWidth={3}
+                    fillOpacity={1}
+                    fill="url(#colorSpend)"
+                    isAnimationActive
+                    animationDuration={1000}
+                  >
+                    <LabelList dataKey="spend" position="top" formatter={formatCurrencyShort} style={{ fontSize: '10px', fill: 'var(--text-secondary)', fontWeight: '600' }} />
+                  </Area>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 
+        {/* Top Suppliers */}
         <div className="metrics-card metrics-card-2">
           <div className="metrics-card-header">
             <div>
               <div className="metrics-card-title">Top Suppliers</div>
-              <div className="metrics-card-subtitle">By volume</div>
+              <div className="metrics-card-subtitle">By spend</div>
             </div>
             <BarChart3 size={18} className="text-secondary" />
           </div>
           <div className="metrics-card-body">
             <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={topSuppliers} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <BarChart data={supplierData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border-color)" />
                 <XAxis type="number" hide />
                 <YAxis
@@ -500,16 +235,14 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
                 />
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                  formatter={(v) => [formatCurrency(v), 'Spend']}
+                  formatter={(v: number | string) => [formatCurrency(v), 'Spend']}
                 />
                 <Bar
                   dataKey="total"
                   fill="#3b82f6"
                   radius={[0, 4, 4, 0]}
                   barSize={18}
-                  isAnimationActive={true}
-                  onClick={handleTopSupplierClick}
-                  style={{ cursor: onDrillToFilters ? 'pointer' : 'default' }}
+                  isAnimationActive
                 >
                   <LabelList dataKey="total" position="right" formatter={formatCurrencyShort} style={{ fontSize: '10px', fill: 'var(--text-secondary)', fontWeight: '600' }} offset={10} />
                 </Bar>
@@ -518,6 +251,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
           </div>
         </div>
 
+        {/* Spend by L1 Category (Pie) */}
         <div className="metrics-card metrics-card-pie">
           <div className="metrics-card-header">
             <div>
@@ -530,30 +264,28 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
                 <Pie
-                  data={chartData.l1Data}
+                  data={l1Data}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
                   outerRadius={80}
                   paddingAngle={5}
                   dataKey="value"
-                  isAnimationActive={true}
-                  label={({ name, value }) => formatCurrencyShort(value)}
-                  onClick={handleL1CategoryClick}
-                  style={{ cursor: onDrillToFilters ? 'pointer' : 'default' }}
+                  isAnimationActive
+                  label={({ value }: { name: string; value: number }) => formatCurrencyShort(value)}
                 >
-                  {chartData.l1Data.map((entry, index) => (
+                  {l1Data.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                  formatter={(v) => formatCurrency(v)}
+                  formatter={(v: number | string) => formatCurrency(v)}
                 />
               </PieChart>
             </ResponsiveContainer>
             <div className="pie-legend">
-              {chartData.l1Data.map((d, i) => (
+              {l1Data.map((d, i) => (
                 <div key={d.name} className="legend-item">
                   <span className="legend-dot" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                   <span className="legend-name">{d.name}</span>
@@ -563,6 +295,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
           </div>
         </div>
 
+        {/* Particular Dimension */}
         <div className="metrics-card metrics-card-particular">
           <div className="metrics-card-header">
             <div>
@@ -584,7 +317,7 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
           </div>
           <div className="metrics-card-body">
             <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={chartData.particularData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <BarChart data={particularData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <XAxis type="number" hide />
                 <YAxis
                   dataKey="name"
@@ -597,16 +330,14 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
                 />
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                  formatter={(v) => [formatCurrency(v), 'Spend']}
+                  formatter={(v: number | string) => [formatCurrency(v), 'Spend']}
                 />
                 <Bar
                   dataKey="value"
                   fill="#8b5cf6"
                   radius={[0, 4, 4, 0]}
                   barSize={18}
-                  isAnimationActive={true}
-                  onClick={handleParticularClick}
-                  style={{ cursor: onDrillToFilters ? 'pointer' : 'default' }}
+                  isAnimationActive
                 >
                   <LabelList dataKey="value" position="right" formatter={formatCurrencyShort} style={{ fontSize: '10px', fill: 'var(--text-secondary)', fontWeight: '600' }} offset={10} />
                 </Bar>
@@ -614,15 +345,31 @@ const MetricsTab = ({ transactions, filteredTransactions, onDrillToFilters }) =>
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
 
+      {/* AI Insights */}
+      <div className="metrics-insights">
+        <div className="insights-header">
+          <Sparkles size={16} />
+          <span>AI Insights</span>
+        </div>
+        <div className="insights-list">
+          {insights.map((insight, idx) => (
+            <div key={idx} className={`insight-item insight-${insight.type}`}>
+              {insight.type === 'up' && <TrendingUp size={14} className="insight-icon" />}
+              {insight.type === 'down' && <TrendingDown size={14} className="insight-icon" />}
+              {insight.type === 'info' && <AlertCircle size={14} className="insight-icon" />}
+              <span>{insight.text}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="metrics-footer-note">
-        Analyzed <strong>{formatNumber(filteredTransactions.length)}</strong> records representing <strong>{formatCurrency(totals.totalSpend)}</strong> in total spend volume.
+        Analyzed <strong>{formatNumber(totals.totalRows)}</strong> records representing <strong>{formatCurrency(totals.totalSpend)}</strong> in total spend volume.
       </div>
     </div>
   )
 }
 
 export default MetricsTab
-

@@ -1,0 +1,11 @@
+{
+  "amazon": {
+    "classificationPath": "non clinical|general & administrative|office supplies & equipment"
+  },
+  "cintas corporation": {
+    "classificationPath": "non clinical|mro supplies|uniforms"
+  },
+  "_default": {
+    "classificationPath": "non clinical|general & administrative|other general & administrative"
+  }
+}

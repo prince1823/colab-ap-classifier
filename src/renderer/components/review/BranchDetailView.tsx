@@ -2,7 +2,24 @@ import React, { useMemo } from 'react'
 import { X, TrendingUp, Users, FileText, DollarSign } from 'lucide-react'
 import '../styles/BranchDetailView.css'
 
-const BranchDetailView = ({ path, transactions, onClose }) => {
+interface TransactionRow {
+  [key: string]: unknown
+  classification_path?: string
+  taxonomy_path?: string
+  supplier_name?: string
+  vendor_name?: string
+  amount?: number | string
+  invoice_amount?: number | string
+  invoice_number?: string
+}
+
+interface BranchDetailViewProps {
+  path: string | null
+  transactions: TransactionRow[]
+  onClose: () => void
+}
+
+const BranchDetailView: React.FC<BranchDetailViewProps> = ({ path, transactions, onClose }) => {
   // Filter transactions that match this classification path
   const branchTransactions = useMemo(() => {
     if (!path || !transactions || transactions.length === 0) return []
@@ -27,20 +44,20 @@ const BranchDetailView = ({ path, transactions, onClose }) => {
       }
     }
 
-    const totalAmount = branchTransactions.reduce((sum, row) => {
-      return sum + (parseFloat(row.amount || row.invoice_amount || 0) || 0)
+    const totalAmount = branchTransactions.reduce((sum: number, row: TransactionRow) => {
+      return sum + (parseFloat(String(row.amount || row.invoice_amount || 0)) || 0)
     }, 0)
 
-    const supplierMap = new Map()
-    branchTransactions.forEach(row => {
+    const supplierMap = new Map<string, { count: number; amount: number }>()
+    branchTransactions.forEach((row: TransactionRow) => {
       const supplier = row.supplier_name || row.vendor_name || 'Unknown'
-      const amount = parseFloat(row.amount || row.invoice_amount || 0) || 0
+      const amount = parseFloat(String(row.amount || row.invoice_amount || 0)) || 0
       
       if (!supplierMap.has(supplier)) {
         supplierMap.set(supplier, { count: 0, amount: 0 })
       }
       
-      const supplierData = supplierMap.get(supplier)
+      const supplierData = supplierMap.get(supplier)!
       supplierData.count++
       supplierData.amount += amount
     })

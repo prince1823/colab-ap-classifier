@@ -41,8 +41,8 @@ const PRIMARY_COLUMNS = ['supplier_name', 'gl_description']
 
 /** Columns to exclude from the filter list (non-filterable) */
 const EXCLUDE_COLUMNS = new Set([
-  'id', 'row_index', 'taxonomy_node_id', 'classification_reasoning',
-  'invoice_group_key', 'spend_amount', 'amount', 'invoice_amount',
+  'id', 'row_index', 'taxonomy_node_id',
+  'classification_status', 'spend_amount', 'amount', 'invoice_amount',
 ])
 
 /* ------------------------------------------------------------------ */
@@ -484,7 +484,7 @@ export default function PivotFilterBar({
 }
 
 /* ------------------------------------------------------------------ */
-/* Filter application (pure function, used by PivotPage)               */
+/* Filter application (pure function, used by Dashboard / ReviewPage)   */
 /* ------------------------------------------------------------------ */
 
 export function applyPivotFilters(

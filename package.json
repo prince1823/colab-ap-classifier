@@ -6,6 +6,7 @@
   "main": "dist/main/main/index.js",
   "scripts": {
     "dev": "concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
+    "dev:log": "LOG_FILE=/tmp/c91-debug.log concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
     "dev:main": "tsc -p tsconfig.main.json && electron dist/main/main/index.js",
     "dev:renderer": "vite",
     "build": "npm run build:main && npm run build:renderer",
@@ -14,11 +15,10 @@
     "build:dist": "npm run build && electron-builder",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:mock": "vitest run tests/integration/pipeline-mock.test.ts",
-    "test:run": "vitest run tests/integration/pipeline-run.test.ts",
+    "test:mock": "vitest run tests/integration/classifier-mock.test.ts",
+    "test:run": "vitest run tests/integration/classifier-real-run.test.ts",
     "test:integration": "vitest run tests/integration/",
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.renderer.json",
-    "script:pipeline": "tsx scripts/run-test-pipeline.ts",
     "script:inspect": "tsx scripts/inspect-c91.ts",
     "script:verify-llm": "tsx scripts/verify-llm-config.ts",
     "script:test-llm": "tsx scripts/test-llm-config.ts"

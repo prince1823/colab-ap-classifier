@@ -1,7 +1,8 @@
-import type { ProjectSupplier } from '../../../shared/types/suppliers'
+import type { ProjectSupplierView } from '../../../shared/types/suppliers'
+import { fmtAbbrev } from '../../utils/formatSpend'
 
 interface Props {
-  suppliers: ProjectSupplier[]
+  suppliers: ProjectSupplierView[]
 }
 
 export default function SpendDistribution({ suppliers }: Props) {
@@ -19,7 +20,7 @@ export default function SpendDistribution({ suppliers }: Props) {
               <div className="mb-1 flex items-center justify-between text-xs">
                 <span className="max-w-xs truncate font-medium text-gray-700">{s.supplierName}</span>
                 <span className="text-gray-500">
-                  ${s.totalSpend.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  {fmtAbbrev(s.totalSpend)}
                 </span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-gray-100">

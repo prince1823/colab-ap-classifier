@@ -1,13 +1,11 @@
-// Load .env before any service imports (settings.ts reads process.env at import time)
+// Load .env before any service imports
 import { loadEnv } from './load-env';
 loadEnv();
 
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
+import { createContainer } from './container';
 import { registerAllHandlers } from './ipc';
-import { setMainWindow } from './services/classification-pipeline';
-import { ensureAppDirectories, getColabipDir } from './services/app-paths';
-import { setColabipBasePath } from './services/colabip';
 
 // Prevent unhandled errors from crashing the entire Electron app
 process.on('uncaughtException', (error) => {
@@ -35,7 +33,6 @@ function createWindow(): void {
     title: 'Colab91 Classifier',
   });
 
-  // In development, load from Vite dev server; in production, load built files
   const isDev = !app.isPackaged;
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
@@ -51,13 +48,29 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  ensureAppDirectories();
-  setColabipBasePath(getColabipDir());
-  registerAllHandlers();
+  const services = createContainer();
+  registerAllHandlers(services);
   createWindow();
-  if (mainWindow) {
-    setMainWindow(mainWindow);
-  }
+
+  // Forward EventBus events to renderer
+  services.eventBus.on('classification:progress', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('classification:progress', ...args);
+    }
+  });
+  services.eventBus.on('suppliers:research:progress', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('suppliers:research:progress', ...args);
+    }
+  });
+  services.eventBus.on('license:statusChanged', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('license:statusChanged', ...args);
+    }
+  });
+
+  // Start silent license checks
+  services.license.startPeriodicChecks();
 });
 
 app.on('window-all-closed', () => {
@@ -69,8 +82,5 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
-    if (mainWindow) {
-      setMainWindow(mainWindow);
-    }
   }
 });

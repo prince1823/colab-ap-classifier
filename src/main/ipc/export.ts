@@ -1,12 +1,8 @@
 import { registerHandler } from './register';
-import * as exportService from '../services/export';
+import type { ExportService } from '../../shared/types/services';
 
-export function registerExportHandlers(): void {
-  registerHandler('export:selectPath', async () => {
-    return exportService.selectExportPath();
-  });
-
-  registerHandler('export:export', async (_event, filePath: unknown) => {
-    return exportService.exportCSV(filePath as string);
+export function registerExportHandlers(exportService: ExportService): void {
+  registerHandler('export:csv', async (_event, filters: unknown) => {
+    return exportService.exportCSV(filters as import('../../shared/types/transactions').TransactionFilter | undefined);
   });
 }

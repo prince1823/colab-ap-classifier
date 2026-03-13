@@ -1,0 +1,19 @@
+name = "colab91-license-server"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[vars]
+# Non-secret config — override in wrangler deploy or .dev.vars
+
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "0e9c71dc0778492da1110bd1d1ec36cd"
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+# Secrets (set via `wrangler secret put`):
+#   ED25519_PRIVATE_KEY  — base64-encoded PKCS8 DER private key
+#   ADMIN_TOKEN          — bearer token for admin endpoints

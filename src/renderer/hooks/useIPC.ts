@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-interface UseIPCResult<T> {
+export interface UseIPCResult<T> {
   data: T | null;
   loading: boolean;
   error: string | null;

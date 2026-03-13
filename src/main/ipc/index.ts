@@ -1,40 +1,35 @@
 import { registerHandler } from './register';
-import { registerColabipHandlers } from './colabip';
+import type { ServiceContainer } from '../container';
 import { registerProjectHandlers } from './project';
-import { registerRecentProjectsHandlers } from './recent-projects';
-import { registerSettingsHandlers } from './settings';
 import { registerChangelogHandlers } from './changelog';
 import { registerTaxonomyHandlers } from './taxonomy';
-import { registerUploadHandlers } from './upload';
+import { registerIngestHandlers } from './ingest';
 import { registerSuppliersHandlers } from './suppliers';
-import { registerCanonicalizationHandlers } from './canonicalization';
 import { registerSupplierResearchHandlers } from './supplier-research';
+import { registerClassificationHandlers } from './classification';
 import { registerRulesHandlers } from './rules';
 import { registerTransactionsHandlers } from './transactions';
-import { registerClassificationHandlers } from './classification';
-import { registerReclassificationHandlers } from './reclassification';
-import { registerFeedbackHandlers } from './feedback';
 import { registerExportHandlers } from './export';
+import { registerSettingsHandlers } from './settings';
+import { registerSupplierUniverseHandlers } from './supplier-universe';
+import { registerLicenseHandlers } from './license';
 
-export function registerAllHandlers(): void {
-  // Test channel — proves IPC is working end-to-end
+export function registerAllHandlers(services: ServiceContainer): void {
+  // Test channel
   registerHandler('test:ping', async () => 'pong');
 
   // Namespace handlers
-  registerColabipHandlers();
-  registerProjectHandlers();
-  registerRecentProjectsHandlers();
-  registerSettingsHandlers();
-  registerChangelogHandlers();
-  registerTaxonomyHandlers();
-  registerUploadHandlers();
-  registerSuppliersHandlers();
-  registerCanonicalizationHandlers();
-  registerSupplierResearchHandlers();
-  registerRulesHandlers();
-  registerTransactionsHandlers();
-  registerClassificationHandlers();
-  registerReclassificationHandlers();
-  registerFeedbackHandlers();
-  registerExportHandlers();
+  registerProjectHandlers(services.project, services.db, services.supplierUniverse);
+  registerChangelogHandlers(services.changelog);
+  registerTaxonomyHandlers(services.taxonomy);
+  registerIngestHandlers(services.ingest);
+  registerSuppliersHandlers(services.suppliers, services.researcher);
+  registerSupplierResearchHandlers(services.researcher, services.suppliers);
+  registerClassificationHandlers(services.classifier, services.eventBus);
+  registerRulesHandlers(services.rules);
+  registerTransactionsHandlers(services.transactions);
+  registerExportHandlers(services.export);
+  registerSettingsHandlers(services.appConfig);
+  registerSupplierUniverseHandlers(services.supplierUniverse);
+  registerLicenseHandlers(services.license);
 }

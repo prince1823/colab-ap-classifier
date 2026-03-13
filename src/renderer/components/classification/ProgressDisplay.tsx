@@ -21,11 +21,11 @@ export default function ProgressDisplay({ progress }: Props) {
             }`}
           />
           <span className="text-sm font-medium text-gray-700">
-            {progress.phase === 'researching' ? 'Researching Suppliers' : 'Classifying Transactions'}
+            Classifying Transactions
           </span>
         </div>
         <span className="text-sm text-gray-500">
-          {progress.processed} / {progress.total}
+          {progress.processedSuppliers} / {progress.totalSuppliers}
         </span>
       </div>
 
@@ -49,7 +49,7 @@ export default function ProgressDisplay({ progress }: Props) {
 
       {progress.status === 'completed' && (
         <div className="mt-4 rounded-md bg-green-50 p-3 text-sm text-green-700">
-          Classification complete! {progress.total} transactions processed.
+          Classification complete! {progress.totalSuppliers} suppliers processed.
         </div>
       )}
       {progress.status === 'failed' && (

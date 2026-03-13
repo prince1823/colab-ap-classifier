@@ -1,17 +1,42 @@
 import React, { useState } from 'react'
 import { X, CheckCircle, FileText, Building2, List, AlertCircle, Sparkles, Edit2 } from 'lucide-react'
+import { fmtAbbrev } from '../../utils/formatSpend'
 import '../../styles/SystemFeedbackModal.css'
 
-const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onReject, onEdit }) => {
-  const [editingId, setEditingId] = useState(null)
+interface AffectedRow {
+  row_index?: number
+  index?: number
+  spend_amount?: number | string
+  [key: string]: unknown
+}
+
+interface FeedbackSuggestion {
+  id: string
+  type?: string
+  proposedChange?: string
+  proposal_text?: string
+  affectedRows?: AffectedRow[]
+  [key: string]: unknown
+}
+
+interface SystemFeedbackModalProps {
+  feedbackSuggestions?: FeedbackSuggestion[]
+  onClose: () => void
+  onApprove?: (suggestion: FeedbackSuggestion) => void
+  onReject?: (suggestion: FeedbackSuggestion) => void
+  onEdit?: (id: string, text: string) => void
+}
+
+const SystemFeedbackModal: React.FC<SystemFeedbackModalProps> = ({ feedbackSuggestions = [], onClose, onApprove, onReject, onEdit }) => {
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
 
-  const handleEdit = (suggestion) => {
+  const handleEdit = (suggestion: FeedbackSuggestion) => {
     setEditingId(suggestion.id)
     setEditText(suggestion.proposedChange || suggestion.proposal_text || '')
   }
 
-  const handleSaveEdit = (suggestion) => {
+  const handleSaveEdit = (suggestion: FeedbackSuggestion) => {
     if (onEdit && editText.trim()) {
       onEdit(suggestion.id, editText)
     }
@@ -24,7 +49,7 @@ const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onR
     setEditText('')
   }
 
-  const getSuggestionIcon = (type) => {
+  const getSuggestionIcon = (type: string) => {
     switch (type) {
       case 'taxonomy_description':
         return <FileText size={16} />
@@ -39,7 +64,7 @@ const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onR
     }
   }
 
-  const getSuggestionTypeLabel = (type) => {
+  const getSuggestionTypeLabel = (type: string) => {
     switch (type) {
       case 'taxonomy_description':
         return 'Taxonomy Description'
@@ -55,7 +80,7 @@ const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onR
   }
 
   // Group suggestions by type
-  const groupedSuggestions = feedbackSuggestions.reduce((acc, suggestion) => {
+  const groupedSuggestions = feedbackSuggestions.reduce<Record<string, FeedbackSuggestion[]>>((acc, suggestion) => {
     const type = suggestion.type || 'other'
     if (!acc[type]) {
       acc[type] = []
@@ -67,18 +92,18 @@ const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onR
   const typeOrder = ['taxonomy_description', 'company_context', 'new_rule', 'category_a_supplier', 'other']
 
   // Calculate total amount for a suggestion
-  const calculateTotalAmount = (suggestion) => {
+  const calculateTotalAmount = (suggestion: FeedbackSuggestion) => {
     if (!suggestion.affectedRows || suggestion.affectedRows.length === 0) {
       return 0
     }
-    return suggestion.affectedRows.reduce((total, row) => {
-      const amount = parseFloat(row.spend_amount || 0) || 0
+    return suggestion.affectedRows.reduce((total: number, row: AffectedRow) => {
+      const amount = parseFloat(String(row.spend_amount || 0)) || 0
       return total + amount
     }, 0)
   }
 
   // Extract classification path from proposedChange text
-  const extractClassificationPath = (proposedChange) => {
+  const extractClassificationPath = (proposedChange: string | null | undefined) => {
     if (!proposedChange) return null
     
     // Try to find path in quotes (e.g., "non clinical → facilities → ...")
@@ -103,16 +128,7 @@ const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onR
   }
 
   // Format amount for display
-  const formatAmount = (amount) => {
-    if (amount === 0) return '$0'
-    if (amount >= 1000000) {
-      return `$${(amount / 1000000).toFixed(2)}M`
-    }
-    if (amount >= 1000) {
-      return `$${(amount / 1000).toFixed(2)}K`
-    }
-    return `$${amount.toFixed(2)}`
-  }
+  const formatAmount = (amount: number) => fmtAbbrev(amount)
 
   return (
     <>
@@ -148,14 +164,14 @@ const SystemFeedbackModal = ({ feedbackSuggestions = [], onClose, onApprove, onR
                     <span className="group-count-compact">{suggestions.length}</span>
                   </div>
 
-                  {suggestions.map((suggestion, idx) => (
+                  {suggestions.map((suggestion: FeedbackSuggestion, idx: number) => (
                       <div key={suggestion.id || idx} className="feedback-item-compact">
                        {suggestion.affectedRows && suggestion.affectedRows.length > 0 && (
                          <div className="affected-rows-info">
                            <span className="rows-count-badge">{suggestion.affectedRows.length} row{suggestion.affectedRows.length !== 1 ? 's' : ''}</span>
                            {suggestion.affectedRows.length <= 5 && (
                              <span className="rows-preview">
-                               {suggestion.affectedRows.map((row, rowIdx) => {
+                               {suggestion.affectedRows.map((row: AffectedRow, rowIdx: number) => {
                                  const rowNum = row.row_index !== undefined ? row.row_index : (row.index !== undefined ? row.index : rowIdx + 1)
                                  return (
                                    <React.Fragment key={rowIdx}>

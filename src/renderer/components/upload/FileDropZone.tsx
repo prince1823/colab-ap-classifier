@@ -10,10 +10,10 @@ export default function FileDropZone({ onFileSelected }: Props) {
   const [selecting, setSelecting] = useState(false)
 
   const handleClick = async () => {
-    console.log('[FileDropZone] Click — calling ipc.upload.selectFile()...')
+    console.log('[FileDropZone] Click — calling ipc.ingest.selectFile()...')
     setSelecting(true)
     try {
-      const filePath = await ipc.upload.selectFile()
+      const filePath = await ipc.ingest.selectFile()
       console.log('[FileDropZone] selectFile returned:', filePath)
       if (filePath) {
         onFileSelected(filePath)

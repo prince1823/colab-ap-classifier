@@ -62,21 +62,21 @@
   transition: background 0.1s;
 }
 
-/* Depth-specific hover — matching pastel tones */
+/* Depth-specific hover — slightly darker version of each band */
 .pivot-tree-row[data-depth="0"]:hover,
 .pivot-tree-row[data-depth="0"]:hover .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="0"]:hover .pivot-tree-total-cell {
-  background: #e6ecf5;
+  background: #cbd5e1;
 }
 .pivot-tree-row[data-depth="1"]:hover,
 .pivot-tree-row[data-depth="1"]:hover .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="1"]:hover .pivot-tree-total-cell {
-  background: #edf2f8;
+  background: #dbeafe;
 }
 .pivot-tree-row[data-depth="2"]:hover,
 .pivot-tree-row[data-depth="2"]:hover .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="2"]:hover .pivot-tree-total-cell {
-  background: #f2f5fa;
+  background: #ede9fe;
 }
 .pivot-tree-row[data-depth="3"]:hover,
 .pivot-tree-row[data-depth="3"]:hover .pivot-tree-label-cell,
@@ -84,7 +84,7 @@
 .pivot-tree-row[data-depth="4"]:hover,
 .pivot-tree-row[data-depth="4"]:hover .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="4"]:hover .pivot-tree-total-cell {
-  background: #f6f8fc;
+  background: #f1f5f9;
 }
 
 /* Label cell (indented tree column) */
@@ -125,16 +125,16 @@
 .pivot-tree-label {
 }
 
-/* ── Depth-based visual blocks — each level is a distinct visual band ── */
+/* ── Depth-based visual blocks — each level uses a different hue ── */
 
-/* L1 — bold header band: light tinted background, left accent */
+/* L1 — dark slate band: bold header row */
 .pivot-tree-row[data-depth="0"] {
-  background: #f1f4f9;
-  border-left: 4px solid #a8c4e6;
+  background: #e2e8f0;
+  border-left: 4px solid #475569;
 }
 .pivot-tree-row[data-depth="0"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="0"] .pivot-tree-total-cell {
-  background: #f1f4f9;
+  background: #e2e8f0;
 }
 .pivot-tree-row[data-depth="0"] td {
   padding-top: 10px;
@@ -143,24 +143,24 @@
 .pivot-tree-row[data-depth="0"] .pivot-tree-label {
   font-weight: 700;
   font-size: 13px;
-  color: var(--text-primary);
+  color: #1e293b;
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
 .pivot-tree-row[data-depth="0"] .pivot-tree-total-cell {
   font-weight: 700;
   font-size: 13px;
-  color: var(--text-primary);
+  color: #1e293b;
 }
 
-/* L2 — medium band: very subtle tint, thinner accent */
+/* L2 — blue tint band */
 .pivot-tree-row[data-depth="1"] {
-  background: #f6f8fb;
-  border-left: 3px solid #c4d6eb;
+  background: #eff6ff;
+  border-left: 3px solid #93c5fd;
 }
 .pivot-tree-row[data-depth="1"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="1"] .pivot-tree-total-cell {
-  background: #f6f8fb;
+  background: #eff6ff;
 }
 .pivot-tree-row[data-depth="1"] td {
   padding-top: 7px;
@@ -169,53 +169,53 @@
 .pivot-tree-row[data-depth="1"] .pivot-tree-label {
   font-weight: 600;
   font-size: 12px;
-  color: var(--text-primary);
+  color: #1e40af;
 }
 .pivot-tree-row[data-depth="1"] .pivot-tree-total-cell {
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1e40af;
 }
 
-/* L3 — light band: near-white, thin muted accent */
+/* L3 — light violet tint band */
 .pivot-tree-row[data-depth="2"] {
-  background: #fafbfc;
-  border-left: 2px solid #dce4ed;
+  background: #f5f3ff;
+  border-left: 2px solid #c4b5fd;
 }
 .pivot-tree-row[data-depth="2"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="2"] .pivot-tree-total-cell {
-  background: #fafbfc;
+  background: #f5f3ff;
 }
 .pivot-tree-row[data-depth="2"] .pivot-tree-label {
   font-weight: 500;
   font-size: 11px;
-  color: var(--text-secondary);
+  color: #5b21b6;
 }
 .pivot-tree-row[data-depth="2"] .pivot-tree-total-cell {
-  color: var(--text-secondary);
+  color: #5b21b6;
   font-weight: 500;
 }
 
-/* L4+ — plain rows: white, no accent */
+/* L4+ — plain white, no accent */
 .pivot-tree-row[data-depth="3"],
 .pivot-tree-row[data-depth="4"] {
-  background: var(--bg-primary);
+  background: #ffffff;
   border-left: 2px solid transparent;
 }
 .pivot-tree-row[data-depth="3"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="3"] .pivot-tree-total-cell,
 .pivot-tree-row[data-depth="4"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="4"] .pivot-tree-total-cell {
-  background: var(--bg-primary);
+  background: #ffffff;
 }
 .pivot-tree-row[data-depth="3"] .pivot-tree-label,
 .pivot-tree-row[data-depth="4"] .pivot-tree-label {
   font-weight: 400;
   font-size: 11px;
-  color: var(--text-light);
+  color: #64748b;
 }
 .pivot-tree-row[data-depth="3"] .pivot-tree-total-cell,
 .pivot-tree-row[data-depth="4"] .pivot-tree-total-cell {
-  color: var(--text-light);
+  color: #64748b;
   font-weight: 400;
 }
 
@@ -554,4 +554,47 @@
   color: var(--text-light);
   margin-left: 4px;
   font-weight: 400;
+}
+
+/* ── Keyboard navigation: focused row ── */
+.pivot-tree-row[data-focused] {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+  z-index: 1;
+  position: relative;
+  scroll-margin-top: 40px;
+  scroll-margin-bottom: 40px;
+}
+
+/* ── Keyboard navigation: selected row (amber to contrast with blue depth bands) ── */
+.pivot-tree-row[data-selected] {
+  background: #fef3c7 !important;
+  border-left-color: #f59e0b !important;
+}
+.pivot-tree-row[data-selected] .pivot-tree-label-cell,
+.pivot-tree-row[data-selected] .pivot-tree-total-cell {
+  background: #fef3c7 !important;
+}
+.pivot-tree-row[data-selected] .pivot-tree-label {
+  color: #92400e !important;
+}
+
+/* Both focused and selected */
+.pivot-tree-row[data-focused][data-selected] {
+  outline-color: #d97706;
+  background: #fde68a !important;
+}
+.pivot-tree-row[data-focused][data-selected] .pivot-tree-label-cell,
+.pivot-tree-row[data-focused][data-selected] .pivot-tree-total-cell {
+  background: #fde68a !important;
+}
+.pivot-tree-row[data-focused][data-selected] .pivot-tree-label {
+  color: #78350f !important;
+}
+
+/* Active state for spend toggle button */
+.pivot-toolbar-icon-btn[data-active] {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
 }

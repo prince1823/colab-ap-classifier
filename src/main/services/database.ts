@@ -1,5 +1,6 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
 import { existsSync, unlinkSync } from 'fs';
+import type { Database } from '../../shared/types/services';
 
 /**
  * Convert `?` placeholders to DuckDB positional `$1, $2, ...` format.
@@ -17,7 +18,6 @@ function convertPlaceholders(sql: string): string {
       inString = true;
       result += ch;
     } else if (ch === "'" && inString) {
-      // Handle escaped quotes ('')
       if (i + 1 < sql.length && sql[i + 1] === "'") {
         result += "''";
         i++;
@@ -36,10 +36,22 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-class DatabaseService {
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers'];
+
+export { convertPlaceholders };
+
+export class DuckDBDatabase implements Database {
   private instance: DuckDBInstance | null = null;
   private connection: DuckDBConnection | null = null;
   private currentFilePath: string | null = null;
+  // Serialize all queries — DuckDB single connection does not support concurrency
+  private queue: Promise<unknown> = Promise.resolve();
+
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(fn, fn) as Promise<T>;
+    this.queue = next.catch(() => {});
+    return next;
+  }
 
   async openDatabase(filePath: string): Promise<void> {
     if (this.instance) {
@@ -50,15 +62,10 @@ class DatabaseService {
       this.instance = await DuckDBInstance.create(filePath);
       this.connection = await this.instance.connect();
     } catch (err) {
-      // Handle corrupted WAL file — delete it and retry
       const walPath = filePath + '.wal';
       if (existsSync(walPath)) {
         console.warn(`[Database] Failed to open database, removing corrupted WAL file: ${walPath}`);
-        try {
-          unlinkSync(walPath);
-        } catch {
-          // Ignore WAL deletion errors
-        }
+        try { unlinkSync(walPath); } catch { /* ignore */ }
         this.instance = await DuckDBInstance.create(filePath);
         this.connection = await this.instance.connect();
       } else {
@@ -69,24 +76,85 @@ class DatabaseService {
     this.currentFilePath = filePath;
 
     const tables = await this.all<{ table_name: string }>(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'settings'"
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'project_settings'"
     );
 
     if (tables.length === 0) {
       await this.initializeSchema();
     }
 
-    await this.runMigrations();
+    // Migrate existing .c91 files: ensure uploads table exists
+    const uploadsTable = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'uploads'"
+    );
+    if (uploadsTable.length === 0) {
+      await this.exec(`
+        CREATE TABLE IF NOT EXISTS uploads (
+          id VARCHAR PRIMARY KEY,
+          file_name VARCHAR NOT NULL,
+          file_path VARCHAR,
+          column_mappings JSON NOT NULL,
+          row_count INTEGER,
+          status VARCHAR DEFAULT 'pending',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    }
+
+    // Migrate: ensure project_suppliers table exists
+    const psTable = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'project_suppliers'"
+    );
+    if (psTable.length === 0) {
+      await this.exec(`
+        CREATE TABLE IF NOT EXISTS project_suppliers (
+          id VARCHAR PRIMARY KEY,
+          supplier_name VARCHAR NOT NULL UNIQUE,
+          confirmation_status VARCHAR DEFAULT 'pending',
+          is_tail_spend BOOLEAN DEFAULT FALSE,
+          parent_supplier_name VARCHAR,
+          data_source VARCHAR DEFAULT 'manual',
+          universe_match BOOLEAN DEFAULT FALSE,
+          is_researched BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_suppliers_name ON project_suppliers(supplier_name);
+      `);
+    }
+
+    // Migrate: ensure supplier_info and mapped_taxonomy_paths columns exist on project_suppliers
+    const siCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'supplier_info'"
+    );
+    if (siCol.length === 0) {
+      await this.exec(`
+        ALTER TABLE project_suppliers ADD COLUMN supplier_info JSON;
+        ALTER TABLE project_suppliers ADD COLUMN mapped_taxonomy_paths JSON;
+      `);
+    }
+
+    // Migrate: ensure is_researched column exists on project_suppliers
+    const irCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'is_researched'"
+    );
+    if (irCol.length === 0) {
+      await this.exec(`
+        ALTER TABLE project_suppliers ADD COLUMN is_researched BOOLEAN DEFAULT FALSE;
+        UPDATE project_suppliers SET is_researched = TRUE WHERE supplier_info IS NOT NULL;
+      `);
+    }
+
+    // Migrate: drop classification_reasoning column from transactions if it exists
+    try {
+      await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
+    } catch { /* column doesn't exist, ignore */ }
   }
 
   async closeDatabase(): Promise<void> {
     if (this.connection) {
-      // Flush WAL to main database file before closing to prevent corruption
-      try {
-        await this.run('CHECKPOINT');
-      } catch {
-        // Ignore checkpoint errors — close anyway
-      }
+      try { await this.run('CHECKPOINT'); } catch { /* ignore */ }
       this.connection.closeSync();
       this.connection = null;
     }
@@ -112,35 +180,41 @@ class DatabaseService {
     return this.currentFilePath;
   }
 
-  async run(sql: string, ...params: unknown[]): Promise<void> {
-    const conn = this.getConnection();
-    if (params.length > 0) {
-      const converted = convertPlaceholders(sql);
-      await conn.run(converted, params as (string | number | boolean | null)[]);
-    } else {
-      await conn.run(sql);
-    }
+  getExpectedTables(): string[] {
+    return [...EXPECTED_TABLES];
   }
 
-  /**
-   * Execute one or more SQL statements (semicolon-separated), without returning results.
-   * Useful for multi-statement batches like multiple INSERTs.
-   */
+  async run(sql: string, ...params: unknown[]): Promise<void> {
+    return this.serialize(async () => {
+      const conn = this.getConnection();
+      if (params.length > 0) {
+        const converted = convertPlaceholders(sql);
+        await conn.run(converted, params as (string | number | boolean | null)[]);
+      } else {
+        await conn.run(sql);
+      }
+    });
+  }
+
   async exec(sql: string): Promise<void> {
-    const conn = this.getConnection();
-    await conn.run(sql);
+    return this.serialize(async () => {
+      const conn = this.getConnection();
+      await conn.run(sql);
+    });
   }
 
   async all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T[]> {
-    const conn = this.getConnection();
-    let reader;
-    if (params.length > 0) {
-      const converted = convertPlaceholders(sql);
-      reader = await conn.runAndReadAll(converted, params as (string | number | boolean | null)[]);
-    } else {
-      reader = await conn.runAndReadAll(sql);
-    }
-    return reader.getRowObjectsJson() as T[];
+    return this.serialize(async () => {
+      const conn = this.getConnection();
+      let reader;
+      if (params.length > 0) {
+        const converted = convertPlaceholders(sql);
+        reader = await conn.runAndReadAll(converted, params as (string | number | boolean | null)[]);
+      } else {
+        reader = await conn.runAndReadAll(sql);
+      }
+      return reader.getRowObjectsJson() as T[];
+    });
   }
 
   async get<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T | undefined> {
@@ -148,63 +222,11 @@ class DatabaseService {
     return results[0];
   }
 
-  /**
-   * Run schema migrations for existing databases.
-   * Adds columns that may be missing from older .c91 files.
-   */
-  private async runMigrations(): Promise<void> {
-    // Add aliases column to project_suppliers if missing
-    const cols = await this.all<{ column_name: string }>(
-      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'aliases'"
-    );
-    if (cols.length === 0) {
-      await this.run('ALTER TABLE project_suppliers ADD COLUMN aliases JSON');
-    }
-
-    // Add parent_name column to project_suppliers if missing
-    const parentNameCols = await this.all<{ column_name: string }>(
-      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'parent_name'"
-    );
-    if (parentNameCols.length === 0) {
-      await this.run('ALTER TABLE project_suppliers ADD COLUMN parent_name VARCHAR');
-    }
-
-    // Add supplier_name index if the column exists but index is missing
-    const supplierCol = await this.all<{ column_name: string }>(
-      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'supplier_name'"
-    );
-    if (supplierCol.length > 0) {
-      await this.run('CREATE INDEX IF NOT EXISTS idx_transactions_supplier ON transactions(supplier_name)');
-    }
-  }
-
   private async initializeSchema(): Promise<void> {
     await this.exec(`
-      CREATE TABLE IF NOT EXISTS settings (
+      CREATE TABLE IF NOT EXISTS project_settings (
         key VARCHAR PRIMARY KEY,
-        value VARCHAR,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS company_context (
-        id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-        company_name VARCHAR,
-        industry VARCHAR,
-        sector VARCHAR,
-        description TEXT,
-        business_focus TEXT,
-        procurement_nuances TEXT,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS column_mappings (
-        canonical_name VARCHAR PRIMARY KEY,
-        csv_column_name VARCHAR
-      );
-
-      CREATE TABLE IF NOT EXISTS invoice_grouping_columns (
-        canonical_name VARCHAR PRIMARY KEY,
-        position INTEGER NOT NULL
+        value JSON
       );
 
       CREATE TABLE IF NOT EXISTS taxonomy (
@@ -221,26 +243,13 @@ class DatabaseService {
 
       CREATE TABLE IF NOT EXISTS transactions (
         id VARCHAR PRIMARY KEY,
+        upload_id VARCHAR,
         row_index INTEGER,
-        invoice_group_key VARCHAR,
         taxonomy_node_id VARCHAR,
-        review_score INTEGER,
-        classification_reasoning TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS project_suppliers (
-        id VARCHAR PRIMARY KEY,
-        supplier_name VARCHAR NOT NULL UNIQUE,
-        aliases JSON,
-        parent_supplier_id VARCHAR,
-        parent_name VARCHAR,
-        supplier_info JSON,
-        category_a BOOLEAN DEFAULT FALSE,
-        category_a_taxonomy_node_id VARCHAR,
-        transaction_count INTEGER DEFAULT 0,
-        total_spend DECIMAL(15,2) DEFAULT 0,
+        classification_status VARCHAR DEFAULT 'unclassified',
+        human_reviewed BOOLEAN DEFAULT FALSE,
+        original_supplier_name VARCHAR,
+        project_supplier_id VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -248,12 +257,10 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS override_rules (
         id VARCHAR PRIMARY KEY,
         name VARCHAR NOT NULL,
-        source VARCHAR NOT NULL,
         conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
-        priority_score INTEGER DEFAULT 100,
+        priority INTEGER NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
-        imported_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -269,33 +276,37 @@ class DatabaseService {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      CREATE TABLE IF NOT EXISTS system_feedback (
+      CREATE TABLE IF NOT EXISTS uploads (
         id VARCHAR PRIMARY KEY,
-        feedback_type VARCHAR NOT NULL,
-        affected_transaction_ids JSON,
-        suggestion JSON NOT NULL,
-        status VARCHAR NOT NULL DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        file_name VARCHAR NOT NULL,
+        file_path VARCHAR,
+        column_mappings JSON NOT NULL,
+        row_count INTEGER,
+        status VARCHAR DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS project_suppliers (
+        id VARCHAR PRIMARY KEY,
+        supplier_name VARCHAR NOT NULL UNIQUE,
+        confirmation_status VARCHAR DEFAULT 'pending',
+        is_tail_spend BOOLEAN DEFAULT FALSE,
+        parent_supplier_name VARCHAR,
+        data_source VARCHAR DEFAULT 'manual',
+        universe_match BOOLEAN DEFAULT FALSE,
+        is_researched BOOLEAN DEFAULT FALSE,
+        supplier_info JSON,
+        mapped_taxonomy_paths JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_project_suppliers_name ON project_suppliers(supplier_name);
       CREATE INDEX IF NOT EXISTS idx_transactions_taxonomy ON transactions(taxonomy_node_id);
+      CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(classification_status);
+      CREATE INDEX IF NOT EXISTS idx_transactions_upload ON transactions(upload_id);
+      CREATE INDEX IF NOT EXISTS idx_transactions_supplier ON transactions(project_supplier_id);
     `);
-
-    // Seed default settings
-    await this.run(
-      "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-      'tail_spend_threshold',
-      '10000'
-    );
-
-    await this.run(
-      "INSERT INTO settings (key, value, updated_at) VALUES (?, CURRENT_TIMESTAMP::VARCHAR, CURRENT_TIMESTAMP)",
-      'created_at'
-    );
-
-    // Seed empty company context row
-    await this.run("INSERT INTO company_context (id) VALUES (1)");
   }
 }
-
-export const databaseService = new DatabaseService();

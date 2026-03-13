@@ -443,9 +443,8 @@ describe('researchSupplier', () => {
 
     const [, , options] = mockChat.mock.calls[0];
     expect(options).toEqual({
-      model: 'claude-3-5-haiku-latest',
       temperature: 0,
-      maxTokens: 4096,
+      maxTokens: 1024,
     });
   });
 

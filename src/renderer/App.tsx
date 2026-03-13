@@ -1,137 +1,36 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { DndProvider } from 'react-dnd'
+import { HTML5Backend } from 'react-dnd-html5-backend'
 import AppShell from './components/AppShell'
-import ReviewPage from './pages/ReviewPage'
-import UploadPage from './pages/UploadPage'
-import CanonicalizationPage from './pages/CanonicalizationPage'
-import DataReviewPage from './pages/DataReviewPage'
-import ClassificationPage from './pages/ClassificationPage'
-import OutputPage from './pages/OutputPage'
-import TaxonomyPage from './pages/TaxonomyPage'
-import CompanyContextPage from './pages/CompanyContextPage'
-import SuppliersPage from './pages/SuppliersPage'
-import OverrideRulesPage from './pages/OverrideRulesPage'
-import VersionHistoryPage from './pages/VersionHistoryPage'
-import FeedbackDashboardPage from './pages/FeedbackDashboardPage'
-import PivotPage from './pages/PivotPage'
-import { WorkflowStateProvider } from './contexts/WorkflowStateContext'
-import ProtectedRoute from './components/ProtectedRoute'
+import LicenseGate from './components/LicenseGate'
+import ProjectView from './views/ProjectView'
+import TaxonomyView from './views/TaxonomyView'
+import DataView from './views/DataView'
+import SuppliersView from './views/SuppliersView'
+import ClassificationView from './views/ClassificationView'
+import ReviewView from './views/ReviewView'
+import OverrideRulesView from './views/OverrideRulesView'
+import VersionHistoryView from './views/VersionHistoryView'
 
 function App() {
   return (
-    <WorkflowStateProvider>
+    <DndProvider backend={HTML5Backend}>
+    <LicenseGate>
       <Routes>
         <Route path="/" element={<AppShell />}>
-          {/* Workflow tabs */}
-          <Route index element={<Navigate to="/workflow/upload" replace />} />
-          <Route
-            path="workflow/upload"
-            element={
-              <ProtectedRoute>
-                <UploadPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="workflow/canonicalization"
-            element={
-              <ProtectedRoute>
-                <CanonicalizationPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="workflow/data-review"
-            element={
-              <ProtectedRoute>
-                <DataReviewPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="workflow/classification"
-            element={
-              <ProtectedRoute>
-                <ClassificationPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="workflow/review"
-            element={
-              <ProtectedRoute>
-                <ReviewPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="workflow/output"
-            element={
-              <ProtectedRoute>
-                <OutputPage />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Project views */}
-          <Route
-            path="project/taxonomy"
-            element={
-              <ProtectedRoute>
-                <TaxonomyPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="project/company-context"
-            element={
-              <ProtectedRoute>
-                <CompanyContextPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="project/suppliers"
-            element={
-              <ProtectedRoute>
-                <SuppliersPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="project/override-rules"
-            element={
-              <ProtectedRoute>
-                <OverrideRulesPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="project/version-history"
-            element={
-              <ProtectedRoute>
-                <VersionHistoryPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="project/feedback"
-            element={
-              <ProtectedRoute>
-                <FeedbackDashboardPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="project/pivot"
-            element={
-              <ProtectedRoute>
-                <PivotPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route index element={<Navigate to="/project" replace />} />
+          <Route path="project" element={<ProjectView />} />
+          <Route path="taxonomy" element={<TaxonomyView />} />
+          <Route path="data" element={<DataView />} />
+          <Route path="suppliers" element={<SuppliersView />} />
+          <Route path="classification" element={<ClassificationView />} />
+          <Route path="review" element={<ReviewView />} />
+          <Route path="override-rules" element={<OverrideRulesView />} />
+          <Route path="version-history" element={<VersionHistoryView />} />
         </Route>
       </Routes>
-    </WorkflowStateProvider>
+    </LicenseGate>
+    </DndProvider>
   )
 }
 

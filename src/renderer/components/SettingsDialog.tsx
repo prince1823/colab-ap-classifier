@@ -1,81 +1,124 @@
 import { useState, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { XMarkIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, CheckCircleIcon, ExclamationCircleIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
 import { ipc } from '../lib/ipc'
-import type { AppSettings, ModelInfo, ProviderInfo } from '../../shared/types/settings'
+import type { LLMConfigResponse } from '../../shared/types/ipc-contract'
 
 interface Props {
   open: boolean
   onClose: () => void
 }
 
+interface SettingsFormState {
+  provider: string
+  model: string
+  apiKey: string
+  isValidating: boolean
+  validationResult: { valid: boolean; error?: string } | null
+}
+
+const PROVIDERS = ['openrouter', 'anthropic', 'openai'] as const
+
+const DEFAULT_FORM: SettingsFormState = {
+  provider: 'openrouter',
+  model: 'claude-3-5-haiku-latest',
+  apiKey: '',
+  isValidating: false,
+  validationResult: null,
+}
+
+function hasKeyForProvider(config: LLMConfigResponse, provider: string): boolean {
+  if (provider === 'openrouter') return config.hasOpenRouterKey
+  if (provider === 'anthropic') return config.hasAnthropicKey
+  if (provider === 'openai') return config.hasOpenAIKey
+  return false
+}
+
 export default function SettingsDialog({ open, onClose }: Props) {
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [providers, setProviders] = useState<ProviderInfo[]>([])
-  const [models, setModels] = useState<ModelInfo[]>([])
-  const [provider, setProvider] = useState('')
-  const [model, setModel] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [form, setForm] = useState<SettingsFormState>(DEFAULT_FORM)
+  const [config, setConfig] = useState<LLMConfigResponse | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Supplier universe path state
+  const [supplierResolvedPath, setSupplierResolvedPath] = useState<string>('')
+  const [supplierPathError, setSupplierPathError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
-    const load = async () => {
-      try {
-        const [s, p] = await Promise.all([
-          ipc.settings.get(),
-          ipc.settings.getProviders(),
-        ])
-        const m = await ipc.settings.getModels(s.provider)
-        setSettings(s)
-        setProviders(p)
-        setModels(m)
-        setProvider(s.provider)
-        setModel(s.model)
-        setApiKey('')
-        setError(null)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load settings')
-      }
-    }
-    load()
+    setForm(DEFAULT_FORM)
+    setSaveError(null)
+    setSaveSuccess(false)
+    setSupplierPathError(null)
+    ipc.settings.getLLMConfig().then((cfg) => {
+      setConfig(cfg)
+      setForm((prev) => ({ ...prev, provider: cfg.provider, model: cfg.model }))
+    }).catch(() => {/* non-fatal */})
+    ipc.supplierUniverse.getPath().then((p) => setSupplierResolvedPath(p ?? '')).catch(() => {/* non-fatal */})
   }, [open])
 
-  // Re-fetch models when provider changes in the dropdown
-  useEffect(() => {
-    if (!provider) return
-    const loadModels = async () => {
-      try {
-        const m = await ipc.settings.getModels(provider)
-        setModels(m)
-        // Auto-select first model if current model isn't in the new list
-        if (m.length > 0 && !m.some((item) => item.id === model)) {
-          setModel(m[0].id)
-        }
-      } catch (e) {
-        // Ignore — models will just stay stale
-      }
-    }
-    loadModels()
-  }, [provider])
+  function handleProviderChange(e: React.ChangeEvent<HTMLInputElement>): void {
+    setForm((prev) => ({ ...prev, provider: e.target.value, apiKey: '', validationResult: null }))
+  }
 
-  const handleSave = async () => {
-    setSaving(true)
-    setError(null)
+  function handleModelChange(e: React.ChangeEvent<HTMLInputElement>): void {
+    setForm((prev) => ({ ...prev, model: e.target.value }))
+  }
+
+  function handleApiKeyChange(e: React.ChangeEvent<HTMLInputElement>): void {
+    setForm((prev) => ({ ...prev, apiKey: e.target.value, validationResult: null }))
+  }
+
+  async function handleValidate(): Promise<void> {
+    if (!form.apiKey.trim()) return
+    setForm((prev) => ({ ...prev, isValidating: true, validationResult: null }))
     try {
-      const updates: Record<string, unknown> = { provider, model }
-      if (apiKey) {
-        updates.apiKeys = { [provider]: apiKey }
-      }
-      await ipc.settings.update(updates as never)
-      onClose()
+      const result = await ipc.settings.validateApiKey(form.provider, form.apiKey.trim())
+      setForm((prev) => ({ ...prev, isValidating: false, validationResult: result }))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save settings')
-    } finally {
-      setSaving(false)
+      setForm((prev) => ({
+        ...prev,
+        isValidating: false,
+        validationResult: { valid: false, error: e instanceof Error ? e.message : 'Validation failed' },
+      }))
     }
   }
+
+  async function handleSave(): Promise<void> {
+    setIsSaving(true)
+    setSaveError(null)
+    setSaveSuccess(false)
+    try {
+      await ipc.settings.setProvider(form.provider)
+      await ipc.settings.setModel(form.model.trim() || 'claude-3-5-haiku-latest')
+      if (form.apiKey.trim()) {
+        await ipc.settings.setApiKey(form.provider, form.apiKey.trim())
+      }
+      // Refresh config to update "key is set" indicators
+      const updated = await ipc.settings.getLLMConfig()
+      setConfig(updated)
+      setForm((prev) => ({ ...prev, apiKey: '', validationResult: null }))
+      setSaveSuccess(true)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Failed to save settings')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleBrowseSupplierUniverse(): Promise<void> {
+    setSupplierPathError(null)
+    try {
+      const selected = await ipc.supplierUniverse.selectFile()
+      if (!selected) return
+      setSupplierResolvedPath(selected)
+    } catch (e) {
+      setSupplierPathError(e instanceof Error ? e.message : 'Failed to set path')
+    }
+  }
+
+  const keyIsSet = config ? hasKeyForProvider(config, form.provider) : false
 
   return (
     <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
@@ -91,69 +134,128 @@ export default function SettingsDialog({ open, onClose }: Props) {
             </Dialog.Close>
           </div>
 
-          {error && (
-            <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">{error}</div>
-          )}
-
           <div className="space-y-4">
+            {/* ── Classification Model ── */}
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Classification Model</h3>
+
+            {/* Provider */}
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Provider</label>
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
+              <div className="flex flex-wrap gap-2">
+                {PROVIDERS.map((p) => (
+                  <label key={p} className="flex cursor-pointer items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="provider"
+                      value={p}
+                      checked={form.provider === p}
+                      onChange={handleProviderChange}
+                      className="accent-blue-600"
+                    />
+                    <span className="text-sm text-gray-700">{p}</span>
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
 
+            {/* Model */}
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Model</label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+              <input
+                type="text"
+                value={form.model}
+                onChange={handleModelChange}
+                placeholder="claude-3-5-haiku-latest"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              />
             </div>
 
+            {/* API Key */}
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
-                API Key {settings?.hasApiKey && <span className="text-green-600">(configured)</span>}
+                API Key
+                {keyIsSet && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-green-600">
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                    currently set
+                  </span>
+                )}
               </label>
               <input
                 type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={settings?.hasApiKey ? 'Leave blank to keep current' : 'Enter API key'}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={form.apiKey}
+                onChange={handleApiKeyChange}
+                placeholder={keyIsSet ? 'Enter new key to replace…' : 'Enter API key…'}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
               />
+              {form.validationResult && (
+                <div
+                  className={`mt-1 flex items-center gap-1 text-xs ${
+                    form.validationResult.valid ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {form.validationResult.valid ? (
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                  ) : (
+                    <ExclamationCircleIcon className="h-3.5 w-3.5" />
+                  )}
+                  {form.validationResult.valid ? 'Key is valid' : (form.validationResult.error ?? 'Invalid key')}
+                </div>
+              )}
             </div>
+
+            {/* Save feedback */}
+            {saveSuccess && (
+              <p className="text-xs text-green-600">Settings saved.</p>
+            )}
+            {saveError && (
+              <p className="text-xs text-red-600">{saveError}</p>
+            )}
           </div>
 
-          <div className="mt-6 flex justify-end gap-3">
-            <button
-              onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
+          <div className="mt-4 flex justify-end gap-2">
+            {form.apiKey.trim() && (
+              <button
+                onClick={handleValidate}
+                disabled={form.isValidating}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {form.isValidating ? 'Validating…' : 'Validate Key'}
+              </button>
+            )}
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={isSaving}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {saving ? 'Saving...' : 'Save'}
+              {isSaving ? 'Saving…' : 'Save'}
             </button>
+          </div>
+
+          {/* ── Supplier Universe ── */}
+          <div className="mt-6 border-t border-gray-200 pt-4">
+            <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">Supplier Universe</h3>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Database File</label>
+              <div
+                className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 overflow-x-auto whitespace-nowrap"
+                title={supplierResolvedPath}
+              >
+                {supplierResolvedPath || 'Not configured'}
+              </div>
+              <div className="mt-2">
+                <button
+                  onClick={handleBrowseSupplierUniverse}
+                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <FolderOpenIcon className="h-3.5 w-3.5" />
+                  Change
+                </button>
+              </div>
+              {supplierPathError && (
+                <p className="mt-1 text-xs text-red-600">{supplierPathError}</p>
+              )}
+            </div>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

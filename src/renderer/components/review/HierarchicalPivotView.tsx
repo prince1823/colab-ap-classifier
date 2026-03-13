@@ -593,9 +593,7 @@ function PivotTreeRow({
         >
           {row.label}
         </span>
-        {row.hasChildren && (
-          <span className="pivot-tree-count">({row.transactionCount})</span>
-        )}
+        <span className="pivot-tree-count">({row.transactionCount})</span>
         {row.isLeaf && onDrillDown && (
           <button
             className="pivot-tree-drilldown ml-1 opacity-0 group-hover/row:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity"

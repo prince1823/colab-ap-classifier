@@ -18,7 +18,7 @@ import type {
   FieldDefinition,
 } from '../../shared/types';
 import type { ChangeSource } from '../../shared/types/changelog';
-import { buildWhereClause } from '../utils/query-builder';
+import { buildWhereClause, buildGroupedWhereClause } from '../utils/query-builder';
 
 const BASE_COLUMNS = [
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
@@ -96,18 +96,32 @@ export class TransactionStore implements ITransactionStore {
       params.push(filters.spendMax);
     }
 
-    if (filters?.conditions && filters.conditions.length > 0) {
-      if (filters.conditions.some((c) => c.field.startsWith('classification_l'))) {
-        needsTaxonomyJoin = true;
+    // Resolve virtual columns used in conditions
+    const FILTER_VIRTUAL_DIMS: Record<string, string> = {
+      classification_l1: 'tax.l1',
+      classification_l2: 'tax.l2',
+      classification_l3: 'tax.l3',
+      supplier_name: 'ps.supplier_name',
+      is_researched: 'ps.is_researched',
+    };
+    const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
+
+    // Check if any conditions reference taxonomy columns
+    const allConditionFields = filters?.groupedConditions
+      ? filters.groupedConditions.groups.flatMap(g => g.conditions.map(c => c.field))
+      : (filters?.conditions ?? []).map(c => c.field);
+    if (allConditionFields.some(f => f.startsWith('classification_l'))) {
+      needsTaxonomyJoin = true;
+    }
+
+    // Prefer groupedConditions (proper parenthesization) over flat conditions
+    if (filters?.groupedConditions && filters.groupedConditions.groups.length > 0) {
+      const built = buildGroupedWhereClause(filters.groupedConditions, resolver);
+      if (built) {
+        whereClauses.push(`(${built.sql})`);
+        params.push(...built.params);
       }
-      const FILTER_VIRTUAL_DIMS: Record<string, string> = {
-        classification_l1: 'tax.l1',
-        classification_l2: 'tax.l2',
-        classification_l3: 'tax.l3',
-        supplier_name: 'ps.supplier_name',
-        is_researched: 'ps.is_researched',
-      };
-      const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
+    } else if (filters?.conditions && filters.conditions.length > 0) {
       const built = buildWhereClause(filters.conditions, resolver);
       if (built) {
         whereClauses.push(`(${built.sql})`);

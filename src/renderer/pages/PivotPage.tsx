@@ -9,8 +9,9 @@ import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
 import type { Aggregation, SpendDisplayMode, FlattenedPivotRow } from '../types/pivot'
 import type { PivotFilterState } from '../components/review/PivotFilterBar'
-import type { TransactionFilter, FilterCondition } from '../../shared/types/transactions'
+import type { TransactionFilter, FilterCondition, GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
+import { groupedToConditions, makeEmptyGroup } from '../components/FilterConditionBuilder'
 
 const DEFAULT_ROW_DIMENSIONS: string[] = []
 
@@ -32,8 +33,14 @@ export default function PivotPage() {
   const [filterState, setFilterState] = useState<PivotFilterState>({})
   const [spendDisplayMode, setSpendDisplayMode] = useState<SpendDisplayMode>('absolute')
   const [drillDownRow, setDrillDownRow] = useState<FlattenedPivotRow | null>(null)
-  const [advancedConditions, setAdvancedConditions] = useState<FilterCondition[]>([])
+  const [advancedGrouped, setAdvancedGrouped] = useState<GroupedFilter | null>(null)
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
+
+  // Flat conditions derived from grouped for backward compat (chips, badge count, etc.)
+  const advancedConditions = useMemo(() =>
+    advancedGrouped ? groupedToConditions(advancedGrouped).filter(c => c.field) : [],
+    [advancedGrouped]
+  )
 
   const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
 
@@ -41,8 +48,23 @@ export default function PivotPage() {
     const pillFilter = buildTransactionFilter(filterState)
     const pillConditions = pillFilter?.conditions ?? []
     const allConditions = [...pillConditions, ...advancedConditions]
-    return allConditions.length > 0 ? { conditions: allConditions } as TransactionFilter : undefined
-  }, [filterState, advancedConditions])
+    if (allConditions.length === 0) return undefined
+
+    // If we have a grouped filter, merge pill conditions as an extra group
+    if (advancedGrouped && advancedGrouped.groups.some(g => g.conditions.some(c => c.field))) {
+      const pillGroup = pillConditions.length > 0
+        ? [{ connector: 'AND' as const, conditions: pillConditions }]
+        : []
+      const merged: GroupedFilter = {
+        groupConnector: 'AND',
+        groups: [...pillGroup, ...advancedGrouped.groups],
+      }
+      return { conditions: allConditions, groupedConditions: merged } as TransactionFilter
+    }
+
+    // Only pill filters, no grouping needed
+    return { conditions: allConditions } as TransactionFilter
+  }, [filterState, advancedConditions, advancedGrouped])
 
   const { pivotData, totalCount, refetch } = useServerPivotData(
     rowDimensions,
@@ -126,7 +148,7 @@ export default function PivotPage() {
           onAggregationChange={setAggregation}
           filterState={filterState}
           onFilterStateChange={setFilterState}
-          onClearAllFilters={() => { setFilterState({}); setAdvancedConditions([]) }}
+          onClearAllFilters={() => { setFilterState({}); setAdvancedGrouped(null) }}
           onExport={handleExport}
           exportDisabled={!pivotData}
           totalCount={totalCount}
@@ -138,7 +160,24 @@ export default function PivotPage() {
           advancedFilterCount={advancedConditions.length}
           onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
           advancedConditions={advancedConditions}
-          onRemoveAdvancedCondition={(idx) => setAdvancedConditions(prev => prev.filter((_, i) => i !== idx))}
+          onRemoveAdvancedCondition={(idx) => {
+            // Remove condition by flat index from the grouped structure
+            if (!advancedGrouped) return
+            let flatIdx = 0
+            const newGroups = advancedGrouped.groups.map(g => ({
+              ...g,
+              conditions: g.conditions.filter(c => {
+                if (!c.field) return true
+                const keep = flatIdx !== idx
+                flatIdx++
+                return keep
+              }),
+            })).filter(g => g.conditions.some(c => c.field))
+            setAdvancedGrouped(newGroups.length > 0
+              ? { ...advancedGrouped, groups: newGroups }
+              : null
+            )
+          }}
         />
       </div>
 
@@ -168,8 +207,8 @@ export default function PivotPage() {
       <AdvancedFilterModal
         isOpen={showAdvancedFilter}
         onClose={() => setShowAdvancedFilter(false)}
-        conditions={advancedConditions}
-        onApply={setAdvancedConditions}
+        groupedFilter={advancedGrouped}
+        onApply={setAdvancedGrouped}
         availableFields={advancedFilterFields}
         pillFilterState={filterState}
         onClearPillFilters={() => setFilterState({})}

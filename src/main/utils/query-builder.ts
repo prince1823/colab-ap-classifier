@@ -1,4 +1,4 @@
-import type { FilterCondition } from '../../shared/types/transactions';
+import type { FilterCondition, ConditionGroup, GroupedFilter } from '../../shared/types/transactions';
 
 /** Optional column resolver — maps field name to SQL expression. Default: quoted column name. */
 export type ColumnResolver = (field: string) => string;
@@ -87,4 +87,41 @@ export function buildWhereClause(
 
   if (parts.length === 0) return null;
   return { sql: parts.join(' '), params };
+}
+
+/**
+ * Build a WHERE clause from grouped conditions.
+ * Each group's conditions are parenthesized; groups are joined by groupConnector.
+ * Example: (A AND B) OR (C AND D)
+ */
+export function buildGroupedWhereClause(
+  grouped: GroupedFilter,
+  resolveColumn?: ColumnResolver
+): { sql: string; params: unknown[] } | null {
+  const params: unknown[] = [];
+  const groupSQLs: string[] = [];
+
+  for (const group of grouped.groups) {
+    const validConditions = group.conditions.filter(c => c.field);
+    if (validConditions.length === 0) continue;
+
+    const parts: string[] = [];
+    for (const condition of validConditions) {
+      const fragment = conditionToSQL(condition, params, resolveColumn);
+      if (!fragment) continue;
+      if (parts.length > 0) parts.push(group.connector);
+      parts.push(fragment);
+    }
+
+    if (parts.length > 0) {
+      // Wrap in parens only if multiple parts and there are multiple groups
+      groupSQLs.push(parts.length > 1 ? `(${parts.join(' ')})` : parts[0]);
+    }
+  }
+
+  if (groupSQLs.length === 0) return null;
+  return {
+    sql: groupSQLs.join(` ${grouped.groupConnector} `),
+    params,
+  };
 }

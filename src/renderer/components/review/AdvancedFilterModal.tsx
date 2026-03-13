@@ -1,16 +1,17 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import FilterConditionBuilder from '../FilterConditionBuilder'
+import { GroupedFilterBuilder, conditionsToGrouped, makeEmptyGroup } from '../FilterConditionBuilder'
 import { ipc } from '../../lib/ipc'
-import type { FilterCondition } from '../../../shared/types/transactions'
+import type { FilterCondition, GroupedFilter } from '../../../shared/types/transactions'
 import type { FieldDefinition } from '../FilterConditionBuilder'
 
 interface AdvancedFilterModalProps {
   isOpen: boolean
   onClose: () => void
-  conditions: FilterCondition[]
-  onApply: (conditions: FilterCondition[]) => void
+  /** The persisted grouped filter (preserved across open/close). */
+  groupedFilter: GroupedFilter | null
+  onApply: (grouped: GroupedFilter | null) => void
   availableFields: FieldDefinition[]
   /** Pill filters from double-click / ⌘F — shown as editable conditions */
   pillFilterState?: Record<string, string[]>
@@ -21,21 +22,21 @@ interface AdvancedFilterModalProps {
 export default function AdvancedFilterModal({
   isOpen,
   onClose,
-  conditions: initialConditions,
+  groupedFilter,
   onApply,
   availableFields,
   pillFilterState = {},
   onClearPillFilters,
 }: AdvancedFilterModalProps) {
-  const [conditions, setConditions] = useState<FilterCondition[]>(initialConditions)
-  // Cache of distinct values per column: { supplier_name: ['Acme', 'Beta'], ... }
+  const [grouped, setGrouped] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
+  // Cache of distinct values per column
   const [distinctCache, setDistinctCache] = useState<Record<string, string[]>>({})
 
-  // Sync when modal opens — merge pill filters + advanced conditions
+  // Sync when modal opens — merge pill filters into the existing grouped state
   useEffect(() => {
     if (!isOpen) return
 
-    // Convert pill filters to conditions (each value → separate in_list or equals condition)
+    // Convert pill filters to conditions
     const pillConditions: FilterCondition[] = []
     for (const [field, values] of Object.entries(pillFilterState)) {
       if (values.length > 0) {
@@ -48,13 +49,24 @@ export default function AdvancedFilterModal({
       }
     }
 
-    const merged = [...pillConditions, ...initialConditions]
-    setConditions(
-      merged.length > 0
-        ? merged
-        : [{ field: '', operator: 'contains', value: '', connector: 'AND' }]
-    )
-  }, [isOpen, initialConditions, pillFilterState])
+    if (groupedFilter && groupedFilter.groups.some(g => g.conditions.some(c => c.field))) {
+      // We have a persisted grouped filter — prepend pill conditions as a group if any
+      if (pillConditions.length > 0) {
+        const pillGroup = { connector: 'AND' as const, conditions: pillConditions }
+        setGrouped({
+          groupConnector: groupedFilter.groupConnector,
+          groups: [pillGroup, ...groupedFilter.groups],
+        })
+      } else {
+        setGrouped(groupedFilter)
+      }
+    } else if (pillConditions.length > 0) {
+      // Only pill filters, wrap in a single group
+      setGrouped({ groupConnector: 'AND', groups: [{ connector: 'AND', conditions: pillConditions }] })
+    } else {
+      setGrouped({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
+    }
+  }, [isOpen, groupedFilter, pillFilterState])
 
   // Preload distinct values for ALL available string fields when modal opens
   useEffect(() => {
@@ -74,8 +86,7 @@ export default function AdvancedFilterModal({
     }
   }, [isOpen, availableFields, distinctCache])
 
-  // Enrich string fields with suggestions from cache — keeps full string operators
-  // while showing autocomplete dropdown via <datalist>
+  // Enrich string fields with suggestions from cache
   const enrichedFields: FieldDefinition[] = useMemo(() =>
     availableFields.map(f => {
       const values = distinctCache[f.name]
@@ -90,21 +101,20 @@ export default function AdvancedFilterModal({
   if (!isOpen) return null
 
   const handleApply = () => {
-    // Only keep conditions that have a field selected
-    const valid = conditions.filter(c => c.field)
-    onApply(valid)
-    // Clear pill filters since they're now part of advanced conditions
+    // Check if there are any valid conditions
+    const hasValid = grouped.groups.some(g => g.conditions.some(c => c.field))
+    onApply(hasValid ? grouped : null)
     onClearPillFilters?.()
     onClose()
   }
 
   const handleClear = () => {
-    onApply([])
+    onApply(null)
     onClearPillFilters?.()
     onClose()
   }
 
-  const hasValidConditions = conditions.some(c => c.field)
+  const hasValidConditions = grouped.groups.some(g => g.conditions.some(c => c.field))
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -112,7 +122,7 @@ export default function AdvancedFilterModal({
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative bg-white rounded-xl shadow-2xl w-[700px] max-h-[80vh] flex flex-col">
+      <div className="relative bg-white rounded-xl shadow-2xl w-[740px] max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
@@ -129,9 +139,9 @@ export default function AdvancedFilterModal({
 
         {/* Body */}
         <div className="px-5 py-4 overflow-y-auto flex-1">
-          <FilterConditionBuilder
-            conditions={conditions}
-            onChange={setConditions}
+          <GroupedFilterBuilder
+            value={grouped}
+            onChange={setGrouped}
             availableFields={enrichedFields}
           />
         </div>

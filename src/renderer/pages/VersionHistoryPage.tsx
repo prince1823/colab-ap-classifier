@@ -156,7 +156,7 @@ export default function VersionHistoryPage() {
                         </span>
                         <span>{entry.affectedCount} row{entry.affectedCount !== 1 ? 's' : ''}</span>
                         <span className="text-gray-400">
-                          {new Date(entry.createdAt.endsWith('Z') ? entry.createdAt : entry.createdAt + 'Z').toLocaleString()}
+                          {new Date(entry.createdAt.replace(' ', 'T')).toLocaleString()}
                         </span>
                       </div>
                     </div>

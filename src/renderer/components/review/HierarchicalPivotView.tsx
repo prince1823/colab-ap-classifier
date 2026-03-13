@@ -560,6 +560,15 @@ function PivotTreeRow({
       data-depth={row.depth}
       data-focused={isFocused || undefined}
       data-selected={isSelected || undefined}
+      onDoubleClick={() => {
+        const dim = rowDimensions[row.depth]
+        if (!dim) return
+        const current = filterState[dim] || []
+        const next = current.includes(row.label)
+          ? current.filter(v => v !== row.label)
+          : [...current, row.label]
+        onFilterStateChange({ ...filterState, [dim]: next })
+      }}
     >
       {/* Label cell */}
       <td
@@ -581,16 +590,6 @@ function PivotTreeRow({
         <span
           className="pivot-tree-label"
           title={row.label}
-          onDoubleClick={() => {
-            const dim = rowDimensions[row.depth]
-            if (!dim) return
-            const current = filterState[dim] || []
-            const next = current.includes(row.label)
-              ? current.filter(v => v !== row.label)
-              : [...current, row.label]
-            onFilterStateChange({ ...filterState, [dim]: next })
-          }}
-          style={{ cursor: 'default' }}
         >
           {row.label}
         </span>

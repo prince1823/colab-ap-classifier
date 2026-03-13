@@ -330,7 +330,10 @@ async function main() {
       for (const ps of projectSuppliers) {
         const cached = await supplierUniverse.getSupplier(ps.supplierName);
         const hadSubstantiveInfo = !!(cached?.industry || cached?.description);
-        await researcher.researchSingle(ps.supplierName);
+        const info = await researcher.researchSingle(ps.supplierName);
+        // Write back research results to project_suppliers (mirrors IPC handler logic)
+        await suppliers.updateSupplier(ps.supplierName, { supplierInfo: info });
+        await suppliers.markResearched(ps.supplierName);
         const source = hadSubstantiveInfo ? 'universe (cached)' : 'LLM';
         log(`    ${ps.supplierName} → ${source}`);
       }
@@ -339,6 +342,15 @@ async function main() {
     } else {
       log('  ⊘ Supplier research: skipped');
     }
+
+    // ─── Phase 5b: Confirm all suppliers ──────────────────────────────────
+
+    start = Date.now();
+    for (const ps of projectSuppliers) {
+      await suppliers.confirmSupplier(ps.id, 'confirmed');
+    }
+    timings.push({ phase: 'Confirm suppliers', ms: Date.now() - start });
+    log(`  ✓ Confirm suppliers: ${projectSuppliers.length} confirmed`);
 
     // ─── Phase 6: Override rules ──────────────────────────────────────────
 

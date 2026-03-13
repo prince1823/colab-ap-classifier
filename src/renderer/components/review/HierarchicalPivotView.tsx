@@ -257,6 +257,7 @@ export default function HierarchicalPivotView({
     onCmdK: handleCmdK,
     onCmdF: handleCmdF,
     onToggleExpand: toggleExpand,
+    onClearAllFilters,
     disabled: modalOpen,
   })
 

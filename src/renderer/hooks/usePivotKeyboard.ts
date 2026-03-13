@@ -8,6 +8,7 @@ interface UsePivotKeyboardOptions {
   onCmdK: (rows: FlattenedPivotRow[]) => void
   onCmdF: (rows: FlattenedPivotRow[]) => void
   onToggleExpand: (key: string) => void
+  onClearAllFilters: () => void
   disabled: boolean
 }
 
@@ -24,6 +25,7 @@ export function usePivotKeyboard({
   onCmdK,
   onCmdF,
   onToggleExpand,
+  onClearAllFilters,
   disabled,
 }: UsePivotKeyboardOptions): UsePivotKeyboardReturn {
   const [focusedIndex, setFocusedIndex] = useState(0)
@@ -137,14 +139,14 @@ export function usePivotKeyboard({
         })
         break
       }
-      case 'k': {
+      case 'f': {
         if (metaKey) {
           e.preventDefault()
           onCmdK(getSelectedRows())
         }
         break
       }
-      case 'f': {
+      case 'k': {
         if (metaKey) {
           e.preventDefault()
           onCmdF(getExplicitlySelectedRows())
@@ -154,10 +156,11 @@ export function usePivotKeyboard({
       case 'Escape': {
         e.preventDefault()
         clearSelection()
+        onClearAllFilters()
         break
       }
     }
-  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onToggleExpand, getSelectedRows, getExplicitlySelectedRows, clearSelection])
+  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onToggleExpand, onClearAllFilters, getSelectedRows, getExplicitlySelectedRows, clearSelection])
 
   return {
     focusedIndex,

@@ -1,9 +1,12 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Plus, X, ChevronUp, ChevronDown, Filter, Layers } from 'lucide-react'
+import { useDrag, useDrop } from 'react-dnd'
 import * as Popover from '@radix-ui/react-popover'
 import type { Aggregation, SpendDisplayMode } from '../../types/pivot'
 import type { PivotFilterState } from './PivotFilterBar'
 import '../../styles/PivotHierarchy.css'
+
+const PIVOT_DIM_TYPE = 'PIVOT_DIM'
 
 // Human-readable labels for common columns
 const COLUMN_LABELS: Record<string, string> = {
@@ -156,6 +159,13 @@ export default function PivotToolbar({
     onRowDimensionsChange(next)
   }
 
+  const moveDim = useCallback((fromIndex: number, toIndex: number) => {
+    const next = [...rowDimensions]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    onRowDimensionsChange(next)
+  }, [rowDimensions, onRowDimensionsChange])
+
   const moveRowDim = (idx: number, direction: 'up' | 'down') => {
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1
     if (swapIdx < 0 || swapIdx >= rowDimensions.length) return
@@ -209,12 +219,13 @@ export default function PivotToolbar({
               {idx > 0 && (
                 <span style={{ fontSize: 9, color: '#9ca3af', margin: '0 1px', userSelect: 'none' }}>→</span>
               )}
-              <span className="pivot-dim-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                <span style={{ fontSize: 10 }}>{colLabel(dim)}</span>
-                <button className="pivot-dim-chip-x" onClick={() => removeRowDim(idx)} title="Remove">
-                  <X size={9} />
-                </button>
-              </span>
+              <DraggableDimChip
+                dim={dim}
+                index={idx}
+                label={colLabel(dim)}
+                onMove={moveDim}
+                onRemove={() => removeRowDim(idx)}
+              />
             </React.Fragment>
           ))}
           {/* Overflow: +N more button with dropdown */}
@@ -493,6 +504,73 @@ function DimFilterChip({
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* DraggableDimChip — drag-and-drop reorderable dimension chip         */
+/* ------------------------------------------------------------------ */
+
+function DraggableDimChip({
+  dim,
+  index,
+  label,
+  onMove,
+  onRemove,
+}: {
+  dim: string
+  index: number
+  label: string
+  onMove: (fromIndex: number, toIndex: number) => void
+  onRemove: () => void
+}) {
+  const chipRef = useRef<HTMLSpanElement>(null)
+
+  const [{ isDragging }, drag] = useDrag({
+    type: PIVOT_DIM_TYPE,
+    item: () => ({ index }),
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  })
+
+  const [{ isOver }, drop] = useDrop({
+    accept: PIVOT_DIM_TYPE,
+    hover: (item: { index: number }) => {
+      if (item.index === index) return
+      onMove(item.index, index)
+      item.index = index
+    },
+    collect: (monitor) => ({
+      isOver: monitor.isOver(),
+    }),
+  })
+
+  drag(drop(chipRef))
+
+  return (
+    <span
+      ref={chipRef}
+      className="pivot-dim-chip"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        cursor: 'grab',
+        opacity: isDragging ? 0.4 : 1,
+        background: isOver ? 'rgba(59,130,246,0.08)' : undefined,
+        transition: 'opacity 0.15s, background 0.15s',
+      }}
+    >
+      <span style={{ fontSize: 10 }}>{label}</span>
+      <button
+        className="pivot-dim-chip-x"
+        onClick={(e) => { e.stopPropagation(); onRemove() }}
+        title="Remove"
+      >
+        <X size={9} />
+      </button>
+    </span>
   )
 }
 

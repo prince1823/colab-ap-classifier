@@ -1,4 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { DndProvider } from 'react-dnd'
+import { HTML5Backend } from 'react-dnd-html5-backend'
 import AppShell from './components/AppShell'
 import LicenseGate from './components/LicenseGate'
 import ProjectView from './views/ProjectView'
@@ -12,6 +14,7 @@ import VersionHistoryView from './views/VersionHistoryView'
 
 function App() {
   return (
+    <DndProvider backend={HTML5Backend}>
     <LicenseGate>
       <Routes>
         <Route path="/" element={<AppShell />}>
@@ -27,6 +30,7 @@ function App() {
         </Route>
       </Routes>
     </LicenseGate>
+    </DndProvider>
   )
 }
 

@@ -93,13 +93,13 @@ export function useReclassification({ filterState, onSuccess }: UseReclassificat
   const filteredNodes = useMemo(() => {
     const q = search.trim().toLowerCase()
     const leafNodes = taxonomyNodes.filter(n => n.l1 && n.l2 && n.l3)
-    const matched = q
-      ? leafNodes.filter(n =>
-          n.fullPath.toLowerCase().includes(q) ||
-          n.l1.toLowerCase().includes(q) ||
-          (n.l2 && n.l2.toLowerCase().includes(q)) ||
-          (n.l3 && n.l3.toLowerCase().includes(q))
-        )
+    // Split query into words — every word must match somewhere in the path
+    const words = q ? q.split(/\s+/).filter(Boolean) : []
+    const matched = words.length > 0
+      ? leafNodes.filter(n => {
+          const haystack = `${n.l1} ${n.l2 ?? ''} ${n.l3 ?? ''} ${n.fullPath}`.toLowerCase()
+          return words.every(w => haystack.includes(w))
+        })
       : leafNodes
 
     // Sort by L1, then L2, then L3 — groups all categories together

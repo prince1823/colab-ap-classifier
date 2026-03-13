@@ -151,7 +151,6 @@ export default function PivotToolbar({
   if (numericColumns.length === 0) numericColumns.push('spend_amount')
 
   const removeRowDim = (idx: number) => {
-    if (rowDimensions.length <= 1) return
     const next = [...rowDimensions]
     next.splice(idx, 1)
     onRowDimensionsChange(next)
@@ -198,72 +197,63 @@ export default function PivotToolbar({
 
   return (
     <div className="pivot-toolbar">
-      {/* Row dimensions — show first 2 inline, overflow behind +N more */}
+      {/* Pivot dimensions — shown as arrow-separated path */}
       <div className="pivot-toolbar-section">
-        <span className="pivot-toolbar-label">Rows:</span>
-        {rowDimensions.slice(0, 2).map((dim, idx) => renderDimChip(dim, idx))}
-        {/* +N more overflow button */}
-        {rowDimensions.length > 2 && (
-          <div ref={overflowRef} style={{ position: 'relative', display: 'inline-flex' }}>
-            <button
-              className="pivot-dim-chip"
-              style={{ cursor: 'pointer', color: 'var(--primary-color)', borderColor: 'var(--primary-color)', background: 'rgba(59,130,246,0.06)' }}
-              onClick={() => setShowOverflow(!showOverflow)}
-            >
-              +{rowDimensions.length - 2} more
-            </button>
-            {showOverflow && (
-              <div className="pivot-add-field-menu" style={{ minWidth: 240 }}>
-                {rowDimensions.slice(2).map((dim, i) => {
-                  const realIdx = i + 2
-                  const colFilterCount = (filterState[dim] || []).length
-                  const options = filterOptions[dim] || []
-                  return (
-                    <div key={dim} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px' }}>
-                      <button
-                        className="pivot-dim-chip-arrow"
-                        onClick={() => moveRowDim(realIdx, 'up')}
-                        title="Move up"
-                        style={{ opacity: 0.7 }}
-                      >
-                        <ChevronUp size={9} />
-                      </button>
-                      {realIdx < rowDimensions.length - 1 && (
-                        <button
-                          className="pivot-dim-chip-arrow"
-                          onClick={() => moveRowDim(realIdx, 'down')}
-                          title="Move down"
-                          style={{ opacity: 0.7 }}
-                        >
-                          <ChevronDown size={9} />
-                        </button>
-                      )}
-                      <OverflowFilterBtn
-                        column={dim}
-                        label={colLabel(dim)}
-                        showLabel
-                        options={options}
-                        selected={filterState[dim] || []}
-                        onToggle={(val) => toggleFilterOption(dim, val)}
-                        onClear={() => clearColumnFilter(dim)}
-                        activeCount={colFilterCount}
-                      />
-                      <button
-                        className="pivot-dim-chip-x"
-                        onClick={() => removeRowDim(realIdx)}
-                        title="Remove"
-                        style={{ opacity: 0.7 }}
-                      >
-                        <X size={9} />
-                      </button>
-                    </div>
-                  )
-                })}
+        <span className="pivot-toolbar-label">Pivot:</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {rowDimensions.length === 0 && (
+            <span style={{ fontSize: 10, color: '#9ca3af', fontStyle: 'italic' }}>Add pivot dimensions with +</span>
+          )}
+          {rowDimensions.slice(0, 3).map((dim, idx) => (
+            <React.Fragment key={dim}>
+              {idx > 0 && (
+                <span style={{ fontSize: 9, color: '#9ca3af', margin: '0 1px', userSelect: 'none' }}>→</span>
+              )}
+              <span className="pivot-dim-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <span style={{ fontSize: 10 }}>{colLabel(dim)}</span>
+                <button className="pivot-dim-chip-x" onClick={() => removeRowDim(idx)} title="Remove">
+                  <X size={9} />
+                </button>
+              </span>
+            </React.Fragment>
+          ))}
+          {/* Overflow: +N more button with dropdown */}
+          {rowDimensions.length > 3 && (
+            <React.Fragment>
+              <span style={{ fontSize: 9, color: '#9ca3af', margin: '0 1px', userSelect: 'none' }}>→</span>
+              <div ref={overflowRef} style={{ position: 'relative', display: 'inline-flex' }}>
+                <button
+                  className="pivot-dim-chip"
+                  style={{ cursor: 'pointer', fontSize: 10, color: 'var(--primary-color)', borderColor: 'var(--primary-color)', background: 'rgba(59,130,246,0.06)' }}
+                  onClick={() => setShowOverflow(!showOverflow)}
+                >
+                  +{rowDimensions.length - 3} more
+                </button>
+                {showOverflow && (
+                  <div className="pivot-add-field-menu" style={{ minWidth: 220 }}>
+                    {rowDimensions.slice(3).map((dim, i) => {
+                      const realIdx = i + 3
+                      return (
+                        <div key={dim} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', fontSize: 11 }}>
+                          <span>{colLabel(dim)}</span>
+                          <button
+                            className="pivot-dim-chip-x"
+                            onClick={() => removeRowDim(realIdx)}
+                            title="Remove"
+                            style={{ opacity: 0.7 }}
+                          >
+                            <X size={9} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
-        {/* Add field button — hidden once max dimensions reached */}
+            </React.Fragment>
+          )}
+        </div>
+        {/* Add field button */}
         {availableForRows.length > 0 && rowDimensions.length < MAX_ROW_DIMS && (
           <div ref={addMenuRef} style={{ position: 'relative', display: 'inline-flex' }}>
             <button

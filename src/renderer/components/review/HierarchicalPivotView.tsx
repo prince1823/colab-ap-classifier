@@ -419,9 +419,11 @@ export default function HierarchicalPivotView({
         showSpendToggle={aggregation === 'sum'}
       />
 
-      {!hasData && (
+      {(!hasData || rowDimensions.length === 0) && (
         <div className="flex items-center justify-center flex-1 text-gray-400 text-sm">
-          No transactions match the current filters.
+          {rowDimensions.length === 0
+            ? 'Please add pivot dimensions to view transactions.'
+            : 'No transactions match the current filters.'}
         </div>
       )}
 

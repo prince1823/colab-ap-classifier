@@ -10,7 +10,7 @@ import type { Aggregation, SpendDisplayMode, FlattenedPivotRow } from '../types/
 import type { PivotFilterState } from '../components/review/PivotFilterBar'
 import type { TransactionFilter } from '../../shared/types/transactions'
 
-const DEFAULT_ROW_DIMENSIONS = ['supplier_name', 'classification_l1', 'classification_l2', 'classification_l3']
+const DEFAULT_ROW_DIMENSIONS: string[] = []
 
 /**
  * Convert dimension pill filters into a TransactionFilter.

@@ -120,8 +120,14 @@ export function buildGroupedWhereClause(
   }
 
   if (groupSQLs.length === 0) return null;
-  return {
-    sql: groupSQLs.join(` ${grouped.groupConnector} `),
-    params,
-  };
+
+  // Join groups with per-group connectors (each group can have its own connector to the previous)
+  let sql = groupSQLs[0];
+  const validGroups = grouped.groups.filter(g => g.conditions.some(c => c.field));
+  for (let i = 1; i < groupSQLs.length; i++) {
+    const connector = validGroups[i]?.groupConnector ?? grouped.groupConnector;
+    sql += ` ${connector} ${groupSQLs[i]}`;
+  }
+
+  return { sql, params };
 }

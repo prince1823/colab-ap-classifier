@@ -29,8 +29,8 @@ export default function AdvancedFilterModal({
   onClearPillFilters,
 }: AdvancedFilterModalProps) {
   const [grouped, setGrouped] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
-  // Cache of distinct values per column
-  const [distinctCache, setDistinctCache] = useState<Record<string, string[]>>({})
+  // Fresh distinct values fetched each time modal opens
+  const [distinctValues, setDistinctValues] = useState<Record<string, string[]>>({})
 
   // Sync when modal opens — merge pill filters into the existing grouped state
   useEffect(() => {
@@ -68,34 +68,34 @@ export default function AdvancedFilterModal({
     }
   }, [isOpen, groupedFilter, pillFilterState])
 
-  // Preload distinct values for ALL available string fields when modal opens
+  // Fetch fresh distinct values for all string fields every time modal opens
   useEffect(() => {
     if (!isOpen) return
-    const stringFields = availableFields.filter(f => f.type === 'string').map(f => f.name)
-    const missing = stringFields.filter(f => !(f in distinctCache))
-    if (missing.length === 0) return
+    // Reset so we always get fresh data from the backend
+    setDistinctValues({})
 
-    for (const field of missing) {
+    const stringFields = availableFields.filter(f => f.type === 'string').map(f => f.name)
+    for (const field of stringFields) {
       ipc.transactions.distinctValues(field, 200)
         .then((values: string[]) => {
-          setDistinctCache(prev => ({ ...prev, [field]: values ?? [] }))
+          setDistinctValues(prev => ({ ...prev, [field]: values ?? [] }))
         })
         .catch(() => {
-          setDistinctCache(prev => ({ ...prev, [field]: [] }))
+          setDistinctValues(prev => ({ ...prev, [field]: [] }))
         })
     }
-  }, [isOpen, availableFields, distinctCache])
+  }, [isOpen, availableFields])
 
-  // Enrich string fields with suggestions from cache
+  // Enrich string fields with fresh suggestions from backend
   const enrichedFields: FieldDefinition[] = useMemo(() =>
     availableFields.map(f => {
-      const values = distinctCache[f.name]
+      const values = distinctValues[f.name]
       if (values && values.length > 0 && f.type === 'string') {
         return { ...f, suggestions: values }
       }
       return f
     }),
-    [availableFields, distinctCache]
+    [availableFields, distinctValues]
   )
 
   if (!isOpen) return null

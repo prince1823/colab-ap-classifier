@@ -41,6 +41,8 @@ export interface ConditionGroup {
   /** How conditions within this group are joined. */
   connector: 'AND' | 'OR';
   conditions: FilterCondition[];
+  /** How this group connects to the PREVIOUS group. Ignored on the first group. Defaults to groupConnector if omitted. */
+  groupConnector?: 'AND' | 'OR';
 }
 
 /** Grouped filter: multiple groups joined by a top-level connector. */

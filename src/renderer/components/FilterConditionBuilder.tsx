@@ -295,7 +295,8 @@ interface GroupBlockProps {
   canRemove: boolean
   /** Connector to the PREVIOUS group */
   showGroupConnector: boolean
-  topLevelConnector: 'AND' | 'OR'
+  /** This group's connector to the previous group */
+  topConnector: 'AND' | 'OR'
   onToggleTopConnector: () => void
 }
 
@@ -308,7 +309,7 @@ function GroupBlock({
   onRemove,
   canRemove,
   showGroupConnector,
-  topLevelConnector,
+  topConnector,
   onToggleTopConnector,
 }: GroupBlockProps) {
   const updateCondition = (idx: number, c: FilterCondition) => {
@@ -328,18 +329,18 @@ function GroupBlock({
 
   return (
     <div>
-      {/* Top-level connector between groups */}
+      {/* Top-level connector between groups — each one toggles independently */}
       {showGroupConnector && (
         <div className="flex items-center py-1.5 pl-1">
           <button
             onClick={onToggleTopConnector}
             className={`rounded px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              topLevelConnector === 'OR'
+              topConnector === 'OR'
                 ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
                 : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
             }`}
           >
-            {topLevelConnector}
+            {topConnector}
           </button>
         </div>
       )}
@@ -435,8 +436,14 @@ export function GroupedFilterBuilder({
     const updatedLast = { ...lastGroup, conditions: [...lastGroup.conditions, makeEmptyCondition()] }
     onChange({ ...value, groups: value.groups.map((g, i) => i === value.groups.length - 1 ? updatedLast : g) })
   }
-  const toggleTopConnector = () => {
-    onChange({ ...value, groupConnector: value.groupConnector === 'AND' ? 'OR' : 'AND' })
+  const toggleTopConnector = (groupIdx: number) => {
+    // Toggle the connector on this specific group (how it connects to the previous group)
+    const currentConnector = value.groups[groupIdx]?.groupConnector ?? value.groupConnector
+    const newConnector = currentConnector === 'AND' ? 'OR' : 'AND'
+    onChange({
+      ...value,
+      groups: value.groups.map((g, i) => i === groupIdx ? { ...g, groupConnector: newConnector } : g),
+    })
   }
 
   /** Build logic expression preview */
@@ -446,8 +453,10 @@ export function GroupedFilterBuilder({
 
     let letterIdx = 0
     const groupExprs: string[] = []
+    const groupConnectors: string[] = [] // connector before each group (except first)
 
-    for (const group of validGroups) {
+    for (let gi = 0; gi < validGroups.length; gi++) {
+      const group = validGroups[gi]
       const validConds = group.conditions.filter(c => c.field)
       if (validConds.length === 0) continue
       const letters = validConds.map(() => String.fromCharCode(65 + letterIdx++))
@@ -456,10 +465,17 @@ export function GroupedFilterBuilder({
       } else {
         groupExprs.push(`(${letters.join(` ${group.connector} `)})`)
       }
+      if (gi > 0) {
+        groupConnectors.push(group.groupConnector ?? value.groupConnector)
+      }
     }
 
     if (groupExprs.length <= 1) return groupExprs[0] || null
-    return groupExprs.join(` ${value.groupConnector} `)
+    let expr = groupExprs[0]
+    for (let i = 1; i < groupExprs.length; i++) {
+      expr += ` ${groupConnectors[i - 1]} ${groupExprs[i]}`
+    }
+    return expr
   }, [value])
 
   return (
@@ -486,8 +502,8 @@ export function GroupedFilterBuilder({
             onRemove={() => removeGroup(gi)}
             canRemove={value.groups.length > 1}
             showGroupConnector={gi > 0}
-            topLevelConnector={value.groupConnector}
-            onToggleTopConnector={toggleTopConnector}
+            topConnector={group.groupConnector ?? value.groupConnector}
+            onToggleTopConnector={() => toggleTopConnector(gi)}
           />
         ))}
       </div>

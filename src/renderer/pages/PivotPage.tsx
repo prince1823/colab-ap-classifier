@@ -90,9 +90,11 @@ export default function PivotPage() {
     'created_at', 'updated_at',
   ])
 
+  const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3'])
+
   const availableColumns = [
     'classification_l1', 'classification_l2', 'classification_l3',
-    ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c)),
+    ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
   ]
 
   const COLUMN_LABELS: Record<string, string> = {

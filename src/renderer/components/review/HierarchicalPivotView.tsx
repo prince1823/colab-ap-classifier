@@ -262,7 +262,7 @@ export default function HierarchicalPivotView({
     onReclassify?.(rows)
   }, [onReclassify])
 
-  const { focusedIndex, selectedKeys, handleKeyDown, clearSelection } = usePivotKeyboard({
+  const { focusedIndex, selectedKeys, handleKeyDown, clearSelection, setFocusedIndex } = usePivotKeyboard({
     visibleRows,
     rowVirtualizer,
     onCmdK: handleCmdK,
@@ -520,6 +520,7 @@ export default function HierarchicalPivotView({
                       isSelected={selectedKeys.has(row.key)}
                       formattedTotal={fmtSpend(row)}
                       onDrillDown={onDrillDown}
+                      onClick={() => setFocusedIndex(virtualRow.index)}
                     />
                   )
                 })}
@@ -567,6 +568,7 @@ function PivotTreeRow({
   isSelected,
   formattedTotal,
   onDrillDown,
+  onClick,
 }: {
   row: FlattenedPivotRow
   aggregation: Aggregation
@@ -578,6 +580,7 @@ function PivotTreeRow({
   isSelected: boolean
   formattedTotal: string
   onDrillDown?: (row: FlattenedPivotRow) => void
+  onClick?: () => void
 }) {
   const indent = row.depth * 20
 
@@ -593,6 +596,7 @@ function PivotTreeRow({
       data-depth={row.depth}
       data-focused={isFocused || undefined}
       data-selected={isSelected || undefined}
+      onClick={onClick}
       onDoubleClick={() => {
         const dim = rowDimensions[row.depth]
         if (!dim) return

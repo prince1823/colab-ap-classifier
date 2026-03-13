@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import type { FlattenedPivotRow } from '../types/pivot'
 
@@ -17,6 +17,7 @@ interface UsePivotKeyboardReturn {
   selectedKeys: Set<string>
   handleKeyDown: (e: React.KeyboardEvent) => void
   clearSelection: () => void
+  setFocusedIndex: (idx: number) => void
 }
 
 export function usePivotKeyboard({
@@ -30,15 +31,56 @@ export function usePivotKeyboard({
 }: UsePivotKeyboardOptions): UsePivotKeyboardReturn {
   const [focusedIndex, setFocusedIndex] = useState(0)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  // Row key to restore focus to after filter clear
+  const restoreKeyRef = useRef<string | null>(null)
+  // How many visibleRows changes to keep trying the restore (async data may take a couple renders)
+  const restoreAttemptsRef = useRef(0)
+  // Skip the scrollIntoView effect once after a restore (avoid double-scroll)
+  const skipScrollIntoViewRef = useRef(false)
 
   // Clamp focused index when visible rows change
   useEffect(() => {
     if (visibleRows.length === 0) return
+
+    // If we have a key to restore to, find it (or nearest ancestor) and scroll there
+    const restoreKey = restoreKeyRef.current
+    if (restoreKey && restoreAttemptsRef.current > 0) {
+      restoreAttemptsRef.current--
+      // Try exact key first, then progressively shorter ancestor paths
+      let idx = -1
+      let searchKey = restoreKey
+      while (idx < 0 && searchKey) {
+        idx = visibleRows.findIndex(r => r.key === searchKey)
+        if (idx < 0) {
+          const lastSep = searchKey.lastIndexOf('|')
+          searchKey = lastSep > 0 ? searchKey.slice(0, lastSep) : ''
+        }
+      }
+      if (idx >= 0) {
+        restoreKeyRef.current = null
+        restoreAttemptsRef.current = 0
+        skipScrollIntoViewRef.current = true
+        setFocusedIndex(idx)
+        setTimeout(() => {
+          rowVirtualizer.scrollToIndex(idx, { align: 'auto' })
+        }, 100)
+        return
+      }
+      // If we ran out of attempts, give up
+      if (restoreAttemptsRef.current <= 0) {
+        restoreKeyRef.current = null
+      }
+    }
+
     setFocusedIndex(prev => Math.min(prev, visibleRows.length - 1))
-  }, [visibleRows.length])
+  }, [visibleRows, rowVirtualizer])
 
   // After render, scroll the focused row into view (handles sticky header/footer)
   useEffect(() => {
+    if (skipScrollIntoViewRef.current) {
+      skipScrollIntoViewRef.current = false
+      return
+    }
     requestAnimationFrame(() => {
       const el = document.querySelector('tr[data-focused]')
       if (el) {
@@ -155,6 +197,12 @@ export function usePivotKeyboard({
       }
       case 'Escape': {
         e.preventDefault()
+        // Save focused row key — will be restored after new data arrives
+        const focusedRow = visibleRows[focusedIndex]
+        if (focusedRow) {
+          restoreKeyRef.current = focusedRow.key
+          restoreAttemptsRef.current = 5 // try up to 5 data changes
+        }
         clearSelection()
         onClearAllFilters()
         break
@@ -167,5 +215,6 @@ export function usePivotKeyboard({
     selectedKeys,
     handleKeyDown,
     clearSelection,
+    setFocusedIndex,
   }
 }

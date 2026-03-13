@@ -168,6 +168,7 @@ export interface SupplierService {
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
   assignParent(id: string, parentId: string): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;
+  isTailSpend(supplierName: string): Promise<boolean>;
   markResearched(supplierId: string): Promise<void>;
   getFilterFields(): FieldDefinition[];
   queryDistinctValues(field: string, limit?: number): Promise<string[]>;

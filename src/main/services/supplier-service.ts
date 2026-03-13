@@ -356,6 +356,11 @@ export class SupplierService implements ISupplierService {
   }
 
   async filterTailSpend(threshold: number): Promise<string[]> {
+    // Reset all flags first so threshold changes recalculate correctly
+    await this.db.run(
+      'UPDATE project_suppliers SET is_tail_spend = FALSE, updated_at = CURRENT_TIMESTAMP'
+    );
+
     const hasSpend = await this.transactionColumnExists('spend_amount');
     if (!hasSpend) return [];
 
@@ -377,6 +382,14 @@ export class SupplierService implements ISupplierService {
     }
 
     return ids;
+  }
+
+  async isTailSpend(supplierName: string): Promise<boolean> {
+    const row = await this.db.get<{ is_tail_spend: boolean }>(
+      'SELECT is_tail_spend FROM project_suppliers WHERE supplier_name = ?',
+      supplierName
+    );
+    return row ? Boolean(row.is_tail_spend) : false;
   }
 
   async markResearched(supplierId: string): Promise<void> {

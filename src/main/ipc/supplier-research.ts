@@ -17,6 +17,11 @@ export function registerSupplierResearchHandlers(
     const supplier = await suppliers.getProjectSupplier(supplierId as string);
     if (!supplier) throw new Error(`Supplier not found: ${supplierId}`);
 
+    // Skip research for tail spend suppliers
+    if (supplier.isTailSpend) {
+      return null;
+    }
+
     const info = await researcher.researchSingle(supplier.supplierName);
 
     // Persist research results to project_suppliers and mark as researched

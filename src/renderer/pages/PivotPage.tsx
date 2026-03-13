@@ -126,7 +126,7 @@ export default function PivotPage() {
           onAggregationChange={setAggregation}
           filterState={filterState}
           onFilterStateChange={setFilterState}
-          onClearAllFilters={() => setFilterState({})}
+          onClearAllFilters={() => { setFilterState({}); setAdvancedConditions([]) }}
           onExport={handleExport}
           exportDisabled={!pivotData}
           totalCount={totalCount}
@@ -137,6 +137,8 @@ export default function PivotPage() {
           modalOpen={reclassify.isOpen || showAdvancedFilter}
           advancedFilterCount={advancedConditions.length}
           onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
+          advancedConditions={advancedConditions}
+          onRemoveAdvancedCondition={(idx) => setAdvancedConditions(prev => prev.filter((_, i) => i !== idx))}
         />
       </div>
 
@@ -169,6 +171,8 @@ export default function PivotPage() {
         conditions={advancedConditions}
         onApply={setAdvancedConditions}
         availableFields={advancedFilterFields}
+        pillFilterState={filterState}
+        onClearPillFilters={() => setFilterState({})}
       />
     </div>
   )

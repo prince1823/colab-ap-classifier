@@ -12,6 +12,10 @@ interface AdvancedFilterModalProps {
   conditions: FilterCondition[]
   onApply: (conditions: FilterCondition[]) => void
   availableFields: FieldDefinition[]
+  /** Pill filters from double-click / ⌘F — shown as editable conditions */
+  pillFilterState?: Record<string, string[]>
+  /** Called on apply to clear pill filters (they become advanced conditions) */
+  onClearPillFilters?: () => void
 }
 
 export default function AdvancedFilterModal({
@@ -20,41 +24,55 @@ export default function AdvancedFilterModal({
   conditions: initialConditions,
   onApply,
   availableFields,
+  pillFilterState = {},
+  onClearPillFilters,
 }: AdvancedFilterModalProps) {
   const [conditions, setConditions] = useState<FilterCondition[]>(initialConditions)
   // Cache of distinct values per column: { supplier_name: ['Acme', 'Beta'], ... }
   const [distinctCache, setDistinctCache] = useState<Record<string, string[]>>({})
 
-  // Sync when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setConditions(
-        initialConditions.length > 0
-          ? initialConditions
-          : [{ field: '', operator: 'contains', value: '', connector: 'AND' }]
-      )
-    }
-  }, [isOpen, initialConditions])
-
-  // Fetch distinct values for any fields used in conditions that we haven't cached yet
+  // Sync when modal opens — merge pill filters + advanced conditions
   useEffect(() => {
     if (!isOpen) return
-    const fieldsInUse = [...new Set(conditions.map(c => c.field).filter(Boolean))]
-    const missing = fieldsInUse.filter(f => !(f in distinctCache))
+
+    // Convert pill filters to conditions (each value → separate in_list or equals condition)
+    const pillConditions: FilterCondition[] = []
+    for (const [field, values] of Object.entries(pillFilterState)) {
+      if (values.length > 0) {
+        pillConditions.push({
+          field,
+          operator: values.length > 1 ? 'in_list' : 'equals',
+          value: values.length > 1 ? values : values[0],
+          connector: 'AND',
+        })
+      }
+    }
+
+    const merged = [...pillConditions, ...initialConditions]
+    setConditions(
+      merged.length > 0
+        ? merged
+        : [{ field: '', operator: 'contains', value: '', connector: 'AND' }]
+    )
+  }, [isOpen, initialConditions, pillFilterState])
+
+  // Preload distinct values for ALL available string fields when modal opens
+  useEffect(() => {
+    if (!isOpen) return
+    const stringFields = availableFields.filter(f => f.type === 'string').map(f => f.name)
+    const missing = stringFields.filter(f => !(f in distinctCache))
     if (missing.length === 0) return
 
     for (const field of missing) {
       ipc.transactions.distinctValues(field, 200)
         .then((values: string[]) => {
-          console.log(`[AdvancedFilter] distinctValues for "${field}":`, values?.length ?? 0, 'values')
           setDistinctCache(prev => ({ ...prev, [field]: values ?? [] }))
         })
-        .catch((err) => {
-          console.error(`[AdvancedFilter] distinctValues failed for "${field}":`, err)
+        .catch(() => {
           setDistinctCache(prev => ({ ...prev, [field]: [] }))
         })
     }
-  }, [isOpen, conditions, distinctCache])
+  }, [isOpen, availableFields, distinctCache])
 
   // Enrich string fields with suggestions from cache — keeps full string operators
   // while showing autocomplete dropdown via <datalist>
@@ -75,11 +93,14 @@ export default function AdvancedFilterModal({
     // Only keep conditions that have a field selected
     const valid = conditions.filter(c => c.field)
     onApply(valid)
+    // Clear pill filters since they're now part of advanced conditions
+    onClearPillFilters?.()
     onClose()
   }
 
   const handleClear = () => {
     onApply([])
+    onClearPillFilters?.()
     onClose()
   }
 

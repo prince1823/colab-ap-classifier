@@ -8,6 +8,8 @@ import { usePivotTreeState, filterRowsBySearch } from '../../hooks/usePivotTreeS
 import { usePivotKeyboard } from '../../hooks/usePivotKeyboard'
 import PivotToolbar from './PivotToolbar'
 import type { PivotFilterState } from './PivotFilterBar'
+import type { FilterCondition } from '../../../shared/types/transactions'
+import { OPERATOR_LABELS } from '../FilterConditionBuilder'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import '../../styles/PivotHierarchy.css'
 
@@ -44,6 +46,8 @@ interface HierarchicalPivotViewProps {
   /* Advanced filter */
   advancedFilterCount?: number
   onOpenAdvancedFilter?: () => void
+  advancedConditions?: FilterCondition[]
+  onRemoveAdvancedCondition?: (index: number) => void
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -201,6 +205,8 @@ export default function HierarchicalPivotView({
   modalOpen = false,
   advancedFilterCount = 0,
   onOpenAdvancedFilter,
+  advancedConditions = [],
+  onRemoveAdvancedCondition,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
@@ -334,7 +340,7 @@ export default function HierarchicalPivotView({
       <div className="h-6 flex-shrink-0 flex items-center gap-1.5">
         {/* Filter pills — grouped by column */}
         <div className="flex items-center gap-1 flex-nowrap overflow-x-auto flex-1 min-w-0 h-full">
-          {totalFilterCount > 0 && (
+          {(totalFilterCount > 0 || advancedConditions.length > 0) && (
             <>
               <span className="text-[9px] font-semibold text-blue-600 flex-shrink-0">Filters:</span>
               {groupedFilters.map(({ col, values }) => (
@@ -345,6 +351,24 @@ export default function HierarchicalPivotView({
                   values={values}
                   onRemove={(value) => removeFilter(col, value)}
                 />
+              ))}
+              {advancedConditions.map((cond, idx) => (
+                <span
+                  key={`adv-${idx}`}
+                  className="inline-flex items-center gap-0.5 rounded-full bg-purple-50 border border-purple-200 pl-1.5 pr-1 py-px text-[9px] text-purple-700 font-medium flex-shrink-0"
+                >
+                  <span className="text-purple-400">{colLabel(cond.field)}</span>
+                  <span className="text-purple-300 mx-0.5">{OPERATOR_LABELS[cond.operator] ?? cond.operator}</span>
+                  <span className="truncate max-w-[80px]">{String(cond.value)}</span>
+                  {onRemoveAdvancedCondition && (
+                    <button
+                      onClick={() => { onRemoveAdvancedCondition(idx); refocusTable() }}
+                      className="ml-0.5 rounded-full p-px hover:bg-purple-200 transition-colors"
+                    >
+                      <X size={8} />
+                    </button>
+                  )}
+                </span>
               ))}
               <button
                 onClick={() => { onClearAllFilters(); refocusTable() }}

@@ -132,12 +132,10 @@ export default function ReclassifyModal({
                   onClick={() => onApply(node)}
                   onMouseEnter={() => onFocusedIdxChange(idx)}
                 >
-                  <span className="font-medium">{node.l3 || node.l2 || node.l1}</span>
-                  {node.l2 && (
-                    <span className="text-xs text-gray-400 ml-2">
-                      {[node.l2, node.l3].filter(Boolean).join(' > ')}
-                    </span>
-                  )}
+                  <span className="font-medium">{node.l3}</span>
+                  <span className="text-xs text-gray-400 ml-2">
+                    {node.l2} &gt; {node.l3}
+                  </span>
                 </div>
               </React.Fragment>
             )

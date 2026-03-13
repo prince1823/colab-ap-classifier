@@ -89,10 +89,10 @@ export function useReclassification({ filterState, onSuccess }: UseReclassificat
     setTimeout(() => searchRef.current?.focus(), 50)
   }, [isOpen])
 
-  // Filter to leaf nodes (depth >= 2), sorted by L1 → L2 → L3
+  // Filter to full 3-level nodes only (L1 + L2 + L3), sorted by L1 → L2 → L3
   const filteredNodes = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const leafNodes = taxonomyNodes.filter(n => n.depth >= 2)
+    const leafNodes = taxonomyNodes.filter(n => n.l1 && n.l2 && n.l3)
     const matched = q
       ? leafNodes.filter(n =>
           n.fullPath.toLowerCase().includes(q) ||

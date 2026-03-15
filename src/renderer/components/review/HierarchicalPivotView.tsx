@@ -239,14 +239,14 @@ export default function HierarchicalPivotView({
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
 
-  const { flatRows, allFlatRows, toggleExpand, expandToLevel, depth0TotalMap } = usePivotTreeState(
+  const { flatRows, allFlatRows, toggleExpand, expandToLevel, expandToKey, depth0TotalMap } = usePivotTreeState(
     pivotData?.root ?? null
   )
 
   // When searching, use allFlatRows (ignores expand/collapse) so collapsed children are found.
   // When not searching, use flatRows (respects expand/collapse state).
   const visibleRows = useMemo(
-    () => search.trim() ? filterRowsBySearch(allFlatRows, search) : flatRows,
+    () => search.trim() ? filterRowsBySearch(flatRows, allFlatRows, search) : flatRows,
     [flatRows, allFlatRows, search]
   )
 
@@ -706,7 +706,7 @@ function PivotTreeRow({
       data-depth={row.depth}
       data-focused={isFocused || undefined}
       data-selected={isSelected || undefined}
-      onClick={onClick}
+      onClick={() => onClick?.()}
       onDoubleClick={() => {
         const dim = rowDimensions[row.depth]
         if (!dim) return
@@ -727,7 +727,7 @@ function PivotTreeRow({
         {row.hasChildren ? (
           <span
             className="pivot-tree-chevron"
-            onClick={() => onToggle(row.key)}
+            onClick={(e) => { e.stopPropagation(); onToggle(row.key) }}
           >
             {row.isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>

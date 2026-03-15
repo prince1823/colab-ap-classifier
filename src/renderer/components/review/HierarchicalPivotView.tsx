@@ -8,9 +8,10 @@ import { usePivotTreeState, filterRowsBySearch } from '../../hooks/usePivotTreeS
 import { usePivotKeyboard } from '../../hooks/usePivotKeyboard'
 import PivotToolbar from './PivotToolbar'
 import type { PivotFilterState } from './PivotFilterBar'
-import type { FilterCondition } from '../../../shared/types/transactions'
+import type { FilterCondition, GroupedFilter } from '../../../shared/types/transactions'
 import { OPERATOR_LABELS } from '../FilterConditionBuilder'
 import { fmtAbbrev } from '../../utils/formatSpend'
+import { ipc } from '../../lib/ipc'
 import '../../styles/PivotHierarchy.css'
 
 interface HierarchicalPivotViewProps {
@@ -48,6 +49,8 @@ interface HierarchicalPivotViewProps {
   onOpenAdvancedFilter?: () => void
   advancedConditions?: FilterCondition[]
   onRemoveAdvancedCondition?: (index: number) => void
+  /** Grouped filter for export — full AND/OR structure */
+  advancedGrouped?: GroupedFilter | null
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -67,6 +70,30 @@ const COLUMN_LABELS: Record<string, string> = {
   month: 'Month',
   costCenter: 'Cost Center',
   country: 'Country',
+}
+
+// Full labels for export CSV
+const FULL_COLUMN_LABELS: Record<string, string> = {
+  classification_l1: 'Classification L1',
+  classification_l2: 'Classification L2',
+  classification_l3: 'Classification L3',
+  classification_l4: 'Classification L4',
+  supplier_name: 'Supplier',
+  gl_description: 'GL Description',
+  line_description: 'Line Description',
+  company: 'Company',
+  spend_amount: 'Spend Amount',
+  amount: 'Amount',
+  invoice_amount: 'Invoice Amount',
+  year: 'Year',
+  quarter: 'Quarter',
+  month: 'Month',
+  costCenter: 'Cost Center',
+  country: 'Country',
+}
+
+function fullColLabel(col: string): string {
+  return FULL_COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function colLabel(col: string): string {
@@ -207,6 +234,7 @@ export default function HierarchicalPivotView({
   onOpenAdvancedFilter,
   advancedConditions = [],
   onRemoveAdvancedCondition,
+  advancedGrouped,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
@@ -221,6 +249,88 @@ export default function HierarchicalPivotView({
     () => search.trim() ? filterRowsBySearch(allFlatRows, search) : flatRows,
     [flatRows, allFlatRows, search]
   )
+
+  // Export pivot view as CSV (hierarchical, matching what's on screen)
+  const handlePivotExport = useCallback(async () => {
+    if (!visibleRows.length) return
+
+    const escCSV = (v: string) => {
+      if (v.includes(',') || v.includes('"') || v.includes('\n')) return `"${v.replace(/"/g, '""')}"`
+      return v
+    }
+
+    const lines: string[] = []
+
+    // Build full filter description with AND/OR logic and parentheses
+    const filterParts: string[] = []
+
+    // Pill filters (double-click / cmd+F)
+    for (const [col, values] of Object.entries(filterState)) {
+      if (values.length > 0) {
+        if (values.length === 1) {
+          filterParts.push(`(${fullColLabel(col)} equals "${values[0]}")`)
+        } else {
+          const orParts = values.map(v => `${fullColLabel(col)} equals "${v}"`).join(' OR ')
+          filterParts.push(`(${orParts})`)
+        }
+      }
+    }
+
+    // Advanced grouped filters — preserve the full AND/OR structure
+    if (advancedGrouped && advancedGrouped.groups.length > 0) {
+      const groupStrs: string[] = []
+      for (const group of advancedGrouped.groups) {
+        const validConds = group.conditions.filter(c => c.field)
+        if (validConds.length === 0) continue
+        const condStrs = validConds.map(c => {
+          const opLabel = OPERATOR_LABELS[c.operator] || c.operator
+          return `${fullColLabel(c.field)} ${opLabel} "${c.value}"`
+        })
+        if (condStrs.length === 1) {
+          groupStrs.push(condStrs[0])
+        } else {
+          groupStrs.push(`(${condStrs.join(` ${group.connector} `)})`)
+        }
+      }
+      if (groupStrs.length > 0) {
+        if (groupStrs.length === 1) {
+          filterParts.push(groupStrs[0])
+        } else {
+          filterParts.push(`(${groupStrs.join(` ${advancedGrouped.groupConnector} `)})`)
+        }
+      }
+    }
+
+    if (filterParts.length > 0) {
+      const filterExpr = filterParts.join(' AND ')
+      lines.push(escCSV(`Active Filters: ${filterExpr}`))
+      lines.push('') // blank line separator
+    }
+
+    // Headers: one column per dimension level + Count + Total
+    const dimHeaders = rowDimensions.map(d => colLabel(d))
+    const headers = [...dimHeaders, 'Count', 'Total']
+    lines.push(headers.map(escCSV).join(','))
+
+    for (const row of visibleRows) {
+      // Fill the correct dimension column based on depth
+      const dimValues = rowDimensions.map((_, i) => i === row.depth ? row.label : '')
+      const total = row.total === 0 ? '' : fmtAbbrev(row.total)
+      const count = String(row.transactionCount)
+      lines.push([...dimValues.map(escCSV), escCSV(count), escCSV(total)].join(','))
+    }
+
+    // Add grand total row
+    if (pivotData) {
+      const grandValues = rowDimensions.map(() => '')
+      grandValues[0] = 'Grand Total'
+      const grandTotal = fmtAbbrev(pivotData.grandTotal)
+      lines.push([...grandValues.map(escCSV), '', escCSV(grandTotal)].join(','))
+    }
+
+    const content = lines.join('\r\n') + '\r\n'
+    await ipc.export.saveContent(content, 'pivot-export.csv')
+  }, [visibleRows, rowDimensions, aggregation, pivotData, filterState, advancedGrouped])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevModalOpenRef = useRef(modalOpen)
@@ -414,10 +524,10 @@ export default function HierarchicalPivotView({
             )}
           </div>
           <button
-            onClick={onExport}
-            disabled={exportDisabled || !hasData}
+            onClick={handlePivotExport}
+            disabled={!hasData}
             className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-1.5 py-px text-[10px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-            title="Export CSV"
+            title="Export pivot view as CSV"
             style={{ height: 20 }}
           >
             <ArrowDownTrayIcon className="h-2.5 w-2.5" />

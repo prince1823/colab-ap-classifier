@@ -146,9 +146,10 @@ export const ipc = {
     revert: (changeId: string) => invoke('changelog:revert', changeId),
   },
 
-  // ── Export (1 channel) ──
+  // ── Export ──
   export: {
     csv: (filters?: TransactionFilter) => invoke('export:csv', filters),
+    saveContent: (content: string, defaultFilename: string) => invoke('export:saveContent', content, defaultFilename),
   },
 
   // ── Settings (5 channels) ──

@@ -167,6 +167,7 @@ export default function PivotPage() {
           advancedFilterCount={advancedConditions.length}
           onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
           advancedConditions={advancedConditions}
+          advancedGrouped={advancedGrouped}
           onRemoveAdvancedCondition={(idx) => {
             // Remove condition by flat index from the grouped structure
             if (!advancedGrouped) return

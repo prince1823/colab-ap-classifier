@@ -169,7 +169,7 @@ export default function SuppliersPage() {
         currentSupplier: supplier.supplierName,
         currentStep: 'Done',
       })
-      setTimeout(() => setResearchProgress(null), 1500)
+      setTimeout(() => setResearchProgress(null), 3000)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Research failed')
       setResearchProgress(null)
@@ -221,7 +221,7 @@ export default function SuppliersPage() {
       currentSupplier: null,
       currentStep: 'Done',
     })
-    setTimeout(() => setResearchProgress(null), 1500)
+    setTimeout(() => setResearchProgress(null), 3000)
     setSelectedIds(new Set())
   }, [suppliers, selectedIds, updateSuppliers])
 
@@ -474,6 +474,17 @@ export default function SuppliersPage() {
               className="progress-fill"
               style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
             />
+          </div>
+        </div>
+      )}
+      {researchProgress && researchProgress.status === 'completed' && (
+        <div className="suppliers-progress">
+          <div className="flex items-center gap-2 py-1">
+            <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
+            <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''} researched)</span>
+          </div>
+          <div className="progress-bar">
+            <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
           </div>
         </div>
       )}

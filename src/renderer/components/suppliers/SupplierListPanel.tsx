@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react'
+import React, { useRef, useEffect, useState, useCallback } from 'react'
 import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import { Search, X } from 'lucide-react'
@@ -72,11 +72,51 @@ export default function SupplierListPanel({
 }: SupplierListPanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const researchBtnRef = useRef<HTMLButtonElement>(null)
+  const confirmBtnRef = useRef<HTMLButtonElement>(null)
+  const [actionFocused, setActionFocused] = useState<'research' | 'confirm' | null>(null)
 
   // Auto-focus list for keyboard nav
   useEffect(() => {
     if (isActive) listRef.current?.focus()
   }, [isActive])
+
+  // Handle Cmd+Enter to focus action buttons, and arrow keys within them
+  const handleListKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Cmd+Enter (or Ctrl+Enter) to jump to action buttons
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && selectedIds.size > 0) {
+      e.preventDefault()
+      e.stopPropagation()
+      const firstBtn = onResearchSelected ? 'research' : onConfirmSelected ? 'confirm' : null
+      if (firstBtn) {
+        setActionFocused(firstBtn)
+        setTimeout(() => {
+          if (firstBtn === 'research') researchBtnRef.current?.focus()
+          else confirmBtnRef.current?.focus()
+        }, 0)
+      }
+      return
+    }
+    onKeyDown(e)
+  }, [onKeyDown, selectedIds.size, onResearchSelected, onConfirmSelected])
+
+  const handleActionKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      const active = document.activeElement
+      if (active === researchBtnRef.current && onConfirmSelected) {
+        setActionFocused('confirm')
+        confirmBtnRef.current?.focus()
+      } else if (active === confirmBtnRef.current && onResearchSelected) {
+        setActionFocused('research')
+        researchBtnRef.current?.focus()
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setActionFocused(null)
+      listRef.current?.focus()
+    }
+  }, [onResearchSelected, onConfirmSelected])
 
   const chipClass = (f: QuickFilter) =>
     `px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer border ${
@@ -143,7 +183,7 @@ export default function SupplierListPanel({
         ref={listRef}
         className="supplier-list-scroll"
         tabIndex={0}
-        onKeyDown={onKeyDown}
+        onKeyDown={handleListKeyDown}
       >
         {suppliers.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-gray-400">
@@ -192,12 +232,26 @@ export default function SupplierListPanel({
           <span className="text-[11px] font-semibold text-blue-700">{selectedIds.size} selected</span>
           <div className="flex-1" />
           {onResearchSelected && (
-            <button type="button" onClick={onResearchSelected} className="px-3 py-1 rounded-md text-[11px] font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm">
+            <button
+              ref={researchBtnRef}
+              type="button"
+              onClick={onResearchSelected}
+              onKeyDown={handleActionKeyDown}
+              onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
+              className={`px-3 py-1 rounded-md text-[11px] font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm ${actionFocused === 'research' ? 'ring-2 ring-blue-300 ring-offset-1' : ''}`}
+            >
               Research
             </button>
           )}
           {onConfirmSelected && (
-            <button type="button" onClick={onConfirmSelected} className="px-3 py-1 rounded-md text-[11px] font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-sm">
+            <button
+              ref={confirmBtnRef}
+              type="button"
+              onClick={onConfirmSelected}
+              onKeyDown={handleActionKeyDown}
+              onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
+              className={`px-3 py-1 rounded-md text-[11px] font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-sm ${actionFocused === 'confirm' ? 'ring-2 ring-green-300 ring-offset-1' : ''}`}
+            >
               Confirm
             </button>
           )}

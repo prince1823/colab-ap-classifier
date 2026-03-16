@@ -98,7 +98,11 @@ export default function SuppliersPage() {
   useEffect(() => {
     const unsub = ipc.suppliers.onResearchProgress((progress: ResearchProgress) => {
       setResearchProgress(progress)
-      if (progress.status === 'complete' || progress.status === 'error') {
+      if (progress.status === 'running' && progress.processedSuppliers > 0) {
+        // Incrementally refresh to show newly-researched suppliers without disturbing the current view
+        loadData()
+      }
+      if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
         setTimeout(() => {
           setResearchProgress(null)
           loadData()
@@ -190,13 +194,14 @@ export default function SuppliersPage() {
 
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
-    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.confirmationStatus !== 'confirmed')
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.isResearched && s.confirmationStatus !== 'confirmed')
     if (selected.length === 0) return
+    const confirmedIds = new Set(selected.map(s => s.id))
     for (const s of selected) {
       try { await ipc.suppliers.confirm(s.id, 'confirmed') } catch { /* continue */ }
     }
     updateSuppliers(prev => prev.map(s =>
-      selectedIds.has(s.id) ? { ...s, confirmationStatus: 'confirmed' } : s
+      confirmedIds.has(s.id) ? { ...s, confirmationStatus: 'confirmed' } : s
     ))
     setSelectedIds(new Set())
   }, [suppliers, selectedIds, updateSuppliers])
@@ -384,7 +389,7 @@ export default function SuppliersPage() {
       )}
 
       {/* Research progress bar */}
-      {researchProgress && researchProgress.status === 'researching' && (
+      {researchProgress && researchProgress.status === 'running' && (
         <div className="suppliers-progress">
           <div className="flex items-center justify-between mb-1">
             <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>

@@ -19,10 +19,11 @@ const DETAIL_FIELDS: {
   { key: 'serviceType', label: 'Service Type', editable: true, type: 'text' },
   { key: 'naicsCode', label: 'NAICS Code', editable: true, type: 'text' },
   { key: 'naicsDescription', label: 'NAICS Description', editable: true, type: 'text', wide: true },
-  { key: 'websiteUrl', label: 'Website', editable: true, type: 'text' },
   { key: 'confidence', label: 'Confidence', editable: false, type: 'readonly' },
   { key: 'productsServices', label: 'Products & Services', editable: true, type: 'text', wide: true },
   { key: 'description', label: 'Description', editable: true, type: 'text', wide: true },
+  { key: 'websiteUrl', label: 'Website', editable: true, type: 'text', wide: true },
+  { key: 'sources', label: 'Sources', editable: true, type: 'text', wide: true },
 ]
 
 /** Only editable fields can be keyboard-navigated */
@@ -240,7 +241,6 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   }
 
   const confidenceVal = getVal('confidence')
-  const sources = info.sources
 
   const handleSave = (key: keyof SupplierInfo | 'parentName', val: string) => {
     if (key === 'parentName') {
@@ -335,6 +335,73 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
           const currentNavIdx = navIdx
           navIdx++
 
+          // Sources: clickable tags in view mode, text input in edit mode
+          if (field.key === 'sources') {
+            const sourcesArr = (info.sources ?? []) as string[]
+            const isFieldEditing = editingFieldIndex === currentNavIdx
+            const isFieldFocused = isActive && currentNavIdx === focusedFieldIndex
+            return (
+              <div
+                key={field.key}
+                className={`detail-field detail-field-wide ${isFieldFocused && !isFieldEditing ? 'detail-field-focused' : ''}`}
+                tabIndex={isFieldFocused && !isFieldEditing ? 0 : -1}
+                onKeyDown={!isFieldEditing ? handlePanelKeyDown : undefined}
+              >
+                <label className="detail-field-label">Sources</label>
+                {isFieldEditing ? (
+                  <input
+                    className="detail-field-input"
+                    defaultValue={sourcesArr.join(', ')}
+                    autoFocus
+                    onBlur={(e) => {
+                      const val = e.target.value
+                      if (val !== sourcesArr.join(', ')) handleSave('sources', val)
+                      handleCommitAndAdvance(currentNavIdx)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const val = (e.target as HTMLInputElement).value
+                        if (val !== sourcesArr.join(', ')) handleSave('sources', val)
+                        handleCommitAndAdvance(currentNavIdx)
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault()
+                        handleCommitAndAdvance(currentNavIdx)
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="flex flex-wrap items-center gap-1.5 min-h-[28px]">
+                    {sourcesArr.length > 0 ? sourcesArr.map((src, i) => (
+                      <a
+                        key={i}
+                        className="source-tag source-link"
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
+                        }}
+                        title={`Search Google for "${src}"`}
+                      >
+                        {src}
+                      </a>
+                    )) : (
+                      <span className="text-gray-300 italic text-xs">—</span>
+                    )}
+                    <button
+                      type="button"
+                      className="text-[10px] text-gray-400 hover:text-blue-500 ml-1"
+                      onClick={() => onEditingFieldChange(currentNavIdx)}
+                    >
+                      edit
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          }
+
           return (
             <EditableField
               key={field.key}
@@ -352,29 +419,6 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
           )
         })}
       </div>
-
-      {/* Sources */}
-      {sources && sources.length > 0 && (
-        <div className="detail-section">
-          <label className="detail-field-label">Sources</label>
-          <div className="sources-list mt-1">
-            {sources.map((src: string, i: number) => (
-              <a
-                key={i}
-                className="source-tag source-link"
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault()
-                  window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
-                }}
-                title={`Search Google for "${src}"`}
-              >
-                {src}
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Footer — aliases only */}
       {supplier.aliases && supplier.aliases.length > 0 && (

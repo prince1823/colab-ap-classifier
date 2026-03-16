@@ -118,7 +118,10 @@ export default function SuppliersPage() {
     setSaving(true)
     try {
       const existingInfo = supplier.supplierInfo ?? {}
-      const updatedInfo: SupplierInfo = { ...existingInfo, [field]: newValue || undefined }
+      const parsedValue = field === 'sources'
+        ? (newValue ? newValue.split(',').map(s => s.trim()).filter(Boolean) : undefined)
+        : (newValue || undefined)
+      const updatedInfo: SupplierInfo = { ...existingInfo, [field]: parsedValue }
       await ipc.suppliers.update(supplier.supplierName, { supplierInfo: updatedInfo })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, supplierInfo: updatedInfo } : s

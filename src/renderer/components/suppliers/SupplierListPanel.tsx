@@ -24,14 +24,20 @@ interface SupplierListPanelProps {
   isActive?: boolean
 }
 
-function StatusDot({ supplier }: { supplier: ProjectSupplierView }) {
-  if (supplier.confirmationStatus === 'confirmed') {
-    return <span className="inline-block w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="Confirmed" />
-  }
-  if (supplier.isResearched) {
-    return <span className="inline-block w-2 h-2 rounded-full bg-purple-500 flex-shrink-0" title="Researched" />
-  }
-  return <span className="inline-block w-2 h-2 rounded-full bg-gray-300 flex-shrink-0" title="Pending" />
+const TYPE_COLORS: Record<string, string> = {
+  company: 'bg-blue-50 text-blue-600',
+  individual: 'bg-amber-50 text-amber-600',
+  government: 'bg-emerald-50 text-emerald-600',
+}
+
+function SupplierTypeChip({ type }: { type?: string }) {
+  if (!type) return null
+  const colors = TYPE_COLORS[type] ?? 'bg-gray-100 text-gray-500'
+  return (
+    <span className={`inline-block px-1.5 py-0 rounded text-[9px] font-medium capitalize flex-shrink-0 ${colors}`}>
+      {type}
+    </span>
+  )
 }
 
 export default function SupplierListPanel({
@@ -150,8 +156,9 @@ export default function SupplierListPanel({
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <StatusDot supplier={s} />
                     <span className="text-xs font-medium text-gray-800 truncate">{s.supplierName}</span>
+                    <span className="flex-1" />
+                    <SupplierTypeChip type={s.supplierInfo?.supplierType} />
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] text-gray-400">{fmtAbbrev(s.totalSpend)}</span>

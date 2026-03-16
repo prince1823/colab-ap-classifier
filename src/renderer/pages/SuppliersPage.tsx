@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
 import type { ResearchProgress } from '../../shared/types/classification'
-import type { GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
@@ -14,6 +13,7 @@ import { useSupplierListKeyboard } from '../hooks/useSupplierListKeyboard'
 import { Filter, X } from 'lucide-react'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
+import { useSupplierFilterStore } from '../stores/supplierFilterStore'
 
 type QuickFilter = 'all' | 'unresearched' | 'unconfirmed'
 
@@ -23,7 +23,7 @@ export default function SuppliersPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
-  const [advancedGrouped, setAdvancedGrouped] = useState<GroupedFilter | null>(null)
+  const { advancedGrouped, setAdvancedGrouped } = useSupplierFilterStore()
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)

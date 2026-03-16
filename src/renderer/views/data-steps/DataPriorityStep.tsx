@@ -21,10 +21,34 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
   const [nonLlm, setNonLlm] = useState<string[]>(() =>
     allCanonicals.filter((c) => c !== 'supplier_name')
   )
+  const [missingColumns, setMissingColumns] = useState<string[]>([])
+  const [loadedFromSaved, setLoadedFromSaved] = useState(false)
 
   const [previewColumns, setPreviewColumns] = useState<string[]>([])
   const [previewRows, setPreviewRows] = useState<TransactionPreviewRow[]>([])
   const [totalRows, setTotalRows] = useState(0)
+
+  // Fetch existing column_priorities and pre-populate
+  useEffect(() => {
+    ipc.project.getSetting('column_priorities').then((saved) => {
+      if (!saved || !Array.isArray(saved) || saved.length === 0) return
+
+      const savedPriorities = saved as string[]
+      const canonicalSet = new Set(allCanonicals)
+
+      // Find columns in saved priorities that are no longer mapped
+      const missing = savedPriorities.filter((col) => !canonicalSet.has(col))
+      if (missing.length > 0) setMissingColumns(missing)
+
+      // Pre-populate: saved priorities that exist in current mappings go to LLM
+      const validSaved = savedPriorities.filter((col) => canonicalSet.has(col))
+      const remaining = allCanonicals.filter((col) => !validSaved.includes(col))
+
+      setLlmOrder(validSaved)
+      setNonLlm(remaining)
+      setLoadedFromSaved(true)
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     setPreviewColumns(allCanonicals)
@@ -128,11 +152,22 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
         )}
       </div>
 
+      {/* Warning: saved priorities reference unmapped columns */}
+      {missingColumns.length > 0 && (
+        <div className="flex-shrink-0 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+          <span className="font-semibold">Warning:</span> Previously saved priorities include columns not in current mappings:{' '}
+          <span className="font-mono">{missingColumns.join(', ')}</span>.
+          These columns will be removed from priorities on save.
+        </div>
+      )}
+
       {/* Column priority heading */}
       <div className="flex-shrink-0 flex items-baseline gap-3">
         <h3 className="text-sm font-medium text-gray-700">Column Priority</h3>
         <p className="text-xs text-gray-400">
-          Drag and drop rows to set priority. Higher position = more weight for LLM classification.
+          {loadedFromSaved
+            ? 'Loaded from saved priorities. Drag and drop to adjust before classification.'
+            : 'Drag and drop rows to set priority. Higher position = more weight for LLM classification.'}
         </p>
       </div>
 
@@ -215,6 +250,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
       <div className="flex-shrink-0 flex items-center justify-between pt-2 border-t border-gray-200">
         <div className="text-xs text-gray-500">
           {llmOrder.length} column{llmOrder.length !== 1 ? 's' : ''} sent to LLM &middot; Drag to reorder priority
+          {loadedFromSaved && <span className="ml-2 text-blue-500">&middot; Restored from saved priorities</span>}
         </div>
         <div className="flex gap-3">
           <button

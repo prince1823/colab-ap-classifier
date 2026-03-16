@@ -25,6 +25,7 @@ import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, Sup
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
 import type { ChangeLog } from './changelog';
 import type { UploadRecord } from './services';
+import type { FeedbackAnalyzeInput, FeedbackRecommendation, FeedbackApplyInput } from './feedback';
 
 export interface IPCInvokeMap {
   // Project
@@ -94,6 +95,10 @@ export interface IPCInvokeMap {
   // Changelog
   'changelog:list':   { args: []; result: ChangeLog[] };
   'changelog:revert': { args: [changeId: string]; result: void };
+
+  // Feedback
+  'feedback:analyze': { args: [input: FeedbackAnalyzeInput]; result: FeedbackRecommendation };
+  'feedback:apply':   { args: [input: FeedbackApplyInput]; result: void };
 
   // Export
   'export:csv': { args: [filters?: TransactionFilter]; result: { rowsExported: number } | null };

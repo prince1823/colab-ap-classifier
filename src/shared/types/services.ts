@@ -7,6 +7,7 @@ import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rul
 import type { ChangeLog, ChangeSource } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
+import type { FeedbackAgentInput, FeedbackRecommendation } from './feedback';
 
 // ─── LLM Config ──────────────────────────────────────────────────────────────
 
@@ -111,6 +112,10 @@ export interface ResearchAgent {
 
 export interface ColumnMappingAgent {
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
+}
+
+export interface FeedbackAgent {
+  analyze(input: FeedbackAgentInput): Promise<FeedbackRecommendation>;
 }
 
 // ─── Data Services ───────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../.
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
+import type { FeedbackAnalyzeInput, FeedbackApplyInput } from '../../shared/types/feedback';
 
 /**
  * Typed invoke wrapper that unwraps the IPCResponse envelope.
@@ -144,6 +145,12 @@ export const ipc = {
   changelog: {
     list: () => invoke('changelog:list'),
     revert: (changeId: string) => invoke('changelog:revert', changeId),
+  },
+
+  // ── Feedback (2 channels) ──
+  feedback: {
+    analyze: (input: FeedbackAnalyzeInput) => invoke('feedback:analyze', input),
+    apply: (input: FeedbackApplyInput) => invoke('feedback:apply', input),
   },
 
   // ── Export (1 channel) ──

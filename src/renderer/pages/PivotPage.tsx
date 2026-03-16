@@ -172,24 +172,7 @@ export default function PivotPage() {
           onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
           advancedConditions={advancedConditions}
           advancedGrouped={advancedGrouped}
-          onRemoveAdvancedCondition={(idx) => {
-            // Remove condition by flat index from the grouped structure
-            if (!advancedGrouped) return
-            let flatIdx = 0
-            const newGroups = advancedGrouped.groups.map(g => ({
-              ...g,
-              conditions: g.conditions.filter(c => {
-                if (!c.field) return true
-                const keep = flatIdx !== idx
-                flatIdx++
-                return keep
-              }),
-            })).filter(g => g.conditions.some(c => c.field))
-            setAdvancedGrouped(newGroups.length > 0
-              ? { ...advancedGrouped, groups: newGroups }
-              : null
-            )
-          }}
+          onSetAdvancedGrouped={setAdvancedGrouped}
         />
       </div>
 

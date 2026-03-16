@@ -8,7 +8,7 @@ import { usePivotTreeState, filterRowsBySearch } from '../../hooks/usePivotTreeS
 import { usePivotKeyboard } from '../../hooks/usePivotKeyboard'
 import PivotToolbar from './PivotToolbar'
 import type { PivotFilterState } from './PivotFilterBar'
-import type { FilterCondition, GroupedFilter } from '../../../shared/types/transactions'
+import type { FilterCondition, GroupedFilter, FilterOperator } from '../../../shared/types/transactions'
 import { OPERATOR_LABELS } from '../FilterConditionBuilder'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import { ipc } from '../../lib/ipc'
@@ -51,6 +51,7 @@ interface HierarchicalPivotViewProps {
   onRemoveAdvancedCondition?: (index: number) => void
   /** Grouped filter for export — full AND/OR structure */
   advancedGrouped?: GroupedFilter | null
+  onSetAdvancedGrouped?: (grouped: GroupedFilter | null) => void
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -235,6 +236,7 @@ export default function HierarchicalPivotView({
   advancedConditions = [],
   onRemoveAdvancedCondition,
   advancedGrouped,
+  onSetAdvancedGrouped,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
@@ -462,24 +464,51 @@ export default function HierarchicalPivotView({
                   onRemove={(value) => removeFilter(col, value)}
                 />
               ))}
-              {advancedConditions.map((cond, idx) => (
-                <span
-                  key={`adv-${idx}`}
-                  className="inline-flex items-center gap-0.5 rounded-full bg-purple-50 border border-purple-200 pl-1.5 pr-1 py-px text-[9px] text-purple-700 font-medium flex-shrink-0"
-                >
-                  <span className="text-purple-400">{colLabel(cond.field)}</span>
-                  <span className="text-purple-300 mx-0.5">{OPERATOR_LABELS[cond.operator] ?? cond.operator}</span>
-                  <span className="truncate max-w-[80px]">{String(cond.value)}</span>
-                  {onRemoveAdvancedCondition && (
-                    <button
-                      onClick={() => { onRemoveAdvancedCondition(idx); refocusTable() }}
-                      className="ml-0.5 rounded-full p-px hover:bg-purple-200 transition-colors"
-                    >
-                      <X size={8} />
-                    </button>
-                  )}
-                </span>
-              ))}
+              {advancedGrouped && advancedGrouped.groups.map((group, gi) => {
+                const validConds = group.conditions.filter(c => c.field)
+                if (validConds.length === 0) return null
+                return (
+                  <React.Fragment key={`adv-g${gi}`}>
+                    {gi > 0 && (
+                      <span className="text-[8px] font-bold text-blue-500 uppercase px-0.5 flex-shrink-0">
+                        {group.groupConnector ?? advancedGrouped.groupConnector}
+                      </span>
+                    )}
+                    {validConds.length > 1 && <span className="text-gray-800 text-[11px] font-bold flex-shrink-0">(</span>}
+                    {validConds.map((c, ci) => {
+                      const opLabel = OPERATOR_LABELS[c.operator as FilterOperator] ?? c.operator
+                      const displayValue = Array.isArray(c.value) ? c.value.join(', ') : String(c.value)
+                      return (
+                        <React.Fragment key={`adv-g${gi}-c${ci}`}>
+                          {ci > 0 && (
+                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{group.connector}</span>
+                          )}
+                          <span className="inline-flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] text-blue-800 whitespace-nowrap flex-shrink-0">
+                            <span className="font-medium">{colLabel(c.field)}</span>
+                            <span className="text-blue-500">{opLabel}</span>
+                            {displayValue && <span className="font-semibold max-w-[150px] truncate" title={displayValue}>{displayValue}</span>}
+                            {onSetAdvancedGrouped && (
+                              <button type="button" onClick={() => {
+                                const newGroups = advancedGrouped.groups.map((g, gIdx) => {
+                                  if (gIdx !== gi) return g
+                                  const newConds = g.conditions.filter((_, cIdx) => cIdx !== ci)
+                                  return { ...g, conditions: newConds.length > 0 ? newConds : [] }
+                                }).filter(g => g.conditions.length > 0)
+                                onSetAdvancedGrouped(newGroups.length > 0 ? { ...advancedGrouped, groups: newGroups } : null)
+                                refocusTable()
+                              }}
+                              className="ml-0.5 rounded-full p-0.5 text-blue-400 hover:bg-blue-200 hover:text-blue-700 transition-colors">
+                                <X size={8} />
+                              </button>
+                            )}
+                          </span>
+                        </React.Fragment>
+                      )
+                    })}
+                    {validConds.length > 1 && <span className="text-gray-800 text-[11px] font-bold flex-shrink-0">)</span>}
+                  </React.Fragment>
+                )
+              })}
               <button
                 onClick={() => { onClearAllFilters(); refocusTable() }}
                 className="text-[9px] font-medium text-red-500 hover:text-red-600 flex-shrink-0 ml-0.5 transition-colors"

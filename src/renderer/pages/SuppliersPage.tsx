@@ -98,19 +98,14 @@ export default function SuppliersPage() {
   useEffect(() => {
     const unsub = ipc.suppliers.onResearchProgress((progress: ResearchProgress) => {
       setResearchProgress(progress)
-      if (progress.status === 'running' && progress.processedSuppliers > 0) {
-        // Incrementally refresh to show newly-researched suppliers without disturbing the current view
-        loadData()
-      }
       if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
         setTimeout(() => {
           setResearchProgress(null)
-          loadData()
         }, 1500)
       }
     })
     return unsub
-  }, [loadData])
+  }, [])
 
   /** Update local state */
   const updateSuppliers = useCallback((updater: (prev: ProjectSupplierView[]) => ProjectSupplierView[]) => {
@@ -157,14 +152,17 @@ export default function SuppliersPage() {
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
     setSaving(true)
     try {
-      await ipc.suppliers.researchSingle(supplier.supplierName)
-      await loadData()
+      const info = await ipc.suppliers.researchSingle(supplier.supplierName)
+      // Update just this supplier in local state instead of full reload
+      updateSuppliers(prev => prev.map(s =>
+        s.id === supplier.id ? { ...s, isResearched: true, supplierInfo: info } : s
+      ))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Research failed')
     } finally {
       setSaving(false)
     }
-  }, [loadData])
+  }, [updateSuppliers])
 
   /** Confirm a single supplier */
   const confirmSupplier = useCallback(async (supplier: ProjectSupplierView) => {
@@ -186,11 +184,15 @@ export default function SuppliersPage() {
     const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
     if (selected.length === 0) return
     for (const s of selected) {
-      try { await ipc.suppliers.researchSingle(s.supplierName) } catch { /* continue */ }
+      try {
+        const info = await ipc.suppliers.researchSingle(s.supplierName)
+        updateSuppliers(prev => prev.map(existing =>
+          existing.id === s.id ? { ...existing, isResearched: true, supplierInfo: info } : existing
+        ))
+      } catch { /* continue */ }
     }
     setSelectedIds(new Set())
-    await loadData()
-  }, [suppliers, selectedIds, loadData])
+  }, [suppliers, selectedIds, updateSuppliers])
 
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
@@ -517,7 +519,6 @@ export default function SuppliersPage() {
           allChecked={allChecked}
           isActive={activePanel === 'list'}
           onResearch={researchSupplier}
-          onConfirm={confirmSupplier}
         />
         <SupplierDetailPanel
           ref={detailPanelRef}

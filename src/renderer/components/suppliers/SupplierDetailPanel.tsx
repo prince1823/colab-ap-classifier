@@ -305,7 +305,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
             Research
           </button>
         )}
-        {supplier.confirmationStatus === 'pending' && (
+        {supplier.isResearched && supplier.confirmationStatus !== 'confirmed' && (
           <button type="button" className="action-btn confirm" onClick={() => onConfirm(supplier)}>
             Confirm
           </button>

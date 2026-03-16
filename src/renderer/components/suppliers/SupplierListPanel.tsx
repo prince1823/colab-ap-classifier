@@ -24,18 +24,20 @@ interface SupplierListPanelProps {
   isActive?: boolean
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  company: 'bg-blue-50 text-blue-600',
-  individual: 'bg-amber-50 text-amber-600',
-  government: 'bg-emerald-50 text-emerald-600',
+function ConfirmedChip({ supplier }: { supplier: ProjectSupplierView }) {
+  if (supplier.confirmationStatus !== 'confirmed') return null
+  return (
+    <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-green-50 text-green-600 flex-shrink-0">
+      confirmed
+    </span>
+  )
 }
 
-function SupplierTypeChip({ type }: { type?: string }) {
-  if (!type) return null
-  const colors = TYPE_COLORS[type] ?? 'bg-gray-100 text-gray-500'
+function ResearchedChip({ supplier }: { supplier: ProjectSupplierView }) {
+  if (!supplier.isResearched) return null
   return (
-    <span className={`inline-block px-1.5 py-0 rounded text-[9px] font-medium capitalize flex-shrink-0 ${colors}`}>
-      {type}
+    <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-purple-50 text-purple-600 flex-shrink-0">
+      researched
     </span>
   )
 }
@@ -158,12 +160,14 @@ export default function SupplierListPanel({
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-medium text-gray-800 truncate">{s.supplierName}</span>
                     <span className="flex-1" />
-                    <SupplierTypeChip type={s.supplierInfo?.supplierType} />
+                    <ConfirmedChip supplier={s} />
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] text-gray-400">{fmtAbbrev(s.totalSpend)}</span>
                     <span className="text-[10px] text-gray-300">·</span>
                     <span className="text-[10px] text-gray-400">{s.transactionCount} txns</span>
+                    <span className="flex-1" />
+                    <ResearchedChip supplier={s} />
                   </div>
                 </div>
               </div>

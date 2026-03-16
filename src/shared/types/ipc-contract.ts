@@ -18,6 +18,7 @@ import type {
   TransactionUpdate,
   GroupedTransactionsResult,
   PivotAggregationResult,
+  GroupedFilter,
 } from './transactions';
 import type { ClassificationProgress, ResearchProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
@@ -77,13 +78,14 @@ export interface IPCInvokeMap {
   'taxonomy:importFromFile': { args: [filePath: string]; result: { nodeCount: number; fileName: string } };
 
   // Suppliers
-  'suppliers:list':           { args: [filter?: { conditions: FilterCondition[] }]; result: ProjectSupplierView[] };
+  'suppliers:list':           { args: [filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }]; result: ProjectSupplierView[] };
   'suppliers:update':         { args: [supplierName: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierName: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
+  'suppliers:distinctValues':  { args: [field: string, limit?: number]; result: string[] };
 
   // Rules
   'rules:list':   { args: []; result: OverrideRule[] };

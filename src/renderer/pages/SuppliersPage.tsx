@@ -2,9 +2,12 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
 import type { ResearchProgress } from '../../shared/types/classification'
-import type { FilterCondition } from '../../shared/types/transactions'
+import type { GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
-import FilterConditionBuilder from '../components/FilterConditionBuilder'
+import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
+import type { FilterOperator } from '../../shared/types/transactions'
+import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
+import { Filter, X } from 'lucide-react'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
 
@@ -132,27 +135,27 @@ export default function SuppliersPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
-  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([])
-  const [debouncedConditions, setDebouncedConditions] = useState<FilterCondition[]>([])
+  const [advancedGrouped, setAdvancedGrouped] = useState<GroupedFilter | null>(null)
+  const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  // Debounce filter conditions — 300ms delay before triggering backend call
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedConditions(filterConditions), 300)
-    return () => clearTimeout(timer)
-  }, [filterConditions])
+  // Derive flat conditions for display (badge count, empty state check)
+  const filterConditions = useMemo(() =>
+    advancedGrouped ? groupedToConditions(advancedGrouped).filter(c => c.field) : [],
+    [advancedGrouped]
+  )
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
   const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
   const [tailSpendSet, setTailSpendSet] = useState(false)
   const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
 
-  // Build backend filter from FilterConditionBuilder conditions
-  const NO_VALUE_OPS = new Set(['is_null', 'is_true', 'is_false'])
+  // Build backend filter from grouped conditions
   const buildFilter = useCallback(() => {
-    // Only send conditions that have a field and a value (or a no-value operator)
-    const valid = debouncedConditions.filter(c => c.field && (NO_VALUE_OPS.has(c.operator) || c.value !== ''))
-    return valid.length > 0 ? { conditions: valid } : undefined
-  }, [debouncedConditions])
+    if (advancedGrouped && advancedGrouped.groups.some(g => g.conditions.some(c => c.field))) {
+      return { groupedConditions: advancedGrouped }
+    }
+    return undefined
+  }, [advancedGrouped])
 
   // Load settings and filter fields once on mount
   useEffect(() => {
@@ -442,15 +445,97 @@ export default function SuppliersPage() {
         </div>
       )}
 
-      {/* Filter bar */}
-      {filterFields.length > 0 && (
-        <div className="suppliers-filter-bar">
-          <FilterConditionBuilder
-            conditions={filterConditions.length > 0 ? filterConditions : [{ field: '', operator: 'equals', value: '', connector: 'AND' }]}
-            onChange={setFilterConditions}
-            availableFields={filterFields}
-            compact
-          />
+      {/* Filter button — rightmost in a flex row */}
+      <div className="flex items-center justify-end gap-2 px-3 py-1.5">
+        {filterConditions.length > 0 && (
+          <button
+            onClick={() => setAdvancedGrouped(null)}
+            className="text-xs text-red-500 hover:text-red-600 font-medium"
+          >
+            Clear filters
+          </button>
+        )}
+        <button
+          onClick={() => setShowAdvancedFilter(true)}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+            filterConditions.length > 0
+              ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          <Filter size={13} />
+          Filters
+          {filterConditions.length > 0 && (
+            <span className="ml-1 rounded-full bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none">
+              {filterConditions.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Active filter chips */}
+      {advancedGrouped && filterConditions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
+          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mr-1">Active:</span>
+          {advancedGrouped.groups.map((group, gi) => {
+            const validConds = group.conditions.filter(c => c.field)
+            if (validConds.length === 0) return null
+            return (
+              <React.Fragment key={gi}>
+                {/* Between-group connector */}
+                {gi > 0 && (
+                  <span className="text-[10px] font-bold text-blue-500 uppercase px-1">
+                    {group.groupConnector ?? advancedGrouped.groupConnector}
+                  </span>
+                )}
+                {/* Group wrapper — show parentheses if multiple conditions */}
+                {validConds.length > 1 && (
+                  <span className="text-gray-300 text-xs font-light">(</span>
+                )}
+                {validConds.map((c, ci) => {
+                  const opLabel = OPERATOR_LABELS[c.operator as FilterOperator] ?? c.operator
+                  const displayValue = Array.isArray(c.value) ? c.value.join(', ') : String(c.value)
+                  return (
+                    <React.Fragment key={`${gi}-${ci}`}>
+                      {/* Within-group connector */}
+                      {ci > 0 && (
+                        <span className="text-[10px] font-bold text-gray-400 uppercase px-0.5">
+                          {group.connector}
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] text-blue-800">
+                        <span className="font-medium">{c.field}</span>
+                        <span className="text-blue-500">{opLabel}</span>
+                        {displayValue && <span className="font-semibold max-w-[150px] truncate" title={displayValue}>{displayValue}</span>}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Remove this specific condition
+                            const newGroups = advancedGrouped.groups.map((g, gIdx) => {
+                              if (gIdx !== gi) return g
+                              const newConds = g.conditions.filter((_, cIdx) => cIdx !== ci)
+                              return { ...g, conditions: newConds.length > 0 ? newConds : [] }
+                            }).filter(g => g.conditions.length > 0)
+                            if (newGroups.length === 0) {
+                              setAdvancedGrouped(null)
+                            } else {
+                              setAdvancedGrouped({ ...advancedGrouped, groups: newGroups })
+                            }
+                          }}
+                          className="ml-0.5 rounded-full p-0.5 text-blue-400 hover:bg-blue-200 hover:text-blue-700 transition-colors"
+                        >
+                          <X size={10} />
+                        </button>
+                      </span>
+                    </React.Fragment>
+                  )
+                })}
+                {validConds.length > 1 && (
+                  <span className="text-gray-300 text-xs font-light">)</span>
+                )}
+              </React.Fragment>
+            )
+          })}
         </div>
       )}
 
@@ -609,6 +694,17 @@ export default function SuppliersPage() {
       </div>
 
       {saving && <div className="supplier-saving">Saving...</div>}
+
+      <AdvancedFilterModal
+        isOpen={showAdvancedFilter}
+        onClose={() => setShowAdvancedFilter(false)}
+        groupedFilter={advancedGrouped}
+        onApply={setAdvancedGrouped}
+        availableFields={filterFields}
+        fetchDistinctValues={(field, limit) => ipc.suppliers.distinctValues(field, limit)}
+        title="Supplier Filters"
+        subtitle="Build conditions to filter suppliers"
+      />
     </div>
   )
 }

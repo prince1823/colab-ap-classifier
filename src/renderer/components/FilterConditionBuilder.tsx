@@ -446,48 +446,8 @@ export function GroupedFilterBuilder({
     })
   }
 
-  /** Build logic expression preview */
-  const logicExpression = useMemo(() => {
-    const validGroups = value.groups.filter(g => g.conditions.some(c => c.field))
-    if (validGroups.length === 0) return null
-
-    let letterIdx = 0
-    const groupExprs: string[] = []
-    const groupConnectors: string[] = [] // connector before each group (except first)
-
-    for (let gi = 0; gi < validGroups.length; gi++) {
-      const group = validGroups[gi]
-      const validConds = group.conditions.filter(c => c.field)
-      if (validConds.length === 0) continue
-      const letters = validConds.map(() => String.fromCharCode(65 + letterIdx++))
-      if (letters.length === 1) {
-        groupExprs.push(letters[0])
-      } else {
-        groupExprs.push(`(${letters.join(` ${group.connector} `)})`)
-      }
-      if (gi > 0) {
-        groupConnectors.push(group.groupConnector ?? value.groupConnector)
-      }
-    }
-
-    if (groupExprs.length <= 1) return groupExprs[0] || null
-    let expr = groupExprs[0]
-    for (let i = 1; i < groupExprs.length; i++) {
-      expr += ` ${groupConnectors[i - 1]} ${groupExprs[i]}`
-    }
-    return expr
-  }, [value])
-
   return (
     <div>
-      {/* Logic expression preview */}
-      {logicExpression && (
-        <div className="mb-3 rounded-md bg-gray-100 px-3 py-1.5">
-          <span className="text-[10px] text-gray-400 mr-1.5">Logic:</span>
-          <span className="text-[11px] font-mono font-medium text-gray-600">{logicExpression}</span>
-        </div>
-      )}
-
       {/* Groups */}
       <div className="space-y-0">
         {value.groups.map((group, gi) => (

@@ -150,17 +150,32 @@ export default function SuppliersPage() {
 
   /** Research a single supplier */
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
-    setSaving(true)
+    setResearchProgress({
+      status: 'running',
+      totalSuppliers: 1,
+      processedSuppliers: 0,
+      percentage: 0,
+      currentSupplier: supplier.supplierName,
+      currentStep: 'Researching',
+    })
     try {
       const info = await ipc.suppliers.researchSingle(supplier.supplierName)
       // Update just this supplier in local state instead of full reload
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, isResearched: true, supplierInfo: info } : s
       ))
+      setResearchProgress({
+        status: 'completed',
+        totalSuppliers: 1,
+        processedSuppliers: 1,
+        percentage: 100,
+        currentSupplier: supplier.supplierName,
+        currentStep: 'Done',
+      })
+      setTimeout(() => setResearchProgress(null), 1500)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Research failed')
-    } finally {
-      setSaving(false)
+      setResearchProgress(null)
     }
   }, [updateSuppliers])
 
@@ -183,7 +198,17 @@ export default function SuppliersPage() {
   const researchSelected = useCallback(async () => {
     const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
     if (selected.length === 0) return
-    for (const s of selected) {
+    const total = selected.length
+    for (let i = 0; i < total; i++) {
+      const s = selected[i]
+      setResearchProgress({
+        status: 'running',
+        totalSuppliers: total,
+        processedSuppliers: i,
+        percentage: Math.round((i / total) * 100),
+        currentSupplier: s.supplierName,
+        currentStep: `Researching ${i + 1} of ${total}`,
+      })
       try {
         const info = await ipc.suppliers.researchSingle(s.supplierName)
         updateSuppliers(prev => prev.map(existing =>
@@ -191,6 +216,15 @@ export default function SuppliersPage() {
         ))
       } catch { /* continue */ }
     }
+    setResearchProgress({
+      status: 'completed',
+      totalSuppliers: total,
+      processedSuppliers: total,
+      percentage: 100,
+      currentSupplier: null,
+      currentStep: 'Done',
+    })
+    setTimeout(() => setResearchProgress(null), 1500)
     setSelectedIds(new Set())
   }, [suppliers, selectedIds, updateSuppliers])
 

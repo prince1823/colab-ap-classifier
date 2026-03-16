@@ -1,133 +1,21 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ipc } from '../lib/ipc'
-import type { ProjectSupplierView, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
+import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
 import type { ResearchProgress } from '../../shared/types/classification'
 import type { GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
+import SupplierListPanel from '../components/suppliers/SupplierListPanel'
+import SupplierDetailPanel from '../components/suppliers/SupplierDetailPanel'
+import type { SupplierDetailPanelHandle } from '../components/suppliers/SupplierDetailPanel'
+import { useSupplierListKeyboard } from '../hooks/useSupplierListKeyboard'
 import { Filter, X } from 'lucide-react'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
 
-const SUPPLIER_TYPES: SupplierType[] = ['company', 'individual', 'government']
-
-/** Which supplierInfo fields to show as columns, in order */
-const INFO_COLUMNS: { key: keyof SupplierInfo; label: string; editable: boolean; type: 'text' | 'select' | 'readonly'; wide?: boolean }[] = [
-  { key: 'supplierType', label: 'Type', editable: true, type: 'select' },
-  { key: 'officialBusinessName', label: 'Official Name', editable: true, type: 'text' },
-  { key: 'industry', label: 'Industry', editable: true, type: 'text' },
-  { key: 'productsServices', label: 'Products/Services', editable: true, type: 'text', wide: true },
-  { key: 'description', label: 'Description', editable: true, type: 'text', wide: true },
-  { key: 'naicsCode', label: 'NAICS', editable: true, type: 'text' },
-  { key: 'naicsDescription', label: 'NAICS Desc', editable: true, type: 'text', wide: true },
-  { key: 'serviceType', label: 'Service Type', editable: true, type: 'text' },
-  { key: 'confidence', label: 'Confidence', editable: false, type: 'readonly' },
-  { key: 'websiteUrl', label: 'Website', editable: true, type: 'text' },
-  { key: 'sources', label: 'Sources', editable: false, type: 'readonly' },
-]
-
-/** Editable cell — click to edit, blur/Enter to save, Escape to cancel */
-function EditableCell({
-  value,
-  onSave,
-  type = 'text',
-}: {
-  value: string
-  onSave: (val: string) => void
-  type?: 'text' | 'select'
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(value)
-  const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
-
-  useEffect(() => {
-    if (editing && inputRef.current) {
-      inputRef.current.focus()
-      if (inputRef.current instanceof HTMLInputElement) {
-        inputRef.current.select()
-      }
-    }
-  }, [editing])
-
-  const commit = useCallback(() => {
-    setEditing(false)
-    if (draft !== value) {
-      onSave(draft)
-    }
-  }, [draft, value, onSave])
-
-  const cancel = useCallback(() => {
-    setDraft(value)
-    setEditing(false)
-  }, [value])
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      commit()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      cancel()
-    }
-  }, [commit, cancel])
-
-  if (editing) {
-    if (type === 'select') {
-      return (
-        <div className="supplier-cell-editing">
-          <select
-            ref={inputRef as React.RefObject<HTMLSelectElement>}
-            className="supplier-cell-select"
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value)
-              setEditing(false)
-              if (e.target.value !== value) {
-                onSave(e.target.value)
-              }
-            }}
-            onBlur={commit}
-            onKeyDown={handleKeyDown}
-          >
-            <option value="">--</option>
-            {SUPPLIER_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-        </div>
-      )
-    }
-
-    return (
-      <div className="supplier-cell-editing">
-        <input
-          ref={inputRef as React.RefObject<HTMLInputElement>}
-          className="supplier-cell-input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={handleKeyDown}
-        />
-      </div>
-    )
-  }
-
-  return (
-    <div className="supplier-cell" onClick={() => { setDraft(value); setEditing(true) }} title={value || undefined}>
-      {value ? <span className="cell-text">{value}</span> : <span className="cell-placeholder">-</span>}
-    </div>
-  )
-}
-
-/** Status badge component */
-function StatusBadge({ status }: { status: string }) {
-  const cls = status === 'confirmed' ? 'status-badge confirmed'
-    : status === 'rejected' ? 'status-badge rejected'
-    : 'status-badge pending'
-  return <span className={cls}>{status}</span>
-}
+type QuickFilter = 'all' | 'unresearched' | 'unconfirmed'
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
@@ -138,16 +26,27 @@ export default function SuppliersPage() {
   const [advancedGrouped, setAdvancedGrouped] = useState<GroupedFilter | null>(null)
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
+  const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
+  const [tailSpendSet, setTailSpendSet] = useState(false)
+  const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
+
+  // New state for master-detail
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
+
+  // Cross-panel keyboard navigation
+  const [activePanel, setActivePanel] = useState<'list' | 'detail'>('list')
+  const [detailFieldIndex, setDetailFieldIndex] = useState(0)
+  const [editingFieldIndex, setEditingFieldIndex] = useState<number | null>(null)
+  const detailPanelRef = useRef<SupplierDetailPanelHandle>(null)
 
   // Derive flat conditions for display (badge count, empty state check)
   const filterConditions = useMemo(() =>
     advancedGrouped ? groupedToConditions(advancedGrouped).filter(c => c.field) : [],
     [advancedGrouped]
   )
-  const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
-  const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
-  const [tailSpendSet, setTailSpendSet] = useState(false)
-  const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
 
   // Build backend filter from grouped conditions
   const buildFilter = useCallback(() => {
@@ -214,15 +113,12 @@ export default function SuppliersPage() {
     setSuppliers(prev => updater(prev))
   }, [])
 
-  /** Save a single supplierInfo field for a supplier */
+  /** Save a single supplierInfo field */
   const saveField = useCallback(async (supplier: ProjectSupplierView, field: keyof SupplierInfo, newValue: string) => {
     setSaving(true)
     try {
       const existingInfo = supplier.supplierInfo ?? {}
-      const updatedInfo: SupplierInfo = {
-        ...existingInfo,
-        [field]: newValue || undefined,
-      }
+      const updatedInfo: SupplierInfo = { ...existingInfo, [field]: newValue || undefined }
       await ipc.suppliers.update(supplier.supplierName, { supplierInfo: updatedInfo })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, supplierInfo: updatedInfo } : s
@@ -234,7 +130,7 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Save parentName for a supplier */
+  /** Save parentName */
   const saveParentName = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
     setSaving(true)
     try {
@@ -278,31 +174,23 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Batch research selected suppliers */
+  /** Batch research selected */
   const researchSelected = useCallback(async () => {
     const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
     if (selected.length === 0) return
     for (const s of selected) {
-      try {
-        await ipc.suppliers.researchSingle(s.supplierName)
-      } catch {
-        // Continue with next supplier
-      }
+      try { await ipc.suppliers.researchSingle(s.supplierName) } catch { /* continue */ }
     }
     setSelectedIds(new Set())
     await loadData()
   }, [suppliers, selectedIds, loadData])
 
-  /** Batch confirm selected suppliers */
+  /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
     const selected = suppliers.filter(s => selectedIds.has(s.id) && s.confirmationStatus !== 'confirmed')
     if (selected.length === 0) return
     for (const s of selected) {
-      try {
-        await ipc.suppliers.confirm(s.id, 'confirmed')
-      } catch {
-        // Continue with next
-      }
+      try { await ipc.suppliers.confirm(s.id, 'confirmed') } catch { /* continue */ }
     }
     updateSuppliers(prev => prev.map(s =>
       selectedIds.has(s.id) ? { ...s, confirmationStatus: 'confirmed' } : s
@@ -327,7 +215,7 @@ export default function SuppliersPage() {
     }
   }, [tailSpendThreshold, loadData])
 
-  /** Change supplier universe DB via file picker */
+  /** Change supplier universe DB */
   const changeSupplierUniverse = useCallback(async () => {
     try {
       const selected = await ipc.supplierUniverse.selectFile()
@@ -338,34 +226,91 @@ export default function SuppliersPage() {
     }
   }, [])
 
-  /** Get display value for a supplierInfo field */
-  const getFieldValue = (supplier: ProjectSupplierView, field: keyof SupplierInfo): string => {
-    const info = supplier.supplierInfo
-    if (!info) return ''
-    const val = info[field]
-    if (val == null) return ''
-    if (Array.isArray(val)) return val.join(', ')
-    return String(val)
-  }
+  // --- Derived data for the two-panel layout ---
 
-  /** Sort by spend descending — filtering is handled by backend */
-  const filteredSuppliers = useMemo(() => {
-    return [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
-  }, [suppliers])
+  /** Sort by spend descending */
+  const sortedSuppliers = useMemo(() =>
+    [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend),
+    [suppliers]
+  )
 
-  // Select all logic
-  const allSelected = filteredSuppliers.length > 0 && filteredSuppliers.every(s => selectedIds.has(s.id))
-  const someSelected = selectedIds.size > 0
+  /** Apply quick filter */
+  const quickFiltered = useMemo(() => {
+    if (quickFilter === 'unresearched') return sortedSuppliers.filter(s => !s.isResearched)
+    if (quickFilter === 'unconfirmed') return sortedSuppliers.filter(s => s.confirmationStatus !== 'confirmed')
+    return sortedSuppliers
+  }, [sortedSuppliers, quickFilter])
 
-  const toggleSelectAll = useCallback(() => {
-    if (allSelected) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(filteredSuppliers.map(s => s.id)))
-    }
-  }, [allSelected, filteredSuppliers])
+  /** Apply search */
+  const displayedSuppliers = useMemo(() => {
+    if (!searchQuery) return quickFiltered
+    const q = searchQuery.toLowerCase()
+    return quickFiltered.filter(s => s.supplierName.toLowerCase().includes(q))
+  }, [quickFiltered, searchQuery])
 
-  const toggleSelect = useCallback((id: string) => {
+  /** Counts for quick filter chips (from backend-filtered, pre-search) */
+  const unresearchedCount = useMemo(() => sortedSuppliers.filter(s => !s.isResearched).length, [sortedSuppliers])
+  const unconfirmedCount = useMemo(() => sortedSuppliers.filter(s => s.confirmationStatus !== 'confirmed').length, [sortedSuppliers])
+
+  /** Selected supplier for detail panel */
+  const selectedSupplier = useMemo(() =>
+    selectedSupplierId ? suppliers.find(s => s.id === selectedSupplierId) ?? null : null,
+    [suppliers, selectedSupplierId]
+  )
+
+  // Keyboard navigation
+  const handleSupplierSelect = useCallback((index: number) => {
+    const s = displayedSuppliers[index]
+    if (s) setSelectedSupplierId(s.id)
+  }, [displayedSuppliers])
+
+  const handleToggleCheck = useCallback((index: number) => {
+    const s = displayedSuppliers[index]
+    if (!s) return
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(s.id)) next.delete(s.id)
+      else next.add(s.id)
+      return next
+    })
+  }, [displayedSuppliers])
+
+  const handleMoveToDetail = useCallback(() => {
+    if (!selectedSupplier) return
+    setActivePanel('detail')
+    setDetailFieldIndex(0)
+    setEditingFieldIndex(null)
+    setTimeout(() => detailPanelRef.current?.focusField(0), 0)
+  }, [selectedSupplier])
+
+  const handleMoveToList = useCallback(() => {
+    setActivePanel('list')
+    setEditingFieldIndex(null)
+  }, [])
+
+  const handleClearSelections = useCallback(() => {
+    setSelectedIds(new Set())
+  }, [])
+
+  const { focusedIndex, setFocusedIndex, handleKeyDown } = useSupplierListKeyboard({
+    itemCount: displayedSuppliers.length,
+    onSelect: handleSupplierSelect,
+    onToggleCheck: handleToggleCheck,
+    onMoveToDetail: handleMoveToDetail,
+    onClearSelections: handleClearSelections,
+    disabled: activePanel !== 'list',
+  })
+
+  // Click handler for list items
+  const handleSupplierClick = useCallback((index: number) => {
+    setActivePanel('list')
+    setFocusedIndex(index)
+    const s = displayedSuppliers[index]
+    if (s) setSelectedSupplierId(s.id)
+  }, [displayedSuppliers, setFocusedIndex])
+
+  // Toggle checkbox by ID (from list panel)
+  const toggleCheckById = useCallback((id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -373,6 +318,25 @@ export default function SuppliersPage() {
       return next
     })
   }, [])
+
+  // Select-all for displayed suppliers
+  const allChecked = displayedSuppliers.length > 0 && displayedSuppliers.every(s => selectedIds.has(s.id))
+  const someSelected = selectedIds.size > 0
+
+  const toggleSelectAll = useCallback(() => {
+    if (allChecked) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(displayedSuppliers.map(s => s.id)))
+    }
+  }, [allChecked, displayedSuppliers])
+
+  // Auto-select first supplier when data loads
+  useEffect(() => {
+    if (!selectedSupplierId && displayedSuppliers.length > 0) {
+      setSelectedSupplierId(displayedSuppliers[0].id)
+    }
+  }, [displayedSuppliers, selectedSupplierId])
 
   if (loading) {
     return (
@@ -419,8 +383,10 @@ export default function SuppliersPage() {
       {/* Research progress bar */}
       {researchProgress && researchProgress.status === 'researching' && (
         <div className="suppliers-progress">
-          Researching: {researchProgress.currentSupplier}
-          ({researchProgress.processedSuppliers}/{researchProgress.totalSuppliers})
+          <div className="flex items-center justify-between mb-1">
+            <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+            <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+          </div>
           <div className="progress-bar">
             <div
               className="progress-fill"
@@ -430,23 +396,20 @@ export default function SuppliersPage() {
         </div>
       )}
 
-      {/* Batch actions */}
-      {someSelected && (
-        <div className="suppliers-actions-bar">
+      {/* Top bar: batch actions + filter button */}
+      <div className="suppliers-top-bar">
+        {/* Batch actions */}
+        {someSelected && (
           <div className="batch-actions">
-            <button onClick={researchSelected} className="action-btn research">
-              Research Selected
-            </button>
-            <button onClick={confirmSelected} className="action-btn confirm">
-              Confirm Selected
-            </button>
-            <span className="selected-count">{selectedIds.size} selected</span>
+            <button onClick={researchSelected} className="action-btn research">Research Selected</button>
+            <button onClick={confirmSelected} className="action-btn confirm">Confirm Selected</button>
+            <span className="selected-count">{selectedIds.size} checked</span>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Filter button — rightmost in a flex row */}
-      <div className="flex items-center justify-end gap-2 px-3 py-1.5">
+        <div className="flex-1" />
+
+        {/* Filter controls */}
         {filterConditions.length > 0 && (
           <button
             onClick={() => setAdvancedGrouped(null)}
@@ -475,33 +438,26 @@ export default function SuppliersPage() {
 
       {/* Active filter chips */}
       {advancedGrouped && filterConditions.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
+        <div className="flex flex-wrap items-center gap-1.5 px-0 pb-2">
           <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mr-1">Active:</span>
           {advancedGrouped.groups.map((group, gi) => {
             const validConds = group.conditions.filter(c => c.field)
             if (validConds.length === 0) return null
             return (
               <React.Fragment key={gi}>
-                {/* Between-group connector */}
                 {gi > 0 && (
                   <span className="text-[10px] font-bold text-blue-500 uppercase px-1">
                     {group.groupConnector ?? advancedGrouped.groupConnector}
                   </span>
                 )}
-                {/* Group wrapper — show parentheses if multiple conditions */}
-                {validConds.length > 1 && (
-                  <span className="text-gray-300 text-xs font-light">(</span>
-                )}
+                {validConds.length > 1 && <span className="text-gray-300 text-xs font-light">(</span>}
                 {validConds.map((c, ci) => {
                   const opLabel = OPERATOR_LABELS[c.operator as FilterOperator] ?? c.operator
                   const displayValue = Array.isArray(c.value) ? c.value.join(', ') : String(c.value)
                   return (
                     <React.Fragment key={`${gi}-${ci}`}>
-                      {/* Within-group connector */}
                       {ci > 0 && (
-                        <span className="text-[10px] font-bold text-gray-400 uppercase px-0.5">
-                          {group.connector}
-                        </span>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase px-0.5">{group.connector}</span>
                       )}
                       <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] text-blue-800">
                         <span className="font-medium">{c.field}</span>
@@ -510,17 +466,13 @@ export default function SuppliersPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            // Remove this specific condition
                             const newGroups = advancedGrouped.groups.map((g, gIdx) => {
                               if (gIdx !== gi) return g
                               const newConds = g.conditions.filter((_, cIdx) => cIdx !== ci)
                               return { ...g, conditions: newConds.length > 0 ? newConds : [] }
                             }).filter(g => g.conditions.length > 0)
-                            if (newGroups.length === 0) {
-                              setAdvancedGrouped(null)
-                            } else {
-                              setAdvancedGrouped({ ...advancedGrouped, groups: newGroups })
-                            }
+                            if (newGroups.length === 0) setAdvancedGrouped(null)
+                            else setAdvancedGrouped({ ...advancedGrouped, groups: newGroups })
                           }}
                           className="ml-0.5 rounded-full p-0.5 text-blue-400 hover:bg-blue-200 hover:text-blue-700 transition-colors"
                         >
@@ -530,167 +482,47 @@ export default function SuppliersPage() {
                     </React.Fragment>
                   )
                 })}
-                {validConds.length > 1 && (
-                  <span className="text-gray-300 text-xs font-light">)</span>
-                )}
+                {validConds.length > 1 && <span className="text-gray-300 text-xs font-light">)</span>}
               </React.Fragment>
             )
           })}
         </div>
       )}
 
-      <div className="suppliers-table-wrap">
-        <table className="suppliers-table">
-          <thead>
-            <tr>
-              <th className="col-check">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleSelectAll}
-                  className="supplier-checkbox"
-                />
-              </th>
-              <th className="col-supplier">Supplier</th>
-              <th className="col-right">Txns</th>
-              <th className="col-right">Spend</th>
-              <th>Status</th>
-              <th>Actions</th>
-              {INFO_COLUMNS.map(col => (
-                <React.Fragment key={col.key}>
-                  <th>{col.label}</th>
-                  {col.key === 'officialBusinessName' && <th>Parent</th>}
-                </React.Fragment>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSuppliers.map((s) => (
-              <tr key={s.id} className={selectedIds.has(s.id) ? 'row-selected' : ''}>
-                <td className="col-check">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(s.id)}
-                    onChange={() => toggleSelect(s.id)}
-                    className="supplier-checkbox"
-                  />
-                </td>
-                <td className="col-supplier" title={s.supplierName}>{s.supplierName}</td>
-                <td className="col-right">{s.transactionCount}</td>
-                <td className="col-right">{fmtAbbrev(s.totalSpend)}</td>
-                <td><StatusBadge status={s.confirmationStatus} /></td>
-                <td className="col-actions">
-                  {!s.isResearched ? (
-                    <button
-                      className="row-action-btn research"
-                      onClick={() => researchSupplier(s)}
-                      title="Research this supplier"
-                    >
-                      Research
-                    </button>
-                  ) : s.confirmationStatus === 'pending' ? (
-                    <button
-                      className="row-action-btn confirm"
-                      onClick={() => confirmSupplier(s)}
-                      title="Confirm this supplier"
-                    >
-                      Confirm
-                    </button>
-                  ) : null}
-                </td>
-
-                {INFO_COLUMNS.map(col => {
-                  const val = getFieldValue(s, col.key)
-                  const parentCell = col.key === 'officialBusinessName' ? (
-                    <td key={`parent-${s.id}`}>
-                      <EditableCell
-                        value={s.parentName || ''}
-                        onSave={(newVal) => saveParentName(s, newVal)}
-                      />
-                    </td>
-                  ) : null
-
-                  // Read-only columns
-                  if (!col.editable) {
-                    if (col.key === 'confidence') {
-                      return (
-                        <React.Fragment key={col.key}>
-                          <td>
-                            {val ? (
-                              <span className={`confidence-badge ${val}`}>{val}</span>
-                            ) : (
-                              <span className="cell-placeholder">-</span>
-                            )}
-                          </td>
-                          {parentCell}
-                        </React.Fragment>
-                      )
-                    }
-                    if (col.key === 'sources') {
-                      const sources = s.supplierInfo?.sources
-                      return (
-                        <React.Fragment key={col.key}>
-                          <td>
-                            {sources && sources.length > 0 ? (
-                              <div className="sources-list">
-                                {sources.map((src: string, i: number) => (
-                                  <a
-                                    key={i}
-                                    className="source-tag source-link"
-                                    href={`https://www.google.com/search?q=${encodeURIComponent(src)}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title={`Search Google for "${src}"`}
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
-                                    }}
-                                  >
-                                    {src}
-                                  </a>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="cell-placeholder">-</span>
-                            )}
-                          </td>
-                          {parentCell}
-                        </React.Fragment>
-                      )
-                    }
-                    return (
-                      <React.Fragment key={col.key}>
-                        <td><span className="cell-placeholder">{val || '-'}</span></td>
-                        {parentCell}
-                      </React.Fragment>
-                    )
-                  }
-
-                  // Editable columns
-                  return (
-                    <React.Fragment key={col.key}>
-                      <td className={col.wide ? 'supplier-col-wide' : ''}>
-                        <EditableCell
-                          value={val}
-                          type={col.type === 'select' ? 'select' : 'text'}
-                          onSave={(newVal) => saveField(s, col.key, newVal)}
-                        />
-                      </td>
-                      {parentCell}
-                    </React.Fragment>
-                  )
-                })}
-              </tr>
-            ))}
-            {filteredSuppliers.length === 0 && (
-              <tr>
-                <td colSpan={7 + INFO_COLUMNS.length + 1} className="suppliers-empty">
-                  {filterConditions.some(c => c.field) ? 'No suppliers match the current filters.' : 'No suppliers found. Upload a CSV to populate suppliers.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      {/* Two-panel layout */}
+      <div className="suppliers-content">
+        <SupplierListPanel
+          suppliers={displayedSuppliers}
+          focusedIndex={focusedIndex}
+          selectedIds={selectedIds}
+          selectedSupplierId={selectedSupplierId}
+          searchQuery={searchQuery}
+          quickFilter={quickFilter}
+          unresearchedCount={unresearchedCount}
+          unconfirmedCount={unconfirmedCount}
+          onSearchChange={setSearchQuery}
+          onQuickFilterChange={setQuickFilter}
+          onSupplierClick={handleSupplierClick}
+          onToggleCheck={toggleCheckById}
+          onToggleSelectAll={toggleSelectAll}
+          onKeyDown={handleKeyDown}
+          allChecked={allChecked}
+          isActive={activePanel === 'list'}
+        />
+        <SupplierDetailPanel
+          ref={detailPanelRef}
+          supplier={selectedSupplier}
+          onSaveField={saveField}
+          onSaveParentName={saveParentName}
+          onResearch={researchSupplier}
+          onConfirm={confirmSupplier}
+          focusedFieldIndex={detailFieldIndex}
+          onFocusedFieldChange={setDetailFieldIndex}
+          editingFieldIndex={editingFieldIndex}
+          onEditingFieldChange={setEditingFieldIndex}
+          onMoveToList={handleMoveToList}
+          isActive={activePanel === 'detail'}
+        />
       </div>
 
       {saving && <div className="supplier-saving">Saving...</div>}

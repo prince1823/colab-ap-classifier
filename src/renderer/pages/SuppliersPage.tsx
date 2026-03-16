@@ -511,6 +511,8 @@ export default function SuppliersPage() {
           onKeyDown={handleKeyDown}
           allChecked={allChecked}
           isActive={activePanel === 'list'}
+          onResearch={researchSupplier}
+          onConfirm={confirmSupplier}
         />
         <SupplierDetailPanel
           ref={detailPanelRef}

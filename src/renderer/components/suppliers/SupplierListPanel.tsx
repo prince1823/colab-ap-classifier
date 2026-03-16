@@ -22,24 +22,53 @@ interface SupplierListPanelProps {
   onKeyDown: (e: React.KeyboardEvent) => void
   allChecked: boolean
   isActive?: boolean
+  onResearch?: (supplier: ProjectSupplierView) => void
+  onConfirm?: (supplier: ProjectSupplierView) => void
 }
 
-function ConfirmedChip({ supplier }: { supplier: ProjectSupplierView }) {
-  if (supplier.confirmationStatus !== 'confirmed') return null
-  return (
-    <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-green-50 text-green-600 flex-shrink-0">
-      confirmed
-    </span>
-  )
+function ConfirmedIndicator({ supplier, onConfirm }: { supplier: ProjectSupplierView; onConfirm?: (s: ProjectSupplierView) => void }) {
+  if (supplier.confirmationStatus === 'confirmed') {
+    return (
+      <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-green-50 text-green-600 flex-shrink-0">
+        confirmed
+      </span>
+    )
+  }
+  // Only show confirm button after research is completed
+  if (onConfirm && supplier.isResearched) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onConfirm(supplier) }}
+        className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 flex-shrink-0 cursor-pointer transition-colors"
+      >
+        confirm
+      </button>
+    )
+  }
+  return null
 }
 
-function ResearchedChip({ supplier }: { supplier: ProjectSupplierView }) {
-  if (!supplier.isResearched) return null
-  return (
-    <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-purple-50 text-purple-600 flex-shrink-0">
-      researched
-    </span>
-  )
+function ResearchedIndicator({ supplier, onResearch }: { supplier: ProjectSupplierView; onResearch?: (s: ProjectSupplierView) => void }) {
+  if (supplier.isResearched) {
+    return (
+      <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-purple-50 text-purple-600 flex-shrink-0">
+        researched
+      </span>
+    )
+  }
+  if (onResearch) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onResearch(supplier) }}
+        className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 flex-shrink-0 cursor-pointer transition-colors"
+      >
+        research
+      </button>
+    )
+  }
+  return null
 }
 
 export default function SupplierListPanel({
@@ -59,6 +88,8 @@ export default function SupplierListPanel({
   onKeyDown,
   allChecked,
   isActive = true,
+  onResearch,
+  onConfirm,
 }: SupplierListPanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -160,14 +191,14 @@ export default function SupplierListPanel({
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-medium text-gray-800 truncate">{s.supplierName}</span>
                     <span className="flex-1" />
-                    <ConfirmedChip supplier={s} />
+                    <ConfirmedIndicator supplier={s} onConfirm={onConfirm} />
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] text-gray-400">{fmtAbbrev(s.totalSpend)}</span>
                     <span className="text-[10px] text-gray-300">·</span>
                     <span className="text-[10px] text-gray-400">{s.transactionCount} txns</span>
                     <span className="flex-1" />
-                    <ResearchedChip supplier={s} />
+                    <ResearchedIndicator supplier={s} onResearch={onResearch} />
                   </div>
                 </div>
               </div>

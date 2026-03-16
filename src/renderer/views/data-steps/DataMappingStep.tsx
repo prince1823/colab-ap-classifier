@@ -41,7 +41,7 @@ function buildInitialState(preview: CSVPreview, derivedMappings: DerivedMappings
   return preview.columns.map((col) => ({
     csvColumn: col,
     canonical: csvToCanonical.get(col) || toSnakeCase(col),
-    included: true,
+    included: fromPrevious ? csvToCanonical.has(col) : true,
     locked: fromPrevious && csvToCanonical.has(col),
   }))
 }

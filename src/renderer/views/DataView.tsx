@@ -38,6 +38,7 @@ export default function DataView() {
   const [activeDerivedMappings, setActiveDerivedMappings] = useState<DerivedMappings | null>(null)
   const [importing, setImporting] = useState(false)
   const [derivingMappings, setDerivingMappings] = useState(false)
+  const [mappingFromPrevious, setMappingFromPrevious] = useState(false)
 
   // Load existing uploads on mount
   useEffect(() => {
@@ -67,6 +68,7 @@ export default function DataView() {
     setActivePreview(preview)
     setError(null)
     setDerivingMappings(true)
+    setMappingFromPrevious(source !== 'llm')
     try {
       const derived = await ipc.ingest.deriveMappings(
         preview.columns,
@@ -215,6 +217,7 @@ export default function DataView() {
             onApply={handleMappingsApplied}
             onBack={() => setStep('upload')}
             importing={importing}
+            fromPreviousMapping={mappingFromPrevious}
           />
         )}
         {step === 'priority' && (

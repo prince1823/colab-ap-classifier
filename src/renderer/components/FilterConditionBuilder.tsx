@@ -480,13 +480,7 @@ export function GroupedFilterBuilder({
 
   return (
     <div>
-      {/* Logic expression preview */}
-      {logicExpression && (
-        <div className="mb-3 rounded-md bg-gray-100 px-3 py-1.5">
-          <span className="text-[10px] text-gray-400 mr-1.5">Logic:</span>
-          <span className="text-[11px] font-mono font-medium text-gray-600">{logicExpression}</span>
-        </div>
-      )}
+      {/* Logic expression preview — removed */}
 
       {/* Groups */}
       <div className="space-y-0">

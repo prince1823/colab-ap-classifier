@@ -29,7 +29,6 @@ export default function SuppliersPage() {
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
   const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
   const [tailSpendSet, setTailSpendSet] = useState(false)
-  const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
 
   // New state for master-detail
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
@@ -60,16 +59,14 @@ export default function SuppliersPage() {
   useEffect(() => {
     async function loadSettings() {
       try {
-        const [threshold, suPath, fields] = await Promise.all([
+        const [threshold, fields] = await Promise.all([
           ipc.project.getSetting('tail_spend_threshold'),
-          ipc.supplierUniverse.getPath(),
           ipc.suppliers.getFilterFields(),
         ])
         if (threshold && Number(threshold) > 0) {
           setTailSpendThreshold(String(threshold))
           setTailSpendSet(true)
         }
-        setSupplierUniversePath(suPath)
         setFilterFields(fields as FieldDefinition[])
       } catch {
         // settings load failure is non-fatal
@@ -259,17 +256,6 @@ export default function SuppliersPage() {
     }
   }, [tailSpendThreshold, loadData])
 
-  /** Change supplier universe DB */
-  const changeSupplierUniverse = useCallback(async () => {
-    try {
-      const selected = await ipc.supplierUniverse.selectFile()
-      if (!selected) return
-      setSupplierUniversePath(selected)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to set supplier universe path')
-    }
-  }, [])
-
   // --- Derived data for the two-panel layout ---
 
   /** Sort by spend descending */
@@ -396,65 +382,71 @@ export default function SuppliersPage() {
     <div className="suppliers-page">
       {error && <div className="suppliers-error">{error}</div>}
 
-      {/* Supplier universe status */}
-      <div className="suppliers-banner" style={{ background: '#f0f4f8', borderColor: '#d0d7de' }}>
-        <span className="text-xs text-gray-500" title={supplierUniversePath || 'Default location'}>
-          Supplier DB: <strong>{supplierUniversePath ? supplierUniversePath.split('/').slice(-2).join('/') : 'Default'}</strong>
-        </span>
-        <button onClick={changeSupplierUniverse} className="banner-btn" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
-          Change
-        </button>
-      </div>
-
-      {/* Tail spend threshold banner */}
-      {!tailSpendSet && (
-        <div className="suppliers-banner">
-          <span>Tail spend threshold not set.</span>
-          <input
-            type="number"
-            placeholder="$ amount"
-            value={tailSpendThreshold}
-            onChange={(e) => setTailSpendThreshold(e.target.value)}
-            className="banner-input"
-          />
-          <button onClick={applyTailSpend} className="banner-btn" disabled={!tailSpendThreshold}>
-            Apply
-          </button>
-        </div>
-      )}
-
-      {/* Research progress bar */}
-      {researchProgress && researchProgress.status === 'running' && (
-        <div className="suppliers-progress">
-          <div className="flex items-center justify-between mb-1">
-            <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
-            <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
-          </div>
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Top bar: filter button */}
+      {/* Row 1: Active filters (left) + Filters button (right) */}
       <div className="suppliers-top-bar">
-        <div className="flex-1" />
+        <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          {advancedGrouped && filterConditions.length > 0 && (
+            <>
+              <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mr-0.5 flex-shrink-0">Active:</span>
+              {advancedGrouped.groups.map((group, gi) => {
+                const validConds = group.conditions.filter(c => c.field)
+                if (validConds.length === 0) return null
+                return (
+                  <React.Fragment key={gi}>
+                    {gi > 0 && (
+                      <span className="text-[8px] font-bold text-blue-500 uppercase px-0.5 flex-shrink-0">
+                        {group.groupConnector ?? advancedGrouped.groupConnector}
+                      </span>
+                    )}
+                    {validConds.length > 1 && <span className="text-gray-800 text-[11px] font-bold flex-shrink-0">(</span>}
+                    {validConds.map((c, ci) => {
+                      const opLabel = OPERATOR_LABELS[c.operator as FilterOperator] ?? c.operator
+                      const displayValue = Array.isArray(c.value) ? c.value.join(', ') : String(c.value)
+                      return (
+                        <React.Fragment key={`${gi}-${ci}`}>
+                          {ci > 0 && (
+                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{group.connector}</span>
+                          )}
+                          <span className="inline-flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] text-blue-800 whitespace-nowrap flex-shrink-0">
+                            <span className="font-medium">{c.field}</span>
+                            <span className="text-blue-500">{opLabel}</span>
+                            {displayValue && <span className="font-semibold max-w-[150px] truncate" title={displayValue}>{displayValue}</span>}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newGroups = advancedGrouped.groups.map((g, gIdx) => {
+                                  if (gIdx !== gi) return g
+                                  const newConds = g.conditions.filter((_, cIdx) => cIdx !== ci)
+                                  return { ...g, conditions: newConds.length > 0 ? newConds : [] }
+                                }).filter(g => g.conditions.length > 0)
+                                if (newGroups.length === 0) setAdvancedGrouped(null)
+                                else setAdvancedGrouped({ ...advancedGrouped, groups: newGroups })
+                              }}
+                              className="ml-0.5 rounded-full p-0.5 text-blue-400 hover:bg-blue-200 hover:text-blue-700 transition-colors"
+                            >
+                              <X size={10} />
+                            </button>
+                          </span>
+                        </React.Fragment>
+                      )
+                    })}
+                    {validConds.length > 1 && <span className="text-gray-800 text-[11px] font-bold flex-shrink-0">)</span>}
+                  </React.Fragment>
+                )
+              })}
+              <button
+                onClick={() => setAdvancedGrouped(null)}
+                className="text-[9px] text-red-500 hover:text-red-600 font-medium ml-0.5 flex-shrink-0"
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
 
-        {/* Filter controls */}
-        {filterConditions.length > 0 && (
-          <button
-            onClick={() => setAdvancedGrouped(null)}
-            className="text-xs text-red-500 hover:text-red-600 font-medium"
-          >
-            Clear filters
-          </button>
-        )}
         <button
           onClick={() => setShowAdvancedFilter(true)}
-          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
             filterConditions.length > 0
               ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
               : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
@@ -470,56 +462,19 @@ export default function SuppliersPage() {
         </button>
       </div>
 
-      {/* Active filter chips */}
-      {advancedGrouped && filterConditions.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 px-0 pb-2">
-          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mr-1">Active:</span>
-          {advancedGrouped.groups.map((group, gi) => {
-            const validConds = group.conditions.filter(c => c.field)
-            if (validConds.length === 0) return null
-            return (
-              <React.Fragment key={gi}>
-                {gi > 0 && (
-                  <span className="text-[10px] font-bold text-blue-500 uppercase px-1">
-                    {group.groupConnector ?? advancedGrouped.groupConnector}
-                  </span>
-                )}
-                {validConds.length > 1 && <span className="text-gray-300 text-xs font-light">(</span>}
-                {validConds.map((c, ci) => {
-                  const opLabel = OPERATOR_LABELS[c.operator as FilterOperator] ?? c.operator
-                  const displayValue = Array.isArray(c.value) ? c.value.join(', ') : String(c.value)
-                  return (
-                    <React.Fragment key={`${gi}-${ci}`}>
-                      {ci > 0 && (
-                        <span className="text-[10px] font-bold text-gray-400 uppercase px-0.5">{group.connector}</span>
-                      )}
-                      <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] text-blue-800">
-                        <span className="font-medium">{c.field}</span>
-                        <span className="text-blue-500">{opLabel}</span>
-                        {displayValue && <span className="font-semibold max-w-[150px] truncate" title={displayValue}>{displayValue}</span>}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newGroups = advancedGrouped.groups.map((g, gIdx) => {
-                              if (gIdx !== gi) return g
-                              const newConds = g.conditions.filter((_, cIdx) => cIdx !== ci)
-                              return { ...g, conditions: newConds.length > 0 ? newConds : [] }
-                            }).filter(g => g.conditions.length > 0)
-                            if (newGroups.length === 0) setAdvancedGrouped(null)
-                            else setAdvancedGrouped({ ...advancedGrouped, groups: newGroups })
-                          }}
-                          className="ml-0.5 rounded-full p-0.5 text-blue-400 hover:bg-blue-200 hover:text-blue-700 transition-colors"
-                        >
-                          <X size={10} />
-                        </button>
-                      </span>
-                    </React.Fragment>
-                  )
-                })}
-                {validConds.length > 1 && <span className="text-gray-300 text-xs font-light">)</span>}
-              </React.Fragment>
-            )
-          })}
+      {/* Row 2: Research progress bar */}
+      {researchProgress && researchProgress.status === 'running' && (
+        <div className="suppliers-progress">
+          <div className="flex items-center justify-between mb-1">
+            <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+            <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+          </div>
+          <div className="progress-bar">
+            <div
+              className="progress-fill"
+              style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+            />
+          </div>
         </div>
       )}
 

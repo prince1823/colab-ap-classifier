@@ -99,12 +99,15 @@ export default function DataView() {
 
       const result = await ipc.ingest.importCSV(activeFilePath, columnMapping)
 
-      // Save default column_priorities (invariant 5: must be set after import)
-      const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
-      // supplier_name first, then rest
-      const supplierFirst = mappedCols.filter((c) => c === 'supplier_name')
-      const rest = mappedCols.filter((c) => c !== 'supplier_name')
-      await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
+      // Only set default column_priorities if none exist yet
+      // (don't overwrite user's saved priorities from a previous session)
+      const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
+      if (!existingPriorities || existingPriorities.length === 0) {
+        const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
+        const supplierFirst = mappedCols.filter((c) => c === 'supplier_name')
+        const rest = mappedCols.filter((c) => c !== 'supplier_name')
+        await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
+      }
 
       // Add to completed uploads
       setCompletedUploads((prev) => [

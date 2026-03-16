@@ -331,7 +331,6 @@ export default function SuppliersPage() {
 
   // Select-all for displayed suppliers
   const allChecked = displayedSuppliers.length > 0 && displayedSuppliers.every(s => selectedIds.has(s.id))
-  const someSelected = selectedIds.size > 0
 
   const toggleSelectAll = useCallback(() => {
     if (allChecked) {
@@ -406,17 +405,8 @@ export default function SuppliersPage() {
         </div>
       )}
 
-      {/* Top bar: batch actions + filter button */}
+      {/* Top bar: filter button */}
       <div className="suppliers-top-bar">
-        {/* Batch actions */}
-        {someSelected && (
-          <div className="batch-actions">
-            <button onClick={researchSelected} className="action-btn research">Research Selected</button>
-            <button onClick={confirmSelected} className="action-btn confirm">Confirm Selected</button>
-            <span className="selected-count">{selectedIds.size} checked</span>
-          </div>
-        )}
-
         <div className="flex-1" />
 
         {/* Filter controls */}
@@ -519,6 +509,8 @@ export default function SuppliersPage() {
           allChecked={allChecked}
           isActive={activePanel === 'list'}
           onResearch={researchSupplier}
+          onResearchSelected={researchSelected}
+          onConfirmSelected={confirmSelected}
         />
         <SupplierDetailPanel
           ref={detailPanelRef}

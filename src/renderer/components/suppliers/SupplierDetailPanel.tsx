@@ -280,22 +280,6 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
             <span><strong className="text-gray-700">{fmtAbbrev(supplier.totalSpend)}</strong> total spend</span>
           </div>
         </div>
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className={`status-badge ${supplier.confirmationStatus}`}>{supplier.confirmationStatus}</span>
-          {confidenceVal && (
-            <span className={`confidence-badge ${confidenceVal}`}>{confidenceVal}</span>
-          )}
-          {supplier.isResearched && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-purple-600 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5 font-medium">
-              Researched
-            </span>
-          )}
-          {supplier.isTailSpend && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 font-medium">
-              Tail Spend
-            </span>
-          )}
-        </div>
       </div>
 
       {/* Actions */}

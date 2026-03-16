@@ -23,6 +23,8 @@ interface SupplierListPanelProps {
   allChecked: boolean
   isActive?: boolean
   onResearch?: (supplier: ProjectSupplierView) => void
+  onResearchSelected?: () => void
+  onConfirmSelected?: () => void
 }
 
 function ConfirmedChip({ supplier }: { supplier: ProjectSupplierView }) {
@@ -65,6 +67,8 @@ export default function SupplierListPanel({
   allChecked,
   isActive = true,
   onResearch,
+  onResearchSelected,
+  onConfirmSelected,
 }: SupplierListPanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -181,6 +185,24 @@ export default function SupplierListPanel({
           })
         )}
       </div>
+
+      {/* Batch actions footer */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2.5 border-t border-blue-200 bg-blue-50">
+          <span className="text-[11px] font-semibold text-blue-700">{selectedIds.size} selected</span>
+          <div className="flex-1" />
+          {onResearchSelected && (
+            <button type="button" onClick={onResearchSelected} className="px-3 py-1 rounded-md text-[11px] font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm">
+              Research
+            </button>
+          )}
+          {onConfirmSelected && (
+            <button type="button" onClick={onConfirmSelected} className="px-3 py-1 rounded-md text-[11px] font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-sm">
+              Confirm
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

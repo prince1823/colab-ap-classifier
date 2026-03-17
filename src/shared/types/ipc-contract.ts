@@ -78,10 +78,10 @@ export interface IPCInvokeMap {
 
   // Suppliers
   'suppliers:list':           { args: [filter?: { conditions: FilterCondition[] }]; result: ProjectSupplierView[] };
-  'suppliers:update':         { args: [supplierName: string, updates: SupplierUpdateInput]; result: void };
+  'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: []; result: void };
-  'suppliers:researchSingle': { args: [supplierName: string]; result: SupplierInfo };
+  'suppliers:researchSingle': { args: [supplierId: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
 

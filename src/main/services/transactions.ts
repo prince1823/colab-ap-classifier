@@ -63,7 +63,7 @@ export class TransactionStore implements ITransactionStore {
 
   /** Whether any columns in use require the supplier JOIN. */
   private needsSupplierJoin(columns: string[]): boolean {
-    return columns.some((c) => c === 'supplier_name');
+    return columns.some((c) => c === 'supplier_name' || c === 'is_tail_spend' || c === 'is_researched');
   }
 
   /** Whether any columns in use require the taxonomy JOIN. */

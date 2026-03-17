@@ -1,5 +1,4 @@
-import { useMemo, useCallback } from 'react'
-import { useState } from 'react'
+import { useMemo, useCallback, useEffect, useState } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
@@ -84,6 +83,14 @@ export default function PivotPage() {
 
   const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
 
+  // Load suggestions for string filter fields (supplier names, etc.)
+  const [supplierSuggestions, setSupplierSuggestions] = useState<string[]>([])
+  useEffect(() => {
+    ipc.transactions.distinctValues('supplier_name', 5000)
+      .then(vals => setSupplierSuggestions(vals.filter(Boolean)))
+      .catch(() => {})
+  }, [])
+
   const filter = useMemo(() => {
     const pillFilter = buildTransactionFilter(filterState)
     const pillConditions = pillFilter?.conditions ?? []
@@ -136,8 +143,9 @@ export default function PivotPage() {
       name: col,
       label: COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
       type: BOOLEAN_COLS.has(col) ? 'boolean' as const : NUMERIC_COLS.has(col) ? 'number' as const : 'string' as const,
+      ...(col === 'supplier_name' && supplierSuggestions.length > 0 ? { suggestions: supplierSuggestions } : {}),
     })),
-    [filterableColumns]
+    [filterableColumns, supplierSuggestions]
   )
 
   const handleExport = useCallback(async () => {

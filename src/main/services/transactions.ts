@@ -30,6 +30,7 @@ const BASE_COLUMNS = [
 /** Columns that don't exist on transactions but are resolved via JOINs. */
 const VIRTUAL_COLUMNS: Record<string, string> = {
   supplier_name: 'ps.supplier_name',
+  is_tail_spend: 'ps.is_tail_spend',
   classification_l1: 'tax.l1',
   classification_l2: 'tax.l2',
   classification_l3: 'tax.l3',

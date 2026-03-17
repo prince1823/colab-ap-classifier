@@ -12,12 +12,23 @@ export function registerSupplierResearchHandlers(
     });
   });
 
-  registerHandler('suppliers:researchSingle', async (_event, supplierName: unknown) => {
-    const info = await researcher.researchSingle(supplierName as string);
+  registerHandler('suppliers:researchSingle', async (_event, supplierId: unknown) => {
+    const id = supplierId as string;
+
+    // Look up supplier by ID to get the name for research
+    const supplier = await suppliers.getProjectSupplier(id);
+    if (!supplier) throw new Error(`Supplier not found: ${id}`);
+
+    // Skip research for tail spend suppliers
+    if (await suppliers.isTailSpend(id)) {
+      return null;
+    }
+
+    const info = await researcher.researchSingle(supplier.supplierName);
 
     // Persist research results to project_suppliers and mark as researched
-    await suppliers.updateSupplier(supplierName as string, { supplierInfo: info });
-    await suppliers.markResearched(supplierName as string);
+    await suppliers.updateSupplier(id, { supplierInfo: info });
+    await suppliers.markResearched(id);
 
     return info;
   });

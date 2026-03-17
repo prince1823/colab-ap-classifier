@@ -27,8 +27,10 @@ export default function SuppliersPage() {
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
-  const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
+  const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('10000')
   const [tailSpendSet, setTailSpendSet] = useState(false)
+  const [tailSpendActive, setTailSpendActive] = useState(false)
+  const [editingThreshold, setEditingThreshold] = useState(false)
 
   // New state for master-detail
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
@@ -256,6 +258,54 @@ export default function SuppliersPage() {
     }
   }, [tailSpendThreshold, loadData])
 
+  /** Toggle tail spend filter on/off */
+  const toggleTailSpendFilter = useCallback(async (enable: boolean) => {
+    if (enable) {
+      const val = Number(tailSpendThreshold)
+      if (!val || val <= 0) return
+      setSaving(true)
+      try {
+        await ipc.project.setSetting('tail_spend_threshold', val)
+        await ipc.suppliers.filterTailSpend(val)
+        setTailSpendSet(true)
+        // Inject is_tail_spend filter to hide tail-spend suppliers
+        const tailCondition = { field: 'is_tail_spend', operator: 'is_true' as FilterOperator, value: '' }
+        const current = advancedGrouped ?? { groupConnector: 'AND' as const, groups: [] }
+        setAdvancedGrouped({
+          groupConnector: current.groupConnector,
+          groups: [...current.groups, { connector: 'AND' as const, conditions: [tailCondition] }],
+        })
+        setTailSpendActive(true)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to apply threshold')
+      } finally {
+        setSaving(false)
+      }
+    } else {
+      // Remove is_tail_spend conditions from all groups
+      if (advancedGrouped) {
+        const cleaned = {
+          ...advancedGrouped,
+          groups: advancedGrouped.groups.map(g => ({
+            ...g,
+            conditions: g.conditions.filter(c => c.field !== 'is_tail_spend'),
+          })).filter(g => g.conditions.length > 0),
+        }
+        setAdvancedGrouped(cleaned.groups.length > 0 ? cleaned : null)
+      }
+      setTailSpendActive(false)
+    }
+  }, [tailSpendThreshold, advancedGrouped, setAdvancedGrouped])
+
+  // Sync tailSpendActive if user removes is_tail_spend from Advanced Filters
+  useEffect(() => {
+    if (!tailSpendActive) return
+    const hasTailFilter = advancedGrouped?.groups.some(g =>
+      g.conditions.some(c => c.field === 'is_tail_spend')
+    )
+    if (!hasTailFilter) setTailSpendActive(false)
+  }, [advancedGrouped, tailSpendActive])
+
   // --- Derived data for the two-panel layout ---
 
   /** Sort by spend descending */
@@ -457,6 +507,58 @@ export default function SuppliersPage() {
           {filterConditions.length > 0 && (
             <span className="ml-1 rounded-full bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none">
               {filterConditions.length}
+            </span>
+          )}
+        </button>
+
+        {/* Tail Spend toggle button */}
+        <button
+          onClick={() => !editingThreshold && toggleTailSpendFilter(!tailSpendActive)}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
+            tailSpendActive
+              ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          Tail Spend:
+          {editingThreshold ? (
+            <input
+              type="number"
+              className="w-[80px] px-1 py-0 border border-amber-300 rounded text-xs bg-white outline-none"
+              defaultValue={tailSpendThreshold}
+              autoFocus
+              onBlur={async (e) => {
+                const newVal = e.target.value
+                setEditingThreshold(false)
+                if (Number(newVal) > 0) {
+                  setTailSpendThreshold(newVal)
+                  await ipc.project.setSetting('tail_spend_threshold', Number(newVal))
+                  if (tailSpendActive) {
+                    await ipc.suppliers.filterTailSpend(Number(newVal))
+                    await loadData()
+                  }
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                if (e.key === 'Escape') setEditingThreshold(false)
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span
+              onClick={(e) => { e.stopPropagation(); setEditingThreshold(true) }}
+              className="cursor-pointer hover:underline font-semibold"
+            >
+              {fmtAbbrev(Number(tailSpendThreshold) || 10000)}
+            </span>
+          )}
+          {tailSpendActive && (
+            <span
+              onClick={(e) => { e.stopPropagation(); toggleTailSpendFilter(false) }}
+              className="ml-0.5 rounded-full p-0.5 text-amber-400 hover:bg-amber-200 hover:text-amber-700 transition-colors"
+            >
+              <X size={10} />
             </span>
           )}
         </button>

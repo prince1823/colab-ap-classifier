@@ -100,7 +100,6 @@ export default function DataView() {
       const result = await ipc.ingest.importCSV(activeFilePath, columnMapping)
 
       // Only set default column_priorities if none exist yet
-      // (don't overwrite user's saved priorities from a previous session)
       const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
       if (!existingPriorities || existingPriorities.length === 0) {
         const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)

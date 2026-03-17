@@ -15,12 +15,8 @@ interface TransactionPreviewRow {
 export default function DataPriorityStep({ allMappings, onSave, onBack }: Props) {
   const allCanonicals = [...new Set(allMappings.filter((m) => m.csvColumn).map((m) => m.canonical))]
 
-  const [llmOrder, setLlmOrder] = useState<string[]>(() =>
-    allCanonicals.filter((c) => c === 'supplier_name')
-  )
-  const [nonLlm, setNonLlm] = useState<string[]>(() =>
-    allCanonicals.filter((c) => c !== 'supplier_name')
-  )
+  const [llmOrder, setLlmOrder] = useState<string[]>([])
+  const [nonLlm, setNonLlm] = useState<string[]>(() => [...allCanonicals])
   const [missingColumns, setMissingColumns] = useState<string[]>([])
   const [loadedFromSaved, setLoadedFromSaved] = useState(false)
 

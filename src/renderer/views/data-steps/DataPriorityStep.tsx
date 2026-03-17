@@ -24,9 +24,10 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
   const [previewRows, setPreviewRows] = useState<TransactionPreviewRow[]>([])
   const [totalRows, setTotalRows] = useState(0)
 
-  // Fetch existing column_priorities and pre-populate
+  // Fetch existing column_priorities from a previous user-saved session
+  // Only pre-populate if the user previously saved a curated (non-default) priority list
   useEffect(() => {
-    ipc.project.getSetting('column_priorities').then((saved) => {
+    ipc.project.getSetting('column_priorities_saved').then((saved) => {
       if (!saved || !Array.isArray(saved) || saved.length === 0) return
 
       const savedPriorities = saved as string[]

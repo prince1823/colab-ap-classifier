@@ -137,6 +137,8 @@ export default function DataView() {
     setError(null)
     try {
       await ipc.project.setSetting('column_priorities', llmOrder)
+      // Save separately so Priority step knows this is user-curated (not auto-default)
+      await ipc.project.setSetting('column_priorities_saved', llmOrder)
       await refreshMetadata()
       await refreshGateState()
       navigate('/suppliers')

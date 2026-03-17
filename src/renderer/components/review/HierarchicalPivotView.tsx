@@ -240,6 +240,7 @@ export default function HierarchicalPivotView({
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
+  const [freezeLevel, setFreezeLevel] = useState(0) // 0 = off, 1 = freeze L1, 2 = freeze L1+L2, etc.
 
   const { flatRows, allFlatRows, toggleExpand, expandToLevel, expandToKey, depth0TotalMap } = usePivotTreeState(
     pivotData?.root ?? null
@@ -353,6 +354,109 @@ export default function HierarchicalPivotView({
     scrollPaddingEnd: 40,
   })
 
+  // Sticky frozen level headers — DOM-driven for smooth performance (no React re-renders on scroll)
+  const stickyRef = useRef<HTMLTableElement>(null)
+  const lastStickyKeyRef = useRef('')
+
+  useEffect(() => {
+    const el = scrollRef.current
+    const stickyEl = stickyRef.current
+    if (!el || !stickyEl) return
+
+    if (freezeLevel === 0) {
+      stickyEl.style.display = 'none'
+      lastStickyKeyRef.current = ''
+      return
+    }
+
+    let rafId = 0
+    const onScroll = () => {
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => {
+        const items = rowVirtualizer.getVirtualItems()
+        if (items.length === 0) { stickyEl.style.display = 'none'; stickyEl.style.marginBottom = '0px'; lastStickyKeyRef.current = ''; return }
+
+        const scrollTop = el.scrollTop
+        const theadHeight = 33
+        const adjustedTop = scrollTop + theadHeight
+
+        let topRowIdx = items[0].index
+        for (const item of items) {
+          if (item.start + item.size > adjustedTop) {
+            topRowIdx = item.index
+            break
+          }
+        }
+
+        const topRow = visibleRows[topRowIdx]
+        if (!topRow) { stickyEl.style.display = 'none'; stickyEl.style.marginBottom = '0px'; lastStickyKeyRef.current = ''; return }
+
+        // Build ancestors: walk backwards to find parent at each depth < freezeLevel
+        const ancestors: { label: string; total: number; depth: number; count: number }[] = []
+        const neededDepths = new Set<number>()
+        for (let d = 0; d < Math.min(freezeLevel, topRow.depth); d++) neededDepths.add(d)
+
+        if (neededDepths.size === 0) { stickyEl.style.display = 'none'; stickyEl.style.marginBottom = '0px'; lastStickyKeyRef.current = ''; return }
+
+        for (let i = topRowIdx - 1; i >= 0 && neededDepths.size > 0; i--) {
+          const r = visibleRows[i]
+          if (neededDepths.has(r.depth)) {
+            ancestors.unshift({ label: r.label, total: r.total, depth: r.depth, count: r.transactionCount })
+            neededDepths.delete(r.depth)
+          }
+        }
+
+        // Only update DOM if ancestors changed
+        const newKey = ancestors.map(a => `${a.depth}:${a.label}`).join('|')
+        if (newKey === lastStickyKeyRef.current) return
+        lastStickyKeyRef.current = newKey
+
+        // Build rows directly in DOM
+        const tbody = stickyEl.querySelector('tbody')!
+        tbody.innerHTML = ''
+        for (const a of ancestors) {
+          const tr = document.createElement('tr')
+          tr.className = 'pivot-tree-row'
+          tr.setAttribute('data-depth', String(a.depth))
+          tr.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)'
+
+          const tdLabel = document.createElement('td')
+          tdLabel.className = 'pivot-tree-label-cell'
+          tdLabel.style.paddingLeft = `${10 + a.depth * 20}px`
+
+          const placeholder = document.createElement('span')
+          placeholder.className = 'pivot-tree-chevron-placeholder'
+          tdLabel.appendChild(placeholder)
+
+          const labelSpan = document.createElement('span')
+          labelSpan.className = 'pivot-tree-label'
+          labelSpan.textContent = a.label
+          tdLabel.appendChild(labelSpan)
+
+          const countSpan = document.createElement('span')
+          countSpan.className = 'pivot-tree-count'
+          countSpan.textContent = `(${a.count})`
+          tdLabel.appendChild(countSpan)
+
+          tr.appendChild(tdLabel)
+
+          const tdTotal = document.createElement('td')
+          tdTotal.className = 'pivot-tree-total-cell'
+          tdTotal.textContent = fmtAbbrev(a.total)
+          tr.appendChild(tdTotal)
+
+          tbody.appendChild(tr)
+        }
+        stickyEl.style.display = 'table'
+        stickyEl.style.marginBottom = `-${ancestors.length * 32}px`
+      })
+    }
+
+    el.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => { el.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId) }
+  }, [visibleRows, rowVirtualizer, freezeLevel])
+
   // Keyboard navigation
   const handleCmdK = useMemo(() => (rows: FlattenedPivotRow[]) => {
     // OR filter: use each row's deepest (most specific) dimension value.
@@ -404,6 +508,19 @@ export default function HierarchicalPivotView({
     if (level >= maxDepth) return 'All'
     const dim = rowDimensions[level]
     return dim ? colLabel(dim) : `D${level + 1}`
+  }
+
+  // Cycle freeze level: Off → L1 → L1+L2 → L1+L2+L3 → Off
+  const handleCycleFreeze = () => {
+    setFreezeLevel(prev => prev >= maxDepth - 1 ? 0 : prev + 1)
+  }
+  const freezeLabelMap = (level: number) => {
+    if (level === 0) return 'Off'
+    const labels: string[] = []
+    for (let i = 0; i < level; i++) {
+      labels.push(`L${i + 1}`)
+    }
+    return labels.join('+')
   }
 
   const hasData = totalCount ? totalCount > 0 : (transactions?.length ?? 0) > 0
@@ -577,6 +694,9 @@ export default function HierarchicalPivotView({
         collapseLevel={collapseLevel}
         onCycleCollapse={handleCycleCollapse}
         cycleLevelLabel={cycleLabelMap(collapseLevel)}
+        freezeLevel={freezeLevel}
+        onCycleFreeze={handleCycleFreeze}
+        freezeLevelLabel={freezeLabelMap(freezeLevel)}
         rows={allRows}
         filterOptions={filterOptions}
         filterState={filterState}
@@ -600,7 +720,7 @@ export default function HierarchicalPivotView({
       {/* Table — only render when there's data */}
       {hasData && pivotData && <div
         ref={scrollRef}
-        className="overflow-auto flex-1 border border-gray-200 rounded-lg"
+        className="overflow-y-auto overflow-x-hidden flex-1 border border-gray-200 rounded-lg"
         style={{ position: 'relative', outline: 'none', scrollPaddingBottom: 40, scrollPaddingTop: 40 }}
         tabIndex={0}
         onKeyDown={handleKeyDown}
@@ -613,11 +733,30 @@ export default function HierarchicalPivotView({
         }}
         role="grid"
       >
-        <table className="pivot-hierarchy-table" style={{ minWidth: '100%' }}>
+        {/* Frozen level headers — DOM-driven sticky overlay below the thead */}
+        <table
+          ref={stickyRef}
+          className="pivot-hierarchy-table"
+          style={{
+            position: 'sticky',
+            top: 33,
+            zIndex: 11,
+            pointerEvents: 'none',
+            minWidth: '100%',
+            display: 'none',
+          }}
+        >
+          <tbody />
+        </table>
+        <table className="pivot-hierarchy-table">
+          <colgroup>
+            <col style={{ width: '80%' }} />
+            <col style={{ width: '20%' }} />
+          </colgroup>
           {/* Header */}
           <thead className="pivot-hierarchy-thead">
             <tr>
-              <th>
+              <th style={{ textAlign: 'left' }}>
                 {rowDimensions
                   .map(d => {
                     const label =

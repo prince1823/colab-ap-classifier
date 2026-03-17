@@ -3,6 +3,7 @@
 /* Hierarchical pivot table container */
 .pivot-hierarchy-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -93,6 +94,7 @@
   align-items: center;
   gap: 4px;
   min-width: 260px;
+  overflow: hidden;
 }
 
 
@@ -123,6 +125,10 @@
 
 /* Row label text */
 .pivot-tree-label {
+  max-width: 150ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Depth-based visual blocks — each level uses a different hue ── */
@@ -593,7 +599,8 @@
 }
 
 /* Active state for spend toggle button */
-.pivot-toolbar-icon-btn[data-active] {
+.pivot-toolbar-icon-btn[data-active],
+.pivot-toolbar-icon-btn-active {
   background: rgba(59, 130, 246, 0.1);
   border-color: var(--primary-color);
   color: var(--primary-color);

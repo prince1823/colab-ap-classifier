@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Plus, X, ChevronUp, ChevronDown, Filter, Layers } from 'lucide-react'
+import { Plus, X, ChevronUp, ChevronDown, Filter, Layers, Pin } from 'lucide-react'
 import { useDrag, useDrop } from 'react-dnd'
 import * as Popover from '@radix-ui/react-popover'
 import type { Aggregation, SpendDisplayMode } from '../../types/pivot'
@@ -44,6 +44,10 @@ interface PivotToolbarProps {
   collapseLevel: number
   onCycleCollapse: () => void
   cycleLevelLabel: string
+  /* Freeze level */
+  freezeLevel: number
+  onCycleFreeze: () => void
+  freezeLevelLabel: string
   /* Filter props */
   rows?: Record<string, unknown>[]
   filterOptions?: Record<string, string[]>
@@ -76,6 +80,9 @@ export default function PivotToolbar({
   collapseLevel,
   onCycleCollapse,
   cycleLevelLabel,
+  freezeLevel,
+  onCycleFreeze,
+  freezeLevelLabel,
   rows,
   filterOptions: filterOptionsProp,
   filterState,
@@ -400,6 +407,14 @@ export default function PivotToolbar({
         >
           <Layers size={12} />
           <span style={{ fontSize: 9, fontWeight: 700, marginLeft: 2 }}>{cycleLevelLabel}</span>
+        </button>
+        <button
+          className={`pivot-toolbar-icon-btn${freezeLevel > 0 ? ' pivot-toolbar-icon-btn-active' : ''}`}
+          onClick={onCycleFreeze}
+          title={`Freeze: ${freezeLevelLabel}. Click to cycle which levels stick on scroll.`}
+        >
+          <Pin size={12} />
+          <span style={{ fontSize: 9, fontWeight: 700, marginLeft: 2 }}>{freezeLevelLabel}</span>
         </button>
       </div>
     </div>

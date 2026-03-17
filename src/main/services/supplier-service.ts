@@ -114,7 +114,7 @@ export class SupplierService implements ISupplierService {
     );
   }
 
-  async updateSupplier(supplierName: string, updates: SupplierUpdateInput): Promise<void> {
+  async updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void> {
     const setClauses: string[] = [];
     const params: unknown[] = [];
 
@@ -134,10 +134,10 @@ export class SupplierService implements ISupplierService {
     if (setClauses.length === 0) return;
 
     setClauses.push('updated_at = CURRENT_TIMESTAMP');
-    params.push(supplierName);
+    params.push(supplierId);
 
     await this.db.run(
-      `UPDATE project_suppliers SET ${setClauses.join(', ')} WHERE supplier_name = ?`,
+      `UPDATE project_suppliers SET ${setClauses.join(', ')} WHERE id = ?`,
       ...params
     );
   }
@@ -379,10 +379,10 @@ export class SupplierService implements ISupplierService {
     return ids;
   }
 
-  async markResearched(supplierName: string): Promise<void> {
+  async markResearched(supplierId: string): Promise<void> {
     await this.db.run(
-      'UPDATE project_suppliers SET is_researched = TRUE, updated_at = CURRENT_TIMESTAMP WHERE supplier_name = ?',
-      supplierName
+      'UPDATE project_suppliers SET is_researched = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      supplierId
     );
   }
 }

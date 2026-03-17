@@ -162,13 +162,13 @@ export interface SupplierService {
   addAlias(canonicalName: string, alias: string): Promise<void>;
   getAliases(canonicalName: string): Promise<string[]>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
-  updateSupplier(supplierName: string, updates: SupplierUpdateInput): Promise<void>;
+  updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void>;
   listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
   assignParent(id: string, parentId: string): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;
-  markResearched(supplierName: string): Promise<void>;
+  markResearched(supplierId: string): Promise<void>;
   getFilterFields(): FieldDefinition[];
   queryDistinctValues(field: string, limit?: number): Promise<string[]>;
 }

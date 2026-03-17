@@ -12,12 +12,16 @@ export function registerSupplierResearchHandlers(
     });
   });
 
-  registerHandler('suppliers:researchSingle', async (_event, supplierName: unknown) => {
-    const info = await researcher.researchSingle(supplierName as string);
+  registerHandler('suppliers:researchSingle', async (_event, supplierId: unknown) => {
+    // Look up supplier name from ID — research service needs the name for web search
+    const supplier = await suppliers.getProjectSupplier(supplierId as string);
+    if (!supplier) throw new Error(`Supplier not found: ${supplierId}`);
+
+    const info = await researcher.researchSingle(supplier.supplierName);
 
     // Persist research results to project_suppliers and mark as researched
-    await suppliers.updateSupplier(supplierName as string, { supplierInfo: info });
-    await suppliers.markResearched(supplierName as string);
+    await suppliers.updateSupplier(supplierId as string, { supplierInfo: info });
+    await suppliers.markResearched(supplierId as string);
 
     return info;
   });

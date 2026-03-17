@@ -118,7 +118,7 @@ export default function SuppliersPage() {
         ? (newValue ? newValue.split(',').map(s => s.trim()).filter(Boolean) : undefined)
         : (newValue || undefined)
       const updatedInfo: SupplierInfo = { ...existingInfo, [field]: parsedValue }
-      await ipc.suppliers.update(supplier.supplierName, { supplierInfo: updatedInfo })
+      await ipc.suppliers.update(supplier.id, { supplierInfo: updatedInfo })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, supplierInfo: updatedInfo } : s
       ))
@@ -134,7 +134,7 @@ export default function SuppliersPage() {
     setSaving(true)
     try {
       const parentName = newValue || null
-      await ipc.suppliers.update(supplier.supplierName, { parentName })
+      await ipc.suppliers.update(supplier.id, { parentName })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, parentName } : s
       ))
@@ -156,7 +156,7 @@ export default function SuppliersPage() {
       currentStep: 'Researching',
     })
     try {
-      const info = await ipc.suppliers.researchSingle(supplier.supplierName)
+      const info = await ipc.suppliers.researchSingle(supplier.id)
       // Update just this supplier in local state instead of full reload
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, isResearched: true, supplierInfo: info } : s
@@ -207,7 +207,7 @@ export default function SuppliersPage() {
         currentStep: `Researching ${i + 1} of ${total}`,
       })
       try {
-        const info = await ipc.suppliers.researchSingle(s.supplierName)
+        const info = await ipc.suppliers.researchSingle(s.id)
         updateSuppliers(prev => prev.map(existing =>
           existing.id === s.id ? { ...existing, isResearched: true, supplierInfo: info } : existing
         ))

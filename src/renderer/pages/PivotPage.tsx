@@ -33,14 +33,19 @@ const INTERNAL_COLS = new Set([
   'created_at', 'updated_at',
 ])
 
-/** Virtual columns resolved via JOIN — not physical on the transactions table. */
-const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3'])
+/** Virtual columns resolved via JOIN — excluded from pivot dimension dropdowns. */
+const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3', 'is_tail_spend', 'is_researched'])
+
+/** Columns excluded from pivot dropdowns but still available in advanced filters. */
+const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched'])
 
 const COLUMN_LABELS: Record<string, string> = {
   classification_l1: 'Classification L1',
   classification_l2: 'Classification L2',
   classification_l3: 'Classification L3',
   supplier_name: 'Supplier',
+  is_tail_spend: 'Tail Spend',
+  is_researched: 'Researched',
   gl_description: 'GL Description',
   line_description: 'Line Description',
   company: 'Company',
@@ -118,13 +123,21 @@ export default function PivotPage() {
     ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
   ], [columns])
 
+  /** All columns available for advanced filters (includes boolean virtual cols excluded from pivot). */
+  const filterableColumns = useMemo(() => [
+    ...availableColumns,
+    ...(columns ?? []).filter(c => PIVOT_ONLY_EXCLUDE.has(c)),
+  ], [availableColumns, columns])
+
+  const BOOLEAN_COLS = new Set(['is_tail_spend', 'is_researched', 'human_reviewed'])
+
   const advancedFilterFields: FieldDefinition[] = useMemo(() =>
-    availableColumns.map(col => ({
+    filterableColumns.map(col => ({
       name: col,
       label: COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      type: NUMERIC_COLS.has(col) ? 'number' as const : 'string' as const,
+      type: BOOLEAN_COLS.has(col) ? 'boolean' as const : NUMERIC_COLS.has(col) ? 'number' as const : 'string' as const,
     })),
-    [availableColumns]
+    [filterableColumns]
   )
 
   const handleExport = useCallback(async () => {

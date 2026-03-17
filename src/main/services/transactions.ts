@@ -104,6 +104,7 @@ export class TransactionStore implements ITransactionStore {
       classification_l3: 'tax.l3',
       supplier_name: 'ps.supplier_name',
       is_researched: 'ps.is_researched',
+      is_tail_spend: 'ps.is_tail_spend',
     };
     const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
 
@@ -245,6 +246,7 @@ export class TransactionStore implements ITransactionStore {
     spend_amount: { label: 'Spend Amount', type: 'number' },
     supplier_name: { label: 'Supplier Name', type: 'string', group: 'Supplier' },
     is_researched: { label: 'Researched', type: 'boolean', group: 'Supplier' },
+    is_tail_spend: { label: 'Tail Spend', type: 'boolean', group: 'Supplier' },
     classification_l1: { label: 'Classification L1', type: 'string' },
     classification_l2: { label: 'Classification L2', type: 'string' },
     classification_l3: { label: 'Classification L3', type: 'string' },

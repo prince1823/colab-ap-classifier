@@ -286,6 +286,17 @@ export class IngestService implements IIngestService {
     // Link transactions to project_suppliers via original_supplier_name
     await this.suppliers.normalizeAllTransactions();
 
+    // Auto-apply tail spend threshold to newly created suppliers
+    const thresholdRow = await this.db.get<{ value: string }>(
+      "SELECT value FROM project_settings WHERE key = 'tail_spend_threshold'"
+    );
+    if (thresholdRow) {
+      const threshold = JSON.parse(thresholdRow.value) as number;
+      if (threshold > 0) {
+        await this.suppliers.filterTailSpend(threshold);
+      }
+    }
+
     return { rowsInserted, uploadId: finalUploadId };
   }
 

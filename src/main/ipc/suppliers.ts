@@ -17,8 +17,8 @@ export function registerSuppliersHandlers(
     return suppliers.listProjectSuppliers(filter as { conditions: FilterCondition[] } | undefined);
   });
 
-  registerHandler('suppliers:update', async (_event, supplierName: unknown, updates: unknown) => {
-    await suppliers.updateSupplier(supplierName as string, updates as SupplierUpdateInput);
+  registerHandler('suppliers:update', async (_event, supplierId: unknown, updates: unknown) => {
+    await suppliers.updateSupplier(supplierId as string, updates as SupplierUpdateInput);
   });
 
   registerHandler('suppliers:confirm', async (_event, id: unknown, status: unknown) => {

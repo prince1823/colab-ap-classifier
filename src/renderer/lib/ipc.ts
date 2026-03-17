@@ -116,13 +116,13 @@ export const ipc = {
   // ── Suppliers (3 channels + research) ──
   suppliers: {
     list: (filter?: { conditions: FilterCondition[] }) => invoke('suppliers:list', filter),
-    update: (supplierName: string, updates: SupplierUpdateInput) =>
-      invoke('suppliers:update', supplierName, updates),
+    update: (supplierId: string, updates: SupplierUpdateInput) =>
+      invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
     researchAll: () => invoke('suppliers:researchAll'),
-    researchSingle: (supplierName: string) =>
-      invoke('suppliers:researchSingle', supplierName),
+    researchSingle: (supplierId: string) =>
+      invoke('suppliers:researchSingle', supplierId),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
       on('suppliers:research:progress', callback),
     filterTailSpend: (threshold: number) =>

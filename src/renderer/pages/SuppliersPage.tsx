@@ -553,14 +553,6 @@ export default function SuppliersPage() {
               {fmtAbbrev(Number(tailSpendThreshold) || 10000)}
             </span>
           )}
-          {tailSpendActive && (
-            <span
-              onClick={(e) => { e.stopPropagation(); toggleTailSpendFilter(false) }}
-              className="ml-0.5 rounded-full p-0.5 text-amber-400 hover:bg-amber-200 hover:text-amber-700 transition-colors"
-            >
-              <X size={10} />
-            </span>
-          )}
         </button>
       </div>
 

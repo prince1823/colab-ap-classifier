@@ -250,17 +250,15 @@ export default function PivotToolbar({
                     {rowDimensions.slice(3).map((dim, i) => {
                       const realIdx = i + 3
                       return (
-                        <div key={dim} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', fontSize: 11 }}>
-                          <span>{colLabel(dim)}</span>
-                          <button
-                            className="pivot-dim-chip-x"
-                            onClick={() => removeRowDim(realIdx)}
-                            title="Remove"
-                            style={{ opacity: 0.7 }}
-                          >
-                            <X size={9} />
-                          </button>
-                        </div>
+                        <DraggableOverflowRow
+                          key={dim}
+                          dim={dim}
+                          index={realIdx}
+                          label={colLabel(dim)}
+                          onMove={moveDim}
+                          onRemove={() => removeRowDim(realIdx)}
+                          onDragEnd={() => setShowOverflow(false)}
+                        />
                       )
                     })}
                   </div>
@@ -583,7 +581,7 @@ function DraggableDimChip({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 3,
+        gap: 6,
         cursor: 'grab',
         opacity: isDragging ? 0.4 : 1,
         background: isOver ? 'rgba(59,130,246,0.08)' : undefined,
@@ -599,6 +597,82 @@ function DraggableDimChip({
         <X size={9} />
       </button>
     </span>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* DraggableOverflowRow — drag-and-drop row in the overflow dropdown   */
+/* ------------------------------------------------------------------ */
+
+function DraggableOverflowRow({
+  dim,
+  index,
+  label,
+  onMove,
+  onRemove,
+  onDragEnd,
+}: {
+  dim: string
+  index: number
+  label: string
+  onMove: (fromIndex: number, toIndex: number) => void
+  onRemove: () => void
+  onDragEnd?: () => void
+}) {
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  const [{ isDragging }, drag] = useDrag({
+    type: PIVOT_DIM_TYPE,
+    item: () => ({ index }),
+    end: () => {
+      onDragEnd?.()
+    },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  })
+
+  const [{ isOver }, drop] = useDrop({
+    accept: PIVOT_DIM_TYPE,
+    hover: (item: { index: number }) => {
+      if (item.index === index) return
+      onMove(item.index, index)
+      item.index = index
+    },
+    collect: (monitor) => ({
+      isOver: monitor.isOver(),
+    }),
+  })
+
+  drag(drop(rowRef))
+
+  return (
+    <div
+      ref={rowRef}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '5px 8px',
+        fontSize: 11,
+        cursor: 'grab',
+        opacity: isDragging ? 0.4 : 1,
+        background: isOver ? 'rgba(59,130,246,0.08)' : undefined,
+        borderRadius: 4,
+        transition: 'opacity 0.15s, background 0.15s',
+      }}
+    >
+      <span style={{ flex: 1 }}>⠿ {label}</span>
+      <button
+        className="pivot-dim-chip-x"
+        onClick={(e) => { e.stopPropagation(); onRemove() }}
+        onMouseDown={(e) => e.stopPropagation()}
+        title="Remove"
+        style={{ opacity: 0.7, cursor: 'pointer', padding: '2px 4px', borderRadius: 3 }}
+      >
+        <X size={9} />
+      </button>
+    </div>
   )
 }
 

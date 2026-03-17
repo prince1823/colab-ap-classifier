@@ -42,6 +42,7 @@ const COLUMN_LABELS: Record<string, string> = {
   classification_l1: 'Classification L1',
   classification_l2: 'Classification L2',
   classification_l3: 'Classification L3',
+  classification_path: 'Classification Path (L1 › L2 › L3)',
   supplier_name: 'Supplier',
   is_tail_spend: 'Tail Spend',
   is_researched: 'Researched',
@@ -126,7 +127,7 @@ export default function PivotPage() {
   })
 
   const availableColumns = useMemo(() => [
-    'classification_l1', 'classification_l2', 'classification_l3',
+    'classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
     ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
   ], [columns])
 

@@ -14,6 +14,7 @@ const COLUMN_LABELS: Record<string, string> = {
   classification_l2: 'Classification L2',
   classification_l3: 'Classification L3',
   classification_l4: 'Classification L4',
+  classification_path: 'Classification Path',
   supplier_name: 'Supplier',
   gl_description: 'GL Description',
   line_description: 'Line Description',

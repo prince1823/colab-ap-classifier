@@ -11,6 +11,7 @@ interface ChangeLogRow {
   old_values: string | null;
   new_values: string | null;
   description: string | null;
+  is_reverted: boolean;
   created_at: string;
 }
 
@@ -29,6 +30,7 @@ function rowToChangeLog(row: ChangeLogRow): ChangeLog {
     oldValues: safeParse(row.old_values) as Record<string, unknown> | null,
     newValues: safeParse(row.new_values) as Record<string, unknown> | null,
     description: row.description,
+    isReverted: Boolean(row.is_reverted),
     createdAt: String(row.created_at),
   };
 }
@@ -40,14 +42,51 @@ export class ChangelogStore implements IChangelogStore {
     const rows = await this.db.all<ChangeLogRow>(
       'SELECT * FROM change_log ORDER BY created_at DESC'
     );
-    return rows.map(rowToChangeLog);
+    const entries = rows.map(rowToChangeLog);
+
+    // Enrich transaction changes with supplier names
+    const txEntries = entries.filter(e => e.affectedTable === 'transactions' && e.affectedIds.length > 0);
+    if (txEntries.length > 0) {
+      const allIds = new Set<string>();
+      for (const e of txEntries) {
+        for (const id of e.affectedIds) allIds.add(id);
+      }
+
+      const idArray = Array.from(allIds);
+      const placeholders = idArray.map(() => '?').join(',');
+      const txRows = await this.db.all<{ id: string; supplier_name: string | null }>(
+        `SELECT CAST(t.id AS VARCHAR) as id, ps.supplier_name
+         FROM transactions t
+         LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+         WHERE t.id IN (${placeholders})`,
+        ...idArray
+      );
+
+      const txSupplierMap = new Map<string, string>();
+      for (const r of txRows) {
+        if (r.supplier_name) txSupplierMap.set(r.id, r.supplier_name);
+      }
+
+      for (const entry of txEntries) {
+        const suppliers = new Set<string>();
+        for (const id of entry.affectedIds) {
+          const name = txSupplierMap.get(id);
+          if (name) suppliers.add(name);
+        }
+        if (suppliers.size > 0) {
+          entry.supplierNames = Array.from(suppliers);
+        }
+      }
+    }
+
+    return entries;
   }
 
   async logChange(entry: Omit<ChangeLog, 'id' | 'createdAt'>): Promise<string> {
     const id = uuidv4();
     await this.db.run(
-      `INSERT INTO change_log (id, source, affected_table, affected_ids, affected_count, old_values, new_values, description)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO change_log (id, source, affected_table, affected_ids, affected_count, old_values, new_values, description, is_reverted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE)`,
       id,
       entry.source,
       entry.affectedTable,
@@ -68,29 +107,37 @@ export class ChangelogStore implements IChangelogStore {
 
     if (!row) throw new Error(`Changelog entry not found: ${changeId}`);
     const change = rowToChangeLog(row);
-    if (!change.oldValues) throw new Error(`Cannot revert change ${changeId}: no old_values recorded`);
 
-    const columns = Object.keys(change.oldValues);
-    if (columns.length > 0 && change.affectedIds.length > 0) {
-      const setClauses = columns.map((col) => `${col} = ?`).join(', ');
-      const setValues = columns.map((col) => change.oldValues![col]);
-      const placeholders = change.affectedIds.map(() => '?').join(', ');
-
-      await this.db.run(
-        `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
-        ...setValues,
-        ...change.affectedIds
-      );
+    if (change.isReverted) {
+      // Un-revert: re-apply the new values
+      if (!change.newValues) throw new Error(`Cannot un-revert change ${changeId}: no new_values recorded`);
+      const columns = Object.keys(change.newValues);
+      if (columns.length > 0 && change.affectedIds.length > 0) {
+        const setClauses = columns.map((col) => `${col} = ?`).join(', ');
+        const setValues = columns.map((col) => change.newValues![col]);
+        const placeholders = change.affectedIds.map(() => '?').join(', ');
+        await this.db.run(
+          `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
+          ...setValues,
+          ...change.affectedIds
+        );
+      }
+      await this.db.run('UPDATE change_log SET is_reverted = FALSE WHERE id = ?', changeId);
+    } else {
+      // Revert: restore the old values
+      if (!change.oldValues) throw new Error(`Cannot revert change ${changeId}: no old_values recorded`);
+      const columns = Object.keys(change.oldValues);
+      if (columns.length > 0 && change.affectedIds.length > 0) {
+        const setClauses = columns.map((col) => `${col} = ?`).join(', ');
+        const setValues = columns.map((col) => change.oldValues![col]);
+        const placeholders = change.affectedIds.map(() => '?').join(', ');
+        await this.db.run(
+          `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
+          ...setValues,
+          ...change.affectedIds
+        );
+      }
+      await this.db.run('UPDATE change_log SET is_reverted = TRUE WHERE id = ?', changeId);
     }
-
-    await this.logChange({
-      source: 'manual',
-      affectedTable: change.affectedTable,
-      affectedIds: change.affectedIds,
-      affectedCount: change.affectedCount,
-      oldValues: change.newValues,
-      newValues: change.oldValues,
-      description: `Reverted: ${(change.description ?? change.id).replace(/^(Reverted:\s*)+/, '')}`,
-    });
   }
 }

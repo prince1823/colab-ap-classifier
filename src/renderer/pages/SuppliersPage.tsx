@@ -220,7 +220,7 @@ export default function SuppliersPage() {
         ...existingInfo,
         [field]: newValue || undefined,
       }
-      await ipc.suppliers.update(supplier.supplierName, { supplierInfo: updatedInfo })
+      await ipc.suppliers.update(supplier.id, { supplierInfo: updatedInfo })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, supplierInfo: updatedInfo } : s
       ))
@@ -236,7 +236,7 @@ export default function SuppliersPage() {
     setSaving(true)
     try {
       const parentName = newValue || null
-      await ipc.suppliers.update(supplier.supplierName, { parentName })
+      await ipc.suppliers.update(supplier.id, { parentName })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, parentName } : s
       ))
@@ -251,7 +251,7 @@ export default function SuppliersPage() {
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
     setSaving(true)
     try {
-      await ipc.suppliers.researchSingle(supplier.supplierName)
+      await ipc.suppliers.researchSingle(supplier.id)
       await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Research failed')
@@ -281,7 +281,7 @@ export default function SuppliersPage() {
     if (selected.length === 0) return
     for (const s of selected) {
       try {
-        await ipc.suppliers.researchSingle(s.supplierName)
+        await ipc.suppliers.researchSingle(s.id)
       } catch {
         // Continue with next supplier
       }

@@ -114,7 +114,7 @@ export class SupplierService implements ISupplierService {
     );
   }
 
-  async updateSupplier(supplierName: string, updates: SupplierUpdateInput): Promise<void> {
+  async updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void> {
     const setClauses: string[] = [];
     const params: unknown[] = [];
 
@@ -134,10 +134,10 @@ export class SupplierService implements ISupplierService {
     if (setClauses.length === 0) return;
 
     setClauses.push('updated_at = CURRENT_TIMESTAMP');
-    params.push(supplierName);
+    params.push(supplierId);
 
     await this.db.run(
-      `UPDATE project_suppliers SET ${setClauses.join(', ')} WHERE supplier_name = ?`,
+      `UPDATE project_suppliers SET ${setClauses.join(', ')} WHERE id = ?`,
       ...params
     );
   }
@@ -317,6 +317,11 @@ export class SupplierService implements ISupplierService {
   }
 
   async filterTailSpend(threshold: number): Promise<string[]> {
+    // Reset all flags first so threshold changes recalculate correctly
+    await this.db.run(
+      'UPDATE project_suppliers SET is_tail_spend = FALSE, updated_at = CURRENT_TIMESTAMP'
+    );
+
     const hasSpend = await this.transactionColumnExists('spend_amount');
     if (!hasSpend) return [];
 
@@ -340,10 +345,18 @@ export class SupplierService implements ISupplierService {
     return ids;
   }
 
-  async markResearched(supplierName: string): Promise<void> {
+  async isTailSpend(supplierId: string): Promise<boolean> {
+    const row = await this.db.get<{ is_tail_spend: boolean }>(
+      'SELECT is_tail_spend FROM project_suppliers WHERE id = ?',
+      supplierId
+    );
+    return row ? Boolean(row.is_tail_spend) : false;
+  }
+
+  async markResearched(supplierId: string): Promise<void> {
     await this.db.run(
-      'UPDATE project_suppliers SET is_researched = TRUE, updated_at = CURRENT_TIMESTAMP WHERE supplier_name = ?',
-      supplierName
+      'UPDATE project_suppliers SET is_researched = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      supplierId
     );
   }
 }

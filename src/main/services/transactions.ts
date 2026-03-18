@@ -30,6 +30,7 @@ const BASE_COLUMNS = [
 /** Columns that don't exist on transactions but are resolved via JOINs. */
 const VIRTUAL_COLUMNS: Record<string, string> = {
   supplier_name: 'ps.supplier_name',
+  is_tail_spend: 'ps.is_tail_spend',
   classification_l1: 'tax.l1',
   classification_l2: 'tax.l2',
   classification_l3: 'tax.l3',
@@ -319,6 +320,32 @@ export class TransactionStore implements ITransactionStore {
       ...params, ...update.ids
     );
 
+    // Build a descriptive changelog message with supplier names and classification
+    let description = `Reclassified ${update.ids.length} transaction(s)`;
+    try {
+      // Get all distinct supplier names from affected transactions
+      const supplierRows = await this.db.all<{ supplier_name: string }>(
+        `SELECT DISTINCT ps.supplier_name FROM transactions t
+         LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+         WHERE t.id IN (${placeholders}) AND ps.supplier_name IS NOT NULL`,
+        ...update.ids
+      );
+      // Get target classification path
+      let classPath: string | null = null;
+      if (update.taxonomyNodeId) {
+        const taxRow = await this.db.get<{ full_path: string }>(
+          'SELECT full_path FROM taxonomy WHERE id = ?',
+          update.taxonomyNodeId
+        );
+        if (taxRow) classPath = taxRow.full_path.split('|').map(s => s.trim()).join(' > ');
+      }
+
+      const parts: string[] = [];
+      parts.push(`${update.ids.length} txn${update.ids.length !== 1 ? 's' : ''}`);
+      if (classPath) parts.push(`→ ${classPath}`);
+      description = parts.join(' ');
+    } catch { /* fall back to generic description */ }
+
     const changelogId = await this.changelog.logChange({
       source,
       affectedTable: 'transactions',
@@ -326,7 +353,7 @@ export class TransactionStore implements ITransactionStore {
       affectedCount: update.ids.length,
       oldValues,
       newValues,
-      description: `Updated ${update.ids.length} transaction(s)`,
+      description,
     });
     return changelogId;
   }

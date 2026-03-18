@@ -149,12 +149,15 @@ export function createMockSupplierService(): SupplierService {
     addAlias: vi.fn(),
     getAliases: vi.fn().mockResolvedValue([]),
     renameSupplier: vi.fn(),
+    updateSupplier: vi.fn(),
     listProjectSuppliers: vi.fn().mockResolvedValue([]),
     getProjectSupplier: vi.fn().mockResolvedValue(null),
     confirmSupplier: vi.fn(),
     assignParent: vi.fn(),
     filterTailSpend: vi.fn().mockResolvedValue([]),
-    enrichProjectSupplier: vi.fn(),
+    isTailSpend: vi.fn().mockResolvedValue(false),
+    markResearched: vi.fn(),
+    getFilterFields: vi.fn().mockReturnValue([]),
   };
 }
 

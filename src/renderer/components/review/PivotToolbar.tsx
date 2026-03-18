@@ -365,12 +365,15 @@ export default function PivotToolbar({
         {showSpendToggle && (
           <button
             className="pivot-toolbar-icon-btn"
-            onClick={() => onSpendDisplayModeChange(spendDisplayMode === 'absolute' ? 'percentage' : 'absolute')}
-            title={spendDisplayMode === 'absolute' ? 'Show as percentage of top-level total' : 'Show absolute values'}
-            data-active={spendDisplayMode === 'percentage' ? '' : undefined}
+            onClick={() => {
+              const next = spendDisplayMode === 'absolute' ? 'percentage' : spendDisplayMode === 'percentage' ? 'both' : 'absolute'
+              onSpendDisplayModeChange(next)
+            }}
+            title={spendDisplayMode === 'absolute' ? 'Show as percentage' : spendDisplayMode === 'percentage' ? 'Show both $ and %' : 'Show absolute values'}
+            data-active={spendDisplayMode !== 'absolute' ? '' : undefined}
           >
             <span style={{ fontSize: 11, fontWeight: 600, minWidth: 14, textAlign: 'center' }}>
-              {spendDisplayMode === 'absolute' ? '$' : '%'}
+              {spendDisplayMode === 'absolute' ? '$' : spendDisplayMode === 'percentage' ? '%' : '$%'}
             </span>
           </button>
         )}

@@ -530,11 +530,21 @@ export default function HierarchicalPivotView({
   const fmtSpend = (row: FlattenedPivotRow) => {
     if (row.total === 0) return ''
     if (aggregation === 'count') return row.total.toLocaleString()
-    if (spendDisplayMode === 'percentage' && aggregation === 'sum') {
-      if (row.depth === 0) return '100%'
-      const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
-      if (base === 0) return '--'
-      return ((row.total / base) * 100).toFixed(1) + '%'
+    if (aggregation === 'sum') {
+      if (spendDisplayMode === 'percentage') {
+        if (row.depth === 0) return '100%'
+        const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
+        if (base === 0) return '--'
+        return ((row.total / base) * 100).toFixed(1) + '%'
+      }
+      if (spendDisplayMode === 'both') {
+        const abs = fmtAbbrev(row.total)
+        if (row.depth === 0) return `${abs} (100%)`
+        const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
+        if (base === 0) return abs
+        const pct = ((row.total / base) * 100).toFixed(1) + '%'
+        return `${abs} (${pct})`
+      }
     }
     return fmtAbbrev(row.total)
   }
@@ -765,7 +775,7 @@ export default function HierarchicalPivotView({
                   })
                   .join(' > ')}
               </th>
-              <th>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '% of Total' : 'Total'}</th>
+              <th>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '% of Total' : spendDisplayMode === 'both' && aggregation === 'sum' ? 'Total (%)' : 'Total'}</th>
             </tr>
           </thead>
 
@@ -825,7 +835,7 @@ export default function HierarchicalPivotView({
           <tfoot className="pivot-hierarchy-tfoot">
             <tr>
               <td>Grand Total</td>
-              <td>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '' : fmtAbsolute(grandTotal, aggregation)}</td>
+              <td>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '100%' : spendDisplayMode === 'both' && aggregation === 'sum' ? `${fmtAbsolute(grandTotal, aggregation)} (100%)` : fmtAbsolute(grandTotal, aggregation)}</td>
             </tr>
           </tfoot>
         </table>

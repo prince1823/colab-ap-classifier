@@ -162,45 +162,59 @@ export default function DrillDownPanel({ row, onClose }: DrillDownPanelProps) {
       ) : (
         <div className="overflow-auto max-h-[300px]">
           <table className="text-[11px]" style={{ tableLayout: 'fixed', width: allCols.reduce((sum, col) => sum + getWidth(col), 0) }}>
-            <thead className="bg-gray-50 sticky top-0">
+            <thead className="sticky top-0" style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
               <tr>
                 {allCols.map(col => (
                   <th
                     key={col}
-                    className="text-left font-medium text-gray-500 relative"
-                    style={{ width: getWidth(col), minWidth: 60, padding: '6px 12px' }}
+                    className="text-left relative"
+                    style={{
+                      width: getWidth(col),
+                      minWidth: 60,
+                      padding: '8px 12px',
+                      fontWeight: 700,
+                      fontSize: 11,
+                      color: '#1e293b',
+                      textTransform: 'capitalize',
+                      borderRight: '1px solid #e2e8f0',
+                    }}
                   >
                     <span className="truncate block">{colLabel(col)}</span>
-                    {/* Resize handle — visible border line */}
+                    {/* Resize handle — full height clickable border */}
                     <div
                       onMouseDown={(e) => handleMouseDown(col, e)}
                       style={{
                         position: 'absolute',
-                        right: 0,
-                        top: 4,
-                        bottom: 4,
-                        width: 3,
+                        right: -2,
+                        top: 0,
+                        bottom: 0,
+                        width: 5,
                         cursor: 'col-resize',
-                        borderRight: '1px solid #d1d5db',
-                        transition: 'border-color 0.15s',
+                        zIndex: 2,
                       }}
-                      onMouseEnter={(e) => { (e.target as HTMLElement).style.borderRight = '2px solid #3b82f6' }}
-                      onMouseLeave={(e) => { (e.target as HTMLElement).style.borderRight = '1px solid #d1d5db' }}
+                      onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgba(59,130,246,0.3)' }}
+                      onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent' }}
                     />
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody>
               {transactions.map(tx => (
-                <tr key={tx.id} className="hover:bg-gray-50">
+                <tr key={tx.id} className="hover:bg-blue-50/40" style={{ borderBottom: '1px solid #f1f5f9' }}>
                   {allCols.map(col => {
                     const value = getCellValue(tx, col)
                     return (
                       <td
                         key={col}
-                        className="text-gray-600 truncate"
-                        style={{ width: getWidth(col), maxWidth: getWidth(col), padding: '6px 12px' }}
+                        className="text-gray-700 truncate"
+                        style={{
+                          width: getWidth(col),
+                          maxWidth: getWidth(col),
+                          padding: '6px 12px',
+                          borderRight: '1px solid #f1f5f9',
+                          fontSize: 11,
+                        }}
                         title={value}
                       >
                         {value}

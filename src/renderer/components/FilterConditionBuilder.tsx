@@ -504,7 +504,6 @@ export function GroupedFilterBuilder({
 
   return (
     <div>
-
       {/* Groups */}
       <div className="space-y-0">
         {value.groups.map((group, gi) => (

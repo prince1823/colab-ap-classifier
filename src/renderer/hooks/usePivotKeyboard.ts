@@ -7,6 +7,7 @@ interface UsePivotKeyboardOptions {
   rowVirtualizer: Virtualizer<HTMLDivElement, Element>
   onCmdK: (rows: FlattenedPivotRow[]) => void
   onCmdF: (rows: FlattenedPivotRow[]) => void
+  onCmdS?: (rows: FlattenedPivotRow[]) => void
   onToggleExpand: (key: string) => void
   onClearAllFilters: () => void
   disabled: boolean
@@ -25,6 +26,7 @@ export function usePivotKeyboard({
   rowVirtualizer,
   onCmdK,
   onCmdF,
+  onCmdS,
   onToggleExpand,
   onClearAllFilters,
   disabled,
@@ -195,6 +197,14 @@ export function usePivotKeyboard({
         }
         break
       }
+      case 's': {
+        if (metaKey && onCmdS) {
+          e.preventDefault()
+          const rows = getExplicitlySelectedRows()
+          if (rows.length > 0) onCmdS(rows)
+        }
+        break
+      }
       case 'Escape': {
         e.preventDefault()
         // Save focused row key — will be restored after new data arrives
@@ -208,7 +218,7 @@ export function usePivotKeyboard({
         break
       }
     }
-  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onToggleExpand, onClearAllFilters, getSelectedRows, getExplicitlySelectedRows, clearSelection])
+  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onCmdS, onToggleExpand, onClearAllFilters, getSelectedRows, getExplicitlySelectedRows, clearSelection])
 
   return {
     focusedIndex,

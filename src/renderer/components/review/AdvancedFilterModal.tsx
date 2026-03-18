@@ -92,7 +92,7 @@ export default function AdvancedFilterModal({
 
     const stringFields = availableFields.filter(f => f.type === 'string').map(f => f.name)
     for (const field of stringFields) {
-      getDistinctValues(field, 200)
+      ipc.transactions.distinctValues(field, 5000)
         .then((values: string[]) => {
           setDistinctValues(prev => ({ ...prev, [field]: values ?? [] }))
         })

@@ -3,6 +3,7 @@
 /* Hierarchical pivot table container */
 .pivot-hierarchy-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -62,21 +63,21 @@
   transition: background 0.1s;
 }
 
-/* Depth-specific hover — slightly darker version of each band */
+/* Depth-specific hover — slightly darker version of each indigo band */
 .pivot-tree-row[data-depth="0"]:hover,
 .pivot-tree-row[data-depth="0"]:hover .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="0"]:hover .pivot-tree-total-cell {
-  background: #cbd5e1;
+  background: #c7d2fe;
 }
 .pivot-tree-row[data-depth="1"]:hover,
 .pivot-tree-row[data-depth="1"]:hover .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="1"]:hover .pivot-tree-total-cell {
-  background: #dbeafe;
+  background: #e0e7ff;
 }
 .pivot-tree-row[data-depth="2"]:hover,
 .pivot-tree-row[data-depth="2"]:hover .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="2"]:hover .pivot-tree-total-cell {
-  background: #ede9fe;
+  background: #eef2ff;
 }
 .pivot-tree-row[data-depth="3"]:hover,
 .pivot-tree-row[data-depth="3"]:hover .pivot-tree-label-cell,
@@ -84,7 +85,7 @@
 .pivot-tree-row[data-depth="4"]:hover,
 .pivot-tree-row[data-depth="4"]:hover .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="4"]:hover .pivot-tree-total-cell {
-  background: #f1f5f9;
+  background: #f5f3ff;
 }
 
 /* Label cell (indented tree column) */
@@ -93,6 +94,7 @@
   align-items: center;
   gap: 4px;
   min-width: 260px;
+  overflow: hidden;
 }
 
 
@@ -123,18 +125,25 @@
 
 /* Row label text */
 .pivot-tree-label {
+  max-width: 150ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Depth-based visual blocks — each level uses a different hue ── */
 
 /* L1 — dark slate band: bold header row */
+/* Depth palette — single hue (indigo-slate), darkest at top, lightest at bottom */
+
+/* L1 — deep indigo */
 .pivot-tree-row[data-depth="0"] {
-  background: #e2e8f0;
-  border-left: 4px solid #475569;
+  background: #e0e7ff;
+  border-left: 4px solid #4f46e5;
 }
 .pivot-tree-row[data-depth="0"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="0"] .pivot-tree-total-cell {
-  background: #e2e8f0;
+  background: #e0e7ff;
 }
 .pivot-tree-row[data-depth="0"] td {
   padding-top: 10px;
@@ -143,24 +152,24 @@
 .pivot-tree-row[data-depth="0"] .pivot-tree-label {
   font-weight: 700;
   font-size: 13px;
-  color: #1e293b;
+  color: #1a1a1a;
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
 .pivot-tree-row[data-depth="0"] .pivot-tree-total-cell {
   font-weight: 700;
   font-size: 13px;
-  color: #1e293b;
+  color: #1a1a1a;
 }
 
-/* L2 — blue tint band */
+/* L2 — medium indigo */
 .pivot-tree-row[data-depth="1"] {
-  background: #eff6ff;
-  border-left: 3px solid #93c5fd;
+  background: #eef2ff;
+  border-left: 3px solid #818cf8;
 }
 .pivot-tree-row[data-depth="1"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="1"] .pivot-tree-total-cell {
-  background: #eff6ff;
+  background: #eef2ff;
 }
 .pivot-tree-row[data-depth="1"] td {
   padding-top: 7px;
@@ -169,17 +178,17 @@
 .pivot-tree-row[data-depth="1"] .pivot-tree-label {
   font-weight: 600;
   font-size: 12px;
-  color: #1e40af;
+  color: #2d2d2d;
 }
 .pivot-tree-row[data-depth="1"] .pivot-tree-total-cell {
   font-weight: 600;
-  color: #1e40af;
+  color: #2d2d2d;
 }
 
-/* L3 — light violet tint band */
+/* L3 — light indigo */
 .pivot-tree-row[data-depth="2"] {
   background: #f5f3ff;
-  border-left: 2px solid #c4b5fd;
+  border-left: 2px solid #a5b4fc;
 }
 .pivot-tree-row[data-depth="2"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="2"] .pivot-tree-total-cell {
@@ -188,34 +197,34 @@
 .pivot-tree-row[data-depth="2"] .pivot-tree-label {
   font-weight: 500;
   font-size: 11px;
-  color: #5b21b6;
+  color: #3a3a3a;
 }
 .pivot-tree-row[data-depth="2"] .pivot-tree-total-cell {
-  color: #5b21b6;
+  color: #3a3a3a;
   font-weight: 500;
 }
 
-/* L4+ — plain white, no accent */
+/* L4+ — faintest indigo wash */
 .pivot-tree-row[data-depth="3"],
 .pivot-tree-row[data-depth="4"] {
-  background: #ffffff;
-  border-left: 2px solid transparent;
+  background: #faf9ff;
+  border-left: 2px solid #c7d2fe;
 }
 .pivot-tree-row[data-depth="3"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="3"] .pivot-tree-total-cell,
 .pivot-tree-row[data-depth="4"] .pivot-tree-label-cell,
 .pivot-tree-row[data-depth="4"] .pivot-tree-total-cell {
-  background: #ffffff;
+  background: #faf9ff;
 }
 .pivot-tree-row[data-depth="3"] .pivot-tree-label,
 .pivot-tree-row[data-depth="4"] .pivot-tree-label {
   font-weight: 400;
   font-size: 11px;
-  color: #64748b;
+  color: #4a4a4a;
 }
 .pivot-tree-row[data-depth="3"] .pivot-tree-total-cell,
 .pivot-tree-row[data-depth="4"] .pivot-tree-total-cell {
-  color: #64748b;
+  color: #4a4a4a;
   font-weight: 400;
 }
 
@@ -593,7 +602,8 @@
 }
 
 /* Active state for spend toggle button */
-.pivot-toolbar-icon-btn[data-active] {
+.pivot-toolbar-icon-btn[data-active],
+.pivot-toolbar-icon-btn-active {
   background: rgba(59, 130, 246, 0.1);
   border-color: var(--primary-color);
   color: var(--primary-color);

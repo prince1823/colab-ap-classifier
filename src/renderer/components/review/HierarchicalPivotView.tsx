@@ -8,9 +8,12 @@ import { usePivotTreeState, filterRowsBySearch } from '../../hooks/usePivotTreeS
 import { usePivotKeyboard } from '../../hooks/usePivotKeyboard'
 import PivotToolbar from './PivotToolbar'
 import type { PivotFilterState } from './PivotFilterBar'
-import type { FilterCondition } from '../../../shared/types/transactions'
+import type { FilterCondition, GroupedFilter, FilterOperator } from '../../../shared/types/transactions'
 import { OPERATOR_LABELS } from '../FilterConditionBuilder'
 import { fmtAbbrev } from '../../utils/formatSpend'
+import { ipc } from '../../lib/ipc'
+import type { SupplierInfo } from '../../../shared/types/suppliers'
+import SupplierInfoModal from './SupplierInfoModal'
 import '../../styles/PivotHierarchy.css'
 
 interface HierarchicalPivotViewProps {
@@ -48,6 +51,9 @@ interface HierarchicalPivotViewProps {
   onOpenAdvancedFilter?: () => void
   advancedConditions?: FilterCondition[]
   onRemoveAdvancedCondition?: (index: number) => void
+  /** Grouped filter for export — full AND/OR structure */
+  advancedGrouped?: GroupedFilter | null
+  onSetAdvancedGrouped?: (grouped: GroupedFilter | null) => void
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -67,6 +73,30 @@ const COLUMN_LABELS: Record<string, string> = {
   month: 'Month',
   costCenter: 'Cost Center',
   country: 'Country',
+}
+
+// Full labels for export CSV
+const FULL_COLUMN_LABELS: Record<string, string> = {
+  classification_l1: 'Classification L1',
+  classification_l2: 'Classification L2',
+  classification_l3: 'Classification L3',
+  classification_l4: 'Classification L4',
+  supplier_name: 'Supplier',
+  gl_description: 'GL Description',
+  line_description: 'Line Description',
+  company: 'Company',
+  spend_amount: 'Spend Amount',
+  amount: 'Amount',
+  invoice_amount: 'Invoice Amount',
+  year: 'Year',
+  quarter: 'Quarter',
+  month: 'Month',
+  costCenter: 'Cost Center',
+  country: 'Country',
+}
+
+function fullColLabel(col: string): string {
+  return FULL_COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function colLabel(col: string): string {
@@ -207,20 +237,112 @@ export default function HierarchicalPivotView({
   onOpenAdvancedFilter,
   advancedConditions = [],
   onRemoveAdvancedCondition,
+  advancedGrouped,
+  onSetAdvancedGrouped,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
+  const [freezeLevel, setFreezeLevel] = useState(0) // 0 = off, 1 = freeze L1, 2 = freeze L1+L2, etc.
 
-  const { flatRows, allFlatRows, toggleExpand, expandToLevel, depth0TotalMap } = usePivotTreeState(
+  // Supplier info modal (Cmd+S) — supports multiple suppliers
+  const [supplierInfoModal, setSupplierInfoModal] = useState<Array<{
+    name: string
+    info: SupplierInfo | null
+    isResearched: boolean
+  }> | null>(null)
+
+  const { flatRows, allFlatRows, toggleExpand, expandToLevel, expandToKey, depth0TotalMap } = usePivotTreeState(
     pivotData?.root ?? null
   )
 
   // When searching, use allFlatRows (ignores expand/collapse) so collapsed children are found.
   // When not searching, use flatRows (respects expand/collapse state).
   const visibleRows = useMemo(
-    () => search.trim() ? filterRowsBySearch(allFlatRows, search) : flatRows,
+    () => search.trim() ? filterRowsBySearch(flatRows, allFlatRows, search) : flatRows,
     [flatRows, allFlatRows, search]
   )
+
+  // Export pivot view as CSV (hierarchical, matching what's on screen)
+  const handlePivotExport = useCallback(async () => {
+    if (!visibleRows.length) return
+
+    const escCSV = (v: string) => {
+      if (v.includes(',') || v.includes('"') || v.includes('\n')) return `"${v.replace(/"/g, '""')}"`
+      return v
+    }
+
+    const lines: string[] = []
+
+    // Build full filter description with AND/OR logic and parentheses
+    const filterParts: string[] = []
+
+    // Pill filters (double-click / cmd+F)
+    for (const [col, values] of Object.entries(filterState)) {
+      if (values.length > 0) {
+        if (values.length === 1) {
+          filterParts.push(`(${fullColLabel(col)} equals "${values[0]}")`)
+        } else {
+          const orParts = values.map(v => `${fullColLabel(col)} equals "${v}"`).join(' OR ')
+          filterParts.push(`(${orParts})`)
+        }
+      }
+    }
+
+    // Advanced grouped filters — preserve the full AND/OR structure
+    if (advancedGrouped && advancedGrouped.groups.length > 0) {
+      const groupStrs: string[] = []
+      for (const group of advancedGrouped.groups) {
+        const validConds = group.conditions.filter(c => c.field)
+        if (validConds.length === 0) continue
+        const condStrs = validConds.map(c => {
+          const opLabel = OPERATOR_LABELS[c.operator] || c.operator
+          return `${fullColLabel(c.field)} ${opLabel} "${c.value}"`
+        })
+        if (condStrs.length === 1) {
+          groupStrs.push(condStrs[0])
+        } else {
+          groupStrs.push(`(${condStrs.join(` ${group.connector} `)})`)
+        }
+      }
+      if (groupStrs.length > 0) {
+        if (groupStrs.length === 1) {
+          filterParts.push(groupStrs[0])
+        } else {
+          filterParts.push(`(${groupStrs.join(` ${advancedGrouped.groupConnector} `)})`)
+        }
+      }
+    }
+
+    if (filterParts.length > 0) {
+      const filterExpr = filterParts.join(' AND ')
+      lines.push(escCSV(`Active Filters: ${filterExpr}`))
+      lines.push('') // blank line separator
+    }
+
+    // Headers: one column per dimension level + Count + Total
+    const dimHeaders = rowDimensions.map(d => colLabel(d))
+    const headers = [...dimHeaders, 'Count', 'Total']
+    lines.push(headers.map(escCSV).join(','))
+
+    for (const row of visibleRows) {
+      // Fill the correct dimension column based on depth
+      const dimValues = rowDimensions.map((_, i) => i === row.depth ? row.label : '')
+      const total = row.total === 0 ? '' : fmtAbbrev(row.total)
+      const count = String(row.transactionCount)
+      lines.push([...dimValues.map(escCSV), escCSV(count), escCSV(total)].join(','))
+    }
+
+    // Add grand total row
+    if (pivotData) {
+      const grandValues = rowDimensions.map(() => '')
+      grandValues[0] = 'Grand Total'
+      const grandTotal = fmtAbbrev(pivotData.grandTotal)
+      lines.push([...grandValues.map(escCSV), '', escCSV(grandTotal)].join(','))
+    }
+
+    const content = lines.join('\r\n') + '\r\n'
+    await ipc.export.saveContent(content, 'pivot-export.csv')
+  }, [visibleRows, rowDimensions, aggregation, pivotData, filterState, advancedGrouped])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevModalOpenRef = useRef(modalOpen)
@@ -240,6 +362,109 @@ export default function HierarchicalPivotView({
     scrollPaddingStart: 40,
     scrollPaddingEnd: 40,
   })
+
+  // Sticky frozen level headers — DOM-driven for smooth performance (no React re-renders on scroll)
+  const stickyRef = useRef<HTMLTableElement>(null)
+  const lastStickyKeyRef = useRef('')
+
+  useEffect(() => {
+    const el = scrollRef.current
+    const stickyEl = stickyRef.current
+    if (!el || !stickyEl) return
+
+    if (freezeLevel === 0) {
+      stickyEl.style.display = 'none'
+      lastStickyKeyRef.current = ''
+      return
+    }
+
+    let rafId = 0
+    const onScroll = () => {
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => {
+        const items = rowVirtualizer.getVirtualItems()
+        if (items.length === 0) { stickyEl.style.display = 'none'; stickyEl.style.marginBottom = '0px'; lastStickyKeyRef.current = ''; return }
+
+        const scrollTop = el.scrollTop
+        const theadHeight = 33
+        const adjustedTop = scrollTop + theadHeight
+
+        let topRowIdx = items[0].index
+        for (const item of items) {
+          if (item.start + item.size > adjustedTop) {
+            topRowIdx = item.index
+            break
+          }
+        }
+
+        const topRow = visibleRows[topRowIdx]
+        if (!topRow) { stickyEl.style.display = 'none'; stickyEl.style.marginBottom = '0px'; lastStickyKeyRef.current = ''; return }
+
+        // Build ancestors: walk backwards to find parent at each depth < freezeLevel
+        const ancestors: { label: string; total: number; depth: number; count: number }[] = []
+        const neededDepths = new Set<number>()
+        for (let d = 0; d < Math.min(freezeLevel, topRow.depth); d++) neededDepths.add(d)
+
+        if (neededDepths.size === 0) { stickyEl.style.display = 'none'; stickyEl.style.marginBottom = '0px'; lastStickyKeyRef.current = ''; return }
+
+        for (let i = topRowIdx - 1; i >= 0 && neededDepths.size > 0; i--) {
+          const r = visibleRows[i]
+          if (neededDepths.has(r.depth)) {
+            ancestors.unshift({ label: r.label, total: r.total, depth: r.depth, count: r.transactionCount })
+            neededDepths.delete(r.depth)
+          }
+        }
+
+        // Only update DOM if ancestors changed
+        const newKey = ancestors.map(a => `${a.depth}:${a.label}`).join('|')
+        if (newKey === lastStickyKeyRef.current) return
+        lastStickyKeyRef.current = newKey
+
+        // Build rows directly in DOM
+        const tbody = stickyEl.querySelector('tbody')!
+        tbody.innerHTML = ''
+        for (const a of ancestors) {
+          const tr = document.createElement('tr')
+          tr.className = 'pivot-tree-row'
+          tr.setAttribute('data-depth', String(a.depth))
+          tr.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)'
+
+          const tdLabel = document.createElement('td')
+          tdLabel.className = 'pivot-tree-label-cell'
+          tdLabel.style.paddingLeft = `${10 + a.depth * 20}px`
+
+          const placeholder = document.createElement('span')
+          placeholder.className = 'pivot-tree-chevron-placeholder'
+          tdLabel.appendChild(placeholder)
+
+          const labelSpan = document.createElement('span')
+          labelSpan.className = 'pivot-tree-label'
+          labelSpan.textContent = a.label
+          tdLabel.appendChild(labelSpan)
+
+          const countSpan = document.createElement('span')
+          countSpan.className = 'pivot-tree-count'
+          countSpan.textContent = `(${a.count})`
+          tdLabel.appendChild(countSpan)
+
+          tr.appendChild(tdLabel)
+
+          const tdTotal = document.createElement('td')
+          tdTotal.className = 'pivot-tree-total-cell'
+          tdTotal.textContent = fmtAbbrev(a.total)
+          tr.appendChild(tdTotal)
+
+          tbody.appendChild(tr)
+        }
+        stickyEl.style.display = 'table'
+        stickyEl.style.marginBottom = `-${ancestors.length * 32}px`
+      })
+    }
+
+    el.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => { el.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId) }
+  }, [visibleRows, rowVirtualizer, freezeLevel])
 
   // Keyboard navigation
   const handleCmdK = useMemo(() => (rows: FlattenedPivotRow[]) => {
@@ -262,14 +487,40 @@ export default function HierarchicalPivotView({
     onReclassify?.(rows)
   }, [onReclassify])
 
+  // Cmd+S: show supplier info for focused/selected supplier rows
+  const handleCmdS = useCallback(async (rows: FlattenedPivotRow[]) => {
+    // Filter to only supplier_name rows
+    const supplierRows = rows.filter(r => r.dimensionField === 'supplier_name')
+    if (supplierRows.length === 0) return
+    const names = supplierRows.map(r => r.label)
+    try {
+      const allSuppliers = await ipc.suppliers.list() as Array<{ supplierName: string; supplierInfo: SupplierInfo | null; isResearched: boolean }>
+      const results = names.map(rawName => {
+        // Clean pipe-separated duplicates (e.g. "ACME INC|ACME INC" → "ACME INC")
+        const name = rawName.split('|')[0].trim()
+        const match = allSuppliers.find(s => s.supplierName.toLowerCase() === name.toLowerCase()
+          || s.supplierName.toLowerCase() === rawName.toLowerCase())
+        return {
+          name,
+          info: match?.supplierInfo ?? null,
+          isResearched: match?.isResearched ?? false,
+        }
+      })
+      setSupplierInfoModal(results)
+    } catch {
+      setSupplierInfoModal(names.map(name => ({ name, info: null, isResearched: false })))
+    }
+  }, [])
+
   const { focusedIndex, selectedKeys, handleKeyDown, clearSelection, setFocusedIndex } = usePivotKeyboard({
     visibleRows,
     rowVirtualizer,
     onCmdK: handleCmdK,
     onCmdF: handleCmdF,
+    onCmdS: handleCmdS,
     onToggleExpand: toggleExpand,
     onClearAllFilters,
-    disabled: modalOpen,
+    disabled: modalOpen || !!supplierInfoModal,
   })
 
   // When modal closes: clear selection and restore keyboard focus to table
@@ -294,6 +545,19 @@ export default function HierarchicalPivotView({
     return dim ? colLabel(dim) : `D${level + 1}`
   }
 
+  // Cycle freeze level: Off → L1 → L1+L2 → L1+L2+L3 → Off
+  const handleCycleFreeze = () => {
+    setFreezeLevel(prev => prev >= maxDepth - 1 ? 0 : prev + 1)
+  }
+  const freezeLabelMap = (level: number) => {
+    if (level === 0) return 'Off'
+    const labels: string[] = []
+    for (let i = 0; i < level; i++) {
+      labels.push(`L${i + 1}`)
+    }
+    return labels.join('+')
+  }
+
   const hasData = totalCount ? totalCount > 0 : (transactions?.length ?? 0) > 0
   const grandTotal = pivotData?.grandTotal ?? 0
 
@@ -301,11 +565,32 @@ export default function HierarchicalPivotView({
   const fmtSpend = (row: FlattenedPivotRow) => {
     if (row.total === 0) return ''
     if (aggregation === 'count') return row.total.toLocaleString()
-    if (spendDisplayMode === 'percentage' && aggregation === 'sum') {
-      if (row.depth === 0) return '100%'
-      const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
-      if (base === 0) return '--'
-      return ((row.total / base) * 100).toFixed(1) + '%'
+    if (aggregation === 'sum') {
+      if (spendDisplayMode === 'percentage') {
+        // Depth 0 (L1): percentage of grand total
+        if (row.depth === 0) {
+          if (grandTotal === 0) return '--'
+          return ((row.total / grandTotal) * 100).toFixed(1) + '%'
+        }
+        // Deeper levels: percentage of their depth-0 ancestor
+        const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
+        if (base === 0) return '--'
+        return ((row.total / base) * 100).toFixed(1) + '%'
+      }
+      if (spendDisplayMode === 'both') {
+        const abs = fmtAbbrev(row.total)
+        // Depth 0 (L1): percentage of grand total
+        if (row.depth === 0) {
+          if (grandTotal === 0) return abs
+          const pct = ((row.total / grandTotal) * 100).toFixed(1) + '%'
+          return `${abs} (${pct})`
+        }
+        // Deeper levels: percentage of their depth-0 ancestor
+        const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
+        if (base === 0) return abs
+        const pct = ((row.total / base) * 100).toFixed(1) + '%'
+        return `${abs} (${pct})`
+      }
     }
     return fmtAbbrev(row.total)
   }
@@ -352,24 +637,51 @@ export default function HierarchicalPivotView({
                   onRemove={(value) => removeFilter(col, value)}
                 />
               ))}
-              {advancedConditions.map((cond, idx) => (
-                <span
-                  key={`adv-${idx}`}
-                  className="inline-flex items-center gap-0.5 rounded-full bg-purple-50 border border-purple-200 pl-1.5 pr-1 py-px text-[9px] text-purple-700 font-medium flex-shrink-0"
-                >
-                  <span className="text-purple-400">{colLabel(cond.field)}</span>
-                  <span className="text-purple-300 mx-0.5">{OPERATOR_LABELS[cond.operator] ?? cond.operator}</span>
-                  <span className="truncate max-w-[80px]">{String(cond.value)}</span>
-                  {onRemoveAdvancedCondition && (
-                    <button
-                      onClick={() => { onRemoveAdvancedCondition(idx); refocusTable() }}
-                      className="ml-0.5 rounded-full p-px hover:bg-purple-200 transition-colors"
-                    >
-                      <X size={8} />
-                    </button>
-                  )}
-                </span>
-              ))}
+              {advancedGrouped && advancedGrouped.groups.map((group, gi) => {
+                const validConds = group.conditions.filter(c => c.field)
+                if (validConds.length === 0) return null
+                return (
+                  <React.Fragment key={`adv-g${gi}`}>
+                    {gi > 0 && (
+                      <span className="text-[8px] font-bold text-blue-500 uppercase px-0.5 flex-shrink-0">
+                        {group.groupConnector ?? advancedGrouped.groupConnector}
+                      </span>
+                    )}
+                    {validConds.length > 1 && <span className="text-gray-800 text-[11px] font-bold flex-shrink-0">(</span>}
+                    {validConds.map((c, ci) => {
+                      const opLabel = OPERATOR_LABELS[c.operator as FilterOperator] ?? c.operator
+                      const displayValue = Array.isArray(c.value) ? c.value.join(', ') : String(c.value)
+                      return (
+                        <React.Fragment key={`adv-g${gi}-c${ci}`}>
+                          {ci > 0 && (
+                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{group.connector}</span>
+                          )}
+                          <span className="inline-flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] text-blue-800 whitespace-nowrap flex-shrink-0">
+                            <span className="font-medium">{colLabel(c.field)}</span>
+                            <span className="text-blue-500">{opLabel}</span>
+                            {displayValue && <span className="font-semibold max-w-[150px] truncate" title={displayValue}>{displayValue}</span>}
+                            {onSetAdvancedGrouped && (
+                              <button type="button" onClick={() => {
+                                const newGroups = advancedGrouped.groups.map((g, gIdx) => {
+                                  if (gIdx !== gi) return g
+                                  const newConds = g.conditions.filter((_, cIdx) => cIdx !== ci)
+                                  return { ...g, conditions: newConds.length > 0 ? newConds : [] }
+                                }).filter(g => g.conditions.length > 0)
+                                onSetAdvancedGrouped(newGroups.length > 0 ? { ...advancedGrouped, groups: newGroups } : null)
+                                refocusTable()
+                              }}
+                              className="ml-0.5 rounded-full p-0.5 text-blue-400 hover:bg-blue-200 hover:text-blue-700 transition-colors">
+                                <X size={8} />
+                              </button>
+                            )}
+                          </span>
+                        </React.Fragment>
+                      )
+                    })}
+                    {validConds.length > 1 && <span className="text-gray-800 text-[11px] font-bold flex-shrink-0">)</span>}
+                  </React.Fragment>
+                )
+              })}
               <button
                 onClick={() => { onClearAllFilters(); refocusTable() }}
                 className="text-[9px] font-medium text-red-500 hover:text-red-600 flex-shrink-0 ml-0.5 transition-colors"
@@ -414,10 +726,10 @@ export default function HierarchicalPivotView({
             )}
           </div>
           <button
-            onClick={onExport}
-            disabled={exportDisabled || !hasData}
+            onClick={handlePivotExport}
+            disabled={!hasData}
             className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-1.5 py-px text-[10px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-            title="Export CSV"
+            title="Export pivot view as CSV"
             style={{ height: 20 }}
           >
             <ArrowDownTrayIcon className="h-2.5 w-2.5" />
@@ -438,6 +750,9 @@ export default function HierarchicalPivotView({
         collapseLevel={collapseLevel}
         onCycleCollapse={handleCycleCollapse}
         cycleLevelLabel={cycleLabelMap(collapseLevel)}
+        freezeLevel={freezeLevel}
+        onCycleFreeze={handleCycleFreeze}
+        freezeLevelLabel={freezeLabelMap(freezeLevel)}
         rows={allRows}
         filterOptions={filterOptions}
         filterState={filterState}
@@ -461,7 +776,7 @@ export default function HierarchicalPivotView({
       {/* Table — only render when there's data */}
       {hasData && pivotData && <div
         ref={scrollRef}
-        className="overflow-auto flex-1 border border-gray-200 rounded-lg"
+        className="overflow-y-auto overflow-x-hidden flex-1 border border-gray-200 rounded-lg"
         style={{ position: 'relative', outline: 'none', scrollPaddingBottom: 40, scrollPaddingTop: 40 }}
         tabIndex={0}
         onKeyDown={handleKeyDown}
@@ -474,11 +789,30 @@ export default function HierarchicalPivotView({
         }}
         role="grid"
       >
-        <table className="pivot-hierarchy-table" style={{ minWidth: '100%' }}>
+        {/* Frozen level headers — DOM-driven sticky overlay below the thead */}
+        <table
+          ref={stickyRef}
+          className="pivot-hierarchy-table"
+          style={{
+            position: 'sticky',
+            top: 33,
+            zIndex: 11,
+            pointerEvents: 'none',
+            minWidth: '100%',
+            display: 'none',
+          }}
+        >
+          <tbody />
+        </table>
+        <table className="pivot-hierarchy-table">
+          <colgroup>
+            <col style={{ width: '80%' }} />
+            <col style={{ width: '20%' }} />
+          </colgroup>
           {/* Header */}
           <thead className="pivot-hierarchy-thead">
             <tr>
-              <th>
+              <th style={{ textAlign: 'left' }}>
                 {rowDimensions
                   .map(d => {
                     const label =
@@ -487,7 +821,7 @@ export default function HierarchicalPivotView({
                   })
                   .join(' > ')}
               </th>
-              <th>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '% of Total' : 'Total'}</th>
+              <th>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '% of Total' : spendDisplayMode === 'both' && aggregation === 'sum' ? 'Total (%)' : 'Total'}</th>
             </tr>
           </thead>
 
@@ -547,11 +881,27 @@ export default function HierarchicalPivotView({
           <tfoot className="pivot-hierarchy-tfoot">
             <tr>
               <td>Grand Total</td>
-              <td>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '' : fmtAbsolute(grandTotal, aggregation)}</td>
+              <td>{spendDisplayMode === 'percentage' && aggregation === 'sum' ? '100%' : spendDisplayMode === 'both' && aggregation === 'sum' ? `${fmtAbsolute(grandTotal, aggregation)} (100%)` : fmtAbsolute(grandTotal, aggregation)}</td>
             </tr>
           </tfoot>
         </table>
       </div>}
+
+      {/* Supplier Info Modal (Cmd+S) */}
+      {supplierInfoModal && createPortal(
+        <SupplierInfoModal
+          suppliers={supplierInfoModal}
+          onClose={() => {
+            setSupplierInfoModal(null)
+            requestAnimationFrame(() => scrollRef.current?.focus())
+          }}
+          onGoToSuppliers={() => {
+            setSupplierInfoModal(null)
+            window.location.hash = '#/suppliers'
+          }}
+        />,
+        document.body
+      )}
     </div>
   )
 }
@@ -596,7 +946,7 @@ function PivotTreeRow({
       data-depth={row.depth}
       data-focused={isFocused || undefined}
       data-selected={isSelected || undefined}
-      onClick={onClick}
+      onClick={() => onClick?.()}
       onDoubleClick={() => {
         const dim = rowDimensions[row.depth]
         if (!dim) return
@@ -617,7 +967,7 @@ function PivotTreeRow({
         {row.hasChildren ? (
           <span
             className="pivot-tree-chevron"
-            onClick={() => onToggle(row.key)}
+            onClick={(e) => { e.stopPropagation(); onToggle(row.key) }}
           >
             {row.isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>

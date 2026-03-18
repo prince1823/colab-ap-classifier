@@ -384,10 +384,10 @@ export class SupplierService implements ISupplierService {
     return ids;
   }
 
-  async isTailSpend(supplierName: string): Promise<boolean> {
+  async isTailSpend(supplierId: string): Promise<boolean> {
     const row = await this.db.get<{ is_tail_spend: boolean }>(
-      'SELECT is_tail_spend FROM project_suppliers WHERE supplier_name = ?',
-      supplierName
+      'SELECT is_tail_spend FROM project_suppliers WHERE id = ?',
+      supplierId
     );
     return row ? Boolean(row.is_tail_spend) : false;
   }

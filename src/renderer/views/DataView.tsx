@@ -38,6 +38,7 @@ export default function DataView() {
   const [activeDerivedMappings, setActiveDerivedMappings] = useState<DerivedMappings | null>(null)
   const [importing, setImporting] = useState(false)
   const [derivingMappings, setDerivingMappings] = useState(false)
+  const [mappingFromPrevious, setMappingFromPrevious] = useState(false)
 
   // Load existing uploads on mount
   useEffect(() => {
@@ -67,6 +68,7 @@ export default function DataView() {
     setActivePreview(preview)
     setError(null)
     setDerivingMappings(true)
+    setMappingFromPrevious(source !== 'llm')
     try {
       const derived = await ipc.ingest.deriveMappings(
         preview.columns,
@@ -97,12 +99,14 @@ export default function DataView() {
 
       const result = await ipc.ingest.importCSV(activeFilePath, columnMapping)
 
-      // Save default column_priorities (invariant 5: must be set after import)
-      const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
-      // supplier_name first, then rest
-      const supplierFirst = mappedCols.filter((c) => c === 'supplier_name')
-      const rest = mappedCols.filter((c) => c !== 'supplier_name')
-      await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
+      // Only set default column_priorities if none exist yet
+      const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
+      if (!existingPriorities || existingPriorities.length === 0) {
+        const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
+        const supplierFirst = mappedCols.filter((c) => c === 'supplier_name')
+        const rest = mappedCols.filter((c) => c !== 'supplier_name')
+        await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
+      }
 
       // Add to completed uploads
       setCompletedUploads((prev) => [
@@ -133,6 +137,8 @@ export default function DataView() {
     setError(null)
     try {
       await ipc.project.setSetting('column_priorities', llmOrder)
+      // Save separately so Priority step knows this is user-curated (not auto-default)
+      await ipc.project.setSetting('column_priorities_saved', llmOrder)
       await refreshMetadata()
       await refreshGateState()
       navigate('/suppliers')
@@ -215,6 +221,7 @@ export default function DataView() {
             onApply={handleMappingsApplied}
             onBack={() => setStep('upload')}
             importing={importing}
+            fromPreviousMapping={mappingFromPrevious}
           />
         )}
         {step === 'priority' && (

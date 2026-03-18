@@ -99,6 +99,7 @@ export interface IPCInvokeMap {
 
   // Export
   'export:csv': { args: [filters?: TransactionFilter]; result: { rowsExported: number } | null };
+  'export:saveContent': { args: [content: string, defaultFilename: string]; result: boolean };
 
   // Settings — LLM
   'settings:getLLMConfig':   { args: []; result: LLMConfigResponse };

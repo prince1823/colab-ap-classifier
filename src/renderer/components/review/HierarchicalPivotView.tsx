@@ -495,8 +495,11 @@ export default function HierarchicalPivotView({
     const names = supplierRows.map(r => r.label)
     try {
       const allSuppliers = await ipc.suppliers.list() as Array<{ supplierName: string; supplierInfo: SupplierInfo | null; isResearched: boolean }>
-      const results = names.map(name => {
-        const match = allSuppliers.find(s => s.supplierName.toLowerCase() === name.toLowerCase())
+      const results = names.map(rawName => {
+        // Clean pipe-separated duplicates (e.g. "ACME INC|ACME INC" → "ACME INC")
+        const name = rawName.split('|')[0].trim()
+        const match = allSuppliers.find(s => s.supplierName.toLowerCase() === name.toLowerCase()
+          || s.supplierName.toLowerCase() === rawName.toLowerCase())
         return {
           name,
           info: match?.supplierInfo ?? null,

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, ExternalLink, ArrowRight } from 'lucide-react'
 import type { SupplierInfo } from '../../../shared/types/suppliers'
 
@@ -17,6 +17,14 @@ interface Props {
 export default function SupplierInfoModal({ suppliers, onClose, onGoToSuppliers }: Props) {
   const multi = suppliers.length > 1
 
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose() }
+    }
+    window.addEventListener('keydown', handleEsc, true)
+    return () => window.removeEventListener('keydown', handleEsc, true)
+  }, [onClose])
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
@@ -24,7 +32,7 @@ export default function SupplierInfoModal({ suppliers, onClose, onGoToSuppliers 
       onClick={onClose}
     >
       <div
-        className={`bg-white rounded-xl shadow-2xl mx-4 overflow-hidden flex flex-col ${multi ? 'max-w-5xl w-full' : 'max-w-lg w-full'}`}
+        className={`bg-white rounded-xl shadow-2xl mx-4 overflow-hidden flex flex-col ${multi ? 'max-w-[90vw]' : 'max-w-lg w-full'}`}
         style={{ maxHeight: '80vh' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -59,14 +67,17 @@ export default function SupplierInfoModal({ suppliers, onClose, onGoToSuppliers 
               </h3>
 
               {!s.isResearched ? (
-                <div className="text-center py-3">
-                  <p className="text-[11px] text-gray-400 mb-2">Not researched</p>
-                  <button
-                    onClick={onGoToSuppliers}
-                    className="inline-flex items-center gap-1 px-3 py-1 rounded-md bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700 transition-colors"
-                  >
-                    Research <ArrowRight size={10} />
-                  </button>
+                <div className="py-3">
+                  <p className="text-[11px] text-gray-500">
+                    Supplier not researched. Go to{' '}
+                    <button
+                      onClick={onGoToSuppliers}
+                      className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                    >
+                      Supplier Page
+                    </button>
+                    {' '}and do the research first.
+                  </p>
                 </div>
               ) : !s.info ? (
                 <p className="text-[11px] text-gray-400 py-3">No info available</p>

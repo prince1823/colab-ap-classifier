@@ -200,7 +200,7 @@ export function usePivotKeyboard({
       case 's': {
         if (metaKey && onCmdS) {
           e.preventDefault()
-          const rows = getSelectedRows()
+          const rows = getExplicitlySelectedRows()
           if (rows.length > 0) onCmdS(rows)
         }
         break

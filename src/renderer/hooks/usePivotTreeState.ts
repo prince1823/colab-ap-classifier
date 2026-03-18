@@ -107,6 +107,19 @@ export function usePivotTreeState(
     setExpandedKeys(new Set<string>())
   }, [])
 
+  // Expand all ancestors of a given key so the row becomes visible
+  const expandToKey = useCallback((key: string) => {
+    setExpandedKeys(prev => {
+      const next = new Set(prev)
+      // Key format: "LABEL1|LABEL2|LABEL3" — expand each prefix
+      const parts = key.split('|')
+      for (let i = 1; i <= parts.length; i++) {
+        next.add(parts.slice(0, i).join('|'))
+      }
+      return next
+    })
+  }, [])
+
   const expandToLevel = useCallback((targetDepth: number) => {
     if (!root) return
     const keys = new Set<string>()
@@ -208,54 +221,54 @@ export function usePivotTreeState(
     expandAll,
     collapseAll,
     expandToLevel,
+    expandToKey,
     depth0TotalMap,
     expandedKeys,
   }
 }
 
 /**
- * Filter flat rows by search term, preserving ancestor context.
- * Uses DFS position (walk-backward) to find true ancestors — safe even when
- * labels contain the `|` delimiter.  Ancestors are forced to isExpanded: true
- * so matching children are always visible during search.
+ * Filter flat rows by search term.
+ * Shows matching rows plus their visible descendants (respecting expand/collapse).
+ * Matching rows with children can be clicked to expand/drill-down within search.
+ *
+ * @param flatRows - rows that respect current expand/collapse state
+ * @param allFlatRows - full tree (ignoring expand/collapse) to find all matches
+ * @param search - search query
  */
 export function filterRowsBySearch(
   flatRows: FlattenedPivotRow[],
+  allFlatRows: FlattenedPivotRow[],
   search: string
 ): FlattenedPivotRow[] {
   if (!search.trim()) return flatRows
   const q = search.trim().toLowerCase()
 
-  // Find indices of all matching rows
-  const matchIndices: number[] = []
-  for (let i = 0; i < flatRows.length; i++) {
-    if (flatRows[i].label.toLowerCase().includes(q)) {
-      matchIndices.push(i)
+  // Find all keys that match the search (from full tree)
+  const matchKeys = new Set<string>()
+  for (const row of allFlatRows) {
+    if (row.label.toLowerCase().includes(q)) {
+      matchKeys.add(row.key)
     }
   }
+  if (matchKeys.size === 0) return []
 
-  if (matchIndices.length === 0) return []
-
-  // For each match, walk backward in the DFS-ordered list to find true ancestors
-  const includeKeys = new Set<string>()
-  for (const idx of matchIndices) {
-    includeKeys.add(flatRows[idx].key)
-    // Walk back, collecting the first row at each decreasing depth
-    let targetDepth = flatRows[idx].depth - 1
-    for (let j = idx - 1; j >= 0 && targetDepth >= 0; j--) {
-      if (flatRows[j].depth === targetDepth) {
-        includeKeys.add(flatRows[j].key)
-        targetDepth--
+  // From the expand-aware flatRows, include:
+  // 1. Rows whose key matches the search
+  // 2. Rows that are descendants of a matched row (key starts with matchKey|)
+  const result: FlattenedPivotRow[] = []
+  for (const row of flatRows) {
+    if (matchKeys.has(row.key)) {
+      result.push(row)
+    } else {
+      // Check if this row is a descendant of any match
+      for (const mk of matchKeys) {
+        if (row.key.startsWith(mk + '|')) {
+          result.push(row)
+          break
+        }
       }
     }
   }
-
-  // Return filtered rows; force ancestors to show expanded chevron
-  return flatRows
-    .filter(row => includeKeys.has(row.key))
-    .map(row =>
-      row.hasChildren && !row.isExpanded
-        ? { ...row, isExpanded: true }
-        : row
-    )
+  return result
 }

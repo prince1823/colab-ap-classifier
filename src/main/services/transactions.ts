@@ -34,6 +34,7 @@ const VIRTUAL_COLUMNS: Record<string, string> = {
   classification_l1: 'tax.l1',
   classification_l2: 'tax.l2',
   classification_l3: 'tax.l3',
+  classification_path: "CONCAT_WS(' > ', tax.l1, tax.l2, tax.l3)",
 };
 
 const SUPPLIER_JOIN = 'LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id';
@@ -63,12 +64,12 @@ export class TransactionStore implements ITransactionStore {
 
   /** Whether any columns in use require the supplier JOIN. */
   private needsSupplierJoin(columns: string[]): boolean {
-    return columns.some((c) => c === 'supplier_name');
+    return columns.some((c) => c === 'supplier_name' || c === 'is_tail_spend' || c === 'is_researched');
   }
 
   /** Whether any columns in use require the taxonomy JOIN. */
   private needsTaxonomyJoinForColumns(columns: string[]): boolean {
-    return columns.some((c) => c.startsWith('classification_l'));
+    return columns.some((c) => c.startsWith('classification_'));
   }
 
   private buildFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[]; needsTaxonomyJoin: boolean } {
@@ -102,8 +103,10 @@ export class TransactionStore implements ITransactionStore {
       classification_l1: 'tax.l1',
       classification_l2: 'tax.l2',
       classification_l3: 'tax.l3',
+      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
       supplier_name: 'ps.supplier_name',
       is_researched: 'ps.is_researched',
+      is_tail_spend: 'ps.is_tail_spend',
     };
     const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
 
@@ -111,7 +114,7 @@ export class TransactionStore implements ITransactionStore {
     const allConditionFields = filters?.groupedConditions
       ? filters.groupedConditions.groups.flatMap(g => g.conditions.map(c => c.field))
       : (filters?.conditions ?? []).map(c => c.field);
-    if (allConditionFields.some(f => f.startsWith('classification_l'))) {
+    if (allConditionFields.some(f => f.startsWith('classification_'))) {
       needsTaxonomyJoin = true;
     }
 
@@ -245,6 +248,7 @@ export class TransactionStore implements ITransactionStore {
     spend_amount: { label: 'Spend Amount', type: 'number' },
     supplier_name: { label: 'Supplier Name', type: 'string', group: 'Supplier' },
     is_researched: { label: 'Researched', type: 'boolean', group: 'Supplier' },
+    is_tail_spend: { label: 'Tail Spend', type: 'boolean', group: 'Supplier' },
     classification_l1: { label: 'Classification L1', type: 'string' },
     classification_l2: { label: 'Classification L2', type: 'string' },
     classification_l3: { label: 'Classification L3', type: 'string' },
@@ -467,6 +471,7 @@ export class TransactionStore implements ITransactionStore {
       classification_l1: "COALESCE(tax.l1, '(Unclassified)')",
       classification_l2: "COALESCE(tax.l2, '(Unclassified)')",
       classification_l3: "COALESCE(tax.l3, '(Unclassified)')",
+      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
       supplier_name: "COALESCE(ps.supplier_name, '')",
     };
 
@@ -486,7 +491,7 @@ export class TransactionStore implements ITransactionStore {
       : '0';
 
     const needsTaxonomyJoin = filterNeedsTaxonomy || safeDimensions.some((d) =>
-      d.startsWith('classification_l')
+      d.startsWith('classification_')
     );
     const taxonomyJoin = needsTaxonomyJoin
       ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
@@ -625,8 +630,10 @@ export class TransactionStore implements ITransactionStore {
       classification_l1: 'tax.l1',
       classification_l2: 'tax.l2',
       classification_l3: 'tax.l3',
+      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
       supplier_name: 'ps.supplier_name',
       is_researched: 'ps.is_researched',
+      is_tail_spend: 'ps.is_tail_spend',
     };
 
     const resolveColumn = (field: string) =>
@@ -635,7 +642,7 @@ export class TransactionStore implements ITransactionStore {
     const built = buildWhereClause(conditions, resolveColumn);
     if (!built) return [];
 
-    const needsTaxonomy = conditions.some((c) => c.field.startsWith('classification_l'));
+    const needsTaxonomy = conditions.some((c) => c.field.startsWith('classification_'));
     const taxonomyJoin = needsTaxonomy
       ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
       : '';

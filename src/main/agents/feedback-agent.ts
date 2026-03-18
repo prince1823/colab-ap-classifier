@@ -21,7 +21,7 @@ export function buildSystemPrompt(): string {
 
 You must recommend exactly ONE of these actions:
 
-1. **update_taxonomy_description** — The taxonomy node's description is missing or misleading, causing the classifier to misunderstand what belongs in that category. Suggest a clearer description.
+1. **update_taxonomy_description** — One or both taxonomy nodes (the incorrectly-classified-to node and/or the correctly-classified-to node) have missing or misleading descriptions. You may update 1–2 nodes: add exclusion language to the wrong node, inclusion language to the right node, or both.
 
 2. **update_supplier_info** — The supplier's profile information is missing or incorrect, causing the classifier to misinterpret what the supplier provides. Suggest updating a specific field.
 
@@ -35,7 +35,7 @@ You must recommend exactly ONE of these actions:
 
 ## Decision Guidelines
 
-- Prefer **taxonomy_description** when the old and new classifications are in similar categories and the distinction is unclear without a description
+- Prefer **taxonomy_description** when the old and new classifications are in similar categories and the distinction is unclear without a description. Target the "before" node to add exclusion language, the "after" node to add inclusion language, or both if both descriptions are weak.
 - Prefer **supplier_info** when the supplier's type, industry, or offerings would have made the correct classification obvious
 - Prefer **company_context** when domain-specific knowledge about the company's business would change interpretation
 - Prefer **column_priority** when the wrong field was weighted too heavily (rare — only suggest if clearly suboptimal)
@@ -55,7 +55,8 @@ Respond with valid JSON only. No markdown fencing, no text outside the JSON.
 ### Details by action type:
 
 **update_taxonomy_description:**
-{ "type": "update_taxonomy_description", "nodeId": "<UUID of the taxonomy node>", "nodePath": "<L1|L2|L3 path>", "currentDescription": "<current description or null>", "proposedDescription": "<suggested description>" }
+{ "type": "update_taxonomy_description", "updates": [ { "nodeId": "<UUID>", "nodePath": "<L1|L2|L3 path>", "currentDescription": "<current or null>", "proposedDescription": "<suggested>" }, ... ] }
+Include 1 or 2 entries. Only include a node if its current description is ABSENT or would ACTIVELY MISLEAD the classifier into making the same wrong choice again. Do NOT include a node just to rephrase or polish an already-adequate description — omit it entirely in that case.
 
 **update_supplier_info:**
 { "type": "update_supplier_info", "supplierName": "<name>", "field": "<SupplierInfo field name>", "currentValue": "<current value or null>", "proposedValue": "<suggested value>" }
@@ -208,6 +209,30 @@ export function parseResponse(responseText: string): FeedbackRecommendation {
   // Validate details.type matches action
   if (details.type !== action) {
     details.type = action;
+  }
+
+  // Normalize update_taxonomy_description: coerce old single-node format into updates array
+  if (action === 'update_taxonomy_description') {
+    if (!Array.isArray(details.updates)) {
+      // LLM returned old format: { nodeId, nodePath, currentDescription, proposedDescription }
+      details.updates = [{
+        nodeId: String(details.nodeId ?? ''),
+        nodePath: String(details.nodePath ?? ''),
+        currentDescription: details.currentDescription != null ? String(details.currentDescription) : null,
+        proposedDescription: String(details.proposedDescription ?? ''),
+      }];
+    }
+    // Drop any entries where the proposed description is identical to the current one
+    details.updates = (details.updates as Array<{ nodeId: string; nodePath: string; currentDescription: string | null; proposedDescription: string }>)
+      .filter(u => u.proposedDescription.trim() !== (u.currentDescription ?? '').trim());
+    // If all updates were no-ops, fall back to no_change
+    if ((details.updates as unknown[]).length === 0) {
+      return {
+        action: 'no_change',
+        reasoning: reasoning || 'All proposed taxonomy descriptions were identical to the current ones.',
+        details: { type: 'no_change', explanation: 'No meaningful description changes were proposed.' },
+      };
+    }
   }
 
   return {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { X, CheckCircle, FileText, Building2, List, AlertCircle, Sparkles, Columns, Edit2 } from 'lucide-react'
-import type { FeedbackRecommendation, FeedbackDetails } from '../../../shared/types/feedback'
+import type { FeedbackRecommendation, FeedbackDetails, TaxonomyDescriptionUpdate } from '../../../shared/types/feedback'
 import '../../styles/SystemFeedbackModal.css'
 
 interface SystemFeedbackModalProps {
@@ -36,25 +36,50 @@ function getActionIcon(action: string) {
 function DetailEditor({
   details,
   onChange,
+  onRemoveUpdate,
 }: {
   details: FeedbackDetails
   onChange: (updated: FeedbackDetails) => void
+  onRemoveUpdate?: (index: number) => void
 }) {
   switch (details.type) {
     case 'update_taxonomy_description':
       return (
         <div className="detail-fields">
-          <label className="detail-label">Taxonomy Path</label>
-          <div className="detail-readonly">{details.nodePath}</div>
-          <label className="detail-label">Current Description</label>
-          <div className="detail-readonly">{details.currentDescription || '(none)'}</div>
-          <label className="detail-label">Proposed Description</label>
-          <textarea
-            className="edit-textarea-compact"
-            value={details.proposedDescription}
-            onChange={e => onChange({ ...details, proposedDescription: e.target.value })}
-            rows={3}
-          />
+          {details.updates.map((update, i) => (
+            <div key={update.nodeId} style={{ marginBottom: i < details.updates.length - 1 ? 16 : 0 }}>
+              {details.updates.length > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <div className="detail-label" style={{ fontWeight: 600, margin: 0 }}>Node {i + 1}</div>
+                  {onRemoveUpdate && (
+                    <button
+                      onClick={() => onRemoveUpdate(i)}
+                      title="Remove this update"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: '0 2px', lineHeight: 1 }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              )}
+              <label className="detail-label">Taxonomy Path</label>
+              <div className="detail-readonly">{update.nodePath}</div>
+              <label className="detail-label">Current Description</label>
+              <div className="detail-readonly">{update.currentDescription || '(none)'}</div>
+              <label className="detail-label">Proposed Description</label>
+              <textarea
+                className="edit-textarea-compact"
+                value={update.proposedDescription}
+                onChange={e => {
+                  const newUpdates: TaxonomyDescriptionUpdate[] = details.updates.map((u, j) =>
+                    j === i ? { ...u, proposedDescription: e.target.value } : u
+                  )
+                  onChange({ ...details, updates: newUpdates })
+                }}
+                rows={3}
+              />
+            </div>
+          ))}
         </div>
       )
 
@@ -152,6 +177,13 @@ const SystemFeedbackModal: React.FC<SystemFeedbackModalProps> = ({
 }) => {
   const [editedDetails, setEditedDetails] = useState<FeedbackDetails>(recommendation.details)
 
+  const handleRemoveUpdate = (index: number) => {
+    if (editedDetails.type !== 'update_taxonomy_description') return
+    const remaining = editedDetails.updates.filter((_, i) => i !== index)
+    if (remaining.length === 0) return // keep at least one
+    setEditedDetails({ ...editedDetails, updates: remaining })
+  }
+
   const handleApply = () => {
     onApply({ ...recommendation, details: editedDetails })
   }
@@ -187,7 +219,7 @@ const SystemFeedbackModal: React.FC<SystemFeedbackModalProps> = ({
 
             {/* Editable details */}
             <div className="feedback-item-compact">
-              <DetailEditor details={editedDetails} onChange={setEditedDetails} />
+              <DetailEditor details={editedDetails} onChange={setEditedDetails} onRemoveUpdate={handleRemoveUpdate} />
             </div>
           </div>
         </div>

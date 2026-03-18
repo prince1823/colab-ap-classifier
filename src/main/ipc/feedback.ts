@@ -55,7 +55,9 @@ export function registerFeedbackHandlers(
 
     switch (details.type) {
       case 'update_taxonomy_description': {
-        await taxonomy.updateNode(details.nodeId, { description: details.proposedDescription });
+        for (const update of details.updates) {
+          await taxonomy.updateNode(update.nodeId, { description: update.proposedDescription });
+        }
         break;
       }
 

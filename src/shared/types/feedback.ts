@@ -15,8 +15,15 @@ export type FeedbackActionType =
 
 // ─── Discriminated Details Union ─────────────────────────────────────────────
 
+export interface TaxonomyDescriptionUpdate {
+  nodeId: string;
+  nodePath: string;
+  currentDescription: string | null;
+  proposedDescription: string;
+}
+
 export type FeedbackDetails =
-  | { type: 'update_taxonomy_description'; nodeId: string; nodePath: string; currentDescription: string | null; proposedDescription: string }
+  | { type: 'update_taxonomy_description'; updates: TaxonomyDescriptionUpdate[] }
   | { type: 'update_supplier_info'; supplierName: string; field: string; currentValue: string | null; proposedValue: string }
   | { type: 'update_company_context'; field: string; currentValue: string | null; proposedValue: string }
   | { type: 'update_column_priority'; currentPriorities: string[]; proposedPriorities: string[] }

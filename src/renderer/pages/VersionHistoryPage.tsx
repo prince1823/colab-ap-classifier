@@ -3,6 +3,7 @@ import { ipc } from '../lib/ipc'
 import type { ChangeLog } from '../../shared/types/changelog'
 import type { FeedbackRecommendation } from '../../shared/types/feedback'
 import SystemFeedbackModal from '../components/review/SystemFeedbackModal'
+import SystemFeedbackDialog from '../components/review/SystemFeedbackDialog'
 
 /** Friendly labels for known fields */
 const FIELD_LABELS: Record<string, string> = {
@@ -77,6 +78,7 @@ export default function VersionHistoryPage() {
   const [taxonomyMap, setTaxonomyMap] = useState<Map<string, string>>(new Map())
 
   // Feedback state
+  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [feedbackText, setFeedbackText] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
@@ -125,6 +127,12 @@ export default function VersionHistoryPage() {
     })
   }, [])
 
+  const handleDialogClose = () => {
+    setFeedbackDialogOpen(false)
+    setSelectedIds(new Set())
+    setFeedbackText('')
+  }
+
   const handleAnalyze = async () => {
     if (selectedIds.size === 0 || !feedbackText.trim()) return
     setAnalyzing(true)
@@ -135,6 +143,7 @@ export default function VersionHistoryPage() {
         changelogIds: [...selectedIds],
         userFeedback: feedbackText.trim(),
       })
+      setFeedbackDialogOpen(false)
       setRecommendation(result)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Analysis failed')
@@ -152,6 +161,7 @@ export default function VersionHistoryPage() {
       setSelectedIds(new Set())
       setFeedbackText('')
       setSuccessMessage('Feedback applied successfully.')
+      setTimeout(() => setSuccessMessage(null), 3000)
       await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply feedback')
@@ -173,38 +183,21 @@ export default function VersionHistoryPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h2 className="text-lg font-semibold text-gray-900">Version History</h2>
-        <p className="mt-1 text-sm text-gray-500">{entries.length} changes recorded</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Version History</h2>
+          <p className="mt-1 text-sm text-gray-500">{entries.length} changes recorded</p>
+        </div>
+        <button
+          onClick={() => setFeedbackDialogOpen(true)}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          System Feedback
+        </button>
       </div>
 
       {error && <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {successMessage && <div className="rounded-md bg-green-50 p-4 text-sm text-green-700">{successMessage}</div>}
-
-      {/* Feedback panel — visible when entries are selected */}
-      {selectedIds.size > 0 && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3">
-          <p className="text-sm font-medium text-blue-900">
-            {selectedIds.size} change{selectedIds.size !== 1 ? 's' : ''} selected
-          </p>
-          <textarea
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            placeholder="Describe what the classifier got wrong..."
-            value={feedbackText}
-            onChange={e => setFeedbackText(e.target.value)}
-            rows={3}
-          />
-          <div className="flex justify-end">
-            <button
-              onClick={handleAnalyze}
-              disabled={!feedbackText.trim() || analyzing}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {analyzing ? 'Analyzing...' : 'Analyze'}
-            </button>
-          </div>
-        </div>
-      )}
 
       {entries.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
@@ -214,23 +207,14 @@ export default function VersionHistoryPage() {
         <div className="space-y-2">
           {entries.map((entry) => {
             const isExpanded = expandedId === entry.id
-            const isSelected = selectedIds.has(entry.id)
             const changes = getChangedFields(entry.oldValues, entry.newValues, taxonomyMap)
             return (
-              <div key={entry.id} className={`rounded-lg border bg-white ${isSelected ? 'border-blue-400 ring-1 ring-blue-200' : 'border-gray-200'}`}>
+              <div key={entry.id} className="rounded-lg border border-gray-200 bg-white">
                 <div
                   className="flex cursor-pointer items-center justify-between px-4 py-3 hover:bg-gray-50"
                   onClick={() => setExpandedId(isExpanded ? null : entry.id)}
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    {/* Selection checkbox */}
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleSelect(entry.id)}
-                      onClick={e => e.stopPropagation()}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
-                    />
                     <div className={`h-2 w-2 flex-shrink-0 rounded-full ${entry.source === 'manual' ? 'bg-blue-500' : 'bg-green-500'}`} />
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">
@@ -319,6 +303,18 @@ export default function VersionHistoryPage() {
           applying={applying}
         />
       )}
+
+      <SystemFeedbackDialog
+        isOpen={feedbackDialogOpen}
+        onClose={handleDialogClose}
+        entries={entries}
+        selectedIds={selectedIds}
+        onToggleSelect={toggleSelect}
+        feedbackText={feedbackText}
+        onFeedbackChange={setFeedbackText}
+        onAnalyze={handleAnalyze}
+        analyzing={analyzing}
+      />
     </div>
   )
 }

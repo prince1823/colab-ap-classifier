@@ -161,6 +161,7 @@ interface FlatRow {
   l2RowSpan: number
   l1Node: L1Tree
   l2Node: L2Tree | null
+  addRow?: 'add-l1' | 'add-l2' | 'add-l3'
 }
 
 export default function TaxonomyPage() {
@@ -278,7 +279,7 @@ export default function TaxonomyPage() {
       }
 
       // Build visible L2s
-      const visibleL2s: { l2: L2Tree; visibleL3s: L3Tree[] }[] = []
+      const visibleL2s: { l2: L2Tree; visibleL3s: L3Tree[]; isEmpty: boolean }[] = []
       for (const l2 of l1.children) {
         if (query) {
           const l2Match = (l2.l2 ?? '').toLowerCase().includes(query) || l1.l1.toLowerCase().includes(query)
@@ -291,7 +292,7 @@ export default function TaxonomyPage() {
 
         const l2IsCollapsed = collapsedL2.has(l2.fullPath)
         if (l2IsCollapsed || l2.children.length === 0) {
-          visibleL2s.push({ l2, visibleL3s: [] })
+          visibleL2s.push({ l2, visibleL3s: [], isEmpty: !l2IsCollapsed && l2.children.length === 0 })
         } else {
           let l3List = l2.children
           if (query) {
@@ -303,33 +304,50 @@ export default function TaxonomyPage() {
             )
             if (filtered.length > 0) l3List = filtered
           }
-          visibleL2s.push({ l2, visibleL3s: l3List })
+          visibleL2s.push({ l2, visibleL3s: l3List, isEmpty: false })
         }
       }
 
-      // Calculate total L1 row span
+      // Calculate total L1 row span (including add-row placeholders)
       let l1TotalRows = 0
-      for (const { visibleL3s } of visibleL2s) {
-        l1TotalRows += visibleL3s.length > 0 ? visibleL3s.length : 1
+      for (const { visibleL3s, isEmpty } of visibleL2s) {
+        if (visibleL3s.length > 0) {
+          l1TotalRows += visibleL3s.length + 1 // +1 for add-l3 row
+        } else if (isEmpty && !query) {
+          l1TotalRows += 2 // L2 row + add-l3 placeholder
+        } else {
+          l1TotalRows += 1
+        }
       }
+      if (!query) l1TotalRows += 1 // +1 for add-l2 row at end of L1
       if (l1TotalRows === 0) l1TotalRows = 1
 
       // Emit rows
       let isFirstL1Row = true
-      for (const { l2, visibleL3s } of visibleL2s) {
-        const l2RowCount = visibleL3s.length > 0 ? visibleL3s.length : 1
-
+      for (const { l2, visibleL3s, isEmpty } of visibleL2s) {
         if (visibleL3s.length === 0) {
+          const showAddL3 = isEmpty && !query
           // L2-only row (collapsed or no children)
           rows.push({
             node: l2, level: 2,
             isFirstInL1: isFirstL1Row, isFirstInL2: true,
             l1RowSpan: isFirstL1Row ? l1TotalRows : 0,
-            l2RowSpan: 1,
+            l2RowSpan: showAddL3 ? 2 : 1,
             l1Node: l1, l2Node: l2,
           })
           isFirstL1Row = false
+          // Add add-l3 placeholder for empty (not collapsed) L2s
+          if (showAddL3) {
+            rows.push({
+              node: l2, level: 3,
+              isFirstInL1: false, isFirstInL2: false,
+              l1RowSpan: 0, l2RowSpan: 0,
+              l1Node: l1, l2Node: l2,
+              addRow: 'add-l3',
+            })
+          }
         } else {
+          const l2RowCount = visibleL3s.length + 1 // +1 for add-l3 row
           let isFirstL2Row = true
           for (const l3 of visibleL3s) {
             rows.push({
@@ -342,9 +360,40 @@ export default function TaxonomyPage() {
             isFirstL1Row = false
             isFirstL2Row = false
           }
+          // Add-l3 placeholder row at end of this L2's children
+          rows.push({
+            node: l2, level: 3,
+            isFirstInL1: false, isFirstInL2: false,
+            l1RowSpan: 0, l2RowSpan: 0,
+            l1Node: l1, l2Node: l2,
+            addRow: 'add-l3',
+          })
         }
       }
+
+      // Add-l2 placeholder row at end of this L1's children (skip during search)
+      if (!query) {
+        rows.push({
+          node: l1, level: 2,
+          isFirstInL1: false, isFirstInL2: true,
+          l1RowSpan: 0, l2RowSpan: 1,
+          l1Node: l1, l2Node: null,
+          addRow: 'add-l2',
+        })
+      }
     }
+
+    // Add-l1 placeholder row at the very end (skip during search)
+    if (!query && tree.length > 0) {
+      rows.push({
+        node: tree[0], level: 1,
+        isFirstInL1: true, isFirstInL2: false,
+        l1RowSpan: 1, l2RowSpan: 0,
+        l1Node: tree[0], l2Node: null,
+        addRow: 'add-l1',
+      })
+    }
+
     return rows
   }, [tree, collapsedL1, collapsedL2, searchQuery])
 
@@ -401,7 +450,7 @@ export default function TaxonomyPage() {
 
   const handleAddChild = useCallback(async (parentPath: string) => {
     if (!addName.trim()) return
-    const fullPath = `${parentPath}|${addName.trim()}`
+    const fullPath = parentPath === '__ROOT__' ? addName.trim() : `${parentPath}|${addName.trim()}`
     if (!window.confirm(`Add "${fullPath}"?`)) return
     setAddSaving(true)
     try {
@@ -524,9 +573,9 @@ export default function TaxonomyPage() {
             <table className="w-full border-collapse table-fixed">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="w-[22%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L1 — Category</th>
-                  <th className="w-[22%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L2 — Subcategory</th>
-                  <th className="w-[20%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L3 — Item</th>
+                  <th className="w-[22%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L1</th>
+                  <th className="w-[22%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L2</th>
+                  <th className="w-[20%] px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">L3</th>
                   <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-100">Description</th>
                   <th className="w-20 px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider text-gray-500">Actions</th>
                 </tr>
@@ -536,6 +585,145 @@ export default function TaxonomyPage() {
                   const l1Idx = tree.findIndex(l1 => l1.id === row.l1Node.id)
                   const stripe = l1Idx % 2 === 1 ? 'bg-gray-50/50' : 'bg-white'
 
+                  {/* ── Add-L1 placeholder row (full width at bottom) ── */}
+                  if (row.addRow === 'add-l1') {
+                    const isActive = addingUnder === '__ROOT__'
+                    return (
+                      <tr key="add-l1" className="bg-white hover:bg-blue-50/30 transition-colors">
+                        <td colSpan={5} className="px-4 py-2 border-b border-gray-100">
+                          {isActive ? (
+                            <div className="flex items-center gap-2">
+                              <Plus size={13} className="text-blue-400 flex-shrink-0" />
+                              <input
+                                value={addName}
+                                onChange={(e) => setAddName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleAddChild('__ROOT__')
+                                  else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
+                                }}
+                                className="rounded border border-blue-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 w-48"
+                                placeholder="New L1 name"
+                                autoFocus
+                              />
+                              <button onClick={() => handleAddChild('__ROOT__')} disabled={addSaving || !addName.trim()} className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                                {addSaving ? '...' : 'Add'}
+                              </button>
+                              <button onClick={() => { setAddingUnder(null); setAddName(''); setAddDescription('') }} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setAddingUnder('__ROOT__'); setAddName(''); setAddDescription(''); setMergingNodeId(null) }}
+                              className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-600 transition-colors"
+                            >
+                              <Plus size={13} /> Add L1
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  }
+
+                  {/* ── Add-L2 placeholder row (at end of L1 group) ── */}
+                  if (row.addRow === 'add-l2') {
+                    const isActive = addingUnder === row.l1Node.fullPath
+                    return (
+                      <tr key={`add-l2-${row.l1Node.id}`} className={`${stripe} hover:bg-blue-50/30 transition-colors`}>
+                        <td colSpan={4} className="px-4 py-2 border-b border-gray-200">
+                          {isActive ? (
+                            <div className="flex items-center gap-2">
+                              <Plus size={13} className="text-blue-400 flex-shrink-0" />
+                              <input
+                                value={addName}
+                                onChange={(e) => setAddName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleAddChild(row.l1Node.fullPath)
+                                  else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
+                                }}
+                                className="rounded border border-blue-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 w-48"
+                                placeholder="New L2 name"
+                                autoFocus
+                              />
+                              <button onClick={() => handleAddChild(row.l1Node.fullPath)} disabled={addSaving || !addName.trim()} className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                                {addSaving ? '...' : 'Add'}
+                              </button>
+                              <button onClick={() => { setAddingUnder(null); setAddName(''); setAddDescription('') }} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setAddingUnder(row.l1Node.fullPath); setAddName(''); setAddDescription(''); setMergingNodeId(null) }}
+                              className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-600 transition-colors"
+                            >
+                              <Plus size={13} /> Add L2
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  }
+
+                  {/* ── Add-L3 placeholder row (at end of L2 group) ── */}
+                  if (row.addRow === 'add-l3') {
+                    const isActive = addingUnder === row.l2Node?.fullPath
+                    return (
+                      <tr key={`add-l3-${row.l2Node?.id}`} className={`${stripe} hover:bg-blue-50/30 transition-colors`}>
+                        {isActive ? (
+                          <>
+                            <td className="px-4 py-1.5 border-r border-gray-100 border-b border-gray-100">
+                              <div className="flex items-center gap-1.5">
+                                <Plus size={13} className="text-blue-400 flex-shrink-0" />
+                                <input
+                                  value={addName}
+                                  onChange={(e) => setAddName(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleAddChild(row.l2Node!.fullPath)
+                                    else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
+                                  }}
+                                  className="w-full rounded border border-blue-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  placeholder="New L3 name"
+                                  autoFocus
+                                />
+                              </div>
+                            </td>
+                            <td className="px-4 py-1.5 border-r border-gray-100 border-b border-gray-100">
+                              <input
+                                value={addDescription}
+                                onChange={(e) => setAddDescription(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleAddChild(row.l2Node!.fullPath)
+                                  else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
+                                }}
+                                className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                placeholder="Description (optional)"
+                              />
+                            </td>
+                            <td className="px-2 py-1.5 border-b border-gray-100">
+                              <div className="flex items-center justify-center gap-1">
+                                <button onClick={() => handleAddChild(row.l2Node!.fullPath)} disabled={addSaving || !addName.trim()} className="rounded bg-blue-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                                  {addSaving ? '...' : 'Add'}
+                                </button>
+                                <button onClick={() => { setAddingUnder(null); setAddName(''); setAddDescription('') }} className="text-[10px] text-gray-400 hover:text-gray-600">✕</button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-4 py-1.5 border-r border-gray-100 border-b border-gray-100">
+                              <button
+                                onClick={() => { setAddingUnder(row.l2Node!.fullPath); setAddName(''); setAddDescription(''); setMergingNodeId(null) }}
+                                className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-600 transition-colors"
+                              >
+                                <Plus size={13} /> Add L3
+                              </button>
+                            </td>
+                            <td className="px-4 py-1.5 border-r border-gray-100 border-b border-gray-100" />
+                            <td className="px-2 py-1.5 border-b border-gray-100" />
+                          </>
+                        )}
+                      </tr>
+                    )
+                  }
+
+                  {/* ── Normal data row ── */}
                   return (
                     <tr key={`${row.node.id}-${idx}`} className={`${stripe} group hover:bg-blue-50/40 transition-colors`}>
 
@@ -575,7 +763,6 @@ export default function TaxonomyPage() {
                           </td>
                           <td className="px-2 py-2 text-center border-b border-gray-100">
                             <div className="flex items-center justify-center gap-0.5 ">
-                              <button onClick={() => { setAddingUnder(row.l1Node.fullPath); setAddName(''); setAddDescription(''); setMergingNodeId(null) }} className="rounded p-1 text-blue-500 hover:bg-blue-50" title="Add L2"><Plus size={13} /></button>
                               <button onClick={() => handleDelete(row.l1Node.id)} className="rounded p-1 text-red-400 hover:bg-red-50" title="Delete"><Trash2 size={13} /></button>
                             </div>
                           </td>
@@ -624,7 +811,6 @@ export default function TaxonomyPage() {
                           </td>
                           <td className="px-2 py-2 text-center border-b border-gray-100">
                             <div className="flex items-center justify-center gap-0.5 ">
-                              <button onClick={() => { setAddingUnder(row.l2Node!.fullPath); setAddName(''); setAddDescription(''); setMergingNodeId(null) }} className="rounded p-1 text-blue-500 hover:bg-blue-50" title="Add L3"><Plus size={13} /></button>
                               <button onClick={() => handleDelete(row.l2Node!.id)} className="rounded p-1 text-red-400 hover:bg-red-50" title="Delete"><Trash2 size={13} /></button>
                             </div>
                           </td>
@@ -657,44 +843,6 @@ export default function TaxonomyPage() {
                 })}
               </tbody>
             </table>
-
-            {/* ── Add child bar ────────────────────────────────────── */}
-            {addingUnder && (
-              <div className="border-t border-gray-200 bg-blue-50/50 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-medium text-gray-500">
-                    Add under <span className="text-blue-600">{addingUnder.split('|').join(' > ')}</span>
-                  </span>
-                  <input
-                    value={addName}
-                    onChange={(e) => setAddName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddChild(addingUnder)
-                      else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
-                    }}
-                    className="rounded border border-gray-200 bg-white px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 w-48"
-                    placeholder="Name"
-                    autoFocus
-                  />
-                  {addingUnder.split('|').length >= 2 && (
-                    <input
-                      value={addDescription}
-                      onChange={(e) => setAddDescription(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleAddChild(addingUnder)
-                        else if (e.key === 'Escape') { setAddingUnder(null); setAddName(''); setAddDescription('') }
-                      }}
-                      className="rounded border border-gray-200 bg-white px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 flex-1"
-                      placeholder="Description (optional)"
-                    />
-                  )}
-                  <button onClick={() => handleAddChild(addingUnder)} disabled={addSaving || !addName.trim()} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
-                    {addSaving ? 'Adding...' : 'Add'}
-                  </button>
-                  <button onClick={() => { setAddingUnder(null); setAddName(''); setAddDescription('') }} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-                </div>
-              </div>
-            )}
 
             {/* Merge picker is now rendered as a fixed popover — see below */}
           </div>

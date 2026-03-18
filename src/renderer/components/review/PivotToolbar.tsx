@@ -608,7 +608,9 @@ function DraggableDimChip({
       <button
         className="pivot-dim-chip-x"
         onClick={(e) => { e.stopPropagation(); onRemove() }}
+        onMouseDown={(e) => e.stopPropagation()}
         title="Remove"
+        style={{ cursor: 'pointer', padding: '2px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
       >
         <X size={9} />
       </button>

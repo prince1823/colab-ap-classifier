@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import type { FlattenedPivotRow, PathSegment } from '../../types/pivot'
 import type { Transaction, FilterCondition } from '../../../shared/types/transactions'
+import { fmtAbbrev } from '../../utils/formatSpend'
 
 const UNCLASSIFIED_LABEL = '(Unclassified)'
 const CLASSIFICATION_DIMS = new Set(['classification_l1', 'classification_l2', 'classification_l3'])
@@ -25,12 +26,25 @@ interface DrillDownPanelProps {
   onClose: () => void
 }
 
+/** Default column widths */
+const DEFAULT_WIDTHS: Record<string, number> = {
+  supplier_name: 180,
+  classification: 220,
+}
+const DEFAULT_COL_WIDTH = 150
+
 export default function DrillDownPanel({ row, onClose }: DrillDownPanelProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [colWidths, setColWidths] = useState<Record<string, number>>({})
+
+  // Resize state
+  const resizingCol = useRef<string | null>(null)
+  const startX = useRef(0)
+  const startWidth = useRef(0)
 
   const fetchPage = useCallback(async (p: number) => {
     setLoading(true)
@@ -62,9 +76,66 @@ export default function DrillDownPanel({ row, onClose }: DrillDownPanelProps) {
   const breadcrumb = row.pathSegments.map(s => s.value).join(' > ')
 
   // Pick display columns from first transaction's canonical fields
-  const displayCols = transactions.length > 0
-    ? Object.keys(transactions[0].canonicalFields).slice(0, 6)
-    : []
+  // Ensure creation_date is always last
+  const AMOUNT_COLS = new Set(['spend_amount', 'amount', 'invoice_amount', 'total_amount'])
+  const displayCols = (() => {
+    if (transactions.length === 0) return []
+    const keys = Object.keys(transactions[0].canonicalFields).filter(k => k !== 'supplier_name')
+    const hasCreationDate = keys.includes('creation_date')
+    const rest = keys.filter(k => k !== 'creation_date').slice(0, hasCreationDate ? 5 : 6)
+    return hasCreationDate ? [...rest, 'creation_date'] : rest
+  })()
+
+  // All columns: supplier + classification + dynamic
+  const allCols = ['supplier_name', 'classification', ...displayCols]
+
+  const getWidth = (col: string) =>
+    colWidths[col] ?? DEFAULT_WIDTHS[col] ?? DEFAULT_COL_WIDTH
+
+  const handleMouseDown = useCallback((col: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    resizingCol.current = col
+    startX.current = e.clientX
+    startWidth.current = getWidth(col)
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!resizingCol.current) return
+      const diff = ev.clientX - startX.current
+      const newWidth = Math.max(60, startWidth.current + diff)
+      setColWidths(prev => ({ ...prev, [resizingCol.current!]: newWidth }))
+    }
+
+    const handleMouseUp = () => {
+      resizingCol.current = null
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [colWidths])
+
+  const colLabel = (col: string) => {
+    if (col === 'classification') return 'Classification'
+    return col.replace(/_/g, ' ')
+  }
+
+  const getCellValue = (tx: Transaction, col: string): string => {
+    if (col === 'supplier_name') return String(tx.canonicalFields.supplier_name ?? '-')
+    if (col === 'classification') return tx.classificationPath?.split('|').map(s => s.trim()).join(' > ') ?? '-'
+    const raw = tx.canonicalFields[col]
+    if (raw == null) return '-'
+    // Format amount columns with $K/$M
+    if (AMOUNT_COLS.has(col)) {
+      const num = Number(raw)
+      if (!isNaN(num)) return fmtAbbrev(num)
+    }
+    return String(raw)
+  }
 
   return (
     <div className="border-t border-gray-200 bg-white">
@@ -90,14 +161,32 @@ export default function DrillDownPanel({ row, onClose }: DrillDownPanelProps) {
         <div className="px-4 py-6 text-center text-xs text-gray-400">Loading...</div>
       ) : (
         <div className="overflow-auto max-h-[300px]">
-          <table className="min-w-full text-[11px]">
+          <table className="text-[11px]" style={{ tableLayout: 'fixed', width: allCols.reduce((sum, col) => sum + getWidth(col), 0) }}>
             <thead className="bg-gray-50 sticky top-0">
               <tr>
-                <th className="px-3 py-1.5 text-left font-medium text-gray-500">Supplier</th>
-                <th className="px-3 py-1.5 text-left font-medium text-gray-500">Classification</th>
-                {displayCols.map(col => (
-                  <th key={col} className="px-3 py-1.5 text-left font-medium text-gray-500">
-                    {col.replace(/_/g, ' ')}
+                {allCols.map(col => (
+                  <th
+                    key={col}
+                    className="text-left font-medium text-gray-500 relative"
+                    style={{ width: getWidth(col), minWidth: 60, padding: '6px 12px' }}
+                  >
+                    <span className="truncate block">{colLabel(col)}</span>
+                    {/* Resize handle — visible border line */}
+                    <div
+                      onMouseDown={(e) => handleMouseDown(col, e)}
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: 4,
+                        bottom: 4,
+                        width: 3,
+                        cursor: 'col-resize',
+                        borderRight: '1px solid #d1d5db',
+                        transition: 'border-color 0.15s',
+                      }}
+                      onMouseEnter={(e) => { (e.target as HTMLElement).style.borderRight = '2px solid #3b82f6' }}
+                      onMouseLeave={(e) => { (e.target as HTMLElement).style.borderRight = '1px solid #d1d5db' }}
+                    />
                   </th>
                 ))}
               </tr>
@@ -105,17 +194,19 @@ export default function DrillDownPanel({ row, onClose }: DrillDownPanelProps) {
             <tbody className="divide-y divide-gray-50">
               {transactions.map(tx => (
                 <tr key={tx.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-1.5 text-gray-700 truncate max-w-[180px]">
-                    {String(tx.canonicalFields.supplier_name ?? '-')}
-                  </td>
-                  <td className="px-3 py-1.5 text-gray-500 truncate max-w-[200px]">
-                    {tx.classificationPath?.split('|').map(s => s.trim()).join(' > ') ?? '-'}
-                  </td>
-                  {displayCols.map(col => (
-                    <td key={col} className="px-3 py-1.5 text-gray-600 truncate max-w-[150px]">
-                      {String(tx.canonicalFields[col] ?? '-')}
-                    </td>
-                  ))}
+                  {allCols.map(col => {
+                    const value = getCellValue(tx, col)
+                    return (
+                      <td
+                        key={col}
+                        className="text-gray-600 truncate"
+                        style={{ width: getWidth(col), maxWidth: getWidth(col), padding: '6px 12px' }}
+                        title={value}
+                      >
+                        {value}
+                      </td>
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>

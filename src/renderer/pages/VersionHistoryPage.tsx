@@ -602,7 +602,7 @@ export default function VersionHistoryPage() {
       <SystemFeedbackDialog
         isOpen={feedbackDialogOpen}
         onClose={handleDialogClose}
-        entries={entries}
+        entries={displayEntries}
         selectedIds={selectedIds}
         onToggleSelect={toggleSelect}
         feedbackText={feedbackText}

@@ -12,6 +12,8 @@ import type { FilterCondition, GroupedFilter, FilterOperator } from '../../../sh
 import { OPERATOR_LABELS } from '../FilterConditionBuilder'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import { ipc } from '../../lib/ipc'
+import type { SupplierInfo } from '../../../shared/types/suppliers'
+import SupplierInfoModal from './SupplierInfoModal'
 import '../../styles/PivotHierarchy.css'
 
 interface HierarchicalPivotViewProps {
@@ -241,6 +243,13 @@ export default function HierarchicalPivotView({
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
   const [freezeLevel, setFreezeLevel] = useState(0) // 0 = off, 1 = freeze L1, 2 = freeze L1+L2, etc.
+
+  // Supplier info modal (Cmd+S) — supports multiple suppliers
+  const [supplierInfoModal, setSupplierInfoModal] = useState<Array<{
+    name: string
+    info: SupplierInfo | null
+    isResearched: boolean
+  }> | null>(null)
 
   const { flatRows, allFlatRows, toggleExpand, expandToLevel, expandToKey, depth0TotalMap } = usePivotTreeState(
     pivotData?.root ?? null
@@ -478,14 +487,37 @@ export default function HierarchicalPivotView({
     onReclassify?.(rows)
   }, [onReclassify])
 
+  // Cmd+S: show supplier info for focused/selected supplier rows
+  const handleCmdS = useCallback(async (rows: FlattenedPivotRow[]) => {
+    // Filter to only supplier_name rows
+    const supplierRows = rows.filter(r => r.dimensionField === 'supplier_name')
+    if (supplierRows.length === 0) return
+    const names = supplierRows.map(r => r.label)
+    try {
+      const allSuppliers = await ipc.suppliers.list() as Array<{ supplierName: string; supplierInfo: SupplierInfo | null; isResearched: boolean }>
+      const results = names.map(name => {
+        const match = allSuppliers.find(s => s.supplierName.toLowerCase() === name.toLowerCase())
+        return {
+          name,
+          info: match?.supplierInfo ?? null,
+          isResearched: match?.isResearched ?? false,
+        }
+      })
+      setSupplierInfoModal(results)
+    } catch {
+      setSupplierInfoModal(names.map(name => ({ name, info: null, isResearched: false })))
+    }
+  }, [])
+
   const { focusedIndex, selectedKeys, handleKeyDown, clearSelection, setFocusedIndex } = usePivotKeyboard({
     visibleRows,
     rowVirtualizer,
     onCmdK: handleCmdK,
     onCmdF: handleCmdF,
+    onCmdS: handleCmdS,
     onToggleExpand: toggleExpand,
     onClearAllFilters,
-    disabled: modalOpen,
+    disabled: modalOpen || !!supplierInfoModal,
   })
 
   // When modal closes: clear selection and restore keyboard focus to table
@@ -840,6 +872,22 @@ export default function HierarchicalPivotView({
           </tfoot>
         </table>
       </div>}
+
+      {/* Supplier Info Modal (Cmd+S) */}
+      {supplierInfoModal && createPortal(
+        <SupplierInfoModal
+          suppliers={supplierInfoModal}
+          onClose={() => {
+            setSupplierInfoModal(null)
+            requestAnimationFrame(() => scrollRef.current?.focus())
+          }}
+          onGoToSuppliers={() => {
+            setSupplierInfoModal(null)
+            window.location.hash = '#/suppliers'
+          }}
+        />,
+        document.body
+      )}
     </div>
   )
 }

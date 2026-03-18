@@ -211,12 +211,14 @@ export default function PivotPage() {
         onClose={reclassify.close}
         targetRows={reclassify.targetRows}
         filteredNodes={reclassify.filteredNodes}
+        allNodes={reclassify.taxonomyNodes}
         search={reclassify.search}
         onSearchChange={reclassify.setSearch}
         focusedIdx={reclassify.focusedIdx}
         onFocusedIdxChange={reclassify.setFocusedIdx}
         searchRef={reclassify.searchRef}
         onApply={reclassify.apply}
+        onAddNode={reclassify.addNode}
         applying={reclassify.applying}
         error={reclassify.error}
       />

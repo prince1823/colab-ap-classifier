@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { X, Plus } from 'lucide-react'
 import type { FlattenedPivotRow } from '../../types/pivot'
 import type { TaxonomyNode } from '../../../shared/types/taxonomy'
@@ -45,6 +45,33 @@ export default function ReclassifyModal({
   const [newL3, setNewL3] = useState('')
   const [newDesc, setNewDesc] = useState('')
   const [adding, setAdding] = useState(false)
+  const [formHeight, setFormHeight] = useState(260)
+  const resizing = useRef(false)
+  const startY = useRef(0)
+  const startH = useRef(0)
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    resizing.current = true
+    startY.current = e.clientY
+    startH.current = formHeight
+    const onMove = (ev: MouseEvent) => {
+      if (!resizing.current) return
+      const diff = ev.clientY - startY.current
+      setFormHeight(Math.max(120, Math.min(400, startH.current + diff)))
+    }
+    const onUp = () => {
+      resizing.current = false
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [formHeight])
 
   // Autocomplete suggestions from existing nodes
   const l1Suggestions = useMemo(() => {
@@ -183,8 +210,8 @@ export default function ReclassifyModal({
         </div>
 
         {/* Add New Node inline form */}
-        {showAddForm && (
-          <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+        {showAddForm && (<>
+          <div className="px-4 py-3 bg-gray-50 overflow-y-auto flex-shrink-0" style={{ height: formHeight, scrollbarWidth: 'thin' }}>
             <div className="space-y-2">
               <div>
                 <label className="text-[10px] font-semibold text-gray-500 uppercase">L1 (required)</label>
@@ -245,7 +272,15 @@ export default function ReclassifyModal({
               </div>
             </div>
           </div>
-        )}
+          {/* Resize handle */}
+          <div
+            onMouseDown={handleResizeStart}
+            className="h-[6px] cursor-row-resize flex items-center justify-center hover:bg-blue-100 transition-colors border-t border-b border-gray-200"
+            title="Drag to resize"
+          >
+            <div className="w-8 h-[2px] rounded-full bg-gray-300" />
+          </div>
+        </>)}
 
         {/* Taxonomy list — grouped by L1 */}
         <div ref={listRef} className="flex-1 overflow-y-auto px-2 py-1">

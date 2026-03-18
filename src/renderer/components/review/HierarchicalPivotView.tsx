@@ -567,14 +567,25 @@ export default function HierarchicalPivotView({
     if (aggregation === 'count') return row.total.toLocaleString()
     if (aggregation === 'sum') {
       if (spendDisplayMode === 'percentage') {
-        if (row.depth === 0) return '100%'
+        // Depth 0 (L1): percentage of grand total
+        if (row.depth === 0) {
+          if (grandTotal === 0) return '--'
+          return ((row.total / grandTotal) * 100).toFixed(1) + '%'
+        }
+        // Deeper levels: percentage of their depth-0 ancestor
         const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
         if (base === 0) return '--'
         return ((row.total / base) * 100).toFixed(1) + '%'
       }
       if (spendDisplayMode === 'both') {
         const abs = fmtAbbrev(row.total)
-        if (row.depth === 0) return `${abs} (100%)`
+        // Depth 0 (L1): percentage of grand total
+        if (row.depth === 0) {
+          if (grandTotal === 0) return abs
+          const pct = ((row.total / grandTotal) * 100).toFixed(1) + '%'
+          return `${abs} (${pct})`
+        }
+        // Deeper levels: percentage of their depth-0 ancestor
         const base = depth0TotalMap.get(row.depth0AncestorKey) ?? 0
         if (base === 0) return abs
         const pct = ((row.total / base) * 100).toFixed(1) + '%'

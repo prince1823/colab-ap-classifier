@@ -103,7 +103,7 @@ export class TransactionStore implements ITransactionStore {
       classification_l1: 'tax.l1',
       classification_l2: 'tax.l2',
       classification_l3: 'tax.l3',
-      classification_path: "CONCAT_WS(' > ', tax.l1, tax.l2, tax.l3)",
+      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
       supplier_name: 'ps.supplier_name',
       is_researched: 'ps.is_researched',
       is_tail_spend: 'ps.is_tail_spend',
@@ -630,8 +630,10 @@ export class TransactionStore implements ITransactionStore {
       classification_l1: 'tax.l1',
       classification_l2: 'tax.l2',
       classification_l3: 'tax.l3',
+      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
       supplier_name: 'ps.supplier_name',
       is_researched: 'ps.is_researched',
+      is_tail_spend: 'ps.is_tail_spend',
     };
 
     const resolveColumn = (field: string) =>
@@ -640,7 +642,7 @@ export class TransactionStore implements ITransactionStore {
     const built = buildWhereClause(conditions, resolveColumn);
     if (!built) return [];
 
-    const needsTaxonomy = conditions.some((c) => c.field.startsWith('classification_l'));
+    const needsTaxonomy = conditions.some((c) => c.field.startsWith('classification_'));
     const taxonomyJoin = needsTaxonomy
       ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
       : '';

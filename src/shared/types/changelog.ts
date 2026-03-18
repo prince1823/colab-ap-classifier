@@ -10,4 +10,7 @@ export interface ChangeLog {
   newValues: Record<string, unknown> | null;
   description: string | null;
   createdAt: string;
+  isReverted?: boolean;
+  /** Computed at read-time: supplier names for transaction changes */
+  supplierNames?: string[];
 }

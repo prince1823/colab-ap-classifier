@@ -39,6 +39,27 @@ export function registerSuppliersHandlers(
     return suppliers.queryDistinctValues(field as string, (limit as number) ?? 200);
   });
 
+  registerHandler('suppliers:getAliases', async (_event, supplierId: unknown) => {
+    return suppliers.getProjectAliases(supplierId as string);
+  });
+
+  registerHandler('suppliers:assignAlias', async (_event, supplierId: unknown, rawName: unknown) => {
+    await suppliers.assignAlias(supplierId as string, rawName as string);
+  });
+
+  registerHandler('suppliers:rename', async (_event, supplierId: unknown, newName: unknown) => {
+    await suppliers.renameSupplier(supplierId as string, newName as string);
+  });
+
+  registerHandler('suppliers:merge', async (_event, survivorId: unknown, losingIds: unknown) => {
+    await suppliers.mergeSuppliers(survivorId as string, losingIds as string[]);
+  });
+
+  registerHandler('suppliers:delete', async (_event, supplierId: unknown) => {
+    await suppliers.deleteSupplier(supplierId as string);
+  });
+
+
   registerHandler('suppliers:listParents', async () => {
     return suppliers.listParents();
   });

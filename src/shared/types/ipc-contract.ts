@@ -87,6 +87,11 @@ export interface IPCInvokeMap {
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
   'suppliers:distinctValues':  { args: [field: string, limit?: number]; result: string[] };
+  'suppliers:getAliases':      { args: [supplierId: string]; result: string[] };
+  'suppliers:assignAlias':     { args: [supplierId: string, rawName: string]; result: void };
+  'suppliers:rename':          { args: [supplierId: string, newName: string]; result: void };
+  'suppliers:merge':           { args: [survivorId: string, losingIds: string[]]; result: void };
+  'suppliers:delete':          { args: [supplierId: string]; result: void };
   'suppliers:listParents':     { args: []; result: SupplierParent[] };
   'suppliers:addParent':       { args: [name: string]; result: SupplierParent };
   'suppliers:changeParent':    { args: [supplierId: string, parentId: string | null]; result: void };

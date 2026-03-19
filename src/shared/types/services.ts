@@ -159,11 +159,13 @@ export interface TaxonomyStore {
 }
 
 export interface SupplierService {
-  normalizeSupplierName(rawName: string): Promise<string>;
+  normalizeSupplierName(rawName: string, aliasMap?: Map<string, string>): Promise<string>;
   normalizeAllTransactions(): Promise<void>;
-  addAlias(canonicalName: string, alias: string): Promise<void>;
-  getAliases(canonicalName: string): Promise<string[]>;
+  assignAlias(supplierId: string, rawName: string): Promise<void>;
+  getProjectAliases(supplierId: string): Promise<string[]>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
+  mergeSuppliers(survivorId: string, losingIds: string[]): Promise<void>;
+  deleteSupplier(supplierId: string): Promise<void>;
   updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void>;
   listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;

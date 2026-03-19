@@ -301,7 +301,13 @@ export default function HierarchicalPivotView({
         if (condStrs.length === 1) {
           groupStrs.push(condStrs[0])
         } else {
-          groupStrs.push(`(${condStrs.join(` ${group.connector} `)})`)
+          // Join with per-condition connectors
+          let expr = condStrs[0]
+          for (let ci = 1; ci < condStrs.length; ci++) {
+            const conn = validConds[ci - 1].connector ?? group.connector
+            expr += ` ${conn} ${condStrs[ci]}`
+          }
+          groupStrs.push(`(${expr})`)
         }
       }
       if (groupStrs.length > 0) {
@@ -654,7 +660,7 @@ export default function HierarchicalPivotView({
                       return (
                         <React.Fragment key={`adv-g${gi}-c${ci}`}>
                           {ci > 0 && (
-                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{group.connector}</span>
+                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{validConds[ci - 1].connector ?? group.connector}</span>
                           )}
                           <span className="inline-flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] text-blue-800 whitespace-nowrap flex-shrink-0">
                             <span className="font-medium">{colLabel(c.field)}</span>

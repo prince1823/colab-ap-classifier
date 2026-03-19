@@ -10,8 +10,8 @@ import type {
   SupplierConfirmationStatus,
   SupplierUpdateInput,
 } from '../../shared/types/suppliers';
-import type { FilterCondition, FieldDefinition } from '../../shared/types/transactions';
-import { buildWhereClause, type ColumnResolver } from '../utils/query-builder';
+import type { FilterCondition, GroupedFilter, FieldDefinition } from '../../shared/types/transactions';
+import { buildWhereClause, buildGroupedWhereClause, type ColumnResolver } from '../utils/query-builder';
 
 export class SupplierService implements ISupplierService {
   constructor(
@@ -184,6 +184,16 @@ export class SupplierService implements ISupplierService {
     return SupplierService.SUPPLIER_FIELD_DEFINITIONS;
   }
 
+  /** Get distinct values for a supplier field (for dropdown suggestions). */
+  async queryDistinctValues(field: string, limit = 200): Promise<string[]> {
+    const colExpr = SupplierService.SUPPLIER_COLUMNS[field];
+    if (!colExpr) return [];
+    // For supplier-level fields, query project_suppliers directly
+    const sql = `SELECT DISTINCT ${colExpr} as val FROM project_suppliers ps WHERE ${colExpr} IS NOT NULL ORDER BY val LIMIT ?`;
+    const rows = await this.db.all<{ val: string }>(sql, limit);
+    return rows.map(r => String(r.val));
+  }
+
   /** Column resolver that validates against known fields and throws for unknown ones. */
   private static readonly SUPPLIER_COLUMN_RESOLVER: ColumnResolver = (field: string) => {
     const col = SupplierService.SUPPLIER_COLUMNS[field];
@@ -191,17 +201,48 @@ export class SupplierService implements ISupplierService {
     return col;
   };
 
-  async listProjectSuppliers(filter?: { conditions: FilterCondition[] }): Promise<ProjectSupplierView[]> {
+  async listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }): Promise<ProjectSupplierView[]> {
     const hasSpend = await this.transactionColumnExists('spend_amount');
     const spendExpr = hasSpend ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)' : '0';
 
-    // Split conditions into regular (inner WHERE) vs aggregate (outer WHERE)
+    // Flatten grouped conditions for aggregate-field detection, or use flat conditions
     const conditions = filter?.conditions ?? [];
-    const regularConditions = conditions.filter(c => !SupplierService.AGGREGATE_FIELDS.has(c.field));
-    const aggregateConditions = conditions.filter(c => SupplierService.AGGREGATE_FIELDS.has(c.field));
 
-    // Build inner WHERE clause for non-aggregate fields
-    const innerWhere = buildWhereClause(regularConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+    // Build WHERE clause — prefer groupedConditions (proper parenthesization) over flat conditions
+    let innerWhere: { sql: string; params: unknown[] } | null = null;
+    let outerWhere: { sql: string; params: unknown[] } | null = null;
+
+    if (filter?.groupedConditions && filter.groupedConditions.groups.length > 0) {
+      // Split grouped conditions: separate aggregate from regular fields
+      const regularGroups: GroupedFilter = {
+        groupConnector: filter.groupedConditions.groupConnector,
+        groups: filter.groupedConditions.groups.map(g => ({
+          ...g,
+          conditions: g.conditions.filter(c => c.field && !SupplierService.AGGREGATE_FIELDS.has(c.field)),
+        })).filter(g => g.conditions.length > 0),
+      };
+      const aggregateGroups: GroupedFilter = {
+        groupConnector: filter.groupedConditions.groupConnector,
+        groups: filter.groupedConditions.groups.map(g => ({
+          ...g,
+          conditions: g.conditions.filter(c => c.field && SupplierService.AGGREGATE_FIELDS.has(c.field)),
+        })).filter(g => g.conditions.length > 0),
+      };
+
+      if (regularGroups.groups.length > 0) {
+        innerWhere = buildGroupedWhereClause(regularGroups, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+      }
+      if (aggregateGroups.groups.length > 0) {
+        outerWhere = buildGroupedWhereClause(aggregateGroups, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+      }
+    } else {
+      // Flat conditions path (backward compatible)
+      const regularConditions = conditions.filter(c => !SupplierService.AGGREGATE_FIELDS.has(c.field));
+      const aggregateConditions = conditions.filter(c => SupplierService.AGGREGATE_FIELDS.has(c.field));
+      innerWhere = buildWhereClause(regularConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+      outerWhere = buildWhereClause(aggregateConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+    }
+
     const innerWhereSQL = innerWhere ? `WHERE ${innerWhere.sql}` : '';
     const innerParams = innerWhere?.params ?? [];
 
@@ -216,12 +257,10 @@ export class SupplierService implements ISupplierService {
                ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.is_researched,
                ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at`;
 
-    // Build outer WHERE clause for aggregate fields
-    const outerWhere = buildWhereClause(aggregateConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);
     const outerWhereSQL = outerWhere ? `WHERE ${outerWhere.sql}` : '';
     const outerParams = outerWhere?.params ?? [];
 
-    const sql = aggregateConditions.length > 0
+    const sql = outerWhere
       ? `SELECT * FROM (${innerSQL}) sub ${outerWhereSQL} ORDER BY sub.supplier_name`
       : `${innerSQL} ORDER BY ps.supplier_name`;
 

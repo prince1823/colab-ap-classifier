@@ -1,6 +1,23 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import type { FilterCondition, FilterOperator, FieldType, FieldDefinition, ConditionGroup, GroupedFilter } from '../../shared/types/transactions'
 
+/* ---------- Stable key helper ---------- */
+// React needs stable keys that survive add/remove operations.
+// Index-based keys cause focus loss and DOM jumbling.
+let _nextKey = 1
+function nextKey(): string { return `fk-${_nextKey++}` }
+
+const _keyMap = new WeakMap<object, string>()
+/** Get or assign a stable React key for any object (condition or group). */
+function stableKey(obj: object): string {
+  let k = _keyMap.get(obj)
+  if (!k) {
+    k = nextKey()
+    _keyMap.set(obj, k)
+  }
+  return k
+}
+
 const ALL_OPERATORS: FilterOperator[] = [
   'equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with',
   'regex', 'in_list', 'is_null', 'is_true', 'is_false',
@@ -58,12 +75,16 @@ function SuggestInput({ value, onChange, suggestions, placeholder, className }: 
     return suggestions.filter(s => s.toLowerCase().includes(q))
   }, [value, suggestions])
 
+  // Close dropdown when clicking outside — use 'pointerdown' on capture phase
+  // so it doesn't interfere with button click handlers
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    const handler = (e: PointerEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('pointerdown', handler, true)
+    return () => document.removeEventListener('pointerdown', handler, true)
   }, [])
 
   useEffect(() => { setFocusIdx(-1) }, [filtered])
@@ -146,11 +167,15 @@ function normalizeFields(fields: string[] | FieldDefinition[]): FieldDefinition[
 }
 
 function makeEmptyCondition(): FilterCondition {
-  return { field: '', operator: 'contains' as FilterOperator, value: '', connector: 'AND' }
+  const c: FilterCondition = { field: '', operator: 'contains' as FilterOperator, value: '', connector: 'AND' }
+  stableKey(c) // pre-assign a stable key
+  return c
 }
 
 function makeEmptyGroup(connector: 'AND' | 'OR' = 'AND'): ConditionGroup {
-  return { connector, conditions: [makeEmptyCondition()] }
+  const g: ConditionGroup = { connector, conditions: [makeEmptyCondition()] }
+  stableKey(g) // pre-assign a stable key
+  return g
 }
 
 /* ---------- ConditionRow ---------- */
@@ -201,6 +226,7 @@ function ConditionRow({
       {showConnector && (
         <div className="flex items-center py-0.5 pl-1">
           <button
+            type="button"
             onClick={onToggleConnector}
             className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
               groupConnector === 'OR'
@@ -273,7 +299,7 @@ function ConditionRow({
           </>
         )}
         {canRemove && (
-          <button onClick={onRemove} className="ml-0.5 rounded p-0.5 text-gray-300 hover:bg-red-50 hover:text-red-500 transition-colors" title="Remove condition">
+          <button type="button" onClick={onRemove} className="ml-0.5 rounded p-0.5 text-gray-300 hover:bg-red-50 hover:text-red-500 transition-colors" title="Remove condition">
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         )}
@@ -313,17 +339,33 @@ function GroupBlock({
   onToggleTopConnector,
 }: GroupBlockProps) {
   const updateCondition = (idx: number, c: FilterCondition) => {
-    onChange({ ...group, conditions: group.conditions.map((cc, i) => i === idx ? c : cc) })
+    // Transfer the stable key from the old condition to the updated one
+    const oldKey = _keyMap.get(group.conditions[idx])
+    if (oldKey) _keyMap.set(c, oldKey)
+    const newGroup = { ...group, conditions: group.conditions.map((cc, i) => i === idx ? c : cc) }
+    // Transfer group key
+    const gk = _keyMap.get(group)
+    if (gk) _keyMap.set(newGroup, gk)
+    onChange(newGroup)
   }
   const removeCondition = (idx: number) => {
     const next = group.conditions.filter((_, i) => i !== idx)
-    onChange({ ...group, conditions: next.length > 0 ? next : [makeEmptyCondition()] })
+    const newGroup = { ...group, conditions: next.length > 0 ? next : [makeEmptyCondition()] }
+    const gk = _keyMap.get(group)
+    if (gk) _keyMap.set(newGroup, gk)
+    onChange(newGroup)
   }
   const addCondition = () => {
-    onChange({ ...group, conditions: [...group.conditions, makeEmptyCondition()] })
+    const newGroup = { ...group, conditions: [...group.conditions, makeEmptyCondition()] }
+    const gk = _keyMap.get(group)
+    if (gk) _keyMap.set(newGroup, gk)
+    onChange(newGroup)
   }
   const toggleGroupConnector = () => {
-    onChange({ ...group, connector: group.connector === 'AND' ? 'OR' : 'AND' })
+    const newGroup = { ...group, connector: group.connector === 'AND' ? 'OR' : 'AND' as const }
+    const gk = _keyMap.get(group)
+    if (gk) _keyMap.set(newGroup, gk)
+    onChange(newGroup)
   }
   const totalConditions = group.conditions.length
 
@@ -333,6 +375,7 @@ function GroupBlock({
       {showGroupConnector && (
         <div className="flex items-center py-1.5 pl-1">
           <button
+            type="button"
             onClick={onToggleTopConnector}
             className={`rounded px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
               topConnector === 'OR'
@@ -352,6 +395,7 @@ function GroupBlock({
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Where</span>
           {canRemove && (
             <button
+              type="button"
               onClick={onRemove}
               className="rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-500 transition-colors"
               title="Remove group"
@@ -365,7 +409,7 @@ function GroupBlock({
         <div className="space-y-0">
           {group.conditions.map((c, ci) => (
             <ConditionRow
-              key={ci}
+              key={stableKey(c)}
               condition={c}
               fields={fields}
               groupedFields={groupedFields}
@@ -382,6 +426,7 @@ function GroupBlock({
 
         {/* Add filter */}
         <button
+          type="button"
           onClick={addCondition}
           className="mt-1.5 flex items-center gap-1 text-[10px] text-gray-400 hover:text-blue-600 transition-colors"
         >
@@ -421,6 +466,7 @@ export function GroupedFilterBuilder({
   }, [fields])
 
   const updateGroup = (idx: number, g: ConditionGroup) => {
+    // g already has the key transferred from GroupBlock handlers
     onChange({ ...value, groups: value.groups.map((gg, i) => i === idx ? g : gg) })
   }
   const removeGroup = (idx: number) => {
@@ -432,9 +478,13 @@ export function GroupedFilterBuilder({
   }
   const addFilter = () => {
     // Add a filter to the last group
-    const lastGroup = value.groups[value.groups.length - 1]
+    const lastIdx = value.groups.length - 1
+    const lastGroup = value.groups[lastIdx]
     const updatedLast = { ...lastGroup, conditions: [...lastGroup.conditions, makeEmptyCondition()] }
-    onChange({ ...value, groups: value.groups.map((g, i) => i === value.groups.length - 1 ? updatedLast : g) })
+    // Transfer group key
+    const gk = _keyMap.get(lastGroup)
+    if (gk) _keyMap.set(updatedLast, gk)
+    onChange({ ...value, groups: value.groups.map((g, i) => i === lastIdx ? updatedLast : g) })
   }
   const toggleTopConnector = (groupIdx: number) => {
     // Toggle the connector on this specific group (how it connects to the previous group)
@@ -442,7 +492,13 @@ export function GroupedFilterBuilder({
     const newConnector = currentConnector === 'AND' ? 'OR' : 'AND'
     onChange({
       ...value,
-      groups: value.groups.map((g, i) => i === groupIdx ? { ...g, groupConnector: newConnector } : g),
+      groups: value.groups.map((g, i) => {
+        if (i !== groupIdx) return g
+        const newG = { ...g, groupConnector: newConnector as 'AND' | 'OR' }
+        const gk = _keyMap.get(g)
+        if (gk) _keyMap.set(newG, gk)
+        return newG
+      }),
     })
   }
 
@@ -452,7 +508,7 @@ export function GroupedFilterBuilder({
       <div className="space-y-0">
         {value.groups.map((group, gi) => (
           <GroupBlock
-            key={gi}
+            key={stableKey(group)}
             group={group}
             groupIndex={gi}
             fields={fields}
@@ -471,12 +527,14 @@ export function GroupedFilterBuilder({
       {/* Bottom actions */}
       <div className="mt-2 flex items-center gap-3">
         <button
+          type="button"
           onClick={addFilter}
           className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors"
         >
           <span className="text-sm leading-none">+</span> Add Filter
         </button>
         <button
+          type="button"
           onClick={addGroup}
           className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors"
         >

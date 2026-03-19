@@ -332,8 +332,8 @@ async function main() {
         const hadSubstantiveInfo = !!(cached?.industry || cached?.description);
         const info = await researcher.researchSingle(ps.supplierName);
         // Write back research results to project_suppliers (mirrors IPC handler logic)
-        await suppliers.updateSupplier(ps.supplierName, { supplierInfo: info });
-        await suppliers.markResearched(ps.supplierName);
+        await suppliers.updateSupplier(ps.id, { supplierInfo: info });
+        await suppliers.markResearched(ps.id);
         const source = hadSubstantiveInfo ? 'universe (cached)' : 'LLM';
         log(`    ${ps.supplierName} → ${source}`);
       }

@@ -1,7 +1,7 @@
 import { registerHandler } from './register';
 import type { SupplierService, SupplierResearcher } from '../../shared/types/services';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
-import type { FilterCondition } from '../../shared/types/transactions';
+import type { FilterCondition, GroupedFilter } from '../../shared/types/transactions';
 
 export function registerSuppliersHandlers(
   suppliers: SupplierService,
@@ -10,11 +10,12 @@ export function registerSuppliersHandlers(
   registerHandler('suppliers:list', async (_event, filter?: unknown) => {
     if (filter != null) {
       const f = filter as Record<string, unknown>;
-      if (!Array.isArray(f.conditions)) {
-        throw new Error('suppliers:list filter.conditions must be an array');
+      // Accept either flat conditions or grouped conditions
+      if (!Array.isArray(f.conditions) && !f.groupedConditions) {
+        throw new Error('suppliers:list filter must have conditions array or groupedConditions');
       }
     }
-    return suppliers.listProjectSuppliers(filter as { conditions: FilterCondition[] } | undefined);
+    return suppliers.listProjectSuppliers(filter as { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter } | undefined);
   });
 
   registerHandler('suppliers:update', async (_event, supplierId: unknown, updates: unknown) => {
@@ -32,5 +33,9 @@ export function registerSuppliersHandlers(
 
   registerHandler('suppliers:getFilterFields', async () => {
     return suppliers.getFilterFields();
+  });
+
+  registerHandler('suppliers:distinctValues', async (_event, field: unknown, limit: unknown) => {
+    return suppliers.queryDistinctValues(field as string, (limit as number) ?? 200);
   });
 }

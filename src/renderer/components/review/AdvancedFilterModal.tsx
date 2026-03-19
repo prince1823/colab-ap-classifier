@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { GroupedFilterBuilder, conditionsToGrouped, makeEmptyGroup } from '../FilterConditionBuilder'
@@ -17,6 +17,12 @@ interface AdvancedFilterModalProps {
   pillFilterState?: Record<string, string[]>
   /** Called on apply to clear pill filters (they become advanced conditions) */
   onClearPillFilters?: () => void
+  /** Custom function to fetch distinct values for a field. Defaults to ipc.transactions.distinctValues. */
+  fetchDistinctValues?: (field: string, limit: number) => Promise<string[]>
+  /** Title override */
+  title?: string
+  /** Subtitle override */
+  subtitle?: string
 }
 
 export default function AdvancedFilterModal({
@@ -27,14 +33,24 @@ export default function AdvancedFilterModal({
   availableFields,
   pillFilterState = {},
   onClearPillFilters,
+  fetchDistinctValues,
+  title = 'Advanced Filters',
+  subtitle = 'Build conditions to filter transactions',
 }: AdvancedFilterModalProps) {
+  const getDistinctValues = fetchDistinctValues ?? ((field: string, limit: number) => ipc.transactions.distinctValues(field, limit))
   const [grouped, setGrouped] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
   // Fresh distinct values fetched each time modal opens
   const [distinctValues, setDistinctValues] = useState<Record<string, string[]>>({})
 
-  // Sync when modal opens — merge pill filters into the existing grouped state
+  // Track previous isOpen to detect open transitions (false → true)
+  const prevOpenRef = useRef(false)
+
+  // Sync ONLY when the modal opens (isOpen transitions from false → true)
+  // NOT on every re-render, which would reset user's in-progress edits
   useEffect(() => {
-    if (!isOpen) return
+    const justOpened = isOpen && !prevOpenRef.current
+    prevOpenRef.current = isOpen
+    if (!justOpened) return
 
     // Convert pill filters to conditions
     const pillConditions: FilterCondition[] = []
@@ -126,8 +142,8 @@ export default function AdvancedFilterModal({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
-            <h3 className="text-base font-semibold text-gray-900">Advanced Filters</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Build conditions to filter transactions</p>
+            <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
           </div>
           <button
             onClick={onClose}

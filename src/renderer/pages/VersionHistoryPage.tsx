@@ -77,6 +77,10 @@ function getChangedFields(
   return changes
 }
 
+// Module-level cache so data persists across navigations (component unmount/remount)
+let _cachedEntries: ChangeLog[] | null = null
+let _cachedTaxonomyMap: Map<string, string> | null = null
+
 /** Inline transaction drill-down panel for a changelog entry */
 function ChangeTransactionPanel({
   entry,
@@ -273,12 +277,12 @@ function ChangeTransactionPanel({
 }
 
 export default function VersionHistoryPage() {
-  const [allEntries, setAllEntries] = useState<ChangeLog[]>([])
-  const [loading, setLoading] = useState(true)
+  const [allEntries, setAllEntries] = useState<ChangeLog[]>(_cachedEntries || [])
+  const [loading, setLoading] = useState(!_cachedEntries)
   const [error, setError] = useState<string | null>(null)
+  const [taxonomyMap, setTaxonomyMapState] = useState<Map<string, string>>(_cachedTaxonomyMap || new Map())
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [reverting, setReverting] = useState<string | null>(null)
-  const [taxonomyMap, setTaxonomyMap] = useState<Map<string, string>>(new Map())
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
   const [supplierDropdownId, setSupplierDropdownId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -316,14 +320,20 @@ export default function VersionHistoryPage() {
   const [applying, setApplying] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
-  const loadData = async () => {
-    setLoading(true)
+  const setTaxonomyMap = useCallback((m: Map<string, string>) => {
+    _cachedTaxonomyMap = m
+    setTaxonomyMapState(m)
+  }, [])
+
+  const loadData = useCallback(async () => {
+    if (!_cachedEntries) setLoading(true)
     setError(null)
     try {
       const [data, nodes] = await Promise.all([
         ipc.changelog.list(),
         ipc.taxonomy.getNodes(),
       ])
+      _cachedEntries = data
       setAllEntries(data)
       setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
     } catch (e) {
@@ -331,9 +341,9 @@ export default function VersionHistoryPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData() }, [loadData])
 
   const handleRevert = async (changeId: string) => {
     setReverting(changeId)
@@ -401,6 +411,7 @@ export default function VersionHistoryPage() {
         ipc.changelog.list(),
         ipc.taxonomy.getNodes(),
       ])
+      _cachedEntries = data
       setAllEntries(data)
       setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
     } catch (e) {

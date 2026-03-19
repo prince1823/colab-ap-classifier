@@ -1,38 +1,44 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { ipc } from '../lib/ipc'
-import FilterConditionBuilder, { OPERATOR_LABELS } from '../components/FilterConditionBuilder'
+import { GroupedFilterBuilder, conditionsToGrouped, groupedToConditions, makeEmptyGroup, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { OverrideRule } from '../../shared/types/rules'
-import type { FilterCondition, FilterOperator } from '../../shared/types/transactions'
+import type { FilterCondition, FieldDefinition, GroupedFilter } from '../../shared/types/transactions'
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
 
 export default function OverrideRulesPage() {
   const [rules, setRules] = useState<OverrideRule[]>([])
   const [taxonomyNodes, setTaxonomyNodes] = useState<TaxonomyNode[]>([])
-  const [columns, setColumns] = useState<string[]>([])
+  const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Create/edit modal
+  // Create/edit editor
   const [showEditor, setShowEditor] = useState(false)
   const [editingRule, setEditingRule] = useState<OverrideRule | null>(null)
   const [name, setName] = useState('')
-  const [conditions, setConditions] = useState<FilterCondition[]>([{ field: '', operator: 'equals', value: '', connector: 'AND' }])
+  const [grouped, setGrouped] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
   const [targetNodeId, setTargetNodeId] = useState('')
   const [priority, setPriority] = useState(100)
   const [saving, setSaving] = useState(false)
+  const [taxonomySearch, setTaxonomySearch] = useState('')
+  const [taxonomyDropdownOpen, setTaxonomyDropdownOpen] = useState(false)
+  const taxonomyDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Distinct values for autocomplete suggestions (fetched when editor opens)
+  const [distinctValues, setDistinctValues] = useState<Record<string, string[]>>({})
 
   const loadData = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [r, n, cols] = await Promise.all([
+      const [r, n, fields] = await Promise.all([
         ipc.rules.list(),
         ipc.taxonomy.getNodes(),
-        ipc.transactions.getColumns(),
+        ipc.transactions.getFilterFields(),
       ])
       setRules(r)
       setTaxonomyNodes(n)
-      setColumns(cols)
+      setFilterFields(fields)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load rules')
     } finally {
@@ -42,21 +48,53 @@ export default function OverrideRulesPage() {
 
   useEffect(() => { loadData() }, [])
 
+  // Fetch distinct values for string fields when editor opens
+  useEffect(() => {
+    if (!showEditor) return
+    setDistinctValues({})
+    const stringFields = filterFields.filter(f => f.type === 'string').map(f => f.name)
+    for (const field of stringFields) {
+      ipc.transactions.distinctValues(field, 5000)
+        .then((values: string[]) => {
+          setDistinctValues(prev => ({ ...prev, [field]: values ?? [] }))
+        })
+        .catch(() => {
+          setDistinctValues(prev => ({ ...prev, [field]: [] }))
+        })
+    }
+  }, [showEditor, filterFields])
+
+  // Enrich string fields with fresh suggestions
+  const enrichedFields: FieldDefinition[] = useMemo(() =>
+    filterFields.map(f => {
+      const values = distinctValues[f.name]
+      if (values && values.length > 0 && f.type === 'string') {
+        return { ...f, suggestions: values }
+      }
+      return f
+    }),
+    [filterFields, distinctValues]
+  )
+
   const openCreate = () => {
     setEditingRule(null)
     setName('')
-    setConditions([{ field: '', operator: 'equals', value: '', connector: 'AND' }])
+    setGrouped({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
     setTargetNodeId(taxonomyNodes[0]?.id || '')
     setPriority(100)
+    setTaxonomySearch('')
+    setTaxonomyDropdownOpen(false)
     setShowEditor(true)
   }
 
   const openEdit = (rule: OverrideRule) => {
     setEditingRule(rule)
     setName(rule.name)
-    setConditions(rule.conditions.length > 0 ? rule.conditions.map(c => ({ ...c, connector: c.connector || 'AND' })) : [{ field: '', operator: 'equals', value: '', connector: 'AND' }])
+    setGrouped(rule.conditions.length > 0 ? conditionsToGrouped(rule.conditions) : { groupConnector: 'AND', groups: [makeEmptyGroup()] })
     setTargetNodeId(rule.targetTaxonomyNodeId)
     setPriority(rule.priorityScore)
+    setTaxonomySearch('')
+    setTaxonomyDropdownOpen(false)
     setShowEditor(true)
   }
 
@@ -64,6 +102,7 @@ export default function OverrideRulesPage() {
     setSaving(true)
     setError(null)
     try {
+      const conditions = groupedToConditions(grouped)
       if (editingRule) {
         await ipc.rules.update(editingRule.id, { name, conditions, targetTaxonomyNodeId: targetNodeId, priorityScore: priority })
       } else {
@@ -94,6 +133,29 @@ export default function OverrideRulesPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to toggle rule')
     }
+  }
+
+  // Searchable taxonomy dropdown
+  const filteredTaxonomyNodes = useMemo(() => {
+    if (!taxonomySearch.trim()) return taxonomyNodes
+    const q = taxonomySearch.toLowerCase()
+    return taxonomyNodes.filter(n => n.fullPath.toLowerCase().includes(q))
+  }, [taxonomyNodes, taxonomySearch])
+
+  useEffect(() => {
+    const handler = (e: PointerEvent) => {
+      if (taxonomyDropdownRef.current && !taxonomyDropdownRef.current.contains(e.target as Node)) {
+        setTaxonomyDropdownOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', handler, true)
+    return () => document.removeEventListener('pointerdown', handler, true)
+  }, [])
+
+  const selectTaxonomyNode = (nodeId: string) => {
+    setTargetNodeId(nodeId)
+    setTaxonomyDropdownOpen(false)
+    setTaxonomySearch('')
   }
 
   const getNodePath = (nodeId: string) => taxonomyNodes.find((n) => n.id === nodeId)?.fullPath || nodeId
@@ -147,19 +209,58 @@ export default function OverrideRulesPage() {
               <input type="number" value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
             </div>
           </div>
-          <div>
+          <div ref={taxonomyDropdownRef} className="relative">
             <label className="mb-1 block text-xs font-medium text-gray-600">Target Classification</label>
-            <select value={targetNodeId} onChange={(e) => setTargetNodeId(e.target.value)} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
-              {taxonomyNodes.map((n) => (
-                <option key={n.id} value={n.id}>{n.fullPath}</option>
-              ))}
-            </select>
+            <button
+              type="button"
+              onClick={() => setTaxonomyDropdownOpen(!taxonomyDropdownOpen)}
+              className="flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm hover:border-gray-400"
+            >
+              <span className={targetNodeId ? 'text-gray-900 truncate' : 'text-gray-400'}>
+                {targetNodeId ? getNodePath(targetNodeId) : 'Select classification...'}
+              </span>
+              <svg className={`ml-2 h-4 w-4 shrink-0 text-gray-400 transition-transform ${taxonomyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+            </button>
+            {taxonomyDropdownOpen && (
+              <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg">
+                <div className="border-b border-gray-100 p-2">
+                  <input
+                    value={taxonomySearch}
+                    onChange={(e) => setTaxonomySearch(e.target.value)}
+                    placeholder="Search taxonomy..."
+                    autoFocus
+                    className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  />
+                </div>
+                <ul className="max-h-48 overflow-y-auto py-1">
+                  {filteredTaxonomyNodes.length === 0 && (
+                    <li className="px-3 py-2 text-xs text-gray-400">No matches</li>
+                  )}
+                  {filteredTaxonomyNodes.map((n) => (
+                    <li
+                      key={n.id}
+                      onMouseDown={(e) => { e.preventDefault(); selectTaxonomyNode(n.id) }}
+                      className={`cursor-pointer px-3 py-1.5 text-xs leading-snug ${
+                        n.id === targetNodeId
+                          ? 'bg-blue-50 font-medium text-blue-700'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {n.fullPath}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
-          <FilterConditionBuilder
-            conditions={conditions}
-            onChange={setConditions}
-            availableFields={columns}
-          />
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Conditions</label>
+            <GroupedFilterBuilder
+              value={grouped}
+              onChange={setGrouped}
+              availableFields={enrichedFields}
+            />
+          </div>
           <div className="flex gap-2">
             <button onClick={handleSave} disabled={saving} className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Saving...' : 'Save'}

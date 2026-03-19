@@ -17,26 +17,36 @@ describe('SupplierService', () => {
 
   describe('normalizeSupplierName', () => {
     it('should create a new project_supplier and return its id', async () => {
-      // No existing supplier
+      // All db.get calls return undefined: no canonical match, no alias match, no universe info
       vi.mocked(db.get).mockResolvedValue(undefined);
       vi.mocked(db.run).mockResolvedValue(undefined);
 
-      const id = await service.normalizeSupplierName('Acme Corp');
+      const id = await service.normalizeSupplierName('Walmart Inc');
       expect(id).toBeTruthy();
+      // INSERT uses 3 params: id, supplier_name (cleaned), universe_match
       expect(db.run).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO project_suppliers'),
         expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        expect.anything()
+        'Walmart',   // cleanSupplierName strips "Inc"
+        false
       );
     });
 
-    it('should return existing supplier id if already normalized', async () => {
-      vi.mocked(db.get).mockResolvedValue({ id: 'existing-id', supplier_name: 'Acme Corp' });
+    it('should return existing supplier id if canonical already exists', async () => {
+      vi.mocked(db.get).mockResolvedValue({ id: 'existing-id' });
 
-      const id = await service.normalizeSupplierName('Acme Corp');
+      const id = await service.normalizeSupplierName('Walmart Inc');
       expect(id).toBe('existing-id');
+    });
+
+    it('should return existing supplier id if raw name matches an existing alias', async () => {
+      // First get (canonical lookup) returns nothing, second get (alias lookup) finds a match
+      vi.mocked(db.get)
+        .mockResolvedValueOnce(undefined)  // canonical lookup
+        .mockResolvedValueOnce({ project_supplier_id: 'alias-matched-id' }); // alias lookup
+
+      const id = await service.normalizeSupplierName('WALMART INC');
+      expect(id).toBe('alias-matched-id');
     });
   });
 
@@ -95,24 +105,33 @@ describe('SupplierService', () => {
     });
   });
 
-  describe('addAlias', () => {
+  describe('assignAlias', () => {
     it('should remap transactions with alias to canonical supplier', async () => {
-      // Must find the canonical supplier in project_suppliers
-      vi.mocked(db.get).mockResolvedValue({ id: 'sup1', supplier_name: 'Acme Corp' });
+      vi.mocked(db.get).mockResolvedValue({ id: 'sup1' });
       vi.mocked(db.run).mockResolvedValue(undefined);
 
-      await service.addAlias('Acme Corp', 'ACME');
+      await service.assignAlias('sup1', 'WALMART INC');
 
-      // Should update transactions with the alias
-      expect(db.run).toHaveBeenCalled();
+      expect(db.run).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE transactions'),
+        'sup1',
+        'WALMART INC'
+      );
+    });
+
+    it('should throw if supplier does not exist', async () => {
+      vi.mocked(db.get).mockResolvedValue(undefined);
+
+      await expect(service.assignAlias('bad-id', 'WALMART INC'))
+        .rejects.toThrow('Supplier not found');
     });
   });
 
   describe('filterTailSpend', () => {
     it('should return supplier IDs below threshold', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        { id: 'sup-small' },
-      ]);
+      // transactionColumnExists checks for spend_amount via db.get
+      vi.mocked(db.get).mockResolvedValue({ cnt: 1 });
+      vi.mocked(db.all).mockResolvedValue([{ id: 'sup-small' }]);
 
       const ids = await service.filterTailSpend(1000);
       expect(ids).toEqual(['sup-small']);

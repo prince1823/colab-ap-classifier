@@ -1,5 +1,5 @@
 import { registerHandler } from './register';
-import type { ILLMConfig } from '../../shared/types/services';
+import type { IAppConfigService, ILLMConfig } from '../../shared/types/services';
 import type { LLMConfigResponse } from '../../shared/types/ipc-contract';
 
 async function validateApiKey(
@@ -36,7 +36,23 @@ async function validateApiKey(
   }
 }
 
-export function registerSettingsHandlers(appConfig: ILLMConfig): void {
+async function validateExaKey(key: string): Promise<{ valid: boolean; error?: string }> {
+  try {
+    const response = await fetch('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: 'test', numResults: 1 }),
+    });
+    if (response.ok) return { valid: true };
+    let body = '';
+    try { body = await response.text(); } catch { /* ignore */ }
+    return { valid: false, error: `HTTP ${response.status}: ${body.slice(0, 200)}` };
+  } catch (e) {
+    return { valid: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export function registerSettingsHandlers(appConfig: ILLMConfig & Pick<IAppConfigService, 'getExaApiKey' | 'setExaApiKey'>): void {
   registerHandler('settings:getLLMConfig', async (): Promise<LLMConfigResponse> => {
     return {
       provider: appConfig.getProvider(),
@@ -44,6 +60,7 @@ export function registerSettingsHandlers(appConfig: ILLMConfig): void {
       hasOpenRouterKey: appConfig.getApiKey('openrouter') !== null,
       hasAnthropicKey:  appConfig.getApiKey('anthropic') !== null,
       hasOpenAIKey:     appConfig.getApiKey('openai') !== null,
+      hasExaKey:        appConfig.getExaApiKey() !== null,
     };
   });
 
@@ -61,5 +78,19 @@ export function registerSettingsHandlers(appConfig: ILLMConfig): void {
 
   registerHandler('settings:validateApiKey', async (_event, provider: unknown, key: unknown) => {
     return validateApiKey(provider as string, key as string);
+  });
+
+  registerHandler('settings:setExaKey', async (_event, key: unknown) => {
+    await appConfig.setExaApiKey(key as string);
+  });
+
+  registerHandler('settings:validateExaKey', async (_event, key: unknown) => {
+    return validateExaKey(key as string);
+  });
+
+  registerHandler('settings:validateStoredExaKey', async () => {
+    const key = appConfig.getExaApiKey();
+    if (!key) return { valid: false, error: 'No Exa API key stored' };
+    return validateExaKey(key);
   });
 }

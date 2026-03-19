@@ -7,6 +7,7 @@ export interface LLMConfigResponse {
   hasOpenRouterKey: boolean;
   hasAnthropicKey: boolean;
   hasOpenAIKey: boolean;
+  hasExaKey: boolean;
 }
 import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type {
@@ -22,7 +23,7 @@ import type {
 } from './transactions';
 import type { ClassificationProgress, ResearchProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
-import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput } from './suppliers';
+import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
 import type { ChangeLog } from './changelog';
 import type { UploadRecord } from './services';
@@ -87,6 +88,17 @@ export interface IPCInvokeMap {
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
   'suppliers:distinctValues':  { args: [field: string, limit?: number]; result: string[] };
+  'suppliers:getAliases':      { args: [supplierId: string]; result: string[] };
+  'suppliers:assignAlias':     { args: [supplierId: string, rawName: string]; result: void };
+  'suppliers:rename':          { args: [supplierId: string, newName: string]; result: void };
+  'suppliers:merge':           { args: [survivorId: string, losingIds: string[]]; result: void };
+  'suppliers:delete':          { args: [supplierId: string]; result: void };
+  'suppliers:listParents':     { args: []; result: SupplierParent[] };
+  'suppliers:addParent':       { args: [name: string]; result: SupplierParent };
+  'suppliers:changeParent':    { args: [supplierId: string, parentId: string | null]; result: void };
+  'suppliers:removeParent':    { args: [supplierId: string]; result: void };
+  'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
+  'suppliers:deleteParent':    { args: [parentId: string]; result: void };
 
   // Rules
   'rules:list':   { args: []; result: OverrideRule[] };
@@ -112,6 +124,10 @@ export interface IPCInvokeMap {
   'settings:setProvider':    { args: [provider: string]; result: void };
   'settings:setModel':       { args: [model: string]; result: void };
   'settings:validateApiKey': { args: [provider: string, key: string]; result: { valid: boolean; error?: string } };
+  // Settings — Exa
+  'settings:setExaKey':           { args: [key: string]; result: void };
+  'settings:validateExaKey':      { args: [key: string]; result: { valid: boolean; error?: string } };
+  'settings:validateStoredExaKey': { args: []; result: { valid: boolean; error?: string } };
 
   // Supplier Universe
   'supplier-universe:getPath':    { args: []; result: string | null };

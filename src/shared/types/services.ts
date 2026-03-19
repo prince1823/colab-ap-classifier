@@ -1,5 +1,5 @@
 import type { LicenseStatus, LicenseActivationResult } from './license';
-import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput } from './suppliers';
+import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
@@ -35,6 +35,8 @@ export interface ILicenseService {
 // ─── App Config ─────────────────────────────────────────────────────────────
 
 export interface IAppConfigService extends ILLMConfig {
+  getExaApiKey(): string | null;
+  setExaApiKey(key: string): Promise<void>;
   getSupplierUniversePath(): string | null;
   setSupplierUniversePath(p: string): Promise<void>;
   clearSupplierUniversePath(): Promise<void>;
@@ -162,21 +164,30 @@ export interface TaxonomyStore {
 }
 
 export interface SupplierService {
-  normalizeSupplierName(rawName: string): Promise<string>;
+  normalizeSupplierName(rawName: string, aliasMap?: Map<string, string>): Promise<string>;
   normalizeAllTransactions(): Promise<void>;
-  addAlias(canonicalName: string, alias: string): Promise<void>;
-  getAliases(canonicalName: string): Promise<string[]>;
+  assignAlias(supplierId: string, rawName: string): Promise<void>;
+  getProjectAliases(supplierId: string): Promise<string[]>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
+  mergeSuppliers(survivorId: string, losingIds: string[]): Promise<void>;
+  deleteSupplier(supplierId: string): Promise<void>;
   updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void>;
   listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
-  assignParent(id: string, parentId: string): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;
   isTailSpend(supplierId: string): Promise<boolean>;
   markResearched(supplierId: string): Promise<void>;
   getFilterFields(): FieldDefinition[];
   queryDistinctValues(field: string, limit?: number): Promise<string[]>;
+  // Parent management
+  listParents(): Promise<SupplierParent[]>;
+  addParent(name: string): Promise<SupplierParent>;
+  findParentByName(name: string): Promise<SupplierParent | null>;
+  changeParent(supplierId: string, parentId: string | null): Promise<void>;
+  removeParent(supplierId: string): Promise<void>;
+  renameParent(parentId: string, newName: string): Promise<void>;
+  deleteParent(parentId: string): Promise<void>;
 }
 
 export interface RuleStore {

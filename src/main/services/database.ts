@@ -36,7 +36,7 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents'];
 
 export { convertPlaceholders };
 
@@ -113,7 +113,7 @@ export class DuckDBDatabase implements Database {
           supplier_name VARCHAR NOT NULL UNIQUE,
           confirmation_status VARCHAR DEFAULT 'pending',
           is_tail_spend BOOLEAN DEFAULT FALSE,
-          parent_supplier_name VARCHAR,
+          parent_supplier_id VARCHAR,
           data_source VARCHAR DEFAULT 'manual',
           universe_match BOOLEAN DEFAULT FALSE,
           is_researched BOOLEAN DEFAULT FALSE,
@@ -189,6 +189,56 @@ export class DuckDBDatabase implements Database {
     try {
       await this.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name)');
     } catch { /* index may already exist or constraint already enforced */ }
+
+    // Migrate: ensure supplier_parents table exists
+    const spTable = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'supplier_parents'"
+    );
+    if (spTable.length === 0) {
+      await this.exec(`
+        CREATE TABLE IF NOT EXISTS supplier_parents (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL UNIQUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    }
+
+    // Migrate: replace parent_supplier_name with parent_supplier_id FK on project_suppliers
+    const parentIdCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'parent_supplier_id'"
+    );
+    if (parentIdCol.length === 0) {
+      await this.exec(`ALTER TABLE project_suppliers ADD COLUMN parent_supplier_id VARCHAR;`);
+    }
+    try {
+      await this.exec('ALTER TABLE project_suppliers DROP COLUMN parent_supplier_name');
+    } catch { /* column already removed, ignore */ }
+
+    // Migrate: convert override_rules.priority from INTEGER to DOUBLE
+    // DuckDB cannot ALTER COLUMN TYPE when indexes exist, so we recreate the table.
+    const priorityColType = await this.get<{ data_type: string }>(
+      "SELECT data_type FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'priority'"
+    );
+    if (priorityColType?.data_type?.toUpperCase() === 'INTEGER') {
+      await this.exec(`
+        CREATE TABLE override_rules_new (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL UNIQUE,
+          conditions JSON NOT NULL,
+          target_taxonomy_node_id VARCHAR NOT NULL,
+          priority DOUBLE NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO override_rules_new
+          SELECT id, name, conditions, target_taxonomy_node_id, CAST(priority AS DOUBLE), is_active, created_at
+          FROM override_rules;
+        DROP TABLE override_rules;
+        ALTER TABLE override_rules_new RENAME TO override_rules;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name);
+      `);
+    }
   }
 
   async closeDatabase(): Promise<void> {
@@ -299,7 +349,7 @@ export class DuckDBDatabase implements Database {
         name VARCHAR NOT NULL UNIQUE,
         conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
-        priority INTEGER NOT NULL,
+        priority DOUBLE NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -328,12 +378,18 @@ export class DuckDBDatabase implements Database {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS supplier_parents (
+        id VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS project_suppliers (
         id VARCHAR PRIMARY KEY,
         supplier_name VARCHAR NOT NULL UNIQUE,
         confirmation_status VARCHAR DEFAULT 'pending',
         is_tail_spend BOOLEAN DEFAULT FALSE,
-        parent_supplier_name VARCHAR,
+        parent_supplier_id VARCHAR,
         data_source VARCHAR DEFAULT 'manual',
         universe_match BOOLEAN DEFAULT FALSE,
         is_researched BOOLEAN DEFAULT FALSE,

@@ -38,4 +38,49 @@ export function registerSuppliersHandlers(
   registerHandler('suppliers:distinctValues', async (_event, field: unknown, limit: unknown) => {
     return suppliers.queryDistinctValues(field as string, (limit as number) ?? 200);
   });
+
+  registerHandler('suppliers:getAliases', async (_event, supplierId: unknown) => {
+    return suppliers.getProjectAliases(supplierId as string);
+  });
+
+  registerHandler('suppliers:assignAlias', async (_event, supplierId: unknown, rawName: unknown) => {
+    await suppliers.assignAlias(supplierId as string, rawName as string);
+  });
+
+  registerHandler('suppliers:rename', async (_event, supplierId: unknown, newName: unknown) => {
+    await suppliers.renameSupplier(supplierId as string, newName as string);
+  });
+
+  registerHandler('suppliers:merge', async (_event, survivorId: unknown, losingIds: unknown) => {
+    await suppliers.mergeSuppliers(survivorId as string, losingIds as string[]);
+  });
+
+  registerHandler('suppliers:delete', async (_event, supplierId: unknown) => {
+    await suppliers.deleteSupplier(supplierId as string);
+  });
+
+
+  registerHandler('suppliers:listParents', async () => {
+    return suppliers.listParents();
+  });
+
+  registerHandler('suppliers:addParent', async (_event, name: unknown) => {
+    return suppliers.addParent(name as string);
+  });
+
+  registerHandler('suppliers:changeParent', async (_event, supplierId: unknown, parentId: unknown) => {
+    await suppliers.changeParent(supplierId as string, (parentId as string | null));
+  });
+
+  registerHandler('suppliers:removeParent', async (_event, supplierId: unknown) => {
+    await suppliers.removeParent(supplierId as string);
+  });
+
+  registerHandler('suppliers:renameParent', async (_event, parentId: unknown, newName: unknown) => {
+    await suppliers.renameParent(parentId as string, newName as string);
+  });
+
+  registerHandler('suppliers:deleteParent', async (_event, parentId: unknown) => {
+    await suppliers.deleteParent(parentId as string);
+  });
 }

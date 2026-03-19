@@ -130,6 +130,17 @@ export const ipc = {
       invoke('suppliers:filterTailSpend', threshold),
     getFilterFields: () => invoke('suppliers:getFilterFields'),
     distinctValues: (field: string, limit?: number) => invoke('suppliers:distinctValues', field, limit),
+    getAliases: (supplierId: string) => invoke('suppliers:getAliases', supplierId),
+    assignAlias: (supplierId: string, rawName: string) => invoke('suppliers:assignAlias', supplierId, rawName),
+    rename: (supplierId: string, newName: string) => invoke('suppliers:rename', supplierId, newName),
+    merge: (survivorId: string, losingIds: string[]) => invoke('suppliers:merge', survivorId, losingIds),
+    delete: (supplierId: string) => invoke('suppliers:delete', supplierId),
+    listParents: () => invoke('suppliers:listParents'),
+    addParent: (name: string) => invoke('suppliers:addParent', name),
+    changeParent: (supplierId: string, parentId: string | null) => invoke('suppliers:changeParent', supplierId, parentId),
+    removeParent: (supplierId: string) => invoke('suppliers:removeParent', supplierId),
+    renameParent: (parentId: string, newName: string) => invoke('suppliers:renameParent', parentId, newName),
+    deleteParent: (parentId: string) => invoke('suppliers:deleteParent', parentId),
   },
 
   // ── Rules (4 channels) ──
@@ -160,13 +171,16 @@ export const ipc = {
     saveContent: (content: string, defaultFilename: string) => invoke('export:saveContent', content, defaultFilename),
   },
 
-  // ── Settings (5 channels) ──
+  // ── Settings (7 channels) ──
   settings: {
     getLLMConfig: () => invoke('settings:getLLMConfig'),
     setApiKey: (provider: string, key: string) => invoke('settings:setApiKey', provider, key),
     setProvider: (provider: string) => invoke('settings:setProvider', provider),
     setModel: (model: string) => invoke('settings:setModel', model),
     validateApiKey: (provider: string, key: string) => invoke('settings:validateApiKey', provider, key),
+    setExaKey: (key: string) => invoke('settings:setExaKey', key),
+    validateExaKey: (key: string) => invoke('settings:validateExaKey', key),
+    validateStoredExaKey: () => invoke('settings:validateStoredExaKey'),
   },
 
   // ── Supplier Universe (3 channels) ──

@@ -7,6 +7,7 @@ export interface LLMConfigResponse {
   hasOpenRouterKey: boolean;
   hasAnthropicKey: boolean;
   hasOpenAIKey: boolean;
+  hasExaKey: boolean;
 }
 import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type {
@@ -113,6 +114,10 @@ export interface IPCInvokeMap {
   'settings:setProvider':    { args: [provider: string]; result: void };
   'settings:setModel':       { args: [model: string]; result: void };
   'settings:validateApiKey': { args: [provider: string, key: string]; result: { valid: boolean; error?: string } };
+  // Settings — Exa
+  'settings:setExaKey':           { args: [key: string]; result: void };
+  'settings:validateExaKey':      { args: [key: string]; result: { valid: boolean; error?: string } };
+  'settings:validateStoredExaKey': { args: []; result: { valid: boolean; error?: string } };
 
   // Supplier Universe
   'supplier-universe:getPath':    { args: []; result: string | null };

@@ -159,13 +159,16 @@ export const ipc = {
     saveContent: (content: string, defaultFilename: string) => invoke('export:saveContent', content, defaultFilename),
   },
 
-  // ── Settings (5 channels) ──
+  // ── Settings (7 channels) ──
   settings: {
     getLLMConfig: () => invoke('settings:getLLMConfig'),
     setApiKey: (provider: string, key: string) => invoke('settings:setApiKey', provider, key),
     setProvider: (provider: string) => invoke('settings:setProvider', provider),
     setModel: (model: string) => invoke('settings:setModel', model),
     validateApiKey: (provider: string, key: string) => invoke('settings:validateApiKey', provider, key),
+    setExaKey: (key: string) => invoke('settings:setExaKey', key),
+    validateExaKey: (key: string) => invoke('settings:validateExaKey', key),
+    validateStoredExaKey: () => invoke('settings:validateStoredExaKey'),
   },
 
   // ── Supplier Universe (3 channels) ──

@@ -15,6 +15,9 @@ interface SettingsFormState {
   apiKey: string
   isValidating: boolean
   validationResult: { valid: boolean; error?: string } | null
+  exaKey: string
+  isValidatingExa: boolean
+  exaValidationResult: { valid: boolean; error?: string } | null
 }
 
 const PROVIDERS = ['openrouter', 'anthropic', 'openai'] as const
@@ -25,6 +28,9 @@ const DEFAULT_FORM: SettingsFormState = {
   apiKey: '',
   isValidating: false,
   validationResult: null,
+  exaKey: '',
+  isValidatingExa: false,
+  exaValidationResult: null,
 }
 
 function hasKeyForProvider(config: LLMConfigResponse, provider: string): boolean {
@@ -82,6 +88,44 @@ export default function SettingsDialog({ open, onClose }: Props) {
         isValidating: false,
         validationResult: { valid: false, error: e instanceof Error ? e.message : 'Validation failed' },
       }))
+    }
+  }
+
+  function handleExaKeyChange(e: React.ChangeEvent<HTMLInputElement>): void {
+    setForm((prev) => ({ ...prev, exaKey: e.target.value, exaValidationResult: null }))
+  }
+
+  async function handleValidateExa(): Promise<void> {
+    setForm((prev) => ({ ...prev, isValidatingExa: true, exaValidationResult: null }))
+    try {
+      const result = form.exaKey.trim()
+        ? await ipc.settings.validateExaKey(form.exaKey.trim())
+        : await ipc.settings.validateStoredExaKey()
+      setForm((prev) => ({ ...prev, isValidatingExa: false, exaValidationResult: result }))
+    } catch (e) {
+      setForm((prev) => ({
+        ...prev,
+        isValidatingExa: false,
+        exaValidationResult: { valid: false, error: e instanceof Error ? e.message : 'Validation failed' },
+      }))
+    }
+  }
+
+  async function handleSaveExaKey(): Promise<void> {
+    if (!form.exaKey.trim()) return
+    setIsSaving(true)
+    setSaveError(null)
+    setSaveSuccess(false)
+    try {
+      await ipc.settings.setExaKey(form.exaKey.trim())
+      const updated = await ipc.settings.getLLMConfig()
+      setConfig(updated)
+      setForm((prev) => ({ ...prev, exaKey: '', exaValidationResult: null }))
+      setSaveSuccess(true)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Failed to save Exa key')
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -230,6 +274,63 @@ export default function SettingsDialog({ open, onClose }: Props) {
             >
               {isSaving ? 'Saving…' : 'Save'}
             </button>
+          </div>
+
+          {/* ── Exa Web Search ── */}
+          <div className="mt-6 border-t border-gray-200 pt-4">
+            <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">Exa Web Search</h3>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                API Key
+                {config?.hasExaKey && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-green-600">
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                    currently set
+                  </span>
+                )}
+              </label>
+              <input
+                type="password"
+                value={form.exaKey}
+                onChange={handleExaKeyChange}
+                placeholder={config?.hasExaKey ? 'Enter new key to replace…' : 'Enter Exa API key…'}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              />
+              {form.exaValidationResult && (
+                <div
+                  className={`mt-1 flex items-center gap-1 text-xs ${
+                    form.exaValidationResult.valid ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {form.exaValidationResult.valid ? (
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                  ) : (
+                    <ExclamationCircleIcon className="h-3.5 w-3.5" />
+                  )}
+                  {form.exaValidationResult.valid ? 'Key is valid' : (form.exaValidationResult.error ?? 'Invalid key')}
+                </div>
+              )}
+              {(form.exaKey.trim() || config?.hasExaKey) && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={handleValidateExa}
+                    disabled={form.isValidatingExa || isSaving}
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {form.isValidatingExa ? 'Validating…' : 'Validate'}
+                  </button>
+                  {form.exaKey.trim() && (
+                    <button
+                      onClick={handleSaveExaKey}
+                      disabled={isSaving}
+                      className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {isSaving ? 'Saving…' : 'Save'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ── Supplier Universe ── */}

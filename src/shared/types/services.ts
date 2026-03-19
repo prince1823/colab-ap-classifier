@@ -34,6 +34,8 @@ export interface ILicenseService {
 // ─── App Config ─────────────────────────────────────────────────────────────
 
 export interface IAppConfigService extends ILLMConfig {
+  getExaApiKey(): string | null;
+  setExaApiKey(key: string): Promise<void>;
   getSupplierUniversePath(): string | null;
   setSupplierUniversePath(p: string): Promise<void>;
   clearSupplierUniversePath(): Promise<void>;

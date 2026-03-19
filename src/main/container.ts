@@ -75,7 +75,7 @@ export function createContainer(): ServiceContainer {
   const appConfig = new AppConfigService();
   const supplierUniverse = new DuckDBSupplierUniverse(appConfig);
   const llm = new OpenRouterLLMClient(appConfig);
-  const webSearch = new ExaWebSearch();
+  const webSearch = new ExaWebSearch(appConfig);
   const license = new LicenseService(appConfig, eventBus);
 
   // Agents

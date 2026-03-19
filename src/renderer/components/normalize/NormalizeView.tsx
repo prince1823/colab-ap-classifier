@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
-  ChevronRight, ChevronDown, Trash2, Plus, Search, X,
+  ChevronRight, ChevronDown, ChevronsDown, ChevronsUp, Trash2, Plus, Search, X,
   Merge, ArrowRightLeft,
 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
@@ -142,6 +142,18 @@ export default function NormalizeView() {
       return next
     })
   }, [loadAliases])
+
+  const allExpanded = suppliers.length > 0 && suppliers.every(s => expanded.has(s.id))
+
+  const toggleExpandAll = useCallback(() => {
+    if (allExpanded) {
+      setExpanded(new Set())
+    } else {
+      const allIds = suppliers.map(s => s.id)
+      setExpanded(new Set(allIds))
+      allIds.forEach(id => loadAliases(id))
+    }
+  }, [allExpanded, suppliers, loadAliases])
 
   // ── Build normalized rows ─────────────────────────────────────────
 
@@ -612,7 +624,15 @@ export default function NormalizeView() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Right: group-by toggle + search */}
+        {/* Right: expand-all + group-by toggle + search */}
+        <button
+          onClick={toggleExpandAll}
+          className="inline-flex items-center justify-center p-1.5 text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50 hover:text-gray-700 transition-colors flex-shrink-0 select-none"
+          title={allExpanded ? 'Collapse all' : 'Expand all'}
+        >
+          {allExpanded ? <ChevronsUp size={13} /> : <ChevronsDown size={13} />}
+        </button>
+
         <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none flex-shrink-0">
           <div
             onClick={() => setGroupByParent(!groupByParent)}

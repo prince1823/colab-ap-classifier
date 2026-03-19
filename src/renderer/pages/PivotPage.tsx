@@ -29,11 +29,12 @@ const INTERNAL_COLS = new Set([
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
   'classification_status', 'human_reviewed',
   'original_supplier_name', 'project_supplier_id',
+  'applied_rule_id',
   'created_at', 'updated_at',
 ])
 
-/** Virtual columns resolved via JOIN — excluded from pivot dimension dropdowns. */
-const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3', 'is_tail_spend', 'is_researched'])
+/** Virtual columns resolved via JOIN — excluded from pivot dimension dropdowns (added manually below). */
+const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3', 'is_tail_spend', 'is_researched', 'applied_rule_name'])
 
 /** Columns excluded from pivot dropdowns but still available in advanced filters. */
 const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched'])
@@ -44,6 +45,7 @@ const COLUMN_LABELS: Record<string, string> = {
   classification_l3: 'Classification L3',
   classification_path: 'Classification Path (L1 › L2 › L3)',
   supplier_name: 'Supplier',
+  applied_rule_name: 'Applied Rule',
   is_tail_spend: 'Tail Spend',
   is_researched: 'Researched',
   gl_description: 'GL Description',
@@ -128,6 +130,7 @@ export default function PivotPage() {
 
   const availableColumns = useMemo(() => [
     'classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
+    'applied_rule_name',
     ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
   ], [columns])
 

@@ -37,11 +37,11 @@ export default function ReassignAliasModal({ alias, currentNormalized, allSuppli
   }, [focusIndex])
 
   const targets = useMemo(() => {
-    const q = search.toLowerCase()
+    const q = search.trim().toLowerCase()
     return allSuppliers
       .filter(s => s.id !== currentNormalized.id)
       .filter(s => !q || s.supplierName.toLowerCase().includes(q))
-      .slice(0, 30)
+      .slice(0, 50)
   }, [allSuppliers, currentNormalized.id, search])
 
   const handleReassign = useCallback(async (toId: string) => {

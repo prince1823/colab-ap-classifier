@@ -282,6 +282,7 @@ export default function VersionHistoryPage() {
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
   const [supplierDropdownId, setSupplierDropdownId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [viewFilter, setViewFilter] = useState<'all' | 'changes' | 'feedback'>('all')
 
   // Close supplier dropdown when clicking outside
   useEffect(() => {
@@ -291,9 +292,11 @@ export default function VersionHistoryPage() {
     return () => document.removeEventListener('click', handleClick)
   }, [supplierDropdownId])
 
-  // Filter out legacy "Reverted:" entries and apply search
+  // Filter out legacy "Reverted:" entries, apply view filter, and search
   const displayEntries = allEntries.filter(e => {
     if (e.description?.startsWith('Reverted:')) return false
+    if (viewFilter === 'changes' && e.source === 'feedback') return false
+    if (viewFilter === 'feedback' && e.source !== 'feedback') return false
     if (!searchQuery.trim()) return true
     const q = searchQuery.trim().toLowerCase()
     const haystack = [
@@ -426,6 +429,18 @@ export default function VersionHistoryPage() {
           <p className="mt-1 text-sm text-gray-500">{displayEntries.length} changes recorded</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setViewFilter(v => v === 'all' ? 'changes' : v === 'changes' ? 'feedback' : 'all')}
+            className={`rounded border px-2 py-1 text-xs font-medium ${
+              viewFilter === 'all'
+                ? 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                : viewFilter === 'changes'
+                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                : 'border-purple-300 bg-purple-50 text-purple-700'
+            }`}
+          >
+            {viewFilter === 'all' ? 'All' : viewFilter === 'changes' ? 'Changes' : 'Feedback'}
+          </button>
           <input
             type="text"
             placeholder="Search..."

@@ -49,7 +49,7 @@ Identify primary business model: "B2B Services", "B2C Retail", "B2B Products", "
 
 ## Parent Company
 If this supplier is a subsidiary, division, or brand owned by a larger corporation, populate
-`parentCompanyName` with the official name of the owning entity. Return null if the supplier
+\`parentCompanyName\` with the official name of the owning entity. Return null if the supplier
 is the top-level entity with no corporate parent, or if the parent company is not known from
 the research.
 

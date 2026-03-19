@@ -10,14 +10,17 @@ import SupplierListPanel from '../components/suppliers/SupplierListPanel'
 import SupplierDetailPanel from '../components/suppliers/SupplierDetailPanel'
 import type { SupplierDetailPanelHandle } from '../components/suppliers/SupplierDetailPanel'
 import { useSupplierListKeyboard } from '../hooks/useSupplierListKeyboard'
-import { Filter, X } from 'lucide-react'
+import { Filter, X, GitMerge } from 'lucide-react'
+import NormalizeView from '../components/normalize/NormalizeView'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
 import { useSupplierFilterStore } from '../stores/supplierFilterStore'
 
 type QuickFilter = 'all' | 'unresearched' | 'unconfirmed'
+type ViewMode = 'suppliers' | 'normalize'
 
 export default function SuppliersPage() {
+  const [viewMode, setViewMode] = useState<ViewMode>('suppliers')
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -509,6 +512,18 @@ export default function SuppliersPage() {
         </div>
 
         <button
+          onClick={() => setViewMode(viewMode === 'normalize' ? 'suppliers' : 'normalize')}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
+            viewMode === 'normalize'
+              ? 'border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100'
+              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          <GitMerge size={13} />
+          Normalize
+        </button>
+
+        <button
           onClick={() => setShowAdvancedFilter(true)}
           className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
             filterConditions.length > 0
@@ -572,8 +587,11 @@ export default function SuppliersPage() {
         </button>
       </div>
 
+      {/* Normalize view */}
+      {viewMode === 'normalize' && <NormalizeView />}
+
       {/* Row 2: Research progress bar */}
-      {researchProgress && researchProgress.status === 'running' && (
+      {viewMode === 'suppliers' && researchProgress && researchProgress.status === 'running' && (
         <div className="suppliers-progress">
           <div className="flex items-center justify-between mb-1">
             <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
@@ -587,7 +605,7 @@ export default function SuppliersPage() {
           </div>
         </div>
       )}
-      {researchProgress && researchProgress.status === 'completed' && (
+      {viewMode === 'suppliers' && researchProgress && researchProgress.status === 'completed' && (
         <div className="suppliers-progress">
           <div className="flex items-center gap-2 py-1">
             <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
@@ -600,7 +618,7 @@ export default function SuppliersPage() {
       )}
 
       {/* Two-panel layout */}
-      <div className="suppliers-content">
+      {viewMode === 'suppliers' && <div className="suppliers-content">
         <SupplierListPanel
           suppliers={displayedSuppliers}
           focusedIndex={focusedIndex}
@@ -636,7 +654,7 @@ export default function SuppliersPage() {
           onMoveToList={handleMoveToList}
           isActive={activePanel === 'detail'}
         />
-      </div>
+      </div>}
 
       {saving && <div className="supplier-saving">Saving...</div>}
 

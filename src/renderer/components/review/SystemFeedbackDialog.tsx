@@ -126,25 +126,43 @@ export default function SystemFeedbackDialog({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50/50 rounded-b-xl">
-          <p className="text-xs text-gray-400">
-            {selectedIds.size} change{selectedIds.size !== 1 ? 's' : ''} selected
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onAnalyze}
-              disabled={selectedIds.size === 0 || !feedbackText.trim() || analyzing}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors"
-            >
-              {analyzing ? 'Analyzing...' : 'Analyze'}
-            </button>
-          </div>
+        <div className="border-t border-gray-100 bg-gray-50/50 rounded-b-xl">
+          {analyzing ? (
+            <div className="px-5 py-4 flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2">
+                <svg className="h-4 w-4 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span className="text-xs font-medium text-blue-600">Analyzing feedback...</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-1 overflow-hidden">
+                <div className="bg-blue-500 h-1 rounded-full animate-pulse" style={{ width: '60%' }} />
+              </div>
+              <p className="text-[10px] text-gray-400">Reviewing changes and generating recommendations</p>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between px-5 py-3">
+              <p className="text-xs text-gray-400">
+                {selectedIds.size} change{selectedIds.size !== 1 ? 's' : ''} selected
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onClose}
+                  className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={onAnalyze}
+                  disabled={selectedIds.size === 0 || !feedbackText.trim()}
+                  className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors"
+                >
+                  Analyze
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>,

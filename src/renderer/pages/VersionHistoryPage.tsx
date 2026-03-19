@@ -393,7 +393,13 @@ export default function VersionHistoryPage() {
       setFeedbackText('')
       setSuccessMessage('Feedback applied successfully.')
       setTimeout(() => setSuccessMessage(null), 3000)
-      await loadData()
+      // Refresh entries in background without full-page reload
+      const [data, nodes] = await Promise.all([
+        ipc.changelog.list(),
+        ipc.taxonomy.getNodes(),
+      ])
+      setAllEntries(data)
+      setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply feedback')
     } finally {

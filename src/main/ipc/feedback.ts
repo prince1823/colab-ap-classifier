@@ -80,7 +80,8 @@ export function registerFeedbackHandlers(
           conditions: [{ field: 'supplier_name', operator: 'equals', value: details.supplierName }],
         });
         const existing = supplierList[0];
-        const currentInfo: SupplierInfo = existing?.supplierInfo || {};
+        if (!existing) throw new Error(`Supplier not found: ${details.supplierName}`);
+        const currentInfo: SupplierInfo = existing.supplierInfo || {};
         const mergedInfo: SupplierInfo = {
           ...currentInfo,
           [details.field]: details.proposedValue,
@@ -137,7 +138,7 @@ export function registerFeedbackHandlers(
         if (!targetNode) {
           throw new Error(`Taxonomy path not found: ${details.targetTaxonomyPath}`);
         }
-        await rules.createRule({
+        const { id: ruleId } = await rules.createRule({
           name: details.name,
           conditions: details.conditions,
           targetTaxonomyNodeId: targetNode.id,
@@ -145,7 +146,7 @@ export function registerFeedbackHandlers(
         await changelog.logChange({
           source: 'feedback',
           affectedTable: 'override_rules',
-          affectedIds: [details.name],
+          affectedIds: [ruleId],
           affectedCount: 1,
           oldValues: null,
           newValues: { name: details.name, conditions: details.conditions, targetPath: details.targetTaxonomyPath },

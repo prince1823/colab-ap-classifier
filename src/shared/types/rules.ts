@@ -1,4 +1,4 @@
-import type { FilterCondition } from './transactions';
+import type { FilterCondition, GroupedFilter } from './transactions';
 
 export type OverrideRuleSource = 'project' | 'taxonomy' | 'global';
 
@@ -7,6 +7,7 @@ export interface OverrideRule {
   name: string;
   source: OverrideRuleSource;
   conditions: FilterCondition[];
+  groupedConditions?: GroupedFilter;
   targetTaxonomyNodeId: string;
   priorityScore: number;
   isActive: boolean;
@@ -17,6 +18,7 @@ export interface OverrideRuleCreate {
   name: string;
   source?: OverrideRuleSource;
   conditions: FilterCondition[];
+  groupedConditions?: GroupedFilter;
   targetTaxonomyNodeId: string;
   priorityScore?: number;
 }
@@ -24,6 +26,7 @@ export interface OverrideRuleCreate {
 export interface OverrideRuleUpdate {
   name?: string;
   conditions?: FilterCondition[];
+  groupedConditions?: GroupedFilter;
   targetTaxonomyNodeId?: string;
   priorityScore?: number;
   isActive?: boolean;

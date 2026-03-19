@@ -213,6 +213,14 @@ export class DuckDBDatabase implements Database {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name);
       `);
     }
+
+    // Migrate: add grouped_conditions column to override_rules for preserving grouped AND/OR logic
+    const groupedCondCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'grouped_conditions'"
+    );
+    if (groupedCondCol.length === 0) {
+      await this.exec('ALTER TABLE override_rules ADD COLUMN grouped_conditions JSON');
+    }
   }
 
   async closeDatabase(): Promise<void> {
@@ -322,6 +330,7 @@ export class DuckDBDatabase implements Database {
         id VARCHAR PRIMARY KEY,
         name VARCHAR NOT NULL UNIQUE,
         conditions JSON NOT NULL,
+        grouped_conditions JSON,
         target_taxonomy_node_id VARCHAR NOT NULL,
         priority DOUBLE NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,

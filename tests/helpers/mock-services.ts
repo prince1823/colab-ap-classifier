@@ -126,6 +126,7 @@ export function createMockTransactionStore(): TransactionStore {
     updateTransactions: vi.fn(),
     invalidateColumnCache: vi.fn(),
     getIdsByConditions: vi.fn().mockResolvedValue([]),
+    getIdsByGroupedConditions: vi.fn().mockResolvedValue([]),
   };
 }
 

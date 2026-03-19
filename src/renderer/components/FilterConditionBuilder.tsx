@@ -189,7 +189,9 @@ interface ConditionRowProps {
   onRemove: () => void
   canRemove: boolean
   showConnector: boolean
-  groupConnector: 'AND' | 'OR'
+  /** The connector value for the link above this row (from the previous condition) */
+  connectorValue: 'AND' | 'OR'
+  /** Toggle the connector for the link above this row */
   onToggleConnector: () => void
 }
 
@@ -202,7 +204,7 @@ function ConditionRow({
   onRemove,
   canRemove,
   showConnector,
-  groupConnector,
+  connectorValue,
   onToggleConnector,
 }: ConditionRowProps) {
   const getFieldDef = (name: string): FieldDefinition =>
@@ -229,12 +231,12 @@ function ConditionRow({
             type="button"
             onClick={onToggleConnector}
             className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              groupConnector === 'OR'
+              connectorValue === 'OR'
                 ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
                 : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
             }`}
           >
-            {groupConnector}
+            {connectorValue}
           </button>
         </div>
       )}
@@ -361,8 +363,13 @@ function GroupBlock({
     if (gk) _keyMap.set(newGroup, gk)
     onChange(newGroup)
   }
-  const toggleGroupConnector = () => {
-    const newGroup = { ...group, connector: group.connector === 'AND' ? 'OR' : 'AND' as const }
+  const toggleConditionConnector = (idx: number) => {
+    // Toggle the connector on condition[idx] — this is the link between condition[idx] and condition[idx+1]
+    const current = group.conditions[idx].connector ?? 'AND'
+    const updated = { ...group.conditions[idx], connector: current === 'AND' ? 'OR' as const : 'AND' as const }
+    const oldKey = _keyMap.get(group.conditions[idx])
+    if (oldKey) _keyMap.set(updated, oldKey)
+    const newGroup = { ...group, conditions: group.conditions.map((cc, i) => i === idx ? updated : cc) }
     const gk = _keyMap.get(group)
     if (gk) _keyMap.set(newGroup, gk)
     onChange(newGroup)
@@ -418,8 +425,8 @@ function GroupBlock({
               onRemove={() => removeCondition(ci)}
               canRemove={totalConditions > 1}
               showConnector={ci > 0}
-              groupConnector={group.connector}
-              onToggleConnector={toggleGroupConnector}
+              connectorValue={ci > 0 ? (group.conditions[ci - 1].connector ?? 'AND') : 'AND'}
+              onToggleConnector={() => ci > 0 && toggleConditionConnector(ci - 1)}
             />
           ))}
         </div>
@@ -583,9 +590,9 @@ export function groupedToConditions(grouped: GroupedFilter): FilterCondition[] {
     const group = grouped.groups[gi]
     for (let ci = 0; ci < group.conditions.length; ci++) {
       const c = { ...group.conditions[ci] }
-      // Within a group, conditions are connected by the group's connector
+      // Within a group, use the per-condition connector (falling back to group.connector)
       if (ci < group.conditions.length - 1) {
-        c.connector = group.connector
+        c.connector = c.connector ?? group.connector
       } else if (gi < grouped.groups.length - 1) {
         // Last condition in group — connector to next group
         c.connector = grouped.groupConnector

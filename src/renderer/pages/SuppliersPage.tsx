@@ -75,7 +75,12 @@ export default function SuppliersPage() {
       }
     }
     loadSettings()
-  }, [])
+    // Sync tailSpendActive from Zustand store (persists across navigations)
+    const hasTailFilter = advancedGrouped?.groups.some(g =>
+      g.conditions.some(c => c.field === 'is_tail_spend')
+    )
+    if (hasTailFilter) setTailSpendActive(true)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = useCallback(async () => {
     if (suppliers.length === 0) setLoading(true)
@@ -131,15 +136,24 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Save parentName */
+  /** Save parentName — find or create the parent by name, then assign the FK */
   const saveParentName = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
     setSaving(true)
     try {
-      const parentName = newValue || null
-      await ipc.suppliers.update(supplier.id, { parentName })
-      updateSuppliers(prev => prev.map(s =>
-        s.id === supplier.id ? { ...s, parentName } : s
-      ))
+      if (!newValue) {
+        await ipc.suppliers.removeParent(supplier.id)
+        updateSuppliers(prev => prev.map(s =>
+          s.id === supplier.id ? { ...s, parentSupplierId: null, parentName: null } : s
+        ))
+      } else {
+        const parents = await ipc.suppliers.listParents()
+        const existing = parents.find(p => p.name.toLowerCase() === newValue.toLowerCase())
+        const parent = existing ?? await ipc.suppliers.addParent(newValue)
+        await ipc.suppliers.changeParent(supplier.id, parent.id)
+        updateSuppliers(prev => prev.map(s =>
+          s.id === supplier.id ? { ...s, parentSupplierId: parent.id, parentName: parent.name } : s
+        ))
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to update')
     } finally {
@@ -532,10 +546,12 @@ export default function SuppliersPage() {
                 setEditingThreshold(false)
                 if (Number(newVal) > 0) {
                   setTailSpendThreshold(newVal)
-                  await ipc.project.setSetting('tail_spend_threshold', Number(newVal))
-                  if (tailSpendActive) {
+                  try {
+                    await ipc.project.setSetting('tail_spend_threshold', Number(newVal))
                     await ipc.suppliers.filterTailSpend(Number(newVal))
-                    await loadData()
+                    if (tailSpendActive) await loadData()
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Failed to save threshold')
                   }
                 }
               }}

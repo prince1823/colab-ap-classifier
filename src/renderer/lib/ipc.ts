@@ -129,6 +129,12 @@ export const ipc = {
       invoke('suppliers:filterTailSpend', threshold),
     getFilterFields: () => invoke('suppliers:getFilterFields'),
     distinctValues: (field: string, limit?: number) => invoke('suppliers:distinctValues', field, limit),
+    listParents: () => invoke('suppliers:listParents'),
+    addParent: (name: string) => invoke('suppliers:addParent', name),
+    changeParent: (supplierId: string, parentId: string | null) => invoke('suppliers:changeParent', supplierId, parentId),
+    removeParent: (supplierId: string) => invoke('suppliers:removeParent', supplierId),
+    renameParent: (parentId: string, newName: string) => invoke('suppliers:renameParent', parentId, newName),
+    deleteParent: (parentId: string) => invoke('suppliers:deleteParent', parentId),
   },
 
   // ── Rules (4 channels) ──

@@ -23,7 +23,7 @@ supplierType) are stored in the supplier_universe.suppliers.supplier_info JSON c
 STRATEGY: Use supplier address if available. Prioritize first result (official website).
 Check "Services"/"About Us" for L1. Extract address if found. Select most relevant result if multiple.
 
-Extract: supplier_type, industry/sector, products/services, official name, parent company, address/location.
+Extract: supplier_type, industry/sector, products/services, official name, address/location.
 Also extract enhanced classification fields: service type, NAICS/SIC codes, business model, revenue streams.
 Be concise. Use null if not found — do NOT guess.
 
@@ -46,6 +46,12 @@ Examples: NAICS "481111" (Scheduled Passenger Air Transportation), "541611" (Adm
 
 ## Business Model
 Identify primary business model: "B2B Services", "B2C Retail", "B2B Products", "Mixed"
+
+## Parent Company
+If this supplier is a subsidiary, division, or brand owned by a larger corporation, populate
+\`parentCompanyName\` with the official name of the owning entity. Return null if the supplier
+is the top-level entity with no corporate parent, or if the parent company is not known from
+the research.
 
 ## Confidence Levels
 
@@ -73,6 +79,7 @@ You MUST respond with valid JSON only (no markdown fencing, no explanation text 
   "primaryRevenueStreams": "<comma-separated or null>",
   "serviceCategories": "<comma-separated categories mapping to taxonomy or null>",
   "targetMarket": "<'Enterprise' | 'SMB' | 'Consumer' | 'Healthcare' | 'Government' | 'Mixed' or null>",
+  "parentCompanyName": "<official name of the parent/holding company, or null if independent>",
   "confidence": "high" | "medium" | "low",
   "sources": ["<list of source URLs used for the research>"]
 }`;
@@ -220,6 +227,9 @@ export function parseResponse(responseText: string): ResearchParseResult {
 
   const supplierType = optStr('supplierType');
   if (supplierType) result.supplierType = supplierType;
+
+  const parentCompanyName = optStr('parentCompanyName');
+  if (parentCompanyName) result.parentCompanyName = parentCompanyName;
 
   return { result };
 }

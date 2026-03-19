@@ -38,4 +38,28 @@ export function registerSuppliersHandlers(
   registerHandler('suppliers:distinctValues', async (_event, field: unknown, limit: unknown) => {
     return suppliers.queryDistinctValues(field as string, (limit as number) ?? 200);
   });
+
+  registerHandler('suppliers:listParents', async () => {
+    return suppliers.listParents();
+  });
+
+  registerHandler('suppliers:addParent', async (_event, name: unknown) => {
+    return suppliers.addParent(name as string);
+  });
+
+  registerHandler('suppliers:changeParent', async (_event, supplierId: unknown, parentId: unknown) => {
+    await suppliers.changeParent(supplierId as string, (parentId as string | null));
+  });
+
+  registerHandler('suppliers:removeParent', async (_event, supplierId: unknown) => {
+    await suppliers.removeParent(supplierId as string);
+  });
+
+  registerHandler('suppliers:renameParent', async (_event, parentId: unknown, newName: unknown) => {
+    await suppliers.renameParent(parentId as string, newName as string);
+  });
+
+  registerHandler('suppliers:deleteParent', async (_event, parentId: unknown) => {
+    await suppliers.deleteParent(parentId as string);
+  });
 }

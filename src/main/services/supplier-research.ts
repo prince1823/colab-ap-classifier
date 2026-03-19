@@ -4,6 +4,7 @@ import type {
   ResearchAgent,
   EventBus,
   SupplierResearcher as ISupplierResearcher,
+  SupplierService,
 } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 
@@ -19,7 +20,8 @@ export class SupplierResearcher implements ISupplierResearcher {
     private supplierUniverse: SupplierUniverse,
     private webSearch: WebSearch,
     private researchAgent: ResearchAgent,
-    private eventBus: EventBus
+    private eventBus: EventBus,
+    private supplierService: SupplierService
   ) {}
 
   async researchSingle(supplierName: string): Promise<SupplierInfo> {

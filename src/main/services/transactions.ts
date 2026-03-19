@@ -24,6 +24,7 @@ const BASE_COLUMNS = [
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
   'classification_status', 'human_reviewed',
   'original_supplier_name', 'project_supplier_id',
+  'applied_rule_id',
   'created_at', 'updated_at',
 ];
 
@@ -34,10 +35,13 @@ const VIRTUAL_COLUMNS: Record<string, string> = {
   classification_l1: 'tax.l1',
   classification_l2: 'tax.l2',
   classification_l3: 'tax.l3',
+  classification_path: "CONCAT_WS(' > ', tax.l1, tax.l2, tax.l3)",
+  applied_rule_name: 'ar.name',
 };
 
 const SUPPLIER_JOIN = 'LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id';
 const TAXONOMY_JOIN = 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id';
+const RULES_JOIN = 'LEFT JOIN override_rules ar ON t.applied_rule_id = ar.id';
 
 export class TransactionStore implements ITransactionStore {
   private cachedColumns: string[] | null = null;
@@ -63,12 +67,17 @@ export class TransactionStore implements ITransactionStore {
 
   /** Whether any columns in use require the supplier JOIN. */
   private needsSupplierJoin(columns: string[]): boolean {
-    return columns.some((c) => c === 'supplier_name');
+    return columns.some((c) => c === 'supplier_name' || c === 'is_tail_spend' || c === 'is_researched');
   }
 
   /** Whether any columns in use require the taxonomy JOIN. */
   private needsTaxonomyJoinForColumns(columns: string[]): boolean {
-    return columns.some((c) => c.startsWith('classification_l'));
+    return columns.some((c) => c.startsWith('classification_'));
+  }
+
+  /** Whether any columns in use require the rules JOIN. */
+  private needsRulesJoin(columns: string[]): boolean {
+    return columns.some((c) => c === 'applied_rule_name');
   }
 
   private buildFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[]; needsTaxonomyJoin: boolean } {
@@ -102,8 +111,10 @@ export class TransactionStore implements ITransactionStore {
       classification_l1: 'tax.l1',
       classification_l2: 'tax.l2',
       classification_l3: 'tax.l3',
+      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
       supplier_name: 'ps.supplier_name',
       is_researched: 'ps.is_researched',
+      is_tail_spend: 'ps.is_tail_spend',
     };
     const resolver = (field: string) => FILTER_VIRTUAL_DIMS[field] ?? `t."${field}"`;
 
@@ -111,7 +122,7 @@ export class TransactionStore implements ITransactionStore {
     const allConditionFields = filters?.groupedConditions
       ? filters.groupedConditions.groups.flatMap(g => g.conditions.map(c => c.field))
       : (filters?.conditions ?? []).map(c => c.field);
-    if (allConditionFields.some(f => f.startsWith('classification_l'))) {
+    if (allConditionFields.some(f => f.startsWith('classification_'))) {
       needsTaxonomyJoin = true;
     }
 
@@ -151,10 +162,11 @@ export class TransactionStore implements ITransactionStore {
     const dynamicCols = validColumns.filter((c) => !BASE_COLUMNS.includes(c));
 
     const sql = `
-      SELECT t.*, ps.supplier_name, tax.full_path as classification_path
+      SELECT t.*, ps.supplier_name, tax.full_path as classification_path, ar.name as applied_rule_name
       FROM transactions t
       ${SUPPLIER_JOIN}
       LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
+      ${RULES_JOIN}
       ${whereSQL}
       ORDER BY t.${safeSortBy} ${safeOrder}
       ${limitClause}
@@ -177,6 +189,8 @@ export class TransactionStore implements ITransactionStore {
         classificationPath: row.classification_path ? String(row.classification_path) : null,
         classificationStatus: (row.classification_status as ClassificationStatus) || 'unclassified',
         humanReviewed: Boolean(row.human_reviewed),
+        appliedRuleId: row.applied_rule_id ? String(row.applied_rule_id) : null,
+        appliedRuleName: row.applied_rule_name ? String(row.applied_rule_name) : null,
         canonicalFields,
         createdAt: String(row.created_at),
         updatedAt: String(row.updated_at),
@@ -245,15 +259,17 @@ export class TransactionStore implements ITransactionStore {
     spend_amount: { label: 'Spend Amount', type: 'number' },
     supplier_name: { label: 'Supplier Name', type: 'string', group: 'Supplier' },
     is_researched: { label: 'Researched', type: 'boolean', group: 'Supplier' },
+    is_tail_spend: { label: 'Tail Spend', type: 'boolean', group: 'Supplier' },
     classification_l1: { label: 'Classification L1', type: 'string' },
     classification_l2: { label: 'Classification L2', type: 'string' },
     classification_l3: { label: 'Classification L3', type: 'string' },
+    applied_rule_name: { label: 'Applied Rule', type: 'string' },
   };
 
   async getFilterFields(): Promise<FieldDefinition[]> {
     const columns = await this.getColumns();
     // Exclude internal columns not useful for filtering
-    const excluded = new Set(['id', 'row_index', 'upload_id', 'taxonomy_node_id', 'project_supplier_id', 'created_at', 'updated_at']);
+    const excluded = new Set(['id', 'row_index', 'upload_id', 'taxonomy_node_id', 'project_supplier_id', 'applied_rule_id', 'created_at', 'updated_at']);
     const fields: FieldDefinition[] = [];
     for (const col of columns) {
       if (excluded.has(col)) continue;
@@ -311,6 +327,11 @@ export class TransactionStore implements ITransactionStore {
       setClauses.push('classification_status = ?');
       params.push(update.classificationStatus);
       newValues.classification_status = update.classificationStatus;
+    }
+    if (update.appliedRuleId !== undefined) {
+      setClauses.push('applied_rule_id = ?');
+      params.push(update.appliedRuleId);
+      newValues.applied_rule_id = update.appliedRuleId;
     }
     if (setClauses.length === 0) return undefined;
     setClauses.push('updated_at = CURRENT_TIMESTAMP');
@@ -493,7 +514,9 @@ export class TransactionStore implements ITransactionStore {
       classification_l1: "COALESCE(tax.l1, '(Unclassified)')",
       classification_l2: "COALESCE(tax.l2, '(Unclassified)')",
       classification_l3: "COALESCE(tax.l3, '(Unclassified)')",
+      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
       supplier_name: "COALESCE(ps.supplier_name, '')",
+      applied_rule_name: "COALESCE(ar.name, '')",
     };
 
     const validCols = await this.getColumns();
@@ -512,12 +535,13 @@ export class TransactionStore implements ITransactionStore {
       : '0';
 
     const needsTaxonomyJoin = filterNeedsTaxonomy || safeDimensions.some((d) =>
-      d.startsWith('classification_l')
+      d.startsWith('classification_')
     );
     const taxonomyJoin = needsTaxonomyJoin
       ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
       : '';
     const supplierJoin = this.needsSupplierJoin(safeDimensions) ? SUPPLIER_JOIN : '';
+    const rulesJoin = this.needsRulesJoin(safeDimensions) ? RULES_JOIN : '';
 
     const dimSelects = safeDimensions.map((d, i) => {
       const expr = PIVOT_VIRTUAL_DIMS[d] ?? `COALESCE(CAST(t.${d} AS VARCHAR), '')`;
@@ -533,6 +557,7 @@ export class TransactionStore implements ITransactionStore {
       FROM transactions t
       ${supplierJoin}
       ${taxonomyJoin}
+      ${rulesJoin}
       ${whereSQL}
       GROUP BY ${dimGroupBy.join(', ')}
       ORDER BY amount DESC
@@ -651,8 +676,11 @@ export class TransactionStore implements ITransactionStore {
       classification_l1: 'tax.l1',
       classification_l2: 'tax.l2',
       classification_l3: 'tax.l3',
+      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
       supplier_name: 'ps.supplier_name',
       is_researched: 'ps.is_researched',
+      is_tail_spend: 'ps.is_tail_spend',
+      applied_rule_name: 'ar.name',
     };
 
     const resolveColumn = (field: string) =>
@@ -661,12 +689,13 @@ export class TransactionStore implements ITransactionStore {
     const built = buildWhereClause(conditions, resolveColumn);
     if (!built) return [];
 
-    const needsTaxonomy = conditions.some((c) => c.field.startsWith('classification_l'));
+    const needsTaxonomy = conditions.some((c) => c.field.startsWith('classification_'));
     const taxonomyJoin = needsTaxonomy
       ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
       : '';
+    const rulesJoin = conditions.some((c) => c.field === 'applied_rule_name') ? RULES_JOIN : '';
 
-    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${taxonomyJoin} WHERE (${built.sql})`;
+    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${taxonomyJoin} ${rulesJoin} WHERE (${built.sql})`;
     const params = [...built.params];
 
     if (scopeToIds && scopeToIds.length > 0) {

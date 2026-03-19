@@ -176,6 +176,19 @@ export class DuckDBDatabase implements Database {
     try {
       await this.exec('ALTER TABLE change_log DROP COLUMN reverted_change_id');
     } catch { /* column doesn't exist, ignore */ }
+
+    // Migrate: ensure applied_rule_id column exists on transactions
+    const appliedRuleCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'applied_rule_id'"
+    );
+    if (appliedRuleCol.length === 0) {
+      await this.exec('ALTER TABLE transactions ADD COLUMN applied_rule_id VARCHAR');
+    }
+
+    // Migrate: ensure override_rules.name is unique
+    try {
+      await this.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name)');
+    } catch { /* index may already exist or constraint already enforced */ }
   }
 
   async closeDatabase(): Promise<void> {
@@ -276,13 +289,14 @@ export class DuckDBDatabase implements Database {
         human_reviewed BOOLEAN DEFAULT FALSE,
         original_supplier_name VARCHAR,
         project_supplier_id VARCHAR,
+        applied_rule_id VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS override_rules (
         id VARCHAR PRIMARY KEY,
-        name VARCHAR NOT NULL,
+        name VARCHAR NOT NULL UNIQUE,
         conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
         priority INTEGER NOT NULL,

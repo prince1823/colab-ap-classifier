@@ -119,6 +119,40 @@ export function useReclassification({ filterState, onSuccess }: UseReclassificat
     setFocusedIdx(prev => Math.min(prev, Math.max(0, filteredNodes.length - 1)))
   }, [filteredNodes.length])
 
+  const refreshNodes = useCallback(async () => {
+    const nodes = await ipc.taxonomy.getNodes()
+    setTaxonomyNodes(nodes)
+  }, [])
+
+  const addNode = useCallback(async (l1: string, l2: string, l3: string, description?: string): Promise<TaxonomyNode | null> => {
+    if (!l1) return null
+    try {
+      // Create parent nodes first (L1, then L1|L2) before creating the full path
+      // addNode silently returns existing node if it already exists
+      await ipc.taxonomy.addNode(l1)
+      if (l2) {
+        await ipc.taxonomy.addNode(`${l1}|${l2}`)
+      }
+      let node: TaxonomyNode | null = null
+      if (l2 && l3) {
+        node = await ipc.taxonomy.addNode(`${l1}|${l2}|${l3}`, description || undefined) as TaxonomyNode
+      } else if (l2) {
+        // L2 is the leaf — fetch it
+        const nodes = await ipc.taxonomy.getNodes() as TaxonomyNode[]
+        node = nodes.find(n => n.l1 === l1 && n.l2 === l2 && !n.l3) ?? null
+      } else {
+        // L1 only — fetch it
+        const nodes = await ipc.taxonomy.getNodes() as TaxonomyNode[]
+        node = nodes.find(n => n.l1 === l1 && !n.l2 && !n.l3) ?? null
+      }
+      await refreshNodes()
+      return node
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add node')
+      return null
+    }
+  }, [refreshNodes])
+
   const apply = useCallback(async (node: TaxonomyNode) => {
     if (applying) return
     setApplying(true)
@@ -174,6 +208,7 @@ export function useReclassification({ filterState, onSuccess }: UseReclassificat
     focusedIdx,
     setFocusedIdx,
     apply,
+    addNode,
     applying,
     error,
     searchRef,

@@ -44,4 +44,4 @@ export interface FlattenedPivotRow {
 }
 
 export type Aggregation = 'sum' | 'count' | 'average'
-export type SpendDisplayMode = 'absolute' | 'percentage'
+export type SpendDisplayMode = 'absolute' | 'percentage' | 'both'

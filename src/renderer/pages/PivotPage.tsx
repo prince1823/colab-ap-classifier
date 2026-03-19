@@ -1,5 +1,4 @@
-import { useMemo, useCallback } from 'react'
-import { useState } from 'react'
+import { useMemo, useCallback, useEffect, useState } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
@@ -30,17 +29,25 @@ const INTERNAL_COLS = new Set([
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
   'classification_status', 'human_reviewed',
   'original_supplier_name', 'project_supplier_id',
+  'applied_rule_id',
   'created_at', 'updated_at',
 ])
 
-/** Virtual columns resolved via JOIN — not physical on the transactions table. */
-const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3'])
+/** Virtual columns resolved via JOIN — excluded from pivot dimension dropdowns (added manually below). */
+const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3', 'is_tail_spend', 'is_researched', 'applied_rule_name'])
+
+/** Columns excluded from pivot dropdowns but still available in advanced filters. */
+const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched'])
 
 const COLUMN_LABELS: Record<string, string> = {
   classification_l1: 'Classification L1',
   classification_l2: 'Classification L2',
   classification_l3: 'Classification L3',
+  classification_path: 'Classification Path (L1 › L2 › L3)',
   supplier_name: 'Supplier',
+  applied_rule_name: 'Applied Rule',
+  is_tail_spend: 'Tail Spend',
+  is_researched: 'Researched',
   gl_description: 'GL Description',
   line_description: 'Line Description',
   company: 'Company',
@@ -79,6 +86,14 @@ export default function PivotPage() {
 
   const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
 
+  // Load suggestions for string filter fields (supplier names, etc.)
+  const [supplierSuggestions, setSupplierSuggestions] = useState<string[]>([])
+  useEffect(() => {
+    ipc.transactions.distinctValues('supplier_name', 5000)
+      .then(vals => setSupplierSuggestions(vals.filter(Boolean)))
+      .catch(() => {})
+  }, [])
+
   const filter = useMemo(() => {
     const pillFilter = buildTransactionFilter(filterState)
     const pillConditions = pillFilter?.conditions ?? []
@@ -114,17 +129,27 @@ export default function PivotPage() {
   })
 
   const availableColumns = useMemo(() => [
-    'classification_l1', 'classification_l2', 'classification_l3',
+    'classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
+    'applied_rule_name',
     ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
   ], [columns])
 
+  /** All columns available for advanced filters (includes boolean virtual cols excluded from pivot). */
+  const filterableColumns = useMemo(() => [
+    ...availableColumns,
+    ...(columns ?? []).filter(c => PIVOT_ONLY_EXCLUDE.has(c)),
+  ], [availableColumns, columns])
+
+  const BOOLEAN_COLS = new Set(['is_tail_spend', 'is_researched', 'human_reviewed'])
+
   const advancedFilterFields: FieldDefinition[] = useMemo(() =>
-    availableColumns.map(col => ({
+    filterableColumns.map(col => ({
       name: col,
       label: COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      type: NUMERIC_COLS.has(col) ? 'number' as const : 'string' as const,
+      type: BOOLEAN_COLS.has(col) ? 'boolean' as const : NUMERIC_COLS.has(col) ? 'number' as const : 'string' as const,
+      ...(col === 'supplier_name' && supplierSuggestions.length > 0 ? { suggestions: supplierSuggestions } : {}),
     })),
-    [availableColumns]
+    [filterableColumns, supplierSuggestions]
   )
 
   const handleExport = useCallback(async () => {
@@ -142,7 +167,7 @@ export default function PivotPage() {
           <h2 className="text-lg font-semibold text-gray-900">Review</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Navigate with arrow keys, Enter to select rows.
-            <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | Double-click to filter</span>
+            <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | ⌘S supplier info | Double-click to filter</span>
           </p>
         </div>
       </div>
@@ -171,24 +196,8 @@ export default function PivotPage() {
           advancedFilterCount={advancedConditions.length}
           onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
           advancedConditions={advancedConditions}
-          onRemoveAdvancedCondition={(idx) => {
-            // Remove condition by flat index from the grouped structure
-            if (!advancedGrouped) return
-            let flatIdx = 0
-            const newGroups = advancedGrouped.groups.map(g => ({
-              ...g,
-              conditions: g.conditions.filter(c => {
-                if (!c.field) return true
-                const keep = flatIdx !== idx
-                flatIdx++
-                return keep
-              }),
-            })).filter(g => g.conditions.some(c => c.field))
-            setAdvancedGrouped(newGroups.length > 0
-              ? { ...advancedGrouped, groups: newGroups }
-              : null
-            )
-          }}
+          advancedGrouped={advancedGrouped}
+          onSetAdvancedGrouped={setAdvancedGrouped}
         />
       </div>
 
@@ -205,12 +214,14 @@ export default function PivotPage() {
         onClose={reclassify.close}
         targetRows={reclassify.targetRows}
         filteredNodes={reclassify.filteredNodes}
+        allNodes={reclassify.taxonomyNodes}
         search={reclassify.search}
         onSearchChange={reclassify.setSearch}
         focusedIdx={reclassify.focusedIdx}
         onFocusedIdxChange={reclassify.setFocusedIdx}
         searchRef={reclassify.searchRef}
         onApply={reclassify.apply}
+        onAddNode={reclassify.addNode}
         applying={reclassify.applying}
         error={reclassify.error}
       />

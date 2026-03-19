@@ -116,7 +116,7 @@ export const ipc = {
 
   // ── Suppliers (3 channels + research) ──
   suppliers: {
-    list: (filter?: { conditions: FilterCondition[] }) => invoke('suppliers:list', filter),
+    list: (filter?: { conditions?: FilterCondition[]; groupedConditions?: import('../../shared/types/transactions').GroupedFilter }) => invoke('suppliers:list', filter),
     update: (supplierId: string, updates: SupplierUpdateInput) =>
       invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
@@ -129,6 +129,7 @@ export const ipc = {
     filterTailSpend: (threshold: number) =>
       invoke('suppliers:filterTailSpend', threshold),
     getFilterFields: () => invoke('suppliers:getFilterFields'),
+    distinctValues: (field: string, limit?: number) => invoke('suppliers:distinctValues', field, limit),
   },
 
   // ── Rules (4 channels) ──
@@ -153,9 +154,10 @@ export const ipc = {
     apply: (input: FeedbackApplyInput) => invoke('feedback:apply', input),
   },
 
-  // ── Export (1 channel) ──
+  // ── Export ──
   export: {
     csv: (filters?: TransactionFilter) => invoke('export:csv', filters),
+    saveContent: (content: string, defaultFilename: string) => invoke('export:saveContent', content, defaultFilename),
   },
 
   // ── Settings (5 channels) ──

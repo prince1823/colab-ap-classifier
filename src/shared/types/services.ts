@@ -168,7 +168,7 @@ export interface SupplierService {
   getAliases(canonicalName: string): Promise<string[]>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
   updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void>;
-  listProjectSuppliers(filter?: { conditions: FilterCondition[] }): Promise<ProjectSupplierView[]>;
+  listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
   assignParent(id: string, parentId: string): Promise<void>;
@@ -176,6 +176,7 @@ export interface SupplierService {
   isTailSpend(supplierId: string): Promise<boolean>;
   markResearched(supplierId: string): Promise<void>;
   getFilterFields(): FieldDefinition[];
+  queryDistinctValues(field: string, limit?: number): Promise<string[]>;
 }
 
 export interface RuleStore {

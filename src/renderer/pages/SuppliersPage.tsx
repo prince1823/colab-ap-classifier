@@ -1,130 +1,21 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ipc } from '../lib/ipc'
-import type { ProjectSupplierView, SupplierType, SupplierInfo } from '../../shared/types/suppliers'
+import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
 import type { ResearchProgress } from '../../shared/types/classification'
-import type { FilterCondition } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
-import FilterConditionBuilder from '../components/FilterConditionBuilder'
+import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
+import type { FilterOperator } from '../../shared/types/transactions'
+import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
+import SupplierListPanel from '../components/suppliers/SupplierListPanel'
+import SupplierDetailPanel from '../components/suppliers/SupplierDetailPanel'
+import type { SupplierDetailPanelHandle } from '../components/suppliers/SupplierDetailPanel'
+import { useSupplierListKeyboard } from '../hooks/useSupplierListKeyboard'
+import { Filter, X } from 'lucide-react'
 import '../styles/SuppliersPage.css'
 import { fmtAbbrev } from '../utils/formatSpend'
+import { useSupplierFilterStore } from '../stores/supplierFilterStore'
 
-const SUPPLIER_TYPES: SupplierType[] = ['company', 'individual', 'government']
-
-/** Which supplierInfo fields to show as columns, in order */
-const INFO_COLUMNS: { key: keyof SupplierInfo; label: string; editable: boolean; type: 'text' | 'select' | 'readonly'; wide?: boolean }[] = [
-  { key: 'supplierType', label: 'Type', editable: true, type: 'select' },
-  { key: 'officialBusinessName', label: 'Official Name', editable: true, type: 'text' },
-  { key: 'industry', label: 'Industry', editable: true, type: 'text' },
-  { key: 'productsServices', label: 'Products/Services', editable: true, type: 'text', wide: true },
-  { key: 'description', label: 'Description', editable: true, type: 'text', wide: true },
-  { key: 'naicsCode', label: 'NAICS', editable: true, type: 'text' },
-  { key: 'naicsDescription', label: 'NAICS Desc', editable: true, type: 'text', wide: true },
-  { key: 'serviceType', label: 'Service Type', editable: true, type: 'text' },
-  { key: 'confidence', label: 'Confidence', editable: false, type: 'readonly' },
-  { key: 'websiteUrl', label: 'Website', editable: true, type: 'text' },
-  { key: 'sources', label: 'Sources', editable: false, type: 'readonly' },
-]
-
-/** Editable cell — click to edit, blur/Enter to save, Escape to cancel */
-function EditableCell({
-  value,
-  onSave,
-  type = 'text',
-}: {
-  value: string
-  onSave: (val: string) => void
-  type?: 'text' | 'select'
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(value)
-  const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
-
-  useEffect(() => {
-    if (editing && inputRef.current) {
-      inputRef.current.focus()
-      if (inputRef.current instanceof HTMLInputElement) {
-        inputRef.current.select()
-      }
-    }
-  }, [editing])
-
-  const commit = useCallback(() => {
-    setEditing(false)
-    if (draft !== value) {
-      onSave(draft)
-    }
-  }, [draft, value, onSave])
-
-  const cancel = useCallback(() => {
-    setDraft(value)
-    setEditing(false)
-  }, [value])
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      commit()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      cancel()
-    }
-  }, [commit, cancel])
-
-  if (editing) {
-    if (type === 'select') {
-      return (
-        <div className="supplier-cell-editing">
-          <select
-            ref={inputRef as React.RefObject<HTMLSelectElement>}
-            className="supplier-cell-select"
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value)
-              setEditing(false)
-              if (e.target.value !== value) {
-                onSave(e.target.value)
-              }
-            }}
-            onBlur={commit}
-            onKeyDown={handleKeyDown}
-          >
-            <option value="">--</option>
-            {SUPPLIER_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-        </div>
-      )
-    }
-
-    return (
-      <div className="supplier-cell-editing">
-        <input
-          ref={inputRef as React.RefObject<HTMLInputElement>}
-          className="supplier-cell-input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={handleKeyDown}
-        />
-      </div>
-    )
-  }
-
-  return (
-    <div className="supplier-cell" onClick={() => { setDraft(value); setEditing(true) }} title={value || undefined}>
-      {value ? <span className="cell-text">{value}</span> : <span className="cell-placeholder">-</span>}
-    </div>
-  )
-}
-
-/** Status badge component */
-function StatusBadge({ status }: { status: string }) {
-  const cls = status === 'confirmed' ? 'status-badge confirmed'
-    : status === 'rejected' ? 'status-badge rejected'
-    : 'status-badge pending'
-  return <span className={cls}>{status}</span>
-}
+type QuickFilter = 'all' | 'unresearched' | 'unconfirmed'
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
@@ -132,42 +23,52 @@ export default function SuppliersPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
-  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([])
-  const [debouncedConditions, setDebouncedConditions] = useState<FilterCondition[]>([])
+  const { advancedGrouped, setAdvancedGrouped } = useSupplierFilterStore()
+  const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-
-  // Debounce filter conditions — 300ms delay before triggering backend call
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedConditions(filterConditions), 300)
-    return () => clearTimeout(timer)
-  }, [filterConditions])
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
-  const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('')
+  const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('10000')
   const [tailSpendSet, setTailSpendSet] = useState(false)
-  const [supplierUniversePath, setSupplierUniversePath] = useState<string | null>(null)
+  const [tailSpendActive, setTailSpendActive] = useState(false)
+  const [editingThreshold, setEditingThreshold] = useState(false)
 
-  // Build backend filter from FilterConditionBuilder conditions
-  const NO_VALUE_OPS = new Set(['is_null', 'is_true', 'is_false'])
+  // New state for master-detail
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
+
+  // Cross-panel keyboard navigation
+  const [activePanel, setActivePanel] = useState<'list' | 'detail'>('list')
+  const [detailFieldIndex, setDetailFieldIndex] = useState(0)
+  const [editingFieldIndex, setEditingFieldIndex] = useState<number | null>(null)
+  const detailPanelRef = useRef<SupplierDetailPanelHandle>(null)
+
+  // Derive flat conditions for display (badge count, empty state check)
+  const filterConditions = useMemo(() =>
+    advancedGrouped ? groupedToConditions(advancedGrouped).filter(c => c.field) : [],
+    [advancedGrouped]
+  )
+
+  // Build backend filter from grouped conditions
   const buildFilter = useCallback(() => {
-    // Only send conditions that have a field and a value (or a no-value operator)
-    const valid = debouncedConditions.filter(c => c.field && (NO_VALUE_OPS.has(c.operator) || c.value !== ''))
-    return valid.length > 0 ? { conditions: valid } : undefined
-  }, [debouncedConditions])
+    if (advancedGrouped && advancedGrouped.groups.some(g => g.conditions.some(c => c.field))) {
+      return { groupedConditions: advancedGrouped }
+    }
+    return undefined
+  }, [advancedGrouped])
 
   // Load settings and filter fields once on mount
   useEffect(() => {
     async function loadSettings() {
       try {
-        const [threshold, suPath, fields] = await Promise.all([
+        const [threshold, fields] = await Promise.all([
           ipc.project.getSetting('tail_spend_threshold'),
-          ipc.supplierUniverse.getPath(),
           ipc.suppliers.getFilterFields(),
         ])
         if (threshold && Number(threshold) > 0) {
           setTailSpendThreshold(String(threshold))
           setTailSpendSet(true)
         }
-        setSupplierUniversePath(suPath)
         setFilterFields(fields as FieldDefinition[])
       } catch {
         // settings load failure is non-fatal
@@ -196,30 +97,29 @@ export default function SuppliersPage() {
   useEffect(() => {
     const unsub = ipc.suppliers.onResearchProgress((progress: ResearchProgress) => {
       setResearchProgress(progress)
-      if (progress.status === 'complete' || progress.status === 'error') {
+      if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
         setTimeout(() => {
           setResearchProgress(null)
-          loadData()
         }, 1500)
       }
     })
     return unsub
-  }, [loadData])
+  }, [])
 
   /** Update local state */
   const updateSuppliers = useCallback((updater: (prev: ProjectSupplierView[]) => ProjectSupplierView[]) => {
     setSuppliers(prev => updater(prev))
   }, [])
 
-  /** Save a single supplierInfo field for a supplier */
+  /** Save a single supplierInfo field */
   const saveField = useCallback(async (supplier: ProjectSupplierView, field: keyof SupplierInfo, newValue: string) => {
     setSaving(true)
     try {
       const existingInfo = supplier.supplierInfo ?? {}
-      const updatedInfo: SupplierInfo = {
-        ...existingInfo,
-        [field]: newValue || undefined,
-      }
+      const parsedValue = field === 'sources'
+        ? (newValue ? newValue.split(',').map(s => s.trim()).filter(Boolean) : undefined)
+        : (newValue || undefined)
+      const updatedInfo: SupplierInfo = { ...existingInfo, [field]: parsedValue }
       await ipc.suppliers.update(supplier.id, { supplierInfo: updatedInfo })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, supplierInfo: updatedInfo } : s
@@ -231,7 +131,7 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Save parentName for a supplier */
+  /** Save parentName */
   const saveParentName = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
     setSaving(true)
     try {
@@ -249,16 +149,34 @@ export default function SuppliersPage() {
 
   /** Research a single supplier */
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
-    setSaving(true)
+    setResearchProgress({
+      status: 'running',
+      totalSuppliers: 1,
+      processedSuppliers: 0,
+      percentage: 0,
+      currentSupplier: supplier.supplierName,
+      currentStep: 'Researching',
+    })
     try {
-      await ipc.suppliers.researchSingle(supplier.id)
-      await loadData()
+      const info = await ipc.suppliers.researchSingle(supplier.id)
+      // Update just this supplier in local state instead of full reload
+      updateSuppliers(prev => prev.map(s =>
+        s.id === supplier.id ? { ...s, isResearched: true, supplierInfo: info } : s
+      ))
+      setResearchProgress({
+        status: 'completed',
+        totalSuppliers: 1,
+        processedSuppliers: 1,
+        percentage: 100,
+        currentSupplier: supplier.supplierName,
+        currentStep: 'Done',
+      })
+      setTimeout(() => setResearchProgress(null), 3000)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Research failed')
-    } finally {
-      setSaving(false)
+      setResearchProgress(null)
     }
-  }, [loadData])
+  }, [updateSuppliers])
 
   /** Confirm a single supplier */
   const confirmSupplier = useCallback(async (supplier: ProjectSupplierView) => {
@@ -275,34 +193,50 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Batch research selected suppliers */
+  /** Batch research selected */
   const researchSelected = useCallback(async () => {
     const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
     if (selected.length === 0) return
-    for (const s of selected) {
+    const total = selected.length
+    for (let i = 0; i < total; i++) {
+      const s = selected[i]
+      setResearchProgress({
+        status: 'running',
+        totalSuppliers: total,
+        processedSuppliers: i,
+        percentage: Math.round((i / total) * 100),
+        currentSupplier: s.supplierName,
+        currentStep: `Researching ${i + 1} of ${total}`,
+      })
       try {
-        await ipc.suppliers.researchSingle(s.id)
-      } catch {
-        // Continue with next supplier
-      }
+        const info = await ipc.suppliers.researchSingle(s.id)
+        updateSuppliers(prev => prev.map(existing =>
+          existing.id === s.id ? { ...existing, isResearched: true, supplierInfo: info } : existing
+        ))
+      } catch { /* continue */ }
     }
+    setResearchProgress({
+      status: 'completed',
+      totalSuppliers: total,
+      processedSuppliers: total,
+      percentage: 100,
+      currentSupplier: null,
+      currentStep: 'Done',
+    })
+    setTimeout(() => setResearchProgress(null), 3000)
     setSelectedIds(new Set())
-    await loadData()
-  }, [suppliers, selectedIds, loadData])
+  }, [suppliers, selectedIds, updateSuppliers])
 
-  /** Batch confirm selected suppliers */
+  /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
-    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.confirmationStatus !== 'confirmed')
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.isResearched && s.confirmationStatus !== 'confirmed')
     if (selected.length === 0) return
+    const confirmedIds = new Set(selected.map(s => s.id))
     for (const s of selected) {
-      try {
-        await ipc.suppliers.confirm(s.id, 'confirmed')
-      } catch {
-        // Continue with next
-      }
+      try { await ipc.suppliers.confirm(s.id, 'confirmed') } catch { /* continue */ }
     }
     updateSuppliers(prev => prev.map(s =>
-      selectedIds.has(s.id) ? { ...s, confirmationStatus: 'confirmed' } : s
+      confirmedIds.has(s.id) ? { ...s, confirmationStatus: 'confirmed' } : s
     ))
     setSelectedIds(new Set())
   }, [suppliers, selectedIds, updateSuppliers])
@@ -324,45 +258,139 @@ export default function SuppliersPage() {
     }
   }, [tailSpendThreshold, loadData])
 
-  /** Change supplier universe DB via file picker */
-  const changeSupplierUniverse = useCallback(async () => {
-    try {
-      const selected = await ipc.supplierUniverse.selectFile()
-      if (!selected) return
-      setSupplierUniversePath(selected)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to set supplier universe path')
+  /** Toggle tail spend filter on/off */
+  const toggleTailSpendFilter = useCallback(async (enable: boolean) => {
+    if (enable) {
+      const val = Number(tailSpendThreshold)
+      if (!val || val <= 0) return
+      setSaving(true)
+      try {
+        await ipc.project.setSetting('tail_spend_threshold', val)
+        await ipc.suppliers.filterTailSpend(val)
+        setTailSpendSet(true)
+        // Inject is_tail_spend filter to hide tail-spend suppliers
+        const tailCondition = { field: 'is_tail_spend', operator: 'is_true' as FilterOperator, value: '' }
+        const current = advancedGrouped ?? { groupConnector: 'AND' as const, groups: [] }
+        setAdvancedGrouped({
+          groupConnector: current.groupConnector,
+          groups: [...current.groups, { connector: 'AND' as const, conditions: [tailCondition] }],
+        })
+        setTailSpendActive(true)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to apply threshold')
+      } finally {
+        setSaving(false)
+      }
+    } else {
+      // Remove is_tail_spend conditions from all groups
+      if (advancedGrouped) {
+        const cleaned = {
+          ...advancedGrouped,
+          groups: advancedGrouped.groups.map(g => ({
+            ...g,
+            conditions: g.conditions.filter(c => c.field !== 'is_tail_spend'),
+          })).filter(g => g.conditions.length > 0),
+        }
+        setAdvancedGrouped(cleaned.groups.length > 0 ? cleaned : null)
+      }
+      setTailSpendActive(false)
     }
+  }, [tailSpendThreshold, advancedGrouped, setAdvancedGrouped])
+
+  // Sync tailSpendActive if user removes is_tail_spend from Advanced Filters
+  useEffect(() => {
+    if (!tailSpendActive) return
+    const hasTailFilter = advancedGrouped?.groups.some(g =>
+      g.conditions.some(c => c.field === 'is_tail_spend')
+    )
+    if (!hasTailFilter) setTailSpendActive(false)
+  }, [advancedGrouped, tailSpendActive])
+
+  // --- Derived data for the two-panel layout ---
+
+  /** Sort by spend descending */
+  const sortedSuppliers = useMemo(() =>
+    [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend),
+    [suppliers]
+  )
+
+  /** Apply quick filter */
+  const quickFiltered = useMemo(() => {
+    if (quickFilter === 'unresearched') return sortedSuppliers.filter(s => !s.isResearched)
+    if (quickFilter === 'unconfirmed') return sortedSuppliers.filter(s => s.confirmationStatus !== 'confirmed')
+    return sortedSuppliers
+  }, [sortedSuppliers, quickFilter])
+
+  /** Apply search */
+  const displayedSuppliers = useMemo(() => {
+    if (!searchQuery) return quickFiltered
+    const q = searchQuery.toLowerCase()
+    return quickFiltered.filter(s => s.supplierName.toLowerCase().includes(q))
+  }, [quickFiltered, searchQuery])
+
+  /** Counts for quick filter chips (from backend-filtered, pre-search) */
+  const unresearchedCount = useMemo(() => sortedSuppliers.filter(s => !s.isResearched).length, [sortedSuppliers])
+  const unconfirmedCount = useMemo(() => sortedSuppliers.filter(s => s.confirmationStatus !== 'confirmed').length, [sortedSuppliers])
+
+  /** Selected supplier for detail panel */
+  const selectedSupplier = useMemo(() =>
+    selectedSupplierId ? suppliers.find(s => s.id === selectedSupplierId) ?? null : null,
+    [suppliers, selectedSupplierId]
+  )
+
+  // Keyboard navigation
+  const handleSupplierSelect = useCallback((index: number) => {
+    const s = displayedSuppliers[index]
+    if (s) setSelectedSupplierId(s.id)
+  }, [displayedSuppliers])
+
+  const handleToggleCheck = useCallback((index: number) => {
+    const s = displayedSuppliers[index]
+    if (!s) return
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(s.id)) next.delete(s.id)
+      else next.add(s.id)
+      return next
+    })
+  }, [displayedSuppliers])
+
+  const handleMoveToDetail = useCallback(() => {
+    if (!selectedSupplier) return
+    setActivePanel('detail')
+    setDetailFieldIndex(0)
+    setEditingFieldIndex(null)
+    setTimeout(() => detailPanelRef.current?.focusField(0), 0)
+  }, [selectedSupplier])
+
+  const handleMoveToList = useCallback(() => {
+    setActivePanel('list')
+    setEditingFieldIndex(null)
   }, [])
 
-  /** Get display value for a supplierInfo field */
-  const getFieldValue = (supplier: ProjectSupplierView, field: keyof SupplierInfo): string => {
-    const info = supplier.supplierInfo
-    if (!info) return ''
-    const val = info[field]
-    if (val == null) return ''
-    if (Array.isArray(val)) return val.join(', ')
-    return String(val)
-  }
+  const handleClearSelections = useCallback(() => {
+    setSelectedIds(new Set())
+  }, [])
 
-  /** Sort by spend descending — filtering is handled by backend */
-  const filteredSuppliers = useMemo(() => {
-    return [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
-  }, [suppliers])
+  const { focusedIndex, setFocusedIndex, handleKeyDown } = useSupplierListKeyboard({
+    itemCount: displayedSuppliers.length,
+    onSelect: handleSupplierSelect,
+    onToggleCheck: handleToggleCheck,
+    onMoveToDetail: handleMoveToDetail,
+    onClearSelections: handleClearSelections,
+    disabled: activePanel !== 'list',
+  })
 
-  // Select all logic
-  const allSelected = filteredSuppliers.length > 0 && filteredSuppliers.every(s => selectedIds.has(s.id))
-  const someSelected = selectedIds.size > 0
+  // Click handler for list items
+  const handleSupplierClick = useCallback((index: number) => {
+    setActivePanel('list')
+    setFocusedIndex(index)
+    const s = displayedSuppliers[index]
+    if (s) setSelectedSupplierId(s.id)
+  }, [displayedSuppliers, setFocusedIndex])
 
-  const toggleSelectAll = useCallback(() => {
-    if (allSelected) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(filteredSuppliers.map(s => s.id)))
-    }
-  }, [allSelected, filteredSuppliers])
-
-  const toggleSelect = useCallback((id: string) => {
+  // Toggle checkbox by ID (from list panel)
+  const toggleCheckById = useCallback((id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -370,6 +398,24 @@ export default function SuppliersPage() {
       return next
     })
   }, [])
+
+  // Select-all for displayed suppliers
+  const allChecked = displayedSuppliers.length > 0 && displayedSuppliers.every(s => selectedIds.has(s.id))
+
+  const toggleSelectAll = useCallback(() => {
+    if (allChecked) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(displayedSuppliers.map(s => s.id)))
+    }
+  }, [allChecked, displayedSuppliers])
+
+  // Auto-select first supplier when data loads
+  useEffect(() => {
+    if (!selectedSupplierId && displayedSuppliers.length > 0) {
+      setSelectedSupplierId(displayedSuppliers[0].id)
+    }
+  }, [displayedSuppliers, selectedSupplierId])
 
   if (loading) {
     return (
@@ -386,38 +432,137 @@ export default function SuppliersPage() {
     <div className="suppliers-page">
       {error && <div className="suppliers-error">{error}</div>}
 
-      {/* Supplier universe status */}
-      <div className="suppliers-banner" style={{ background: '#f0f4f8', borderColor: '#d0d7de' }}>
-        <span className="text-xs text-gray-500" title={supplierUniversePath || 'Default location'}>
-          Supplier DB: <strong>{supplierUniversePath ? supplierUniversePath.split('/').slice(-2).join('/') : 'Default'}</strong>
-        </span>
-        <button onClick={changeSupplierUniverse} className="banner-btn" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
-          Change
+      {/* Row 1: Active filters (left) + Filters button (right) */}
+      <div className="suppliers-top-bar">
+        <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          {advancedGrouped && filterConditions.length > 0 && (
+            <>
+              <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mr-0.5 flex-shrink-0">Active:</span>
+              {advancedGrouped.groups.map((group, gi) => {
+                const validConds = group.conditions.filter(c => c.field)
+                if (validConds.length === 0) return null
+                return (
+                  <React.Fragment key={gi}>
+                    {gi > 0 && (
+                      <span className="text-[8px] font-bold text-blue-500 uppercase px-0.5 flex-shrink-0">
+                        {group.groupConnector ?? advancedGrouped.groupConnector}
+                      </span>
+                    )}
+                    {validConds.length > 1 && <span className="text-gray-800 text-[11px] font-bold flex-shrink-0">(</span>}
+                    {validConds.map((c, ci) => {
+                      const opLabel = OPERATOR_LABELS[c.operator as FilterOperator] ?? c.operator
+                      const displayValue = Array.isArray(c.value) ? c.value.join(', ') : String(c.value)
+                      return (
+                        <React.Fragment key={`${gi}-${ci}`}>
+                          {ci > 0 && (
+                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{group.connector}</span>
+                          )}
+                          <span className="inline-flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] text-blue-800 whitespace-nowrap flex-shrink-0">
+                            <span className="font-medium">{c.field}</span>
+                            <span className="text-blue-500">{opLabel}</span>
+                            {displayValue && <span className="font-semibold max-w-[150px] truncate" title={displayValue}>{displayValue}</span>}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newGroups = advancedGrouped.groups.map((g, gIdx) => {
+                                  if (gIdx !== gi) return g
+                                  const newConds = g.conditions.filter((_, cIdx) => cIdx !== ci)
+                                  return { ...g, conditions: newConds.length > 0 ? newConds : [] }
+                                }).filter(g => g.conditions.length > 0)
+                                if (newGroups.length === 0) setAdvancedGrouped(null)
+                                else setAdvancedGrouped({ ...advancedGrouped, groups: newGroups })
+                              }}
+                              className="ml-0.5 rounded-full p-0.5 text-blue-400 hover:bg-blue-200 hover:text-blue-700 transition-colors"
+                            >
+                              <X size={10} />
+                            </button>
+                          </span>
+                        </React.Fragment>
+                      )
+                    })}
+                    {validConds.length > 1 && <span className="text-gray-800 text-[11px] font-bold flex-shrink-0">)</span>}
+                  </React.Fragment>
+                )
+              })}
+              <button
+                onClick={() => setAdvancedGrouped(null)}
+                className="text-[9px] text-red-500 hover:text-red-600 font-medium ml-0.5 flex-shrink-0"
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+
+        <button
+          onClick={() => setShowAdvancedFilter(true)}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
+            filterConditions.length > 0
+              ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          <Filter size={13} />
+          Filters
+          {filterConditions.length > 0 && (
+            <span className="ml-1 rounded-full bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none">
+              {filterConditions.length}
+            </span>
+          )}
+        </button>
+
+        {/* Tail Spend toggle button */}
+        <button
+          onClick={() => !editingThreshold && toggleTailSpendFilter(!tailSpendActive)}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
+            tailSpendActive
+              ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          Tail Spend:
+          {editingThreshold ? (
+            <input
+              type="number"
+              className="w-[80px] px-1 py-0 border border-amber-300 rounded text-xs bg-white outline-none"
+              defaultValue={tailSpendThreshold}
+              autoFocus
+              onBlur={async (e) => {
+                const newVal = e.target.value
+                setEditingThreshold(false)
+                if (Number(newVal) > 0) {
+                  setTailSpendThreshold(newVal)
+                  await ipc.project.setSetting('tail_spend_threshold', Number(newVal))
+                  if (tailSpendActive) {
+                    await ipc.suppliers.filterTailSpend(Number(newVal))
+                    await loadData()
+                  }
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                if (e.key === 'Escape') setEditingThreshold(false)
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span
+              onClick={(e) => { e.stopPropagation(); setEditingThreshold(true) }}
+              className="cursor-pointer hover:underline font-semibold"
+            >
+              {fmtAbbrev(Number(tailSpendThreshold) || 10000)}
+            </span>
+          )}
         </button>
       </div>
 
-      {/* Tail spend threshold banner */}
-      {!tailSpendSet && (
-        <div className="suppliers-banner">
-          <span>Tail spend threshold not set.</span>
-          <input
-            type="number"
-            placeholder="$ amount"
-            value={tailSpendThreshold}
-            onChange={(e) => setTailSpendThreshold(e.target.value)}
-            className="banner-input"
-          />
-          <button onClick={applyTailSpend} className="banner-btn" disabled={!tailSpendThreshold}>
-            Apply
-          </button>
-        </div>
-      )}
-
-      {/* Research progress bar */}
-      {researchProgress && researchProgress.status === 'researching' && (
+      {/* Row 2: Research progress bar */}
+      {researchProgress && researchProgress.status === 'running' && (
         <div className="suppliers-progress">
-          Researching: {researchProgress.currentSupplier}
-          ({researchProgress.processedSuppliers}/{researchProgress.totalSuppliers})
+          <div className="flex items-center justify-between mb-1">
+            <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+            <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+          </div>
           <div className="progress-bar">
             <div
               className="progress-fill"
@@ -426,189 +571,69 @@ export default function SuppliersPage() {
           </div>
         </div>
       )}
-
-      {/* Batch actions */}
-      {someSelected && (
-        <div className="suppliers-actions-bar">
-          <div className="batch-actions">
-            <button onClick={researchSelected} className="action-btn research">
-              Research Selected
-            </button>
-            <button onClick={confirmSelected} className="action-btn confirm">
-              Confirm Selected
-            </button>
-            <span className="selected-count">{selectedIds.size} selected</span>
+      {researchProgress && researchProgress.status === 'completed' && (
+        <div className="suppliers-progress">
+          <div className="flex items-center gap-2 py-1">
+            <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
+            <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''} researched)</span>
+          </div>
+          <div className="progress-bar">
+            <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
           </div>
         </div>
       )}
 
-      {/* Filter bar */}
-      {filterFields.length > 0 && (
-        <div className="suppliers-filter-bar">
-          <FilterConditionBuilder
-            conditions={filterConditions.length > 0 ? filterConditions : [{ field: '', operator: 'equals', value: '', connector: 'AND' }]}
-            onChange={setFilterConditions}
-            availableFields={filterFields}
-            compact
-          />
-        </div>
-      )}
-
-      <div className="suppliers-table-wrap">
-        <table className="suppliers-table">
-          <thead>
-            <tr>
-              <th className="col-check">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleSelectAll}
-                  className="supplier-checkbox"
-                />
-              </th>
-              <th className="col-supplier">Supplier</th>
-              <th className="col-right">Txns</th>
-              <th className="col-right">Spend</th>
-              <th>Status</th>
-              <th>Actions</th>
-              {INFO_COLUMNS.map(col => (
-                <React.Fragment key={col.key}>
-                  <th>{col.label}</th>
-                  {col.key === 'officialBusinessName' && <th>Parent</th>}
-                </React.Fragment>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSuppliers.map((s) => (
-              <tr key={s.id} className={selectedIds.has(s.id) ? 'row-selected' : ''}>
-                <td className="col-check">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(s.id)}
-                    onChange={() => toggleSelect(s.id)}
-                    className="supplier-checkbox"
-                  />
-                </td>
-                <td className="col-supplier" title={s.supplierName}>{s.supplierName}</td>
-                <td className="col-right">{s.transactionCount}</td>
-                <td className="col-right">{fmtAbbrev(s.totalSpend)}</td>
-                <td><StatusBadge status={s.confirmationStatus} /></td>
-                <td className="col-actions">
-                  {!s.isResearched ? (
-                    <button
-                      className="row-action-btn research"
-                      onClick={() => researchSupplier(s)}
-                      title="Research this supplier"
-                    >
-                      Research
-                    </button>
-                  ) : s.confirmationStatus === 'pending' ? (
-                    <button
-                      className="row-action-btn confirm"
-                      onClick={() => confirmSupplier(s)}
-                      title="Confirm this supplier"
-                    >
-                      Confirm
-                    </button>
-                  ) : null}
-                </td>
-
-                {INFO_COLUMNS.map(col => {
-                  const val = getFieldValue(s, col.key)
-                  const parentCell = col.key === 'officialBusinessName' ? (
-                    <td key={`parent-${s.id}`}>
-                      <EditableCell
-                        value={s.parentName || ''}
-                        onSave={(newVal) => saveParentName(s, newVal)}
-                      />
-                    </td>
-                  ) : null
-
-                  // Read-only columns
-                  if (!col.editable) {
-                    if (col.key === 'confidence') {
-                      return (
-                        <React.Fragment key={col.key}>
-                          <td>
-                            {val ? (
-                              <span className={`confidence-badge ${val}`}>{val}</span>
-                            ) : (
-                              <span className="cell-placeholder">-</span>
-                            )}
-                          </td>
-                          {parentCell}
-                        </React.Fragment>
-                      )
-                    }
-                    if (col.key === 'sources') {
-                      const sources = s.supplierInfo?.sources
-                      return (
-                        <React.Fragment key={col.key}>
-                          <td>
-                            {sources && sources.length > 0 ? (
-                              <div className="sources-list">
-                                {sources.map((src: string, i: number) => (
-                                  <a
-                                    key={i}
-                                    className="source-tag source-link"
-                                    href={`https://www.google.com/search?q=${encodeURIComponent(src)}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title={`Search Google for "${src}"`}
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
-                                    }}
-                                  >
-                                    {src}
-                                  </a>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="cell-placeholder">-</span>
-                            )}
-                          </td>
-                          {parentCell}
-                        </React.Fragment>
-                      )
-                    }
-                    return (
-                      <React.Fragment key={col.key}>
-                        <td><span className="cell-placeholder">{val || '-'}</span></td>
-                        {parentCell}
-                      </React.Fragment>
-                    )
-                  }
-
-                  // Editable columns
-                  return (
-                    <React.Fragment key={col.key}>
-                      <td className={col.wide ? 'supplier-col-wide' : ''}>
-                        <EditableCell
-                          value={val}
-                          type={col.type === 'select' ? 'select' : 'text'}
-                          onSave={(newVal) => saveField(s, col.key, newVal)}
-                        />
-                      </td>
-                      {parentCell}
-                    </React.Fragment>
-                  )
-                })}
-              </tr>
-            ))}
-            {filteredSuppliers.length === 0 && (
-              <tr>
-                <td colSpan={7 + INFO_COLUMNS.length + 1} className="suppliers-empty">
-                  {filterConditions.some(c => c.field) ? 'No suppliers match the current filters.' : 'No suppliers found. Upload a CSV to populate suppliers.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      {/* Two-panel layout */}
+      <div className="suppliers-content">
+        <SupplierListPanel
+          suppliers={displayedSuppliers}
+          focusedIndex={focusedIndex}
+          selectedIds={selectedIds}
+          selectedSupplierId={selectedSupplierId}
+          searchQuery={searchQuery}
+          quickFilter={quickFilter}
+          unresearchedCount={unresearchedCount}
+          unconfirmedCount={unconfirmedCount}
+          onSearchChange={setSearchQuery}
+          onQuickFilterChange={setQuickFilter}
+          onSupplierClick={handleSupplierClick}
+          onToggleCheck={toggleCheckById}
+          onToggleSelectAll={toggleSelectAll}
+          onKeyDown={handleKeyDown}
+          allChecked={allChecked}
+          isActive={activePanel === 'list'}
+          onResearch={researchSupplier}
+          onResearchSelected={researchSelected}
+          onConfirmSelected={confirmSelected}
+        />
+        <SupplierDetailPanel
+          ref={detailPanelRef}
+          supplier={selectedSupplier}
+          onSaveField={saveField}
+          onSaveParentName={saveParentName}
+          onResearch={researchSupplier}
+          onConfirm={confirmSupplier}
+          focusedFieldIndex={detailFieldIndex}
+          onFocusedFieldChange={setDetailFieldIndex}
+          editingFieldIndex={editingFieldIndex}
+          onEditingFieldChange={setEditingFieldIndex}
+          onMoveToList={handleMoveToList}
+          isActive={activePanel === 'detail'}
+        />
       </div>
 
       {saving && <div className="supplier-saving">Saving...</div>}
+
+      <AdvancedFilterModal
+        isOpen={showAdvancedFilter}
+        onClose={() => setShowAdvancedFilter(false)}
+        groupedFilter={advancedGrouped}
+        onApply={setAdvancedGrouped}
+        availableFields={filterFields}
+        fetchDistinctValues={(field, limit) => ipc.suppliers.distinctValues(field, limit)}
+        title="Supplier Filters"
+        subtitle="Build conditions to filter suppliers"
+      />
     </div>
   )
 }

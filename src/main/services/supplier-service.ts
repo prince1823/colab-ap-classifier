@@ -212,9 +212,7 @@ export class SupplierService implements ISupplierService {
       FROM project_suppliers ps
       LEFT JOIN transactions t ON t.project_supplier_id = ps.id
       ${innerWhereSQL}
-      GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
-               ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.is_researched,
-               ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at`;
+      GROUP BY ALL`;
 
     // Build outer WHERE clause for aggregate fields
     const outerWhere = buildWhereClause(aggregateConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);

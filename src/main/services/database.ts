@@ -188,6 +188,31 @@ export class DuckDBDatabase implements Database {
     try {
       await this.exec('ALTER TABLE project_suppliers DROP COLUMN parent_supplier_name');
     } catch { /* column already removed, ignore */ }
+
+    // Migrate: convert override_rules.priority from INTEGER to DOUBLE
+    // DuckDB cannot ALTER COLUMN TYPE when indexes exist, so we recreate the table.
+    const priorityColType = await this.get<{ data_type: string }>(
+      "SELECT data_type FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'priority'"
+    );
+    if (priorityColType?.data_type?.toUpperCase() === 'INTEGER') {
+      await this.exec(`
+        CREATE TABLE override_rules_new (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL UNIQUE,
+          conditions JSON NOT NULL,
+          target_taxonomy_node_id VARCHAR NOT NULL,
+          priority DOUBLE NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO override_rules_new
+          SELECT id, name, conditions, target_taxonomy_node_id, CAST(priority AS DOUBLE), is_active, created_at
+          FROM override_rules;
+        DROP TABLE override_rules;
+        ALTER TABLE override_rules_new RENAME TO override_rules;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name);
+      `);
+    }
   }
 
   async closeDatabase(): Promise<void> {
@@ -298,7 +323,7 @@ export class DuckDBDatabase implements Database {
         name VARCHAR NOT NULL UNIQUE,
         conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
-        priority INTEGER NOT NULL,
+        priority DOUBLE NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );

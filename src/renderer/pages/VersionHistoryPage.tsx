@@ -548,7 +548,90 @@ export default function VersionHistoryPage() {
                       </div>
                     )}
 
-                    {changes.length > 0 ? (
+                    {/* Special layout for taxonomy description feedback */}
+                    {entry.source === 'feedback' && entry.affectedTable === 'taxonomy' && entry.oldValues?.descriptions && entry.newValues?.descriptions ? (
+                      <div className="space-y-3">
+                        {Object.keys(entry.newValues.descriptions as Record<string, string>).map((nodePath) => {
+                          const oldDesc = (entry.oldValues!.descriptions as Record<string, string | null>)[nodePath]
+                          const newDesc = (entry.newValues!.descriptions as Record<string, string>)[nodePath]
+                          return (
+                            <div key={nodePath} className="rounded border border-gray-200 p-3">
+                              <p className="text-xs font-semibold text-gray-800 mb-2">
+                                {nodePath.replace(/\|/g, ' > ')}
+                              </p>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <p className="text-[10px] font-medium text-gray-500 uppercase mb-1">Before</p>
+                                  <p className="text-xs text-red-700 bg-red-50 rounded p-2 leading-relaxed">
+                                    {oldDesc || <span className="italic text-gray-400">No description</span>}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-medium text-gray-500 uppercase mb-1">After</p>
+                                  <p className="text-xs text-green-700 bg-green-50 rounded p-2 leading-relaxed">
+                                    {newDesc}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : entry.source === 'feedback' && entry.affectedTable === 'project_settings' && entry.oldValues?.priorities && entry.newValues?.priorities ? (
+                      /* Column priorities feedback */
+                      <div className="rounded border border-gray-200 p-3">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-[10px] font-medium text-gray-500 uppercase mb-2">Before</p>
+                            <ol className="list-decimal list-inside space-y-1">
+                              {(entry.oldValues.priorities as string[]).map((col, i) => (
+                                <li key={i} className="text-xs text-red-700 bg-red-50 rounded px-2 py-1">
+                                  {humanizeField(col)}
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-medium text-gray-500 uppercase mb-2">After</p>
+                            <ol className="list-decimal list-inside space-y-1">
+                              {(entry.newValues.priorities as string[]).map((col, i) => (
+                                <li key={i} className="text-xs text-green-700 bg-green-50 rounded px-2 py-1">
+                                  {humanizeField(col)}
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        </div>
+                      </div>
+                    ) : entry.source === 'feedback' && entry.affectedTable === 'override_rules' && entry.newValues?.name ? (
+                      /* Create rule feedback */
+                      <div className="rounded border border-gray-200 p-3 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-medium text-gray-500 uppercase">Rule Name</span>
+                          <span className="text-xs font-semibold text-gray-800">{entry.newValues.name as string}</span>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-medium text-gray-500 uppercase mb-1">Target Classification</p>
+                          <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 inline-block">
+                            {(entry.newValues.targetPath as string).replace(/\|/g, ' > ')}
+                          </p>
+                        </div>
+                        {entry.newValues.conditions && Array.isArray(entry.newValues.conditions) && (
+                          <div>
+                            <p className="text-[10px] font-medium text-gray-500 uppercase mb-1">Conditions</p>
+                            <div className="space-y-1">
+                              {(entry.newValues.conditions as Array<{ field: string; operator: string; value: string }>).map((cond, i) => (
+                                <div key={i} className="text-xs bg-gray-50 rounded px-2 py-1 flex items-center gap-1">
+                                  <span className="font-medium text-gray-700">{humanizeField(cond.field)}</span>
+                                  <span className="text-gray-500">{cond.operator}</span>
+                                  <span className="text-gray-900">"{cond.value}"</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : changes.length > 0 ? (
                       <table className="w-full text-xs table-fixed">
                         <colgroup>
                           <col className="w-1/5" />

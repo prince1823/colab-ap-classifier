@@ -9,6 +9,7 @@ import type {
   ProjectSupplierView,
   SupplierConfirmationStatus,
   SupplierUpdateInput,
+  SupplierParent,
 } from '../../shared/types/suppliers';
 import type { FilterCondition, GroupedFilter, FieldDefinition } from '../../shared/types/transactions';
 import { buildWhereClause, buildGroupedWhereClause, type ColumnResolver } from '../utils/query-builder';
@@ -122,10 +123,6 @@ export class SupplierService implements ISupplierService {
       setClauses.push('supplier_info = ?');
       params.push(JSON.stringify(updates.supplierInfo));
     }
-    if (updates.parentName !== undefined) {
-      setClauses.push('parent_supplier_name = ?');
-      params.push(updates.parentName);
-    }
     if (updates.mappedTaxonomyPaths !== undefined) {
       setClauses.push('mapped_taxonomy_paths = ?');
       params.push(JSON.stringify(updates.mappedTaxonomyPaths));
@@ -160,7 +157,7 @@ export class SupplierService implements ISupplierService {
     is_researched: 'ps.is_researched',
     is_tail_spend: 'ps.is_tail_spend',
     universe_match: 'ps.universe_match',
-    parent_supplier_name: 'ps.parent_supplier_name',
+    parent_name: 'sp.name',
     data_source: 'ps.data_source',
     // Aggregate fields — resolved on the outer subquery alias
     total_spend: 'sub.total_spend',
@@ -174,7 +171,7 @@ export class SupplierService implements ISupplierService {
     { name: 'is_researched', label: 'Researched', type: 'boolean' },
     { name: 'is_tail_spend', label: 'Tail Spend', type: 'boolean' },
     { name: 'universe_match', label: 'Universe Match', type: 'boolean' },
-    { name: 'parent_supplier_name', label: 'Parent Supplier', type: 'string' },
+    { name: 'parent_name', label: 'Parent Supplier', type: 'string' },
     { name: 'data_source', label: 'Data Source', type: 'string' },
     { name: 'total_spend', label: 'Total Spend', type: 'number', group: 'Aggregates' },
     { name: 'transaction_count', label: 'Transaction Count', type: 'number', group: 'Aggregates' },
@@ -186,6 +183,14 @@ export class SupplierService implements ISupplierService {
 
   /** Get distinct values for a supplier field (for dropdown suggestions). */
   async queryDistinctValues(field: string, limit = 200): Promise<string[]> {
+    if (field === 'parent_name') {
+      // Query the normalized table directly — it's the source of truth for parent names
+      const rows = await this.db.all<{ val: string }>(
+        'SELECT name AS val FROM supplier_parents ORDER BY name LIMIT ?',
+        limit
+      );
+      return rows.map(r => String(r.val));
+    }
     const colExpr = SupplierService.SUPPLIER_COLUMNS[field];
     if (!colExpr) return [];
     // For supplier-level fields, query project_suppliers directly
@@ -247,14 +252,19 @@ export class SupplierService implements ISupplierService {
     const innerParams = innerWhere?.params ?? [];
 
     // Build inner query
-    const innerSQL = `SELECT ps.*,
+    const innerSQL = `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
+        ps.parent_supplier_id, sp.name AS parent_name,
+        ps.data_source, ps.universe_match, ps.is_researched,
+        ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at,
         COUNT(t.id) as transaction_count,
         ${spendExpr} as total_spend
       FROM project_suppliers ps
       LEFT JOIN transactions t ON t.project_supplier_id = ps.id
+      LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
       ${innerWhereSQL}
       GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
-               ps.parent_supplier_name, ps.data_source, ps.universe_match, ps.is_researched,
+               ps.parent_supplier_id, sp.name,
+               ps.data_source, ps.universe_match, ps.is_researched,
                ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at`;
 
     const outerWhereSQL = outerWhere ? `WHERE ${outerWhere.sql}` : '';
@@ -271,7 +281,8 @@ export class SupplierService implements ISupplierService {
       supplier_name: string;
       confirmation_status: string;
       is_tail_spend: boolean;
-      parent_supplier_name: string | null;
+      parent_supplier_id: string | null;
+      parent_name: string | null;
       universe_match: boolean;
       is_researched: boolean;
       supplier_info: string | null;
@@ -286,8 +297,8 @@ export class SupplierService implements ISupplierService {
       supplierName: row.supplier_name,
       confirmationStatus: row.confirmation_status as SupplierConfirmationStatus,
       isTailSpend: Boolean(row.is_tail_spend),
-      parentSupplierName: row.parent_supplier_name,
-      parentName: row.parent_supplier_name,
+      parentSupplierId: row.parent_supplier_id,
+      parentName: row.parent_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
       universeMatch: Boolean(row.universe_match),
@@ -305,14 +316,21 @@ export class SupplierService implements ISupplierService {
       supplier_name: string;
       confirmation_status: string;
       is_tail_spend: boolean;
-      parent_supplier_name: string | null;
+      parent_supplier_id: string | null;
+      parent_name: string | null;
       universe_match: boolean;
       is_researched: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
       created_at: string;
     }>(
-      'SELECT * FROM project_suppliers WHERE id = ?',
+      `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
+              ps.parent_supplier_id, sp.name AS parent_name,
+              ps.universe_match, ps.is_researched,
+              ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at
+       FROM project_suppliers ps
+       LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
+       WHERE ps.id = ?`,
       id
     );
 
@@ -323,8 +341,8 @@ export class SupplierService implements ISupplierService {
       supplierName: row.supplier_name,
       confirmationStatus: row.confirmation_status as SupplierConfirmationStatus,
       isTailSpend: Boolean(row.is_tail_spend),
-      parentSupplierName: row.parent_supplier_name,
-      parentName: row.parent_supplier_name,
+      parentSupplierId: row.parent_supplier_id,
+      parentName: row.parent_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
       universeMatch: Boolean(row.universe_match),
@@ -341,18 +359,66 @@ export class SupplierService implements ISupplierService {
     );
   }
 
-  async assignParent(id: string, parentId: string): Promise<void> {
-    const parent = await this.db.get<{ supplier_name: string }>(
-      'SELECT supplier_name FROM project_suppliers WHERE id = ?',
-      parentId
+  async listParents(): Promise<SupplierParent[]> {
+    const rows = await this.db.all<{ id: string; name: string; created_at: string }>(
+      'SELECT id, name, created_at FROM supplier_parents ORDER BY name'
     );
-    if (!parent) throw new Error(`Parent supplier not found: ${parentId}`);
+    return rows.map(r => ({ id: r.id, name: r.name, createdAt: String(r.created_at) }));
+  }
 
+  async addParent(name: string): Promise<SupplierParent> {
+    const id = uuidv4();
     await this.db.run(
-      'UPDATE project_suppliers SET parent_supplier_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      parent.supplier_name,
+      'INSERT INTO supplier_parents (id, name) VALUES (?, ?)',
+      id,
+      name
+    );
+    const row = await this.db.get<{ id: string; name: string; created_at: string }>(
+      'SELECT id, name, created_at FROM supplier_parents WHERE id = ?',
       id
     );
+    return { id: row!.id, name: row!.name, createdAt: String(row!.created_at) };
+  }
+
+  async findParentByName(name: string): Promise<SupplierParent | null> {
+    const row = await this.db.get<{ id: string; name: string; created_at: string }>(
+      'SELECT id, name, created_at FROM supplier_parents WHERE lower(name) = lower(?)',
+      name
+    );
+    if (!row) return null;
+    return { id: row.id, name: row.name, createdAt: String(row.created_at) };
+  }
+
+  async changeParent(supplierId: string, parentId: string | null): Promise<void> {
+    await this.db.run(
+      'UPDATE project_suppliers SET parent_supplier_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      parentId,
+      supplierId
+    );
+  }
+
+  async removeParent(supplierId: string): Promise<void> {
+    return this.changeParent(supplierId, null);
+  }
+
+  async renameParent(parentId: string, newName: string): Promise<void> {
+    await this.db.run(
+      'UPDATE supplier_parents SET name = ? WHERE id = ?',
+      newName,
+      parentId
+    );
+  }
+
+  async deleteParent(parentId: string): Promise<void> {
+    const row = await this.db.get<{ cnt: number }>(
+      'SELECT COUNT(*) AS cnt FROM project_suppliers WHERE parent_supplier_id = ?',
+      parentId
+    );
+    const count = Number(row?.cnt ?? 0);
+    if (count > 0) {
+      throw new Error(`Cannot delete parent: ${count} supplier(s) still assigned to it`);
+    }
+    await this.db.run('DELETE FROM supplier_parents WHERE id = ?', parentId);
   }
 
   async filterTailSpend(threshold: number): Promise<string[]> {

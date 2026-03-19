@@ -73,6 +73,7 @@ You MUST respond with valid JSON only (no markdown fencing, no explanation text 
   "primaryRevenueStreams": "<comma-separated or null>",
   "serviceCategories": "<comma-separated categories mapping to taxonomy or null>",
   "targetMarket": "<'Enterprise' | 'SMB' | 'Consumer' | 'Healthcare' | 'Government' | 'Mixed' or null>",
+  "parentCompanyName": "<official name of the parent/holding company, or null if independent>",
   "confidence": "high" | "medium" | "low",
   "sources": ["<list of source URLs used for the research>"]
 }`;
@@ -220,6 +221,9 @@ export function parseResponse(responseText: string): ResearchParseResult {
 
   const supplierType = optStr('supplierType');
   if (supplierType) result.supplierType = supplierType;
+
+  const parentCompanyName = optStr('parentCompanyName');
+  if (parentCompanyName) result.parentCompanyName = parentCompanyName;
 
   return { result };
 }

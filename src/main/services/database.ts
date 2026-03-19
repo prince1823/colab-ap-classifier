@@ -36,7 +36,7 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents'];
 
 export { convertPlaceholders };
 
@@ -113,7 +113,7 @@ export class DuckDBDatabase implements Database {
           supplier_name VARCHAR NOT NULL UNIQUE,
           confirmation_status VARCHAR DEFAULT 'pending',
           is_tail_spend BOOLEAN DEFAULT FALSE,
-          parent_supplier_name VARCHAR,
+          parent_supplier_id VARCHAR,
           data_source VARCHAR DEFAULT 'manual',
           universe_match BOOLEAN DEFAULT FALSE,
           is_researched BOOLEAN DEFAULT FALSE,
@@ -150,6 +150,31 @@ export class DuckDBDatabase implements Database {
     try {
       await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
     } catch { /* column doesn't exist, ignore */ }
+
+    // Migrate: ensure supplier_parents table exists
+    const spTable = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'supplier_parents'"
+    );
+    if (spTable.length === 0) {
+      await this.exec(`
+        CREATE TABLE IF NOT EXISTS supplier_parents (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL UNIQUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    }
+
+    // Migrate: replace parent_supplier_name with parent_supplier_id FK on project_suppliers
+    const parentIdCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'parent_supplier_id'"
+    );
+    if (parentIdCol.length === 0) {
+      await this.exec(`ALTER TABLE project_suppliers ADD COLUMN parent_supplier_id VARCHAR;`);
+    }
+    try {
+      await this.exec('ALTER TABLE project_suppliers DROP COLUMN parent_supplier_name');
+    } catch { /* column already removed, ignore */ }
   }
 
   async closeDatabase(): Promise<void> {
@@ -287,12 +312,18 @@ export class DuckDBDatabase implements Database {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS supplier_parents (
+        id VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS project_suppliers (
         id VARCHAR PRIMARY KEY,
         supplier_name VARCHAR NOT NULL UNIQUE,
         confirmation_status VARCHAR DEFAULT 'pending',
         is_tail_spend BOOLEAN DEFAULT FALSE,
-        parent_supplier_name VARCHAR,
+        parent_supplier_id VARCHAR,
         data_source VARCHAR DEFAULT 'manual',
         universe_match BOOLEAN DEFAULT FALSE,
         is_researched BOOLEAN DEFAULT FALSE,

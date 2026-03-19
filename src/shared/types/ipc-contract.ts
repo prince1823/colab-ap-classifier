@@ -22,7 +22,7 @@ import type {
 } from './transactions';
 import type { ClassificationProgress, ResearchProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
-import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput } from './suppliers';
+import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
 import type { ChangeLog } from './changelog';
 import type { UploadRecord } from './services';
@@ -86,6 +86,12 @@ export interface IPCInvokeMap {
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
   'suppliers:distinctValues':  { args: [field: string, limit?: number]; result: string[] };
+  'suppliers:listParents':     { args: []; result: SupplierParent[] };
+  'suppliers:addParent':       { args: [name: string]; result: SupplierParent };
+  'suppliers:changeParent':    { args: [supplierId: string, parentId: string | null]; result: void };
+  'suppliers:removeParent':    { args: [supplierId: string]; result: void };
+  'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
+  'suppliers:deleteParent':    { args: [parentId: string]; result: void };
 
   // Rules
   'rules:list':   { args: []; result: OverrideRule[] };

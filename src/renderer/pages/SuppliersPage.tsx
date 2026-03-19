@@ -131,15 +131,24 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Save parentName */
+  /** Save parentName — find or create the parent by name, then assign the FK */
   const saveParentName = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
     setSaving(true)
     try {
-      const parentName = newValue || null
-      await ipc.suppliers.update(supplier.id, { parentName })
-      updateSuppliers(prev => prev.map(s =>
-        s.id === supplier.id ? { ...s, parentName } : s
-      ))
+      if (!newValue) {
+        await ipc.suppliers.removeParent(supplier.id)
+        updateSuppliers(prev => prev.map(s =>
+          s.id === supplier.id ? { ...s, parentSupplierId: null, parentName: null } : s
+        ))
+      } else {
+        const parents = await ipc.suppliers.listParents()
+        const existing = parents.find(p => p.name.toLowerCase() === newValue.toLowerCase())
+        const parent = existing ?? await ipc.suppliers.addParent(newValue)
+        await ipc.suppliers.changeParent(supplier.id, parent.id)
+        updateSuppliers(prev => prev.map(s =>
+          s.id === supplier.id ? { ...s, parentSupplierId: parent.id, parentName: parent.name } : s
+        ))
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to update')
     } finally {

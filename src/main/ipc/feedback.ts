@@ -32,12 +32,10 @@ export function registerFeedbackHandlers(
       throw new Error('No matching changelog entries found for the selected IDs');
     }
 
-    // 2. Fetch current system state
-    const [nodes, companyContext, columnPriorities] = await Promise.all([
-      taxonomy.getNodes(),
-      project.getSetting('company_context') as Promise<CompanyContext | null>,
-      project.getSetting('column_priorities') as Promise<string[] | null>,
-    ]);
+    // 2. Fetch current system state (sequential — DuckDB is single-connection embedded)
+    const nodes = await taxonomy.getNodes();
+    const companyContext = await project.getSetting('company_context') as CompanyContext | null;
+    const columnPriorities = await project.getSetting('column_priorities') as string[] | null;
 
     // 3. Call the feedback agent
     return feedbackAgent.analyze({
@@ -87,11 +85,11 @@ export function registerFeedbackHandlers(
           ...currentInfo,
           [details.field]: details.proposedValue,
         };
-        await suppliers.updateSupplier(details.supplierName, { supplierInfo: mergedInfo });
+        await suppliers.updateSupplier(existing.id, { supplierInfo: mergedInfo });
         await changelog.logChange({
           source: 'feedback',
           affectedTable: 'project_suppliers',
-          affectedIds: [details.supplierName],
+          affectedIds: [existing.id],
           affectedCount: 1,
           oldValues: { [details.field]: details.currentValue },
           newValues: { [details.field]: details.proposedValue },

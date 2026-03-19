@@ -6,8 +6,7 @@ export function registerChangelogHandlers(changelog: ChangelogStore): void {
     return changelog.listChanges();
   });
 
-  registerHandler('changelog:revert', async (_event, ...args: unknown[]) => {
-    const changeId = args[0] as string;
-    return changelog.revertChange(changeId);
+  registerHandler('changelog:revert', async (_event, changeId: unknown) => {
+    return changelog.revertChange(changeId as string);
   });
 }

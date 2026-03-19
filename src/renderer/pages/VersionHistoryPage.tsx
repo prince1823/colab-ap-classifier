@@ -543,7 +543,10 @@ export default function VersionHistoryPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {entry.affectedTable === 'transactions' && (
+                    {/* Revert is only available for manual/classification transaction changes.
+                      Feedback changes store nested value structures (e.g. { descriptions: { path: val } })
+                      that don't map to flat column→value pairs, so the generic SQL revert cannot handle them. */}
+                  {entry.affectedTable === 'transactions' && entry.source !== 'feedback' && (
                       isReverted ? (
                         <span className="rounded px-2 py-1 text-xs text-gray-400 italic">reverted</span>
                       ) : (

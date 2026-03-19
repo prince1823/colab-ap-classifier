@@ -43,11 +43,18 @@ export class RuleStore implements IRuleStore {
       priority = await this.getNextPriority();
     }
 
-    await this.db.run(
-      `INSERT INTO override_rules (id, name, conditions, target_taxonomy_node_id, priority, is_active, created_at)
-       VALUES (?, ?, ?, ?, ?, TRUE, CURRENT_TIMESTAMP)`,
-      id, input.name, JSON.stringify(input.conditions), input.targetTaxonomyNodeId, priority
-    );
+    try {
+      await this.db.run(
+        `INSERT INTO override_rules (id, name, conditions, target_taxonomy_node_id, priority, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, TRUE, CURRENT_TIMESTAMP)`,
+        id, input.name, JSON.stringify(input.conditions), input.targetTaxonomyNodeId, priority
+      );
+    } catch (err) {
+      if (err instanceof Error && err.message.toLowerCase().includes('unique')) {
+        throw new Error(`A rule named "${input.name}" already exists. Rule names must be unique.`);
+      }
+      throw err;
+    }
 
     return { id };
   }
@@ -65,10 +72,17 @@ export class RuleStore implements IRuleStore {
     if (setClauses.length === 0) return;
 
     params.push(ruleId);
-    await this.db.run(
-      `UPDATE override_rules SET ${setClauses.join(', ')} WHERE id = ?`,
-      ...params
-    );
+    try {
+      await this.db.run(
+        `UPDATE override_rules SET ${setClauses.join(', ')} WHERE id = ?`,
+        ...params
+      );
+    } catch (err) {
+      if (err instanceof Error && err.message.toLowerCase().includes('unique')) {
+        throw new Error(`A rule named "${updates.name}" already exists. Rule names must be unique.`);
+      }
+      throw err;
+    }
   }
 
   async deleteRule(ruleId: string): Promise<void> {

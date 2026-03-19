@@ -288,25 +288,27 @@ export class ClassificationRunner implements IClassificationRunner {
     // Step 2: Apply override rules
     const ruleMatches = await this.rules.evaluateRules(txnIds);
 
-    const txnsByTargetNode = new Map<string, string[]>();
+    const txnsByRuleAndNode = new Map<string, { ruleId: string; targetNodeId: string; ids: string[] }>();
     const matchedTxnIds = new Set<string>();
 
     for (const [txnId, match] of ruleMatches.entries()) {
-      let ids = txnsByTargetNode.get(match.targetTaxonomyNodeId);
-      if (!ids) {
-        ids = [];
-        txnsByTargetNode.set(match.targetTaxonomyNodeId, ids);
+      const key = `${match.ruleId}::${match.targetTaxonomyNodeId}`;
+      let entry = txnsByRuleAndNode.get(key);
+      if (!entry) {
+        entry = { ruleId: match.ruleId, targetNodeId: match.targetTaxonomyNodeId, ids: [] };
+        txnsByRuleAndNode.set(key, entry);
       }
-      ids.push(txnId);
+      entry.ids.push(txnId);
       matchedTxnIds.add(txnId);
     }
 
-    for (const [targetNodeId, ids] of txnsByTargetNode) {
+    for (const { ruleId, targetNodeId, ids } of txnsByRuleAndNode.values()) {
       await this.transactions.updateTransactions(
         {
           ids,
           taxonomyNodeId: targetNodeId,
           classificationStatus: 'classified_by_rule',
+          appliedRuleId: ruleId,
         },
         'rule'
       );

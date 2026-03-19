@@ -452,7 +452,7 @@ export default function SuppliersPage() {
       {/* Row 1: Active filters (left) + Filters button (right) */}
       <div className="suppliers-top-bar">
         <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-          {advancedGrouped && filterConditions.length > 0 && (
+          {viewMode !== 'normalize' && advancedGrouped && filterConditions.length > 0 && (
             <>
               <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mr-0.5 flex-shrink-0">Active:</span>
               {advancedGrouped.groups.map((group, gi) => {
@@ -520,71 +520,75 @@ export default function SuppliersPage() {
           }`}
         >
           <GitMerge size={13} />
-          Normalize
+          {viewMode === 'normalize' ? 'Supplier Research' : 'Normalize'}
         </button>
 
-        <button
-          onClick={() => setShowAdvancedFilter(true)}
-          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
-            filterConditions.length > 0
-              ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
-              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
-          }`}
-        >
-          <Filter size={13} />
-          Filters
-          {filterConditions.length > 0 && (
-            <span className="ml-1 rounded-full bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none">
-              {filterConditions.length}
-            </span>
-          )}
-        </button>
+        {viewMode !== 'normalize' && (
+          <button
+            onClick={() => setShowAdvancedFilter(true)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
+              filterConditions.length > 0
+                ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <Filter size={13} />
+            Filters
+            {filterConditions.length > 0 && (
+              <span className="ml-1 rounded-full bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none">
+                {filterConditions.length}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Tail Spend toggle button */}
-        <button
-          onClick={() => !editingThreshold && toggleTailSpendFilter(!tailSpendActive)}
-          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
-            tailSpendActive
-              ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
-              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
-          }`}
-        >
-          Tail Spend:
-          {editingThreshold ? (
-            <input
-              type="number"
-              className="w-[80px] px-1 py-0 border border-amber-300 rounded text-xs bg-white outline-none"
-              defaultValue={tailSpendThreshold}
-              autoFocus
-              onBlur={async (e) => {
-                const newVal = e.target.value
-                setEditingThreshold(false)
-                if (Number(newVal) > 0) {
-                  setTailSpendThreshold(newVal)
-                  try {
-                    await ipc.project.setSetting('tail_spend_threshold', Number(newVal))
-                    await ipc.suppliers.filterTailSpend(Number(newVal))
-                    if (tailSpendActive) await loadData()
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : 'Failed to save threshold')
+        {viewMode !== 'normalize' && (
+          <button
+            onClick={() => !editingThreshold && toggleTailSpendFilter(!tailSpendActive)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
+              tailSpendActive
+                ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            Tail Spend:
+            {editingThreshold ? (
+              <input
+                type="number"
+                className="w-[80px] px-1 py-0 border border-amber-300 rounded text-xs bg-white outline-none"
+                defaultValue={tailSpendThreshold}
+                autoFocus
+                onBlur={async (e) => {
+                  const newVal = e.target.value
+                  setEditingThreshold(false)
+                  if (Number(newVal) > 0) {
+                    setTailSpendThreshold(newVal)
+                    try {
+                      await ipc.project.setSetting('tail_spend_threshold', Number(newVal))
+                      await ipc.suppliers.filterTailSpend(Number(newVal))
+                      if (tailSpendActive) await loadData()
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Failed to save threshold')
+                    }
                   }
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                if (e.key === 'Escape') setEditingThreshold(false)
-              }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <span
-              onClick={(e) => { e.stopPropagation(); setEditingThreshold(true) }}
-              className="cursor-pointer hover:underline font-semibold"
-            >
-              {fmtAbbrev(Number(tailSpendThreshold) || 10000)}
-            </span>
-          )}
-        </button>
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  if (e.key === 'Escape') setEditingThreshold(false)
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span
+                onClick={(e) => { e.stopPropagation(); setEditingThreshold(true) }}
+                className="cursor-pointer hover:underline font-semibold"
+              >
+                {fmtAbbrev(Number(tailSpendThreshold) || 10000)}
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Normalize view */}

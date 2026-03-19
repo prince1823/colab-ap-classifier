@@ -60,7 +60,12 @@ export default function NormalizeView() {
 
   // Focus
   const [focusedRowIndex, setFocusedRowIndex] = useState(0)
-  const tableRef = useRef<HTMLDivElement>(null)
+  const outerRef = useRef<HTMLDivElement>(null)  // owns onKeyDown — always focus this
+  const tableRef = useRef<HTMLDivElement>(null)  // scroll container
+
+  const focusOuter = useCallback(() => {
+    setTimeout(() => outerRef.current?.focus(), 50)
+  }, [])
 
   // Inline editing
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -78,6 +83,13 @@ export default function NormalizeView() {
 
   // Parent typeahead
   const [parentTypeahead, setParentTypeahead] = useState<{ supplierId: string; anchor: { top: number; left: number } } | null>(null)
+
+  // Re-focus outer div whenever all modals/popovers/edits are closed (also on initial load)
+  useEffect(() => {
+    if (!loading && !showMergeModal && !reassigningAlias && !parentTypeahead && !editingId && !editingParentId) {
+      outerRef.current?.focus()
+    }
+  }, [loading, showMergeModal, reassigningAlias, parentTypeahead, editingId, editingParentId])
 
   // ── Data loading ──────────────────────────────────────────────────
 
@@ -345,17 +357,30 @@ export default function NormalizeView() {
   const handleMerge = useCallback(async (survivorId: string, losingIds: string[]) => {
     try {
       await ipc.suppliers.merge(survivorId, losingIds)
-      await loadData()
-      // Clear only the losing suppliers from state — leave everything else untouched
+
       const losingSet = new Set(losingIds)
-      setSelectedIds(prev => { const n = new Set(prev); losingSet.forEach(id => n.delete(id)); return n })
+
+      // Immediately remove losers from local state — no full reload, no visual disruption
+      setSuppliers(prev => prev.filter(s => !losingSet.has(s.id)))
+      setSelectedIds(prev => { const n = new Set(prev); losingSet.forEach(id => n.delete(id)); n.delete(survivorId); return n })
       setExpanded(prev => { const n = new Set(prev); losingSet.forEach(id => n.delete(id)); return n })
-      setAliasCache(prev => { const n = new Map(prev); losingSet.forEach(id => n.delete(id)); return n })
+      setAliasCache(prev => {
+        const n = new Map(prev)
+        losingSet.forEach(id => n.delete(id))
+        n.delete(survivorId) // invalidate survivor so aliases reload fresh on next expand
+        return n
+      })
+
+      // Silently refresh spend/txn counts in background — no loading state, no collapse
+      ipc.suppliers.list().then(fresh => {
+        setSuppliers(fresh as ProjectSupplierView[])
+      }).catch(() => { /* non-fatal */ })
+
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Merge failed')
     }
     setShowMergeModal(false)
-  }, [loadData])
+  }, [])
 
   const handleReassignAlias = useCallback(async (aliasName: string, fromId: string, toId: string) => {
     try {
@@ -390,8 +415,8 @@ export default function NormalizeView() {
     } else {
       setEditingId(null)
     }
-    setTimeout(() => tableRef.current?.focus(), 0)
-  }, [editDraft, suppliers, handleRename])
+    focusOuter()
+  }, [editDraft, suppliers, handleRename, focusOuter])
 
   const startEditParent = useCallback((parentId: string, currentName: string) => {
     setEditingParentId(parentId)
@@ -457,8 +482,8 @@ export default function NormalizeView() {
       return
     }
 
-    // Cmd+R: reassign alias (alias rows only)
-    if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
+    // Shift+R: reassign alias (alias rows only)
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && e.shiftKey && e.key === 'R') {
       e.preventDefault()
       if (row.type === 'alias' && row.alias && row.aliasNormalized) {
         setReassigningAlias({ alias: row.alias, normalized: row.aliasNormalized })
@@ -544,7 +569,7 @@ export default function NormalizeView() {
         break
       }
     }
-  }, [flatRows, focusedRowIndex, expanded, selectedIds, editingId, editingParentId, toggleExpand, toggleSelect, startEdit])
+  }, [flatRows, focusedRowIndex, expanded, selectedIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleExpand, toggleSelect, startEdit])
 
   // Scroll focused row into view
   useEffect(() => {
@@ -566,26 +591,29 @@ export default function NormalizeView() {
   }
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden outline-none" onKeyDown={handleKeyDown} tabIndex={0}>
-      {/* Header: search + group-by-parent toggle */}
+    <div ref={outerRef} className="flex flex-col flex-1 overflow-hidden outline-none" onKeyDown={handleKeyDown} tabIndex={0}>
+      {/* Header: left side (count + merge) + right side (group-by + search) */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
-        <div className="relative flex-1 max-w-sm">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search suppliers or aliases..."
-            className="w-full pl-8 pr-8 py-1.5 text-xs rounded-md border border-gray-200 bg-white text-gray-700 placeholder:text-gray-300 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
-              <X size={14} />
-            </button>
-          )}
-        </div>
+        {/* Left: supplier count + merge button */}
+        <span className="text-[10px] text-gray-400 flex-shrink-0">
+          {filtered.length} supplier{filtered.length !== 1 ? 's' : ''}
+        </span>
 
-        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none">
+        {selectedIds.size >= 2 && (
+          <button
+            onClick={() => setShowMergeModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 transition-colors flex-shrink-0"
+          >
+            <Merge size={13} />
+            Merge {selectedIds.size}
+          </button>
+        )}
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Right: group-by toggle + search */}
+        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none flex-shrink-0">
           <div
             onClick={() => setGroupByParent(!groupByParent)}
             className={`relative w-8 h-[18px] rounded-full transition-colors cursor-pointer ${groupByParent ? 'bg-violet-500' : 'bg-gray-300'}`}
@@ -595,20 +623,21 @@ export default function NormalizeView() {
           Group by parent
         </label>
 
-        {/* Batch action: merge */}
-        {selectedIds.size >= 2 && (
-          <button
-            onClick={() => setShowMergeModal(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 transition-colors"
-          >
-            <Merge size={13} />
-            Merge {selectedIds.size}
-          </button>
-        )}
-
-        <span className="text-[10px] text-gray-400">
-          {filtered.length} supplier{filtered.length !== 1 ? 's' : ''}
-        </span>
+        <div className="relative w-48">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search..."
+            className="w-full pl-7 pr-7 py-1.5 text-xs rounded-md border border-gray-200 bg-white text-gray-700 placeholder:text-gray-300 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
+              <X size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -619,22 +648,22 @@ export default function NormalizeView() {
       )}
 
       {/* Table */}
-      <div ref={tableRef} className="flex-1 overflow-auto outline-none" tabIndex={-1} onClick={() => tableRef.current?.focus()}>
+      <div ref={tableRef} className="flex-1 overflow-auto outline-none" tabIndex={-1} onClick={focusOuter}>
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
             {searchQuery ? 'No suppliers match your search' : 'No suppliers found'}
           </div>
         ) : (
-          <table className="w-full border-collapse text-xs">
+          <table className="w-full border-collapse text-xs border border-gray-300">
             <thead className="sticky top-0 z-10">
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="w-8 px-2 py-2.5 border-r border-gray-200" />
-                <th className="w-[18%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-200">Parent</th>
-                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-200">Normalized Name</th>
-                <th className="w-[22%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-200">Raw Alias</th>
-                <th className="w-[10%] px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-200">Spend</th>
-                <th className="w-[7%] px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-200">Txns</th>
-                <th className="w-24 px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500">Actions</th>
+              <tr className="bg-gray-50">
+                <th className="w-8 px-2 py-2.5 border border-gray-300" />
+                <th className="w-[18%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Parent</th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Normalized Name</th>
+                <th className="w-[22%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Raw Alias</th>
+                <th className="w-[10%] px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Spend</th>
+                <th className="w-[7%] px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Txns</th>
+                <th className="w-24 px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -648,12 +677,12 @@ export default function NormalizeView() {
                     <tr
                       key={`parent-${row.parentName}`}
                       data-row-index={idx}
-                      className={`border-t-2 border-gray-200 ${isFocused ? 'bg-gray-100' : 'bg-gray-50/70'}`}
+                      className={`${isFocused ? 'bg-gray-100' : 'bg-gray-50/70'}`}
                       onClick={() => setFocusedRowIndex(idx)}
                     >
-                      <td className="px-2 py-2 border-r border-gray-100" />
-                      <td colSpan={5} className="px-3 py-2 font-semibold text-gray-600">
-                        <div className="flex items-center gap-2">
+                      <td className="px-2 py-2 border border-gray-300" />
+                      <td colSpan={5} className="px-3 py-2 font-semibold text-gray-600 border border-gray-300 text-center">
+                        <div className="flex items-center justify-center gap-2">
                           {isNoParent ? (
                             <span className="text-gray-400 italic">{row.parentName}</span>
                           ) : editingParentId === row.parentId ? (
@@ -689,7 +718,7 @@ export default function NormalizeView() {
                           )}
                         </div>
                       </td>
-                      <td className="px-2 py-2" />
+                      <td className="px-2 py-2 border border-gray-300" />
                     </tr>
                   )
                 }
@@ -706,14 +735,14 @@ export default function NormalizeView() {
                     <tr
                       key={`norm-${s.id}`}
                       data-row-index={idx}
-                      className={`border-t border-gray-100 cursor-pointer transition-colors ${
+                      className={`cursor-pointer transition-colors ${
                         isFocused ? 'bg-blue-50' : isSelected ? 'bg-violet-50/50' : 'hover:bg-gray-50/50'
                       }`}
                       onClick={() => { setFocusedRowIndex(idx) }}
                     >
                       {/* Expand toggle */}
-                      <td className="px-2 py-2 text-center border-r border-gray-100">
-                        <button
+                      <td className="px-2 py-2 text-center border border-gray-200">
+  <button
                           onClick={(e) => { e.stopPropagation(); if (hasAliases) toggleExpand(s.id) }}
                           className={`rounded p-0.5 transition-colors ${hasAliases ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 cursor-pointer' : 'text-gray-200 cursor-default'}`}
                         >
@@ -722,7 +751,7 @@ export default function NormalizeView() {
                       </td>
 
                       {/* Parent column — always visible */}
-                      <td className="px-3 py-2 text-gray-400 border-r border-gray-100">
+                      <td className="px-3 py-2 text-gray-400 border border-gray-200">
                         {s.parentName ? (
                           <span className="text-gray-600">{s.parentName}</span>
                         ) : (
@@ -740,7 +769,7 @@ export default function NormalizeView() {
                       </td>
 
                       {/* Normalized name */}
-                      <td className="px-3 py-2 border-r border-gray-100">
+                      <td className="px-3 py-2 border border-gray-200">
                         <div className="flex items-center gap-2">
                           {editingId === s.id ? (
                             <input
@@ -750,7 +779,7 @@ export default function NormalizeView() {
                               onBlur={() => commitEdit(s.id)}
                               onKeyDown={e => {
                                 if (e.key === 'Enter') { e.stopPropagation(); commitEdit(s.id) }
-                                if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null); setTimeout(() => tableRef.current?.focus(), 0) }
+                                if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null); focusOuter() }
                               }}
                               className="flex-1 px-2 py-0.5 border border-blue-300 rounded text-xs outline-none focus:ring-1 focus:ring-blue-400"
                               autoFocus
@@ -773,22 +802,22 @@ export default function NormalizeView() {
                       </td>
 
                       {/* Raw alias (empty for normalized row) */}
-                      <td className="px-3 py-2 text-gray-300 italic border-r border-gray-100">
+                      <td className="px-3 py-2 text-gray-300 italic border border-gray-200">
                         {nr.aliasesLoaded ? `${nr.aliases.length} alias${nr.aliases.length !== 1 ? 'es' : ''}` : '—'}
                       </td>
 
                       {/* Spend */}
-                      <td className="px-3 py-2 text-right font-medium text-gray-700 tabular-nums border-r border-gray-100">
+                      <td className="px-3 py-2 text-right font-medium text-gray-700 tabular-nums border border-gray-200">
                         {fmtAbbrev(s.totalSpend)}
                       </td>
 
                       {/* Txns */}
-                      <td className="px-3 py-2 text-right text-gray-500 tabular-nums border-r border-gray-100">
+                      <td className="px-3 py-2 text-right text-gray-500 tabular-nums border border-gray-200">
                         {s.transactionCount.toLocaleString()}
                       </td>
 
                       {/* Actions */}
-                      <td className="px-2 py-2">
+                      <td className="px-2 py-2 border border-gray-200">
                         <div className="flex items-center justify-end gap-1 pr-1">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteNormalized(s.id) }}
@@ -818,33 +847,33 @@ export default function NormalizeView() {
                       onClick={() => setFocusedRowIndex(idx)}
                     >
                       {/* Indent */}
-                      <td className="px-2 py-1.5 border-r border-gray-100" />
+                      <td className="px-2 py-1.5 border border-gray-200" />
 
                       {/* Empty parent cell */}
-                      <td className="px-3 py-1.5 border-r border-gray-100" />
+                      <td className="px-3 py-1.5 border border-gray-200" />
 
                       {/* Empty normalized name cell */}
-                      <td className="px-3 py-1.5 border-r border-gray-100" />
+                      <td className="px-3 py-1.5 border border-gray-200" />
 
                       {/* Alias name */}
-                      <td className="px-3 py-1.5 border-r border-gray-100">
+                      <td className="px-3 py-1.5 border border-gray-200">
                         <div className="flex items-center gap-2 pl-2 border-l-2 border-gray-200">
                           <span className="text-gray-600">{alias.rawName}</span>
                         </div>
                       </td>
 
                       {/* Spend */}
-                      <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums border-r border-gray-100">
+                      <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums border border-gray-200">
                         {alias.spend > 0 ? fmtAbbrev(alias.spend) : '—'}
                       </td>
 
                       {/* Txns */}
-                      <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums border-r border-gray-100">
+                      <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums border border-gray-200">
                         {alias.txnCount > 0 ? alias.txnCount.toLocaleString() : '—'}
                       </td>
 
                       {/* Actions */}
-                      <td className="px-2 py-1.5">
+                      <td className="px-2 py-1.5 border border-gray-200">
                         <div className="flex items-center justify-end gap-1 pr-1">
                           <button
                             onClick={(e) => {
@@ -852,7 +881,7 @@ export default function NormalizeView() {
                               setReassigningAlias({ alias, normalized: nr })
                             }}
                             className="rounded p-1 text-amber-500 hover:bg-amber-50 transition-colors"
-                            title="Reassign alias (Cmd+R)"
+                            title="Reassign alias (Shift+R)"
                           >
                             <ArrowRightLeft size={13} />
                           </button>
@@ -881,7 +910,7 @@ export default function NormalizeView() {
         <MergeModal
           suppliers={selectedSuppliers}
           onMerge={handleMerge}
-          onClose={() => setShowMergeModal(false)}
+          onClose={() => { setShowMergeModal(false); focusOuter() }}
         />
       )}
 

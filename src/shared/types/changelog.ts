@@ -1,4 +1,4 @@
-export type ChangeSource = 'manual' | 'pipeline' | 'rule';
+export type ChangeSource = 'manual' | 'pipeline' | 'rule' | 'feedback';
 
 export interface ChangeLog {
   id: string;

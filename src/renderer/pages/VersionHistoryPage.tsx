@@ -464,7 +464,7 @@ export default function VersionHistoryPage() {
                   onClick={() => setExpandedId(isExpanded ? null : entry.id)}
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className={`h-2 w-2 flex-shrink-0 rounded-full ${entry.source === 'manual' ? 'bg-blue-500' : 'bg-green-500'}`} />
+                    <div className={`h-2 w-2 flex-shrink-0 rounded-full ${entry.source === 'feedback' ? 'bg-purple-500' : entry.source === 'manual' ? 'bg-blue-500' : 'bg-green-500'}`} />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium text-gray-900 truncate">
@@ -478,11 +478,11 @@ export default function VersionHistoryPage() {
                       </div>
                       <div className="mt-0.5 flex items-center gap-2 text-xs text-gray-500">
                         <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 font-medium ${
-                          entry.source === 'manual' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+                          entry.source === 'feedback' ? 'bg-purple-100 text-purple-700' : entry.source === 'manual' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
                         }`}>
                           {entry.source}
                         </span>
-                        <span>{entry.affectedCount} row{entry.affectedCount !== 1 ? 's' : ''}</span>
+                        <span>{entry.affectedCount} {entry.affectedTable === 'transactions' ? 'row' : 'item'}{entry.affectedCount !== 1 ? 's' : ''}</span>
                         {entry.supplierNames && entry.supplierNames.length > 0 && (
                           <span className="relative text-gray-600 font-medium">
                             {entry.supplierNames[0]}
@@ -517,19 +517,21 @@ export default function VersionHistoryPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {isReverted ? (
-                      <span className="rounded px-2 py-1 text-xs text-gray-400 italic">reverted</span>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleRevert(entry.id)
-                        }}
-                        disabled={reverting === entry.id}
-                        className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50"
-                      >
-                        {reverting === entry.id ? 'Reverting...' : 'Revert'}
-                      </button>
+                    {entry.affectedTable === 'transactions' && (
+                      isReverted ? (
+                        <span className="rounded px-2 py-1 text-xs text-gray-400 italic">reverted</span>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleRevert(entry.id)
+                          }}
+                          disabled={reverting === entry.id}
+                          className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+                        >
+                          {reverting === entry.id ? 'Reverting...' : 'Revert'}
+                        </button>
+                      )
                     )}
                     <svg className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />

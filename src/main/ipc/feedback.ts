@@ -55,14 +55,29 @@ export function registerFeedbackHandlers(
 
     switch (details.type) {
       case 'update_taxonomy_description': {
+        const oldDescs: Record<string, string | null> = {};
+        const newDescs: Record<string, string> = {};
         for (const update of details.updates) {
+          oldDescs[update.nodePath] = update.currentDescription;
+          newDescs[update.nodePath] = update.proposedDescription;
           await taxonomy.updateNode(update.nodeId, { description: update.proposedDescription });
         }
+        const pathSummary = details.updates.length === 1
+          ? details.updates[0].nodePath.replace(/\|/g, ' > ')
+          : `${details.updates.length} nodes`;
+        await changelog.logChange({
+          source: 'feedback',
+          affectedTable: 'taxonomy',
+          affectedIds: details.updates.map(u => u.nodeId),
+          affectedCount: details.updates.length,
+          oldValues: { descriptions: oldDescs },
+          newValues: { descriptions: newDescs },
+          description: `Feedback: Updated taxonomy description for ${pathSummary}`,
+        });
         break;
       }
 
       case 'update_supplier_info': {
-        // Fetch current supplier info, merge the changed field, write back
         const supplierList = await suppliers.listProjectSuppliers({
           conditions: [{ field: 'supplier_name', operator: 'equals', value: details.supplierName }],
         });
@@ -73,6 +88,15 @@ export function registerFeedbackHandlers(
           [details.field]: details.proposedValue,
         };
         await suppliers.updateSupplier(details.supplierName, { supplierInfo: mergedInfo });
+        await changelog.logChange({
+          source: 'feedback',
+          affectedTable: 'project_suppliers',
+          affectedIds: [details.supplierName],
+          affectedCount: 1,
+          oldValues: { [details.field]: details.currentValue },
+          newValues: { [details.field]: details.proposedValue },
+          description: `Feedback: Updated ${details.field} for ${details.supplierName}`,
+        });
         break;
       }
 
@@ -83,16 +107,33 @@ export function registerFeedbackHandlers(
           [details.field]: details.proposedValue,
         };
         await project.setSetting('company_context', updatedContext);
+        await changelog.logChange({
+          source: 'feedback',
+          affectedTable: 'project_settings',
+          affectedIds: ['company_context'],
+          affectedCount: 1,
+          oldValues: { [details.field]: details.currentValue },
+          newValues: { [details.field]: details.proposedValue },
+          description: `Feedback: Updated company context (${details.field})`,
+        });
         break;
       }
 
       case 'update_column_priority': {
         await project.setSetting('column_priorities', details.proposedPriorities);
+        await changelog.logChange({
+          source: 'feedback',
+          affectedTable: 'project_settings',
+          affectedIds: ['column_priorities'],
+          affectedCount: 1,
+          oldValues: { priorities: details.currentPriorities },
+          newValues: { priorities: details.proposedPriorities },
+          description: `Feedback: Updated column priorities`,
+        });
         break;
       }
 
       case 'create_rule': {
-        // Resolve taxonomy path to node ID
         const nodes = await taxonomy.getNodes();
         const targetNode = nodes.find(n => n.fullPath === details.targetTaxonomyPath);
         if (!targetNode) {
@@ -103,11 +144,20 @@ export function registerFeedbackHandlers(
           conditions: details.conditions,
           targetTaxonomyNodeId: targetNode.id,
         });
+        await changelog.logChange({
+          source: 'feedback',
+          affectedTable: 'override_rules',
+          affectedIds: [details.name],
+          affectedCount: 1,
+          oldValues: null,
+          newValues: { name: details.name, conditions: details.conditions, targetPath: details.targetTaxonomyPath },
+          description: `Feedback: Created rule "${details.name}"`,
+        });
         break;
       }
 
       case 'no_change':
-        // No-op
+        // No-op — nothing to log
         break;
 
       default:

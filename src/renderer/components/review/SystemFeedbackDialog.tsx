@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import type { ChangeLog } from '../../../shared/types/changelog'
@@ -25,6 +26,21 @@ export default function SystemFeedbackDialog({
   onAnalyze,
   analyzing,
 }: SystemFeedbackDialogProps) {
+  const [search, setSearch] = useState('')
+
+  const filteredEntries = useMemo(() => {
+    if (!search.trim()) return entries
+    const q = search.trim().toLowerCase()
+    return entries.filter(e => {
+      const haystack = [
+        e.description,
+        ...(e.supplierNames || []),
+        e.source,
+      ].filter(Boolean).join(' ').toLowerCase()
+      return haystack.includes(q)
+    })
+  }, [entries, search])
+
   if (!isOpen) return null
 
   return createPortal(
@@ -45,12 +61,25 @@ export default function SystemFeedbackDialog({
           </button>
         </div>
 
+        {/* Search */}
+        <div className="px-5 pt-3 pb-1">
+          <input
+            type="text"
+            placeholder="Search changes..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded border border-gray-300 px-2.5 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+
         {/* Entry list */}
         <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
-          {entries.length === 0 ? (
-            <p className="text-sm text-gray-400 italic text-center py-4">No changes recorded yet.</p>
+          {filteredEntries.length === 0 ? (
+            <p className="text-sm text-gray-400 italic text-center py-4">
+              {entries.length === 0 ? 'No changes recorded yet.' : 'No matching changes.'}
+            </p>
           ) : (
-            entries.map(entry => {
+            filteredEntries.map(entry => {
               const isSelected = selectedIds.has(entry.id)
               return (
                 <label

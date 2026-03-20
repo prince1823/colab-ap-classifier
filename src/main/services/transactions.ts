@@ -23,7 +23,7 @@ import { buildWhereClause, buildGroupedWhereClause } from '../utils/query-builde
 
 const BASE_COLUMNS = [
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
-  'classification_status', 'human_reviewed',
+  'classification_status', 'human_reviewed', 'flagged_for_review',
   'original_supplier_name', 'project_supplier_id',
   'applied_rule_id',
   'created_at', 'updated_at',
@@ -202,6 +202,7 @@ export class TransactionStore implements ITransactionStore {
         classificationPath: row.classification_path ? String(row.classification_path) : null,
         classificationStatus: (row.classification_status as ClassificationStatus) || 'unclassified',
         humanReviewed: Boolean(row.human_reviewed),
+        flaggedForReview: Boolean(row.flagged_for_review),
         appliedRuleId: row.applied_rule_id ? String(row.applied_rule_id) : null,
         appliedRuleName: row.applied_rule_name ? String(row.applied_rule_name) : null,
         canonicalFields,
@@ -236,7 +237,7 @@ export class TransactionStore implements ITransactionStore {
         COUNT(*) as total_rows,
         ${spendExpr} as total_spend,
         COUNT(DISTINCT project_supplier_id) as unique_suppliers,
-        COUNT(CASE WHEN classification_status IN ('classified_by_ai', 'classified_by_rule') THEN 1 END) as classified_rows,
+        COUNT(CASE WHEN classification_status IN ('classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent') THEN 1 END) as classified_rows,
         COUNT(CASE WHEN classification_status = 'unclassified' OR classification_status = 'classification_error' THEN 1 END) as unclassified_rows
       FROM transactions`
     );
@@ -267,8 +268,9 @@ export class TransactionStore implements ITransactionStore {
 
   /** Known column types for richer FilterConditionBuilder UI. */
   private static readonly KNOWN_FIELD_TYPES: Record<string, Omit<FieldDefinition, 'name'>> = {
-    classification_status: { label: 'Classification Status', type: 'enum', enumValues: ['unclassified', 'classified_by_ai', 'classified_by_rule', 'classification_failed'] },
+    classification_status: { label: 'Classification Status', type: 'enum', enumValues: ['unclassified', 'classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent', 'classification_error'] },
     human_reviewed: { label: 'Human Reviewed', type: 'boolean' },
+    flagged_for_review: { label: 'Flagged for Review', type: 'boolean' },
     spend_amount: { label: 'Spend Amount', type: 'number' },
     supplier_name: { label: 'Supplier Name', type: 'string', group: 'Supplier' },
     is_researched: { label: 'Researched', type: 'boolean', group: 'Supplier' },
@@ -341,6 +343,11 @@ export class TransactionStore implements ITransactionStore {
       params.push(update.classificationStatus);
       newValues.classification_status = update.classificationStatus;
     }
+    if (update.flaggedForReview !== undefined) {
+      setClauses.push('flagged_for_review = ?');
+      params.push(update.flaggedForReview);
+      newValues.flagged_for_review = update.flaggedForReview;
+    }
     if (update.appliedRuleId !== undefined) {
       setClauses.push('applied_rule_id = ?');
       params.push(update.appliedRuleId);
@@ -353,6 +360,10 @@ export class TransactionStore implements ITransactionStore {
       `UPDATE transactions SET ${setClauses.join(', ')} WHERE id IN (${placeholders})`,
       ...params, ...update.ids
     );
+
+    // Only log classification changes (taxonomy / status) — not internal signals like flagged_for_review
+    const hasClassificationChange = newValues.taxonomy_node_id !== undefined || newValues.classification_status !== undefined;
+    if (!hasClassificationChange) return undefined;
 
     const changelogId = await this.changelog.logChange({
       source,

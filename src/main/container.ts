@@ -19,6 +19,7 @@ import type {
   ExportService as IExportService,
   SupplierResearcher as ISupplierResearcher,
   ClassificationRunner as IClassificationRunner,
+  QCRunner as IQCRunner,
 } from '../shared/types/services';
 
 import { DuckDBDatabase } from './services/database';
@@ -40,6 +41,7 @@ import { IngestService } from './services/ingest';
 import { ExportService } from './services/export';
 import { SupplierResearcher } from './services/supplier-research';
 import { ClassificationRunner } from './services/classification';
+import { QCRunner } from './services/qc';
 import { LicenseService } from './services/license-service';
 
 export interface ServiceContainer {
@@ -67,6 +69,7 @@ export interface ServiceContainer {
   // Orchestrators
   researcher: ISupplierResearcher;
   classifier: IClassificationRunner;
+  qc: IQCRunner;
 }
 
 export function createContainer(): ServiceContainer {
@@ -101,11 +104,12 @@ export function createContainer(): ServiceContainer {
     db, taxonomy, project, rules,
     transactions, changelog, classificationAgent, eventBus, supplierUniverse
   );
+  const qc = new QCRunner(db, transactions, eventBus);
 
   return {
     db, supplierUniverse, eventBus, llm, appConfig, webSearch, license,
     classificationAgent, researchAgent, columnMappingAgent,
     changelog, transactions, project, taxonomy, suppliers, rules,
-    ingest, export: exportSvc, researcher, classifier,
+    ingest, export: exportSvc, researcher, classifier, qc,
   };
 }

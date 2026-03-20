@@ -13,6 +13,7 @@ import { registerExportHandlers } from './export';
 import { registerSettingsHandlers } from './settings';
 import { registerSupplierUniverseHandlers } from './supplier-universe';
 import { registerLicenseHandlers } from './license';
+import { registerQCHandlers } from './qc';
 
 export function registerAllHandlers(services: ServiceContainer): void {
   // Test channel
@@ -32,4 +33,5 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerSettingsHandlers(services.appConfig);
   registerSupplierUniverseHandlers(services.supplierUniverse);
   registerLicenseHandlers(services.license);
+  registerQCHandlers(services.qc, services.eventBus);
 }

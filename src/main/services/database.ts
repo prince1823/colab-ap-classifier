@@ -151,6 +151,14 @@ export class DuckDBDatabase implements Database {
       await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
     } catch { /* column doesn't exist, ignore */ }
 
+    // Migrate: ensure flagged_for_review column exists on transactions
+    const frCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'flagged_for_review'"
+    );
+    if (frCol.length === 0) {
+      await this.exec('ALTER TABLE transactions ADD COLUMN flagged_for_review BOOLEAN DEFAULT FALSE');
+    }
+
     // Migrate: ensure applied_rule_id column exists on transactions
     const appliedRuleCol = await this.all<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'applied_rule_id'"

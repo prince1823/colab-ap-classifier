@@ -232,6 +232,12 @@ export interface ClassificationRunner {
   cancel(): Promise<void>;
 }
 
+export interface QCRunner {
+  runQC(): Promise<void>;
+  getIsRunning(): boolean;
+  cancel(): void;
+}
+
 // ─── Upload Record ───────────────────────────────────────────────────────────
 
 export interface UploadRecord {

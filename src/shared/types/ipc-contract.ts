@@ -21,7 +21,7 @@ import type {
   PivotAggregationResult,
   GroupedFilter,
 } from './transactions';
-import type { ClassificationProgress, ResearchProgress } from './classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
@@ -67,6 +67,11 @@ export interface IPCInvokeMap {
   'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
   'classification:cancel':     { args: []; result: void };
   'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
+
+  // QC
+  'qc:start':     { args: []; result: void };
+  'qc:cancel':    { args: []; result: void };
+  'qc:isRunning': { args: []; result: boolean };
 
   // Taxonomy
   'taxonomy:getNodeCount':   { args: []; result: number };
@@ -138,6 +143,7 @@ export interface IPCInvokeMap {
 export interface IPCEventMap {
   'classification:progress':     ClassificationProgress;
   'suppliers:research:progress': ResearchProgress;
+  'qc:progress':                 QCProgress;
   'license:statusChanged':       LicenseStatus;
 }
 

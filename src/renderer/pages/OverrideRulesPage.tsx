@@ -28,6 +28,9 @@ export default function OverrideRulesPage() {
   // Conditions modal
   const [conditionsModalOpen, setConditionsModalOpen] = useState(false)
 
+  // Expanded conditions per rule
+  const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set())
+
   // Drag-and-drop reorder state
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [overIdx, setOverIdx] = useState<number | null>(null)
@@ -349,7 +352,29 @@ export default function OverrideRulesPage() {
                 </td>
                 <td className="px-4 py-2 font-medium text-gray-900">{rule.name}</td>
                 <td className="max-w-xs px-4 py-2">
-                  <span className="text-[11px] text-gray-500 leading-tight line-clamp-2">{formatConditionSummary(rule)}</span>
+                  {(() => {
+                    const summary = formatConditionSummary(rule)
+                    const isExpanded = expandedConditions.has(rule.id)
+                    const isLong = summary.length > 80
+                    return (
+                      <div>
+                        <span className={`text-[11px] text-gray-500 leading-tight ${isExpanded ? '' : 'line-clamp-2'}`}>{summary}</span>
+                        {isLong && (
+                          <button
+                            onClick={() => setExpandedConditions(prev => {
+                              const next = new Set(prev)
+                              if (next.has(rule.id)) next.delete(rule.id)
+                              else next.add(rule.id)
+                              return next
+                            })}
+                            className="mt-0.5 block text-[10px] font-medium text-blue-600 hover:text-blue-800"
+                          >
+                            {isExpanded ? 'Show less' : 'Read more'}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </td>
                 <td className="px-4 py-2 text-center text-gray-600">{rule.priorityScore}</td>
                 <td className="px-4 py-2 text-xs text-gray-600">{getNodePath(rule.targetTaxonomyNodeId)}</td>

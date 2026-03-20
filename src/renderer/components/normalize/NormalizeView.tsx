@@ -83,6 +83,9 @@ export default function NormalizeView() {
   // Parent typeahead
   const [parentTypeahead, setParentTypeahead] = useState<{ supplierId: string; anchor: { top: number; left: number } } | null>(null)
 
+  // Pending parent delete confirmation (holds parentSupplierId)
+  const [pendingDeleteParentRowId, setPendingDeleteParentRowId] = useState<string | null>(null)
+
   // Re-focus outer div whenever all modals/popovers/edits are closed (also on initial load)
   useEffect(() => {
     if (!loading && !showMergeModal && !reassigningAlias && !parentTypeahead && !editingId && !editingParentId) {
@@ -226,22 +229,6 @@ export default function NormalizeView() {
     }
   }, [suppliers, aliasCache])
 
-  const handleDeleteAlias = useCallback(async (alias: AliasData, normalizedId: string) => {
-    if (!window.confirm(`Remove alias "${alias.rawName}"?`)) return
-    try {
-      // Reassign alias to itself is essentially a no-op — we need a delete alias endpoint
-      // For now, we'll just remove from cache (backend may need a dedicated endpoint)
-      setAliasCache(prev => {
-        const next = new Map(prev)
-        const aliases = next.get(normalizedId) ?? []
-        next.set(normalizedId, aliases.filter(a => a.rawName !== alias.rawName))
-        return next
-      })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to remove alias')
-    }
-  }, [])
-
   const handleChangeParent = useCallback(async (supplierId: string, parentId: string | null) => {
     try {
       if (parentId) {
@@ -274,6 +261,22 @@ export default function NormalizeView() {
     }
     setEditingParentId(null)
   }, [])
+
+  const handleDeleteParent = useCallback(async (parentId: string) => {
+    // Unassign all children first
+    const children = suppliers.filter(s => s.parentSupplierId === parentId)
+    try {
+      await Promise.all(children.map(s => ipc.suppliers.removeParent(s.id)))
+      setSuppliers(prev => prev.map(s =>
+        s.parentSupplierId === parentId ? { ...s, parentSupplierId: null, parentName: null } : s
+      ))
+      await ipc.suppliers.deleteParent(parentId)
+      setParents(prev => prev.filter(p => p.id !== parentId))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete parent')
+    }
+    setPendingDeleteParentRowId(null)
+  }, [suppliers])
 
   const handleCreateParentAndAssign = useCallback(async (supplierId: string, name: string) => {
     try {
@@ -660,13 +663,44 @@ export default function NormalizeView() {
                             onClick={e => e.stopPropagation()}
                           />
                         ) : s.parentName ? (
-                          <span
-                            className="text-gray-600 cursor-pointer hover:text-blue-600 transition-colors"
-                            onDoubleClick={() => startEditParent(s.id, s.parentName!)}
-                            title="Double-click or Shift+Enter to rename"
-                          >
-                            {s.parentName}
-                          </span>
+                          pendingDeleteParentRowId === s.id ? (
+                            <div className="flex flex-col gap-1.5">
+                              <span className="text-[10px] text-amber-600 leading-tight">
+                                Reassign or remove all suppliers under this parent before deleting
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteParent(s.parentSupplierId!) }}
+                                  className="text-[10px] px-2 py-0.5 rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+                                >
+                                  Confirm Delete
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setPendingDeleteParentRowId(null) }}
+                                  className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="group/parent inline-flex items-center gap-1">
+                              <span
+                                className="text-gray-600 cursor-pointer hover:text-blue-600 transition-colors"
+                                onDoubleClick={() => startEditParent(s.id, s.parentName!)}
+                                title="Double-click or Shift+Enter to rename"
+                              >
+                                {s.parentName}
+                              </span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setPendingDeleteParentRowId(s.id) }}
+                                className="opacity-0 group-hover/parent:opacity-100 rounded p-0.5 text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all"
+                                title="Delete parent"
+                              >
+                                <X size={11} />
+                              </button>
+                            </span>
+                          )
                         ) : (
                           <span
                             className="inline-flex items-center gap-0.5 text-gray-300 hover:text-violet-500 cursor-pointer transition-colors"
@@ -791,13 +825,6 @@ export default function NormalizeView() {
                             title="Reassign alias (Shift+R)"
                           >
                             <ArrowRightLeft size={13} />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDeleteAlias(alias, nr.supplier.id) }}
-                            className="rounded p-1 text-red-400 hover:bg-red-50 transition-colors"
-                            title="Remove alias"
-                          >
-                            <Trash2 size={13} />
                           </button>
                         </div>
                       </td>

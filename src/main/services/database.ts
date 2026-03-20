@@ -151,6 +151,32 @@ export class DuckDBDatabase implements Database {
       await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
     } catch { /* column doesn't exist, ignore */ }
 
+    // Migrate: add is_reverted column to change_log
+    try {
+      await this.exec('ALTER TABLE change_log ADD COLUMN is_reverted BOOLEAN DEFAULT FALSE');
+    } catch { /* column already exists, ignore */ }
+
+    // Migrate: clean up old "Reverted:" entries — mark originals as reverted and delete the revert rows
+    try {
+      // Mark original entries as reverted if a "Reverted:" entry exists for them
+      await this.exec(`
+        UPDATE change_log SET is_reverted = TRUE
+        WHERE is_reverted = FALSE
+          AND description IS NOT NULL
+          AND id IN (
+            SELECT cl2.reverted_change_id FROM change_log cl2
+            WHERE cl2.reverted_change_id IS NOT NULL
+          )
+      `);
+      // Delete old "Reverted:" rows (those with description starting with 'Reverted:')
+      await this.exec("DELETE FROM change_log WHERE description LIKE 'Reverted:%'");
+    } catch { /* ignore — reverted_change_id column may not exist */ }
+
+    // Drop old reverted_change_id column if it exists
+    try {
+      await this.exec('ALTER TABLE change_log DROP COLUMN reverted_change_id');
+    } catch { /* column doesn't exist, ignore */ }
+
     // Migrate: ensure flagged_for_review column exists on transactions
     const frCol = await this.all<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'flagged_for_review'"
@@ -352,6 +378,7 @@ export class DuckDBDatabase implements Database {
         old_values JSON,
         new_values JSON,
         description TEXT,
+        is_reverted BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 

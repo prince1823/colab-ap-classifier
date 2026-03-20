@@ -25,8 +25,9 @@ import type { ClassificationProgress, ResearchProgress, QCProgress } from './cla
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
-import type { ChangeLog } from './changelog';
+import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
+import type { FeedbackAnalyzeInput, FeedbackRecommendation, FeedbackApplyInput } from './feedback';
 
 export interface IPCInvokeMap {
   // Project
@@ -111,8 +112,12 @@ export interface IPCInvokeMap {
   'rules:delete': { args: [ruleId: string]; result: void };
 
   // Changelog
-  'changelog:list':   { args: []; result: ChangeLog[] };
+  'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };
   'changelog:revert': { args: [changeId: string]; result: void };
+
+  // Feedback
+  'feedback:analyze': { args: [input: FeedbackAnalyzeInput]; result: FeedbackRecommendation };
+  'feedback:apply':   { args: [input: FeedbackApplyInput]; result: void };
 
   // Export
   'export:csv': { args: [filters?: TransactionFilter]; result: { rowsExported: number } | null };

@@ -7,6 +7,7 @@ import type {
   ClassificationAgent,
   ResearchAgent,
   ColumnMappingAgent,
+  FeedbackAgent,
   IAppConfigService,
   ILicenseService,
   ChangelogStore as IChangelogStore,
@@ -31,6 +32,7 @@ import { ExaWebSearch } from './services/exa-search';
 import { LLMClassificationAgent } from './agents/classification-agent';
 import { LLMResearchAgent } from './agents/research-agent';
 import { LLMColumnMappingAgent } from './agents/column-mapping-agent';
+import { LLMFeedbackAgent } from './agents/feedback-agent';
 import { ChangelogStore } from './services/changelog';
 import { TransactionStore } from './services/transactions';
 import { ProjectStore } from './services/project';
@@ -57,6 +59,7 @@ export interface ServiceContainer {
   classificationAgent: ClassificationAgent;
   researchAgent: ResearchAgent;
   columnMappingAgent: ColumnMappingAgent;
+  feedbackAgent: FeedbackAgent;
   // Data
   changelog: IChangelogStore;
   transactions: ITransactionStore;
@@ -85,6 +88,7 @@ export function createContainer(): ServiceContainer {
   const classificationAgent = new LLMClassificationAgent(llm);
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
+  const feedbackAgent = new LLMFeedbackAgent(llm);
 
   // Data layer (order matters — respect dependency graph)
   const changelog = new ChangelogStore(db);
@@ -108,7 +112,7 @@ export function createContainer(): ServiceContainer {
 
   return {
     db, supplierUniverse, eventBus, llm, appConfig, webSearch, license,
-    classificationAgent, researchAgent, columnMappingAgent,
+    classificationAgent, researchAgent, columnMappingAgent, feedbackAgent,
     changelog, transactions, project, taxonomy, suppliers, rules,
     ingest, export: exportSvc, researcher, classifier, qc,
   };

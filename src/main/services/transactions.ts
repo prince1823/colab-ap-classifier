@@ -365,6 +365,32 @@ export class TransactionStore implements ITransactionStore {
     const hasClassificationChange = newValues.taxonomy_node_id !== undefined || newValues.classification_status !== undefined;
     if (!hasClassificationChange) return undefined;
 
+    // Build a descriptive changelog message with supplier names and classification
+    let description = `Reclassified ${update.ids.length} transaction(s)`;
+    try {
+      // Get all distinct supplier names from affected transactions
+      const supplierRows = await this.db.all<{ supplier_name: string }>(
+        `SELECT DISTINCT ps.supplier_name FROM transactions t
+         LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+         WHERE t.id IN (${placeholders}) AND ps.supplier_name IS NOT NULL`,
+        ...update.ids
+      );
+      // Get target classification path
+      let classPath: string | null = null;
+      if (update.taxonomyNodeId) {
+        const taxRow = await this.db.get<{ full_path: string }>(
+          'SELECT full_path FROM taxonomy WHERE id = ?',
+          update.taxonomyNodeId
+        );
+        if (taxRow) classPath = taxRow.full_path.split('|').map(s => s.trim()).join(' > ');
+      }
+
+      const parts: string[] = [];
+      parts.push(`${update.ids.length} txn${update.ids.length !== 1 ? 's' : ''}`);
+      if (classPath) parts.push(`→ ${classPath}`);
+      description = parts.join(' ');
+    } catch { /* fall back to generic description */ }
+
     const changelogId = await this.changelog.logChange({
       source,
       affectedTable: 'transactions',
@@ -372,7 +398,7 @@ export class TransactionStore implements ITransactionStore {
       affectedCount: update.ids.length,
       oldValues,
       newValues,
-      description: `Updated ${update.ids.length} transaction(s)`,
+      description,
     });
     return changelogId;
   }

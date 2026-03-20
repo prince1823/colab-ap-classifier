@@ -353,10 +353,7 @@ export class SupplierService implements ISupplierService {
       LEFT JOIN transactions t ON t.project_supplier_id = ps.id
       LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
       ${innerWhereSQL}
-      GROUP BY ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
-               ps.parent_supplier_id, sp.name,
-               ps.data_source, ps.universe_match, ps.is_researched,
-               ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at`;
+      GROUP BY ALL`;
 
     const outerWhereSQL = outerWhere ? `WHERE ${outerWhere.sql}` : '';
     const outerParams = outerWhere?.params ?? [];

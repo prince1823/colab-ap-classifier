@@ -13,6 +13,7 @@ import { registerExportHandlers } from './export';
 import { registerSettingsHandlers } from './settings';
 import { registerSupplierUniverseHandlers } from './supplier-universe';
 import { registerLicenseHandlers } from './license';
+import { registerFeedbackHandlers } from './feedback';
 import { registerQCHandlers } from './qc';
 
 export function registerAllHandlers(services: ServiceContainer): void {
@@ -33,5 +34,9 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerSettingsHandlers(services.appConfig);
   registerSupplierUniverseHandlers(services.supplierUniverse);
   registerLicenseHandlers(services.license);
+  registerFeedbackHandlers(
+    services.feedbackAgent, services.changelog, services.taxonomy,
+    services.project, services.suppliers, services.rules,
+  );
   registerQCHandlers(services.qc, services.eventBus);
 }

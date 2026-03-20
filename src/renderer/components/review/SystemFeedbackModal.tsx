@@ -1,134 +1,192 @@
 import React, { useState } from 'react'
-import { X, CheckCircle, FileText, Building2, List, AlertCircle, Sparkles, Edit2 } from 'lucide-react'
-import { fmtAbbrev } from '../../utils/formatSpend'
+import { X, CheckCircle, FileText, Building2, List, AlertCircle, Sparkles, Columns, Edit2 } from 'lucide-react'
+import type { FeedbackRecommendation, FeedbackDetails, TaxonomyDescriptionUpdate } from '../../../shared/types/feedback'
 import '../../styles/SystemFeedbackModal.css'
 
-interface AffectedRow {
-  row_index?: number
-  index?: number
-  spend_amount?: number | string
-  [key: string]: unknown
-}
-
-interface FeedbackSuggestion {
-  id: string
-  type?: string
-  proposedChange?: string
-  proposal_text?: string
-  affectedRows?: AffectedRow[]
-  [key: string]: unknown
-}
-
 interface SystemFeedbackModalProps {
-  feedbackSuggestions?: FeedbackSuggestion[]
+  recommendation: FeedbackRecommendation
   onClose: () => void
-  onApprove?: (suggestion: FeedbackSuggestion) => void
-  onReject?: (suggestion: FeedbackSuggestion) => void
-  onEdit?: (id: string, text: string) => void
+  onApply: (edited: FeedbackRecommendation) => void
+  applying?: boolean
 }
 
-const SystemFeedbackModal: React.FC<SystemFeedbackModalProps> = ({ feedbackSuggestions = [], onClose, onApprove, onReject, onEdit }) => {
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editText, setEditText] = useState('')
+const ACTION_LABELS: Record<string, string> = {
+  update_taxonomy_description: 'Update Taxonomy Description',
+  update_supplier_info: 'Update Supplier Info',
+  update_company_context: 'Update Company Context',
+  update_column_priority: 'Update Column Priorities',
+  create_rule: 'Create Rule',
+  no_change: 'No Change Needed',
+}
 
-  const handleEdit = (suggestion: FeedbackSuggestion) => {
-    setEditingId(suggestion.id)
-    setEditText(suggestion.proposedChange || suggestion.proposal_text || '')
+function getActionIcon(action: string) {
+  switch (action) {
+    case 'update_taxonomy_description': return <FileText size={16} />
+    case 'update_supplier_info': return <AlertCircle size={16} />
+    case 'update_company_context': return <Building2 size={16} />
+    case 'update_column_priority': return <Columns size={16} />
+    case 'create_rule': return <List size={16} />
+    default: return <Sparkles size={16} />
+  }
+}
+
+/**
+ * Editable detail fields for each recommendation action type.
+ */
+function DetailEditor({
+  details,
+  onChange,
+  onRemoveUpdate,
+}: {
+  details: FeedbackDetails
+  onChange: (updated: FeedbackDetails) => void
+  onRemoveUpdate?: (index: number) => void
+}) {
+  switch (details.type) {
+    case 'update_taxonomy_description':
+      return (
+        <div className="detail-fields">
+          {details.updates.map((update, i) => (
+            <div key={update.nodeId} style={{ marginBottom: i < details.updates.length - 1 ? 16 : 0 }}>
+              {details.updates.length > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <div className="detail-label" style={{ fontWeight: 600, margin: 0 }}>Node {i + 1}</div>
+                  {onRemoveUpdate && (
+                    <button
+                      onClick={() => onRemoveUpdate(i)}
+                      title="Remove this update"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: '0 2px', lineHeight: 1 }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              )}
+              <label className="detail-label">Taxonomy Path</label>
+              <div className="detail-readonly">{update.nodePath}</div>
+              <label className="detail-label">Current Description</label>
+              <div className="detail-readonly">{update.currentDescription || '(none)'}</div>
+              <label className="detail-label">Proposed Description</label>
+              <textarea
+                className="edit-textarea-compact"
+                value={update.proposedDescription}
+                onChange={e => {
+                  const newUpdates: TaxonomyDescriptionUpdate[] = details.updates.map((u, j) =>
+                    j === i ? { ...u, proposedDescription: e.target.value } : u
+                  )
+                  onChange({ ...details, updates: newUpdates })
+                }}
+                rows={3}
+              />
+            </div>
+          ))}
+        </div>
+      )
+
+    case 'update_supplier_info':
+      return (
+        <div className="detail-fields">
+          <label className="detail-label">Supplier</label>
+          <div className="detail-readonly">{details.supplierName}</div>
+          <label className="detail-label">Field</label>
+          <div className="detail-readonly">{details.field}</div>
+          <label className="detail-label">Current Value</label>
+          <div className="detail-readonly">{details.currentValue || '(none)'}</div>
+          <label className="detail-label">Proposed Value</label>
+          <input
+            className="detail-input"
+            value={details.proposedValue}
+            onChange={e => onChange({ ...details, proposedValue: e.target.value })}
+          />
+        </div>
+      )
+
+    case 'update_company_context':
+      return (
+        <div className="detail-fields">
+          <label className="detail-label">Field</label>
+          <div className="detail-readonly">{details.field}</div>
+          <label className="detail-label">Current Value</label>
+          <div className="detail-readonly">{details.currentValue || '(none)'}</div>
+          <label className="detail-label">Proposed Value</label>
+          <textarea
+            className="edit-textarea-compact"
+            value={details.proposedValue}
+            onChange={e => onChange({ ...details, proposedValue: e.target.value })}
+            rows={3}
+          />
+        </div>
+      )
+
+    case 'update_column_priority':
+      return (
+        <div className="detail-fields">
+          <label className="detail-label">Current Order</label>
+          <div className="detail-readonly">{details.currentPriorities.join(', ') || '(none)'}</div>
+          <label className="detail-label">Proposed Order (one per line)</label>
+          <textarea
+            className="edit-textarea-compact"
+            value={details.proposedPriorities.join('\n')}
+            onChange={e => onChange({ ...details, proposedPriorities: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) })}
+            rows={4}
+          />
+        </div>
+      )
+
+    case 'create_rule':
+      return (
+        <div className="detail-fields">
+          <label className="detail-label">Rule Name</label>
+          <input
+            className="detail-input"
+            value={details.name}
+            onChange={e => onChange({ ...details, name: e.target.value })}
+          />
+          <label className="detail-label">Conditions</label>
+          <div className="detail-readonly">
+            {details.conditions.map((c, i) => (
+              <div key={i}>{c.field} {c.operator} "{c.value}"</div>
+            ))}
+          </div>
+          <label className="detail-label">Target Taxonomy Path</label>
+          <input
+            className="detail-input"
+            value={details.targetTaxonomyPath}
+            onChange={e => onChange({ ...details, targetTaxonomyPath: e.target.value })}
+          />
+        </div>
+      )
+
+    case 'no_change':
+      return (
+        <div className="detail-fields">
+          <div className="detail-readonly">{details.explanation}</div>
+        </div>
+      )
+
+    default:
+      return null
+  }
+}
+
+const SystemFeedbackModal: React.FC<SystemFeedbackModalProps> = ({
+  recommendation,
+  onClose,
+  onApply,
+  applying = false,
+}) => {
+  const [editedDetails, setEditedDetails] = useState<FeedbackDetails>(recommendation.details)
+
+  const handleRemoveUpdate = (index: number) => {
+    if (editedDetails.type !== 'update_taxonomy_description') return
+    const remaining = editedDetails.updates.filter((_, i) => i !== index)
+    if (remaining.length === 0) return // keep at least one
+    setEditedDetails({ ...editedDetails, updates: remaining })
   }
 
-  const handleSaveEdit = (suggestion: FeedbackSuggestion) => {
-    if (onEdit && editText.trim()) {
-      onEdit(suggestion.id, editText)
-    }
-    setEditingId(null)
-    setEditText('')
+  const handleApply = () => {
+    onApply({ ...recommendation, details: editedDetails })
   }
-
-  const handleCancelEdit = () => {
-    setEditingId(null)
-    setEditText('')
-  }
-
-  const getSuggestionIcon = (type: string) => {
-    switch (type) {
-      case 'taxonomy_description':
-        return <FileText size={16} />
-      case 'company_context':
-        return <Building2 size={16} />
-      case 'new_rule':
-        return <List size={16} />
-      case 'category_a_supplier':
-        return <AlertCircle size={16} />
-      default:
-        return <Sparkles size={16} />
-    }
-  }
-
-  const getSuggestionTypeLabel = (type: string) => {
-    switch (type) {
-      case 'taxonomy_description':
-        return 'Taxonomy Description'
-      case 'company_context':
-        return 'Company Context'
-      case 'new_rule':
-        return 'New Rule'
-      case 'category_a_supplier':
-        return 'Category A Supplier'
-      default:
-        return 'Feedback'
-    }
-  }
-
-  // Group suggestions by type
-  const groupedSuggestions = feedbackSuggestions.reduce<Record<string, FeedbackSuggestion[]>>((acc, suggestion) => {
-    const type = suggestion.type || 'other'
-    if (!acc[type]) {
-      acc[type] = []
-    }
-    acc[type].push(suggestion)
-    return acc
-  }, {})
-
-  const typeOrder = ['taxonomy_description', 'company_context', 'new_rule', 'category_a_supplier', 'other']
-
-  // Calculate total amount for a suggestion
-  const calculateTotalAmount = (suggestion: FeedbackSuggestion) => {
-    if (!suggestion.affectedRows || suggestion.affectedRows.length === 0) {
-      return 0
-    }
-    return suggestion.affectedRows.reduce((total: number, row: AffectedRow) => {
-      const amount = parseFloat(String(row.spend_amount || 0)) || 0
-      return total + amount
-    }, 0)
-  }
-
-  // Extract classification path from proposedChange text
-  const extractClassificationPath = (proposedChange: string | null | undefined) => {
-    if (!proposedChange) return null
-    
-    // Try to find path in quotes (e.g., "non clinical → facilities → ...")
-    const quotedMatch = proposedChange.match(/"([^"]+)"/)
-    if (quotedMatch) {
-      return quotedMatch[1]
-    }
-    
-    // Try to find path after "to" or "for" (e.g., ... to "path" or ... for "path")
-    const toMatch = proposedChange.match(/(?:to|for)\s+"([^"]+)"/)
-    if (toMatch) {
-      return toMatch[1]
-    }
-    
-    // Try to find path with arrow notation
-    const arrowMatch = proposedChange.match(/([^→]+(?:→[^→]+)+)/)
-    if (arrowMatch) {
-      return arrowMatch[1].trim()
-    }
-    
-    return null
-  }
-
-  // Format amount for display
-  const formatAmount = (amount: number) => fmtAbbrev(amount)
 
   return (
     <>
@@ -137,7 +195,7 @@ const SystemFeedbackModal: React.FC<SystemFeedbackModalProps> = ({ feedbackSugge
         <div className="feedback-modal-header">
           <div className="feedback-modal-title">
             <Sparkles size={18} />
-            <h3>System Feedback ({feedbackSuggestions.length})</h3>
+            <h3>System Feedback</h3>
           </div>
           <button className="feedback-modal-close" onClick={onClose}>
             <X size={18} />
@@ -145,108 +203,41 @@ const SystemFeedbackModal: React.FC<SystemFeedbackModalProps> = ({ feedbackSugge
         </div>
 
         <div className="feedback-modal-content">
-          {feedbackSuggestions.length === 0 ? (
-            <div className="feedback-empty-state">
-              <Sparkles size={32} className="empty-icon" />
-              <h4>No suggestions yet</h4>
-              <p>Feedback is generated when you reclassify rows.</p>
+          {/* Action type badge */}
+          <div className="feedback-group-compact">
+            <div className="feedback-group-header-compact">
+              {getActionIcon(recommendation.action)}
+              <h4>{ACTION_LABELS[recommendation.action] || recommendation.action}</h4>
             </div>
-          ) : (
-            typeOrder.map(type => {
-              const suggestions = groupedSuggestions[type] || []
-              if (suggestions.length === 0) return null
 
-              return (
-                <div key={type} className="feedback-group-compact">
-                  <div className="feedback-group-header-compact">
-                    {getSuggestionIcon(type)}
-                    <h4>{getSuggestionTypeLabel(type)}</h4>
-                    <span className="group-count-compact">{suggestions.length}</span>
-                  </div>
+            {/* Reasoning */}
+            <div className="feedback-item-compact">
+              <p style={{ margin: 0, fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
+                {recommendation.reasoning}
+              </p>
+            </div>
 
-                  {suggestions.map((suggestion: FeedbackSuggestion, idx: number) => (
-                      <div key={suggestion.id || idx} className="feedback-item-compact">
-                       {suggestion.affectedRows && suggestion.affectedRows.length > 0 && (
-                         <div className="affected-rows-info">
-                           <span className="rows-count-badge">{suggestion.affectedRows.length} row{suggestion.affectedRows.length !== 1 ? 's' : ''}</span>
-                           {suggestion.affectedRows.length <= 5 && (
-                             <span className="rows-preview">
-                               {suggestion.affectedRows.map((row: AffectedRow, rowIdx: number) => {
-                                 const rowNum = row.row_index !== undefined ? row.row_index : (row.index !== undefined ? row.index : rowIdx + 1)
-                                 return (
-                                   <React.Fragment key={rowIdx}>
-                                     {rowIdx > 0 && <span className="row-separator">, </span>}
-                                     <span className="row-preview-item">{rowNum}</span>
-                                   </React.Fragment>
-                                 )
-                               })}
-                             </span>
-                           )}
-                         </div>
-                       )}
-
-               <div className="feedback-proposed-compact">
-                 {editingId === suggestion.id ? (
-                   <div className="edit-container-compact">
-                     <textarea
-                       className="edit-textarea-compact"
-                       value={editText}
-                       onChange={(e) => setEditText(e.target.value)}
-                       rows={3}
-                       placeholder="Edit the proposed change..."
-                     />
-                     <div className="edit-actions-compact">
-                       <button className="action-btn-secondary" onClick={handleCancelEdit}>
-                         Cancel
-                       </button>
-                       <button className="action-btn-primary" onClick={() => handleSaveEdit(suggestion)}>
-                         <CheckCircle size={14} />
-                         Save
-                       </button>
-                     </div>
-                   </div>
-                 ) : (
-                   <div className="proposed-text-compact">
-                     <p>{suggestion.proposedChange || suggestion.proposal_text || 'No description provided'}</p>
-                     <button
-                       className="edit-btn-compact"
-                       onClick={() => handleEdit(suggestion)}
-                       title="Edit"
-                     >
-                       <Edit2 size={12} />
-                     </button>
-                   </div>
-                 )}
-               </div>
-
-               <div className="feedback-actions-compact">
-                 <button
-                   className="action-btn-reject"
-                   onClick={() => onReject && onReject(suggestion)}
-                 >
-                   <X size={14} />
-                   Reject
-                 </button>
-                 <button
-                   className="action-btn-approve"
-                   onClick={() => onApprove && onApprove(suggestion)}
-                 >
-                   <CheckCircle size={14} />
-                   Approve
-                 </button>
-               </div>
-                    </div>
-                  ))}
-                </div>
-              )
-            })
-          )}
+            {/* Editable details */}
+            <div className="feedback-item-compact">
+              <DetailEditor details={editedDetails} onChange={setEditedDetails} onRemoveUpdate={handleRemoveUpdate} />
+            </div>
+          </div>
         </div>
 
-        <div className="feedback-modal-footer">
-          <button className="close-all-btn" onClick={onClose}>
-            Close
+        <div className="feedback-modal-footer" style={{ gap: 8, display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="action-btn-secondary" onClick={onClose}>
+            Dismiss
           </button>
+          {recommendation.action !== 'no_change' && (
+            <button
+              className="action-btn-approve"
+              onClick={handleApply}
+              disabled={applying}
+            >
+              <CheckCircle size={14} />
+              {applying ? 'Applying...' : 'Apply'}
+            </button>
+          )}
         </div>
       </div>
     </>

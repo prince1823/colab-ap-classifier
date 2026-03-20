@@ -4,9 +4,10 @@ import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
-import type { ChangeLog, ChangeSource } from './changelog';
+import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
+import type { FeedbackAgentInput, FeedbackRecommendation } from './feedback';
 
 // ─── LLM Config ──────────────────────────────────────────────────────────────
 
@@ -115,6 +116,10 @@ export interface ColumnMappingAgent {
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
 }
 
+export interface FeedbackAgent {
+  analyze(input: FeedbackAgentInput): Promise<FeedbackRecommendation>;
+}
+
 // ─── Data Services ───────────────────────────────────────────────────────────
 
 export interface ProjectStore {
@@ -195,7 +200,9 @@ export interface RuleStore {
 }
 
 export interface ChangelogStore {
-  listChanges(): Promise<ChangeLog[]>;
+  listChanges(filter?: ChangelogFilter): Promise<ChangeLog[]>;
+  listChangesPaginated(filter?: ChangelogFilter): Promise<PaginatedChangelog>;
+  getCount(filter?: ChangelogFilter): Promise<number>;
   logChange(entry: Omit<ChangeLog, 'id' | 'createdAt'>): Promise<string>;
   revertChange(changeId: string): Promise<void>;
 }

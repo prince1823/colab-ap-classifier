@@ -24,13 +24,10 @@ interface NormalizedRow {
   aliasesLoaded: boolean
 }
 
-type RowType = 'parent-label' | 'normalized' | 'alias'
+type RowType = 'normalized' | 'alias'
 
 interface FlatRow {
   type: RowType
-  // For parent-label rows
-  parentName?: string
-  parentId?: string
   // For normalized rows
   normalized?: NormalizedRow
   // For alias rows
@@ -47,7 +44,6 @@ export default function NormalizeView() {
   const [error, setError] = useState<string | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [groupByParent, setGroupByParent] = useState(false)
 
   // Expanded state: set of supplier IDs whose aliases are visible
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -72,11 +68,6 @@ export default function NormalizeView() {
   const [editDraft, setEditDraft] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
 
-  // Parent editing
-  const [editingParentId, setEditingParentId] = useState<string | null>(null)
-  const [editParentDraft, setEditParentDraft] = useState('')
-  const editParentInputRef = useRef<HTMLInputElement>(null)
-
   // Modals
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [reassigningAlias, setReassigningAlias] = useState<{ alias: AliasData; normalized: NormalizedRow } | null>(null)
@@ -86,10 +77,10 @@ export default function NormalizeView() {
 
   // Re-focus outer div whenever all modals/popovers/edits are closed (also on initial load)
   useEffect(() => {
-    if (!loading && !showMergeModal && !reassigningAlias && !parentTypeahead && !editingId && !editingParentId) {
+    if (!loading && !showMergeModal && !reassigningAlias && !parentTypeahead && !editingId) {
       outerRef.current?.focus()
     }
-  }, [loading, showMergeModal, reassigningAlias, parentTypeahead, editingId, editingParentId])
+  }, [loading, showMergeModal, reassigningAlias, parentTypeahead, editingId])
 
   // ── Data loading ──────────────────────────────────────────────────
 
@@ -183,64 +174,16 @@ export default function NormalizeView() {
 
   const flatRows: FlatRow[] = useMemo(() => {
     const rows: FlatRow[] = []
-
-    if (groupByParent) {
-      // Group by parent
-      const byParent = new Map<string, NormalizedRow[]>()
-      const noParent: NormalizedRow[] = []
-
-      for (const r of filtered) {
-        const pName = r.supplier.parentName
-        if (pName) {
-          if (!byParent.has(pName)) byParent.set(pName, [])
-          byParent.get(pName)!.push(r)
-        } else {
-          noParent.push(r)
-        }
-      }
-
-      // Sort parent groups alphabetically
-      const sortedParents = [...byParent.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-
-      for (const [pName, items] of sortedParents) {
-        const parent = parents.find(p => p.name === pName)
-        rows.push({ type: 'parent-label', parentName: pName, parentId: parent?.id })
-        for (const r of items) {
-          rows.push({ type: 'normalized', normalized: r })
-          if (expanded.has(r.supplier.id)) {
-            for (const a of r.aliases) {
-              rows.push({ type: 'alias', alias: a, aliasNormalized: r })
-            }
-          }
-        }
-      }
-
-      // No parent group at bottom
-      if (noParent.length > 0) {
-        rows.push({ type: 'parent-label', parentName: '— No parent' })
-        for (const r of noParent) {
-          rows.push({ type: 'normalized', normalized: r })
-          if (expanded.has(r.supplier.id)) {
-            for (const a of r.aliases) {
-              rows.push({ type: 'alias', alias: a, aliasNormalized: r })
-            }
-          }
-        }
-      }
-    } else {
-      // Flat list
-      for (const r of filtered) {
-        rows.push({ type: 'normalized', normalized: r })
-        if (expanded.has(r.supplier.id)) {
-          for (const a of r.aliases) {
-            rows.push({ type: 'alias', alias: a, aliasNormalized: r })
-          }
+    for (const r of filtered) {
+      rows.push({ type: 'normalized', normalized: r })
+      if (expanded.has(r.supplier.id)) {
+        for (const a of r.aliases) {
+          rows.push({ type: 'alias', alias: a, aliasNormalized: r })
         }
       }
     }
-
     return rows
-  }, [filtered, groupByParent, expanded, parents])
+  }, [filtered, expanded])
 
   // ── Actions ───────────────────────────────────────────────────────
 
@@ -254,19 +197,6 @@ export default function NormalizeView() {
       setError(e instanceof Error ? e.message : 'Rename failed')
     }
     setEditingId(null)
-  }, [])
-
-  const handleRenameParent = useCallback(async (parentId: string, newName: string) => {
-    try {
-      await ipc.suppliers.renameParent(parentId, newName)
-      setParents(prev => prev.map(p => p.id === parentId ? { ...p, name: newName } : p))
-      setSuppliers(prev => prev.map(s =>
-        s.parentSupplierId === parentId ? { ...s, parentName: newName } : s
-      ))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Rename failed')
-    }
-    setEditingParentId(null)
   }, [])
 
   const handleDeleteNormalized = useCallback(async (supplierId: string) => {
@@ -287,34 +217,6 @@ export default function NormalizeView() {
       setError(e instanceof Error ? e.message : 'Delete failed')
     }
   }, [suppliers, aliasCache])
-
-  const handleDeleteParent = useCallback(async (parentId: string, parentName: string) => {
-    const children = suppliers.filter(s => s.parentSupplierId === parentId)
-    if (children.length > 0) {
-      const ok = window.confirm(
-        `"${parentName}" has ${children.length} supplier${children.length !== 1 ? 's' : ''} assigned to it.\n\nDeleting will unassign all of them. Proceed?`
-      )
-      if (!ok) return
-      // Unassign all children first
-      try {
-        await Promise.all(children.map(s => ipc.suppliers.removeParent(s.id)))
-        setSuppliers(prev => prev.map(s =>
-          s.parentSupplierId === parentId ? { ...s, parentSupplierId: null, parentName: null } : s
-        ))
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to unassign suppliers')
-        return
-      }
-    } else {
-      if (!window.confirm(`Delete parent "${parentName}"?`)) return
-    }
-    try {
-      await ipc.suppliers.deleteParent(parentId)
-      setParents(prev => prev.filter(p => p.id !== parentId))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed')
-    }
-  }, [suppliers])
 
   const handleDeleteAlias = useCallback(async (alias: AliasData, normalizedId: string) => {
     if (!window.confirm(`Remove alias "${alias.rawName}"?`)) return
@@ -429,22 +331,6 @@ export default function NormalizeView() {
     }
     focusOuter()
   }, [editDraft, suppliers, handleRename, focusOuter])
-
-  const startEditParent = useCallback((parentId: string, currentName: string) => {
-    setEditingParentId(parentId)
-    setEditParentDraft(currentName)
-    setTimeout(() => editParentInputRef.current?.focus(), 0)
-  }, [])
-
-  const commitEditParent = useCallback((parentId: string) => {
-    const trimmed = editParentDraft.trim()
-    const current = parents.find(p => p.id === parentId)
-    if (trimmed && trimmed !== current?.name) {
-      handleRenameParent(parentId, trimmed)
-    } else {
-      setEditingParentId(null)
-    }
-  }, [editParentDraft, parents, handleRenameParent])
 
   // ── Selection ─────────────────────────────────────────────────────
 
@@ -576,12 +462,11 @@ export default function NormalizeView() {
       case 'Escape': {
         e.preventDefault()
         if (editingId) setEditingId(null)
-        else if (editingParentId) setEditingParentId(null)
         else setSelectedIds(new Set())
         break
       }
     }
-  }, [flatRows, focusedRowIndex, expanded, selectedIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleExpand, toggleSelect, startEdit])
+  }, [flatRows, focusedRowIndex, expanded, selectedIds, editingId, showMergeModal, reassigningAlias, parentTypeahead, toggleExpand, toggleSelect, startEdit])
 
   // Scroll focused row into view
   useEffect(() => {
@@ -624,7 +509,7 @@ export default function NormalizeView() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Right: expand-all + group-by toggle + search */}
+        {/* Right: expand-all + search */}
         <button
           onClick={toggleExpandAll}
           className="inline-flex items-center justify-center p-1.5 text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50 hover:text-gray-700 transition-colors flex-shrink-0 select-none"
@@ -632,16 +517,6 @@ export default function NormalizeView() {
         >
           {allExpanded ? <ChevronsUp size={13} /> : <ChevronsDown size={13} />}
         </button>
-
-        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none flex-shrink-0">
-          <div
-            onClick={() => setGroupByParent(!groupByParent)}
-            className={`relative w-8 h-[18px] rounded-full transition-colors cursor-pointer ${groupByParent ? 'bg-violet-500' : 'bg-gray-300'}`}
-          >
-            <div className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-transform ${groupByParent ? 'translate-x-[16px]' : 'translate-x-[2px]'}`} />
-          </div>
-          Group by parent
-        </label>
 
         <div className="relative w-48">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
@@ -689,59 +564,6 @@ export default function NormalizeView() {
             <tbody>
               {flatRows.map((row, idx) => {
                 const isFocused = idx === focusedRowIndex
-
-                // ── Parent label row ──
-                if (row.type === 'parent-label') {
-                  const isNoParent = !row.parentId
-                  return (
-                    <tr
-                      key={`parent-${row.parentName}`}
-                      data-row-index={idx}
-                      className={`${isFocused ? 'bg-gray-100' : 'bg-gray-50/70'}`}
-                      onClick={() => setFocusedRowIndex(idx)}
-                    >
-                      <td className="px-2 py-2 border border-gray-300" />
-                      <td colSpan={5} className="px-3 py-2 font-semibold text-gray-600 border border-gray-300 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          {isNoParent ? (
-                            <span className="text-gray-400 italic">{row.parentName}</span>
-                          ) : editingParentId === row.parentId ? (
-                            <input
-                              ref={editParentInputRef}
-                              value={editParentDraft}
-                              onChange={e => setEditParentDraft(e.target.value)}
-                              onBlur={() => commitEditParent(row.parentId!)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') commitEditParent(row.parentId!)
-                                if (e.key === 'Escape') setEditingParentId(null)
-                              }}
-                              className="px-2 py-0.5 border border-blue-300 rounded text-xs outline-none focus:ring-1 focus:ring-blue-400 w-48"
-                              autoFocus
-                            />
-                          ) : (
-                            <span
-                              className="cursor-pointer hover:text-blue-600 transition-colors"
-                              onDoubleClick={() => row.parentId && startEditParent(row.parentId, row.parentName!)}
-                              title="Double-click to rename"
-                            >
-                              {row.parentName}
-                            </span>
-                          )}
-                          {row.parentId && !editingParentId && (
-                            <button
-                              onClick={() => handleDeleteParent(row.parentId!, row.parentName!)}
-                              className="rounded p-0.5 text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                              title="Delete parent"
-                            >
-                              <X size={12} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-2 py-2 border border-gray-300" />
-                    </tr>
-                  )
-                }
 
                 // ── Normalized name row ──
                 if (row.type === 'normalized' && row.normalized) {

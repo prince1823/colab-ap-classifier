@@ -69,10 +69,24 @@ function findCSV(): string {
 const csvPath = findCSV();
 
 // ─── Load env before any service imports ────────────────────────────────────
+// Walk up from __dirname to find the nearest directory containing a .env file.
+// This handles running from a git worktree where .env lives in the main repo root.
 
 import { loadEnv, resetEnvLoaded } from '../src/main/load-env';
+
+function findEnvRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 6; i++) {
+    if (fs.existsSync(path.join(dir, '.env'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // filesystem root
+    dir = parent;
+  }
+  return startDir; // fallback — loadEnv will silently skip if not found
+}
+
 resetEnvLoaded();
-loadEnv(path.resolve(__dirname, '..'));
+loadEnv(findEnvRoot(path.resolve(__dirname, '..')));
 
 // ─── Parse config ───────────────────────────────────────────────────────────
 
@@ -161,6 +175,7 @@ import { IngestService } from '../src/main/services/ingest';
 import { SupplierService } from '../src/main/services/supplier-service';
 import { SupplierResearcher } from '../src/main/services/supplier-research';
 import { ClassificationRunner } from '../src/main/services/classification';
+import { QCRunner } from '../src/main/services/qc';
 
 // ─── CSV export (inline, no Electron dependency) ────────────────────────────
 
@@ -178,7 +193,7 @@ async function exportCSV(db: DuckDBDatabase, outPath: string): Promise<number> {
   const allColumns = colRows.map((r) => r.column_name);
 
   const metaColumns = ['id', 'row_index', 'upload_id', 'taxonomy_node_id',
-    'classification_status', 'human_reviewed',
+    'classification_status', 'human_reviewed', 'flagged_for_review',
     'original_supplier_name', 'supplier_name', 'project_supplier_id', 'created_at', 'updated_at'];
 
   const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
@@ -199,6 +214,7 @@ async function exportCSV(db: DuckDBDatabase, outPath: string): Promise<number> {
     'classification_l2',
     'classification_l3',
     'classification_status',
+    'flagged_for_review',
   ];
 
   const csvLines: string[] = [headers.map(escapeCSV).join(',')];
@@ -214,6 +230,7 @@ async function exportCSV(db: DuckDBDatabase, outPath: string): Promise<number> {
       parts[1] || '',
       parts[2] || '',
       row.classification_status ?? 'unclassified',
+      row.flagged_for_review ? 'true' : 'false',
     ];
     csvLines.push(values.map((v) => escapeCSV(String(v))).join(','));
   }
@@ -254,17 +271,28 @@ async function main() {
   // ─── Bootstrap services ─────────────────────────────────────────────────
 
   const db = new DuckDBDatabase();
+  // Minimal app config for script use — only LLM provider/model/universe path are needed.
+  // License and key-storage methods are no-ops; API keys come from env vars via EnvLLMConfig.
   const scriptAppConfig = {
-    getApiKey: () => null,
-    setApiKey: async () => {},
-    getProvider: () => 'openrouter',
-    setProvider: async () => {},
-    getModel: () => 'claude-3-5-haiku-latest',
-    setModel: async () => {},
+    getApiKey: (_provider: string) => null,
+    setApiKey: async (_provider: string, _key: string) => {},
+    getProvider: () => process.env.CLASSIFIER_LLM_PROVIDER ?? 'openrouter',
+    setProvider: async (_provider: string) => {},
+    getModel: () => process.env.CLASSIFIER_MODEL ?? 'claude-3-5-haiku-latest',
+    setModel: async (_model: string) => {},
     getSupplierUniversePath: () => UNIVERSE_PATH,
-    setSupplierUniversePath: async () => {},
+    setSupplierUniversePath: async (_p: string) => {},
     clearSupplierUniversePath: async () => {},
-  };
+    getLicenseKey: () => null,
+    setLicenseKey: async (_key: string) => {},
+    clearLicenseKey: async () => {},
+    getLicenseData: () => null,
+    setLicenseData: async (_data: unknown) => {},
+    getLicenseServerUrl: () => null,
+    setLicenseServerUrl: async (_url: string) => {},
+    getLicensePublicKey: () => null,
+    setLicensePublicKey: async (_key: string) => {},
+  } as any;
   const supplierUniverse = new DuckDBSupplierUniverse(scriptAppConfig);
   const eventBus = new EventEmitter();
   const llm = new OpenRouterLLMClient();
@@ -278,7 +306,7 @@ async function main() {
   const transactions = new TransactionStore(db, changelog);
   const project = new ProjectStore(db, transactions, supplierUniverse);
   const taxonomy = new TaxonomyStore(db, project);
-  const rules = new RuleStore(db);
+  const rules = new RuleStore(db, transactions);
   const suppliers = new SupplierService(db, supplierUniverse);
   const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
   const researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus as any);
@@ -286,6 +314,7 @@ async function main() {
     db, taxonomy, project, rules,
     transactions, changelog, classificationAgent, eventBus as any, supplierUniverse
   );
+  const qc = new QCRunner(db, transactions, eventBus as any);
 
   try {
     // ─── Phase 1: Create project ──────────────────────────────────────────
@@ -395,12 +424,42 @@ async function main() {
     timings.push({ phase: 'Classification', ms: Date.now() - start });
     log(`  ✓ Classification complete: ${stats.classifiedRows}/${stats.totalRows} classified`);
 
-    // ─── Phase 8: Export CSV ──────────────────────────────────────────────
+    // ─── Phase 8: QC ──────────────────────────────────────────────────────
+
+    start = Date.now();
+    log('  Running QC consolidation:');
+    await new Promise<void>((resolve, reject) => {
+      eventBus.on('qc:progress', (progress: any) => {
+        if (progress.outcome) {
+          const outcomeLabel: Record<string, string> = {
+            clean: '✓ clean',
+            consolidated: `→ consolidated to ${progress.consolidatedTo ?? '?'}`,
+            flagged: '⚑ flagged for review',
+            skipped: '⊘ skipped (zero spend)',
+          };
+          log(`    [${progress.processedSuppliers}/${progress.totalSuppliers}] ${progress.currentSupplier}  ${outcomeLabel[progress.outcome] ?? progress.outcome}`);
+        }
+        if (progress.status === 'completed' || progress.status === 'cancelled') {
+          eventBus.removeAllListeners('qc:progress');
+          resolve();
+        }
+        if (progress.status === 'failed') {
+          eventBus.removeAllListeners('qc:progress');
+          reject(new Error(progress.currentStep));
+        }
+      });
+      qc.runQC().catch(reject);
+    });
+    const qcStats = await transactions.getStats();
+    timings.push({ phase: 'QC consolidation', ms: Date.now() - start });
+    log(`  ✓ QC complete: ${qcStats.classifiedRows}/${qcStats.totalRows} classified after QC`);
+
+    // ─── Phase 9: Export CSV ──────────────────────────────────────────────
 
     start = Date.now();
     const rowsExported = await exportCSV(db, EXPORT_PATH);
     timings.push({ phase: 'Export CSV', ms: Date.now() - start });
-    log(`  ✓ Export CSV: ${rowsExported} rows → ${EXPORT_PATH}`);
+    log(`  ✓ Export CSV: ${rowsExported} rows → ${EXPORT_PATH} (includes flagged_for_review column)`);
 
     // ─── Summary ──────────────────────────────────────────────────────────
 

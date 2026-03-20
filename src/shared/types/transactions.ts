@@ -7,6 +7,7 @@ export interface Transaction {
   classificationPath: string | null;
   classificationStatus: ClassificationStatus;
   humanReviewed: boolean;
+  flaggedForReview: boolean;
   appliedRuleId: string | null;
   appliedRuleName: string | null;
   canonicalFields: Record<string, unknown>;
@@ -103,6 +104,7 @@ export interface TransactionUpdate {
   ids: string[];
   taxonomyNodeId?: string;
   classificationStatus?: ClassificationStatus;
+  flaggedForReview?: boolean;
   appliedRuleId?: string | null;
 }
 

@@ -149,6 +149,7 @@ export interface TransactionStore {
   getTransactionIdsByColumnValue(column: string, value: string, filters?: TransactionFilter): Promise<string[]>;
   queryPivotAggregation(dimensions: string[], valueDimension?: string, filters?: TransactionFilter): Promise<PivotAggregationResult>;
   getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;
+  getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
 }
 
 export interface TaxonomyStore {
@@ -234,6 +235,12 @@ export interface ClassificationRunner {
   classifySupplier(projectSupplierId: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], scopedTxnIds?: Set<string>): Promise<void>;
   getIsRunning(): boolean;
   cancel(): Promise<void>;
+}
+
+export interface QCRunner {
+  runQC(): Promise<void>;
+  getIsRunning(): boolean;
+  cancel(): void;
 }
 
 // ─── Upload Record ───────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactionStore } from '../../shared/types/services';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
+import type { GroupedFilter } from '../../shared/types/transactions';
 
 // Minimum gap between two float priorities before renormalization is triggered.
 const PRIORITY_PRECISION_THRESHOLD = 1e-10;
@@ -8,8 +9,7 @@ const PRIORITY_PRECISION_THRESHOLD = 1e-10;
 interface RuleRow {
   id: string;
   name: string;
-  source: string;
-  conditions: string;
+  grouped_conditions: string;
   target_taxonomy_node_id: string;
   priority: number;
   rank: number;
@@ -18,11 +18,13 @@ interface RuleRow {
 }
 
 function rowToRule(row: RuleRow): OverrideRule {
+  const grouped: GroupedFilter = typeof row.grouped_conditions === 'string'
+    ? JSON.parse(row.grouped_conditions)
+    : row.grouped_conditions;
   return {
     id: row.id,
     name: row.name,
-    source: (row.source as OverrideRule['source']) || 'project',
-    conditions: typeof row.conditions === 'string' ? JSON.parse(row.conditions) : row.conditions,
+    groupedConditions: grouped,
     targetTaxonomyNodeId: row.target_taxonomy_node_id,
     priorityScore: row.rank,
     isActive: row.is_active,
@@ -52,9 +54,10 @@ export class RuleStore implements IRuleStore {
 
     try {
       await this.db.run(
-        `INSERT INTO override_rules (id, name, conditions, target_taxonomy_node_id, priority, is_active, created_at)
+        `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, priority, is_active, created_at)
          VALUES (?, ?, ?, ?, ?, TRUE, CURRENT_TIMESTAMP)`,
-        id, input.name, JSON.stringify(input.conditions), input.targetTaxonomyNodeId, float
+        id, input.name, JSON.stringify(input.groupedConditions),
+        input.targetTaxonomyNodeId, float
       );
     } catch (err) {
       if (err instanceof Error && err.message.toLowerCase().includes('unique')) {
@@ -71,7 +74,7 @@ export class RuleStore implements IRuleStore {
     const params: unknown[] = [];
 
     if (updates.name !== undefined) { setClauses.push('name = ?'); params.push(updates.name); }
-    if (updates.conditions !== undefined) { setClauses.push('conditions = ?'); params.push(JSON.stringify(updates.conditions)); }
+    if (updates.groupedConditions !== undefined) { setClauses.push('grouped_conditions = ?'); params.push(JSON.stringify(updates.groupedConditions)); }
     if (updates.targetTaxonomyNodeId !== undefined) { setClauses.push('target_taxonomy_node_id = ?'); params.push(updates.targetTaxonomyNodeId); }
     if (updates.isActive !== undefined) { setClauses.push('is_active = ?'); params.push(updates.isActive); }
 
@@ -109,8 +112,7 @@ export class RuleStore implements IRuleStore {
     const matched = new Map<string, { ruleId: string; targetTaxonomyNodeId: string }>();
 
     for (const rule of activeRules) {
-      const matchedIds = await this.transactions.getIdsByConditions(rule.conditions, transactionIds);
-
+      const matchedIds = await this.transactions.getIdsByGroupedConditions(rule.groupedConditions, transactionIds);
       for (const id of matchedIds) {
         if (!matched.has(id)) {
           matched.set(id, { ruleId: rule.id, targetTaxonomyNodeId: rule.targetTaxonomyNodeId });

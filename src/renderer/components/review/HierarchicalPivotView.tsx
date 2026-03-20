@@ -42,6 +42,8 @@ interface HierarchicalPivotViewProps {
   onSpendDisplayModeChange: (mode: SpendDisplayMode) => void
   /* Reclassify */
   onReclassify?: (rows: FlattenedPivotRow[]) => void
+  /* Create rule */
+  onCreateRule?: (rows: FlattenedPivotRow[]) => void
   /* Drill-down */
   onDrillDown?: (row: FlattenedPivotRow) => void
   /** Whether a modal is open (suppresses keyboard) */
@@ -54,6 +56,9 @@ interface HierarchicalPivotViewProps {
   /** Grouped filter for export — full AND/OR structure */
   advancedGrouped?: GroupedFilter | null
   onSetAdvancedGrouped?: (grouped: GroupedFilter | null) => void
+  /** Flagged for review toggle */
+  flaggedForReviewOnly?: boolean
+  onFlaggedForReviewOnlyChange?: (on: boolean) => void
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -231,6 +236,7 @@ export default function HierarchicalPivotView({
   spendDisplayMode,
   onSpendDisplayModeChange,
   onReclassify,
+  onCreateRule,
   onDrillDown,
   modalOpen = false,
   advancedFilterCount = 0,
@@ -239,6 +245,8 @@ export default function HierarchicalPivotView({
   onRemoveAdvancedCondition,
   advancedGrouped,
   onSetAdvancedGrouped,
+  flaggedForReviewOnly = false,
+  onFlaggedForReviewOnlyChange,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
@@ -301,7 +309,13 @@ export default function HierarchicalPivotView({
         if (condStrs.length === 1) {
           groupStrs.push(condStrs[0])
         } else {
-          groupStrs.push(`(${condStrs.join(` ${group.connector} `)})`)
+          // Join with per-condition connectors
+          let expr = condStrs[0]
+          for (let ci = 1; ci < condStrs.length; ci++) {
+            const conn = validConds[ci - 1].connector ?? group.connector
+            expr += ` ${conn} ${condStrs[ci]}`
+          }
+          groupStrs.push(`(${expr})`)
         }
       }
       if (groupStrs.length > 0) {
@@ -348,9 +362,10 @@ export default function HierarchicalPivotView({
   const prevModalOpenRef = useRef(modalOpen)
 
   // Auto-focus the table on mount so keyboard navigation works immediately
+  // Use preventScroll to avoid resetting scroll position on data refresh
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.focus()
+      scrollRef.current.focus({ preventScroll: true })
     }
   }, [pivotData])
 
@@ -487,6 +502,11 @@ export default function HierarchicalPivotView({
     onReclassify?.(rows)
   }, [onReclassify])
 
+  const handleCmdL = useMemo(() => (rows: FlattenedPivotRow[]) => {
+    if (rows.length === 0) return
+    onCreateRule?.(rows)
+  }, [onCreateRule])
+
   // Cmd+S: show supplier info for focused/selected supplier rows
   const handleCmdS = useCallback(async (rows: FlattenedPivotRow[]) => {
     // Filter to only supplier_name rows
@@ -515,9 +535,11 @@ export default function HierarchicalPivotView({
   const { focusedIndex, selectedKeys, handleKeyDown, clearSelection, setFocusedIndex } = usePivotKeyboard({
     visibleRows,
     rowVirtualizer,
+    scrollRef,
     onCmdK: handleCmdK,
     onCmdF: handleCmdF,
     onCmdS: handleCmdS,
+    onCmdL: handleCmdL,
     onToggleExpand: toggleExpand,
     onClearAllFilters,
     disabled: modalOpen || !!supplierInfoModal,
@@ -654,7 +676,7 @@ export default function HierarchicalPivotView({
                       return (
                         <React.Fragment key={`adv-g${gi}-c${ci}`}>
                           {ci > 0 && (
-                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{group.connector}</span>
+                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{validConds[ci - 1].connector ?? group.connector}</span>
                           )}
                           <span className="inline-flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] text-blue-800 whitespace-nowrap flex-shrink-0">
                             <span className="font-medium">{colLabel(c.field)}</span>
@@ -701,6 +723,8 @@ export default function HierarchicalPivotView({
               <span className="text-gray-400">filter</span>
               <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘F</kbd>
               <span className="text-gray-400">classify</span>
+              <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘L</kbd>
+              <span className="text-gray-400">rule</span>
             </span>
           )}
         </div>
@@ -763,6 +787,8 @@ export default function HierarchicalPivotView({
         showSpendToggle={aggregation === 'sum'}
         advancedFilterCount={advancedFilterCount}
         onOpenAdvancedFilter={onOpenAdvancedFilter}
+        flaggedForReviewOnly={flaggedForReviewOnly}
+        onFlaggedForReviewOnlyChange={onFlaggedForReviewOnlyChange}
       />
 
       {(!hasData || rowDimensions.length === 0) && (

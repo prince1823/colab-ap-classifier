@@ -14,6 +14,7 @@ import { registerSettingsHandlers } from './settings';
 import { registerSupplierUniverseHandlers } from './supplier-universe';
 import { registerLicenseHandlers } from './license';
 import { registerFeedbackHandlers } from './feedback';
+import { registerQCHandlers } from './qc';
 
 export function registerAllHandlers(services: ServiceContainer): void {
   // Test channel
@@ -37,4 +38,5 @@ export function registerAllHandlers(services: ServiceContainer): void {
     services.feedbackAgent, services.changelog, services.taxonomy,
     services.project, services.suppliers, services.rules,
   );
+  registerQCHandlers(services.qc, services.eventBus);
 }

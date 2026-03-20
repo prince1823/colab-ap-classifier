@@ -72,6 +72,7 @@ export default function PivotPage() {
     spendDisplayMode, setSpendDisplayMode,
     advancedGrouped, setAdvancedGrouped,
     showAdvancedFilter, setShowAdvancedFilter,
+    flaggedForReviewOnly, setFlaggedForReviewOnly,
     clearAllFilters,
   } = usePivotStore()
 
@@ -97,7 +98,10 @@ export default function PivotPage() {
   const filter = useMemo(() => {
     const pillFilter = buildTransactionFilter(filterState)
     const pillConditions = pillFilter?.conditions ?? []
-    const allConditions = [...pillConditions, ...advancedConditions]
+    const flaggedCondition = flaggedForReviewOnly
+      ? [{ field: 'flagged_for_review', operator: 'is_true' as const, value: '' }]
+      : []
+    const allConditions = [...pillConditions, ...advancedConditions, ...flaggedCondition]
     if (allConditions.length === 0) return undefined
 
     // If we have a grouped filter, merge pill conditions as an extra group
@@ -114,7 +118,7 @@ export default function PivotPage() {
 
     // Only pill filters, no grouping needed
     return { conditions: allConditions } as TransactionFilter
-  }, [filterState, advancedConditions, advancedGrouped])
+  }, [filterState, advancedConditions, advancedGrouped, flaggedForReviewOnly])
 
   const { pivotData, totalCount, refetch } = useServerPivotData(
     rowDimensions,
@@ -198,6 +202,8 @@ export default function PivotPage() {
           advancedConditions={advancedConditions}
           advancedGrouped={advancedGrouped}
           onSetAdvancedGrouped={setAdvancedGrouped}
+          flaggedForReviewOnly={flaggedForReviewOnly}
+          onFlaggedForReviewOnlyChange={setFlaggedForReviewOnly}
         />
       </div>
 

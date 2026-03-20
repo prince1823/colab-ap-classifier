@@ -54,6 +54,9 @@ interface HierarchicalPivotViewProps {
   /** Grouped filter for export — full AND/OR structure */
   advancedGrouped?: GroupedFilter | null
   onSetAdvancedGrouped?: (grouped: GroupedFilter | null) => void
+  /** Flagged for review toggle */
+  flaggedForReviewOnly?: boolean
+  onFlaggedForReviewOnlyChange?: (on: boolean) => void
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -239,6 +242,8 @@ export default function HierarchicalPivotView({
   onRemoveAdvancedCondition,
   advancedGrouped,
   onSetAdvancedGrouped,
+  flaggedForReviewOnly = false,
+  onFlaggedForReviewOnlyChange,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
@@ -771,6 +776,8 @@ export default function HierarchicalPivotView({
         showSpendToggle={aggregation === 'sum'}
         advancedFilterCount={advancedFilterCount}
         onOpenAdvancedFilter={onOpenAdvancedFilter}
+        flaggedForReviewOnly={flaggedForReviewOnly}
+        onFlaggedForReviewOnlyChange={onFlaggedForReviewOnlyChange}
       />
 
       {(!hasData || rowDimensions.length === 0) && (

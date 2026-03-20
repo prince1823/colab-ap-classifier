@@ -642,12 +642,12 @@ export default function NormalizeView() {
                       key={`norm-${s.id}`}
                       data-row-index={idx}
                       className={`cursor-pointer transition-colors ${
-                        isFocused ? 'bg-blue-50' : 'hover:bg-gray-50/50'
+                        isFocused ? 'bg-slate-100' : 'bg-slate-50/40 hover:bg-slate-50'
                       }`}
                       onClick={() => setFocusedRowIndex(idx)}
                     >
                       {/* Col 0: Parent */}
-                      <td className={`px-3 py-2 text-gray-400 border border-gray-200 ${cellFocus(idx, 0)} ${cellSelect(0, isSelected)}`} onClick={() => { setFocusedColIndex(0) }}>
+                      <td className={`px-3 py-2.5 text-gray-400 border border-gray-300 ${cellFocus(idx, 0)} ${cellSelect(0, isSelected)}`} onClick={() => { setFocusedColIndex(0) }}>
                         {editingParentId === s.id ? (
                           <input
                             ref={editParentInputRef}
@@ -686,7 +686,7 @@ export default function NormalizeView() {
                           ) : (
                             <span className="group/parent inline-flex items-center gap-1">
                               <span
-                                className="text-gray-600 cursor-pointer hover:text-blue-600 transition-colors"
+                                className="font-semibold text-gray-700 cursor-pointer hover:text-blue-600 transition-colors"
                                 onDoubleClick={() => startEditParent(s.id, s.parentName!)}
                                 title="Double-click or Shift+Enter to rename"
                               >
@@ -716,7 +716,7 @@ export default function NormalizeView() {
                       </td>
 
                       {/* Col 1: Normalized name */}
-                      <td className={`px-3 py-2 border border-gray-200 ${cellFocus(idx, 1)} ${cellSelect(1, isSelected)}`} onClick={() => { setFocusedColIndex(1) }}>
+                      <td className={`px-3 py-2.5 border border-gray-300 ${cellFocus(idx, 1)} ${cellSelect(1, isSelected)}`} onClick={() => { setFocusedColIndex(1) }}>
                         <div className="flex items-center gap-2">
                           {editingId === s.id ? (
                             <input
@@ -745,23 +745,22 @@ export default function NormalizeView() {
                       </td>
 
                       {/* Col 2: Raw alias (empty for normalized row) */}
-                      <td className={`px-3 py-2 text-gray-300 italic border border-gray-200 ${cellFocus(idx, 2)} ${cellSelect(2, isSelected)}`} onClick={() => { setFocusedColIndex(2) }}>
+                      <td className={`px-3 py-2.5 text-gray-400 italic border border-gray-300 ${cellFocus(idx, 2)} ${cellSelect(2, isSelected)}`} onClick={() => { setFocusedColIndex(2) }}>
                         {nr.aliasesLoaded ? `${nr.aliases.length} alias${nr.aliases.length !== 1 ? 'es' : ''}` : '—'}
                       </td>
 
                       {/* Col 3: Spend */}
-                      <td className={`px-3 py-2 text-right font-medium text-gray-700 tabular-nums border border-gray-200 ${cellFocus(idx, 3)} ${cellSelect(3, isSelected)}`} onClick={() => { setFocusedColIndex(3) }}>
+                      <td className={`px-3 py-2.5 text-right font-medium text-gray-700 tabular-nums border border-gray-300 ${cellFocus(idx, 3)} ${cellSelect(3, isSelected)}`} onClick={() => { setFocusedColIndex(3) }}>
                         {fmtAbbrev(s.totalSpend)}
                       </td>
 
                       {/* Col 4: Txns */}
-                      <td className={`px-3 py-2 text-right text-gray-500 tabular-nums border border-gray-200 ${cellFocus(idx, 4)} ${cellSelect(4, isSelected)}`} onClick={() => { setFocusedColIndex(4) }}>
+                      <td className={`px-3 py-2.5 text-right text-gray-600 tabular-nums border border-gray-300 ${cellFocus(idx, 4)} ${cellSelect(4, isSelected)}`} onClick={() => { setFocusedColIndex(4) }}>
                         {s.transactionCount.toLocaleString()}
                       </td>
 
-                      {/* Col 6: Actions */}
                       {/* Col 5: Actions */}
-                      <td className={`px-2 py-2 border border-gray-200 ${cellFocus(idx, 5)} ${cellSelect(5, isSelected)}`} onClick={() => { setFocusedColIndex(5) }}>
+                      <td className={`px-2 py-2.5 border border-gray-300 ${cellFocus(idx, 5)} ${cellSelect(5, isSelected)}`} onClick={() => { setFocusedColIndex(5) }}>
                         <div className="flex items-center justify-end gap-1 pr-1">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteNormalized(s.id) }}
@@ -786,45 +785,45 @@ export default function NormalizeView() {
                       key={`alias-${nr.supplier.id}-${alias.rawName}`}
                       data-row-index={idx}
                       className={`cursor-pointer transition-colors ${
-                        isFocused ? 'bg-blue-50/60' : 'bg-gray-50/40 hover:bg-gray-50'
+                        isFocused ? 'bg-amber-50' : 'bg-orange-50/30 hover:bg-orange-50/50'
                       }`}
                       onClick={() => setFocusedRowIndex(idx)}
                     >
                       {/* Col 0: Empty parent cell */}
-                      <td className={`px-3 py-1.5 border border-gray-200 ${cellFocus(idx, 0)}`} onClick={() => { setFocusedColIndex(0) }} />
+                      <td className={`px-3 py-1.5 border border-orange-100 ${cellFocus(idx, 0)}`} onClick={() => { setFocusedColIndex(0) }} />
 
                       {/* Col 1: Empty normalized name cell */}
-                      <td className={`px-3 py-1.5 border border-gray-200 ${cellFocus(idx, 1)}`} onClick={() => { setFocusedColIndex(1) }} />
+                      <td className={`px-3 py-1.5 border border-orange-100 ${cellFocus(idx, 1)}`} onClick={() => { setFocusedColIndex(1) }} />
 
                       {/* Col 2: Alias name */}
-                      <td className={`px-3 py-1.5 border border-gray-200 ${cellFocus(idx, 2)}`} onClick={() => { setFocusedColIndex(2) }}>
-                        <div className="flex items-center gap-2 pl-2 border-l-2 border-gray-200">
-                          <span className="text-gray-600">{alias.rawName}</span>
+                      <td className={`px-3 py-1.5 border border-orange-100 ${cellFocus(idx, 2)}`} onClick={() => { setFocusedColIndex(2) }}>
+                        <div className="flex items-center gap-2 pl-3 border-l-2 border-orange-200">
+                          <span className="text-stone-500 text-[11px]">{alias.rawName}</span>
                         </div>
                       </td>
 
                       {/* Col 3: Spend */}
-                      <td className={`px-3 py-1.5 text-right text-gray-400 tabular-nums border border-gray-200 ${cellFocus(idx, 3)}`} onClick={() => { setFocusedColIndex(3) }}>
+                      <td className={`px-3 py-1.5 text-right text-stone-400 tabular-nums border border-orange-100 ${cellFocus(idx, 3)}`} onClick={() => { setFocusedColIndex(3) }}>
                         {alias.spend > 0 ? fmtAbbrev(alias.spend) : '—'}
                       </td>
 
                       {/* Col 4: Txns */}
-                      <td className={`px-3 py-1.5 text-right text-gray-400 tabular-nums border border-gray-200 ${cellFocus(idx, 4)}`} onClick={() => { setFocusedColIndex(4) }}>
+                      <td className={`px-3 py-1.5 text-right text-stone-400 tabular-nums border border-orange-100 ${cellFocus(idx, 4)}`} onClick={() => { setFocusedColIndex(4) }}>
                         {alias.txnCount > 0 ? alias.txnCount.toLocaleString() : '—'}
                       </td>
 
                       {/* Col 5: Actions */}
-                      <td className={`px-2 py-1.5 border border-gray-200 ${cellFocus(idx, 5)}`} onClick={() => { setFocusedColIndex(5) }}>
+                      <td className={`px-2 py-1.5 border border-orange-100 ${cellFocus(idx, 5)}`} onClick={() => { setFocusedColIndex(5) }}>
                         <div className="flex items-center justify-end gap-1 pr-1">
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
                               setReassigningAlias({ alias, normalized: nr })
                             }}
-                            className="rounded p-1 text-amber-500 hover:bg-amber-50 transition-colors"
+                            className="rounded p-1 text-stone-300 hover:text-amber-500 hover:bg-amber-50 transition-colors"
                             title="Reassign alias (Shift+R)"
                           >
-                            <ArrowRightLeft size={13} />
+                            <ArrowRightLeft size={12} />
                           </button>
                         </div>
                       </td>

@@ -395,14 +395,18 @@ export default function NormalizeView() {
 
   // ── Selection ─────────────────────────────────────────────────────
 
+  // Track which column the selection was made in so yellow stays there
+  const [selectedColIndex, setSelectedColIndex] = useState(0)
+
   const toggleSelect = useCallback((id: string) => {
+    setSelectedColIndex(focusedColIndex)
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
-  }, [])
+  }, [focusedColIndex])
 
   const selectedSuppliers = useMemo(() =>
     suppliers.filter(s => selectedSupplierIds.has(s.id)),
@@ -440,8 +444,8 @@ export default function NormalizeView() {
     if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
       e.preventDefault()
       if (selectedSupplierIds.size >= 2) {
-        if (focusedColIndex === 0) {
-          // Parent column focused — merge parents
+        if (selectedColIndex === 0) {
+          // Parent column selected — merge parents
           const uniqueParentIds = new Set<string>()
           for (const sid of selectedSupplierIds) {
             const sup = suppliers.find(s => s.id === sid)
@@ -612,9 +616,9 @@ export default function NormalizeView() {
       ? 'ring-2 ring-inset ring-blue-400'
       : ''
 
-  // Helper: selection highlight — only the focused column gets yellow bg on selected rows
+  // Helper: selection highlight — yellow stays on the column where Enter was pressed
   const cellSelect = (colIdx: number, isSelected: boolean) =>
-    isSelected && colIdx === focusedColIndex
+    isSelected && colIdx === selectedColIndex
       ? 'bg-yellow-100'
       : ''
 
@@ -643,7 +647,7 @@ export default function NormalizeView() {
         {selectedSupplierIds.size >= 2 && (
           <button
             onClick={() => {
-              if (focusedColIndex === 0) {
+              if (selectedColIndex === 0) {
                 const uniqueParentIds = new Set<string>()
                 for (const sid of selectedSupplierIds) {
                   const sup = suppliers.find(s => s.id === sid)
@@ -668,17 +672,17 @@ export default function NormalizeView() {
 
         {/* Keyboard shortcut hints */}
         <div className="flex-1 flex items-center justify-center gap-3 text-[10px] text-gray-400 select-none">
-          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">↑↓</kbd> Navigate</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">Up / Down</kbd> Navigate</span>
           <span className="text-gray-300">·</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">⌘P</kbd> Assign Parent</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">Cmd + P</kbd> Assign Parent</span>
           <span className="text-gray-300">·</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">⌘M</kbd> Merge</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">Cmd + M</kbd> Merge</span>
           <span className="text-gray-300">·</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">⇧Enter</kbd> Edit</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">Shift + Enter</kbd> Edit</span>
           <span className="text-gray-300">·</span>
           <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">Enter</kbd> Select Alias</span>
           <span className="text-gray-300">·</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">⇧R</kbd> Reassign Alias</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">Shift + R</kbd> Reassign Alias</span>
         </div>
 
         {/* Right: search */}

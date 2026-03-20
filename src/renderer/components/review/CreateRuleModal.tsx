@@ -82,14 +82,15 @@ export default function CreateRuleModal({
   // Filter fields for condition builder
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
 
-  // Load taxonomy nodes and filter fields when modal opens
+  // Load taxonomy nodes (full L1|L2|L3 paths only) and filter fields when modal opens
   useEffect(() => {
     if (!isOpen) return
     Promise.all([
       ipc.taxonomy.getNodes(),
       ipc.transactions.getFilterFields(),
     ]).then(([nodes, fields]) => {
-      setTaxonomyNodes(nodes)
+      // Only show leaf nodes with full L1|L2|L3 path
+      setTaxonomyNodes(nodes.filter((n: TaxonomyNode) => n.l3 !== null))
       setFilterFields(fields)
     }).catch(() => {})
   }, [isOpen])

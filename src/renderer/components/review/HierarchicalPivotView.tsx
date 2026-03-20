@@ -42,6 +42,8 @@ interface HierarchicalPivotViewProps {
   onSpendDisplayModeChange: (mode: SpendDisplayMode) => void
   /* Reclassify */
   onReclassify?: (rows: FlattenedPivotRow[]) => void
+  /* Create rule */
+  onCreateRule?: (rows: FlattenedPivotRow[]) => void
   /* Drill-down */
   onDrillDown?: (row: FlattenedPivotRow) => void
   /** Whether a modal is open (suppresses keyboard) */
@@ -234,6 +236,7 @@ export default function HierarchicalPivotView({
   spendDisplayMode,
   onSpendDisplayModeChange,
   onReclassify,
+  onCreateRule,
   onDrillDown,
   modalOpen = false,
   advancedFilterCount = 0,
@@ -499,6 +502,11 @@ export default function HierarchicalPivotView({
     onReclassify?.(rows)
   }, [onReclassify])
 
+  const handleCmdL = useMemo(() => (rows: FlattenedPivotRow[]) => {
+    if (rows.length === 0) return
+    onCreateRule?.(rows)
+  }, [onCreateRule])
+
   // Cmd+S: show supplier info for focused/selected supplier rows
   const handleCmdS = useCallback(async (rows: FlattenedPivotRow[]) => {
     // Filter to only supplier_name rows
@@ -531,6 +539,7 @@ export default function HierarchicalPivotView({
     onCmdK: handleCmdK,
     onCmdF: handleCmdF,
     onCmdS: handleCmdS,
+    onCmdL: handleCmdL,
     onToggleExpand: toggleExpand,
     onClearAllFilters,
     disabled: modalOpen || !!supplierInfoModal,
@@ -714,6 +723,8 @@ export default function HierarchicalPivotView({
               <span className="text-gray-400">filter</span>
               <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘F</kbd>
               <span className="text-gray-400">classify</span>
+              <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘L</kbd>
+              <span className="text-gray-400">rule</span>
             </span>
           )}
         </div>

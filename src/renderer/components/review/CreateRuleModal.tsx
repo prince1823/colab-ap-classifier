@@ -24,35 +24,37 @@ interface CreateRuleModalProps {
  * different fields are AND'd together.
  */
 function buildConditionsFromRows(rows: FlattenedPivotRow[]): GroupedFilter {
-  // Collect all dimension → values from all selected rows' pathSegments
+  // Only use the leaf (deepest) segment of each row — the one the user actually selected.
+  // Ancestor segments (L1, L2 parents of an L3 row) are NOT included.
   const fieldValues = new Map<string, Set<string>>()
   for (const row of rows) {
-    for (const seg of row.pathSegments) {
-      if (!fieldValues.has(seg.dimensionField)) {
-        fieldValues.set(seg.dimensionField, new Set())
-      }
-      fieldValues.get(seg.dimensionField)!.add(seg.value)
+    const leaf = row.pathSegments[row.pathSegments.length - 1]
+    if (!leaf) continue
+    if (!fieldValues.has(leaf.dimensionField)) {
+      fieldValues.set(leaf.dimensionField, new Set())
     }
+    fieldValues.get(leaf.dimensionField)!.add(leaf.value)
   }
 
   if (fieldValues.size === 0) {
     return { groupConnector: 'AND', groups: [makeEmptyGroup()] }
   }
 
-  // Each dimension field becomes a condition in a single AND group
-  const conditions: FilterCondition[] = []
+  // Each value becomes its own individual "equals" condition, OR'd within a group per field
+  // Multiple fields are AND'd via separate groups
+  const groups: ConditionGroup[] = []
   for (const [field, values] of fieldValues) {
     const valArr = Array.from(values)
-    conditions.push({
+    const conditions: FilterCondition[] = valArr.map(v => ({
       field,
-      operator: valArr.length > 1 ? 'in_list' : 'equals',
-      value: valArr.length > 1 ? valArr : valArr[0],
-      connector: 'AND',
-    })
+      operator: 'equals' as const,
+      value: v,
+      connector: 'OR' as const,
+    }))
+    groups.push({ connector: 'OR', conditions })
   }
 
-  const group: ConditionGroup = { connector: 'AND', conditions }
-  return { groupConnector: 'AND', groups: [group] }
+  return { groupConnector: 'AND', groups }
 }
 
 export default function CreateRuleModal({

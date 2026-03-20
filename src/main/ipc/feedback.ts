@@ -140,7 +140,10 @@ export function registerFeedbackHandlers(
         }
         const { id: ruleId } = await rules.createRule({
           name: details.name,
-          conditions: details.conditions,
+          groupedConditions: {
+            groupConnector: 'AND',
+            groups: [{ connector: 'AND', conditions: details.conditions }],
+          },
           targetTaxonomyNodeId: targetNode.id,
         });
         await changelog.logChange({

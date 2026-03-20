@@ -313,9 +313,17 @@ export default function NormalizeView() {
       setAliasCache(prev => {
         const n = new Map(prev)
         losingSet.forEach(id => n.delete(id))
-        n.delete(survivorId) // invalidate survivor so aliases reload fresh on next expand
+        n.delete(survivorId) // invalidate survivor so aliases reload fresh
         return n
       })
+
+      // Reload survivor aliases directly (not inside a setState updater)
+      ipc.suppliers.getAliases(survivorId).then(aliases => {
+        const aliasData: AliasData[] = (aliases as string[]).map(name => ({
+          rawName: name, spend: 0, txnCount: 0,
+        }))
+        setAliasCache(c => new Map(c).set(survivorId, aliasData))
+      }).catch(() => {})
 
       // Silently refresh spend/txn counts in background — no loading state, no collapse
       ipc.suppliers.list().then(fresh => {

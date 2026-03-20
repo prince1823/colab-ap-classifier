@@ -136,11 +136,7 @@ export class SupplierService implements ISupplierService {
        FROM transactions t
        WHERE t.project_supplier_id = ?
        AND t.original_supplier_name IS NOT NULL
-       AND t.original_supplier_name != (
-         SELECT supplier_name FROM project_suppliers WHERE id = ?
-       )
        ORDER BY t.original_supplier_name`,
-      supplierId,
       supplierId
     );
     return rows.map(r => r.original_supplier_name);
@@ -387,15 +383,12 @@ export class SupplierService implements ISupplierService {
       total_spend: number | bigint;
     }>(sql, ...allParams);
 
-    // Bulk-fetch project-local aliases (distinct raw names per supplier, excluding canonical name)
+    // Bulk-fetch project-local aliases (all distinct raw names per supplier)
     const aliasRows = await this.db.all<{ project_supplier_id: string; original_supplier_name: string }>(
       `SELECT DISTINCT t.project_supplier_id, t.original_supplier_name
        FROM transactions t
        WHERE t.project_supplier_id IS NOT NULL
-       AND t.original_supplier_name IS NOT NULL
-       AND t.original_supplier_name != (
-         SELECT ps.supplier_name FROM project_suppliers ps WHERE ps.id = t.project_supplier_id
-       )`
+       AND t.original_supplier_name IS NOT NULL`
     );
     const aliasMap = new Map<string, string[]>();
     for (const r of aliasRows) {

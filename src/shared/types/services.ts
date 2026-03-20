@@ -144,6 +144,7 @@ export interface TransactionStore {
   getTransactionIdsByColumnValue(column: string, value: string, filters?: TransactionFilter): Promise<string[]>;
   queryPivotAggregation(dimensions: string[], valueDimension?: string, filters?: TransactionFilter): Promise<PivotAggregationResult>;
   getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;
+  getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
 }
 
 export interface TaxonomyStore {

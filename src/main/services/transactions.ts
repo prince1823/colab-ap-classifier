@@ -16,6 +16,7 @@ import type {
   ClassificationStatus,
   FilterCondition,
   FieldDefinition,
+  GroupedFilter,
 } from '../../shared/types';
 import type { ChangeSource } from '../../shared/types/changelog';
 import { buildWhereClause, buildGroupedWhereClause } from '../utils/query-builder';
@@ -42,6 +43,18 @@ const VIRTUAL_COLUMNS: Record<string, string> = {
 const SUPPLIER_JOIN = 'LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id';
 const TAXONOMY_JOIN = 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id';
 const RULES_JOIN = 'LEFT JOIN override_rules ar ON t.applied_rule_id = ar.id';
+
+/** Virtual column → SQL expression for filter/ID-lookup queries. */
+const FILTER_VIRTUAL_EXPRS: Record<string, string> = {
+  classification_l1: 'tax.l1',
+  classification_l2: 'tax.l2',
+  classification_l3: 'tax.l3',
+  classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
+  supplier_name: 'ps.supplier_name',
+  is_researched: 'ps.is_researched',
+  is_tail_spend: 'ps.is_tail_spend',
+  applied_rule_name: 'ar.name',
+};
 
 export class TransactionStore implements ITransactionStore {
   private cachedColumns: string[] | null = null;
@@ -427,12 +440,14 @@ export class TransactionStore implements ITransactionStore {
     const colExpr = this.resolveColumn(column);
     const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
     const taxonomyJoin = this.needsTaxonomyJoinForColumns([column]) ? TAXONOMY_JOIN : '';
+    const rulesJoin = this.needsRulesJoin([column]) ? RULES_JOIN : '';
 
     const sql = `
       SELECT DISTINCT CAST(${colExpr} AS VARCHAR) as value
       FROM transactions t
       ${supplierJoin}
       ${taxonomyJoin}
+      ${rulesJoin}
       WHERE ${colExpr} IS NOT NULL
       ORDER BY value
       LIMIT ${limit}
@@ -645,20 +660,8 @@ export class TransactionStore implements ITransactionStore {
     conditions: FilterCondition[],
     scopeToIds?: string[]
   ): Promise<string[]> {
-    /** Virtual dim → SQL expression (same as pivot aggregation) */
-    const VIRTUAL_DIM_EXPRS: Record<string, string> = {
-      classification_l1: 'tax.l1',
-      classification_l2: 'tax.l2',
-      classification_l3: 'tax.l3',
-      classification_path: "CONCAT_WS(' > ', COALESCE(tax.l1, '(Unclassified)'), COALESCE(tax.l2, ''), COALESCE(tax.l3, ''))",
-      supplier_name: 'ps.supplier_name',
-      is_researched: 'ps.is_researched',
-      is_tail_spend: 'ps.is_tail_spend',
-      applied_rule_name: 'ar.name',
-    };
-
     const resolveColumn = (field: string) =>
-      VIRTUAL_DIM_EXPRS[field] ?? `t."${field}"`;
+      FILTER_VIRTUAL_EXPRS[field] ?? `t."${field}"`;
 
     const built = buildWhereClause(conditions, resolveColumn);
     if (!built) return [];
@@ -668,6 +671,38 @@ export class TransactionStore implements ITransactionStore {
       ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
       : '';
     const rulesJoin = conditions.some((c) => c.field === 'applied_rule_name') ? RULES_JOIN : '';
+
+    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${taxonomyJoin} ${rulesJoin} WHERE (${built.sql})`;
+    const params = [...built.params];
+
+    if (scopeToIds && scopeToIds.length > 0) {
+      sql += ` AND t.id IN (${scopeToIds.map(() => '?').join(',')})`;
+      params.push(...scopeToIds);
+    }
+
+    const rows = await this.db.all<{ id: string }>(sql, ...params);
+    return rows.map((r) => String(r.id));
+  }
+
+  /**
+   * Return transaction IDs matching grouped filter conditions (preserving AND/OR group logic).
+   */
+  async getIdsByGroupedConditions(
+    grouped: GroupedFilter,
+    scopeToIds?: string[]
+  ): Promise<string[]> {
+    const resolveColumn = (field: string) =>
+      FILTER_VIRTUAL_EXPRS[field] ?? `t."${field}"`;
+
+    const built = buildGroupedWhereClause(grouped, resolveColumn);
+    if (!built) return [];
+
+    const allConditions = grouped.groups.flatMap(g => g.conditions);
+    const needsTaxonomy = allConditions.some((c) => c.field.startsWith('classification_'));
+    const taxonomyJoin = needsTaxonomy
+      ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
+      : '';
+    const rulesJoin = allConditions.some((c) => c.field === 'applied_rule_name') ? RULES_JOIN : '';
 
     let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${taxonomyJoin} ${rulesJoin} WHERE (${built.sql})`;
     const params = [...built.params];

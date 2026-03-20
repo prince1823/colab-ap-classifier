@@ -189,24 +189,31 @@ export class DuckDBDatabase implements Database {
       await this.exec('ALTER TABLE project_suppliers DROP COLUMN parent_supplier_name');
     } catch { /* column already removed, ignore */ }
 
-    // Migrate: convert override_rules.priority from INTEGER to DOUBLE
-    // DuckDB cannot ALTER COLUMN TYPE when indexes exist, so we recreate the table.
-    const priorityColType = await this.get<{ data_type: string }>(
-      "SELECT data_type FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'priority'"
+    // Migrate: drop flat conditions column and make grouped_conditions the sole conditions store.
+    // Recreates the table if conditions column still exists (handles INTEGER priority and old schema in one pass).
+    const conditionsCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'conditions'"
     );
-    if (priorityColType?.data_type?.toUpperCase() === 'INTEGER') {
+    if (conditionsCol.length > 0) {
+      const hasGroupedCond = await this.all<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'grouped_conditions'"
+      );
+      // Carry over grouped_conditions if it exists; otherwise seed from flat conditions as a single-group fallback
+      const groupedSelect = hasGroupedCond.length > 0
+        ? 'COALESCE(grouped_conditions, conditions)'
+        : 'conditions';
       await this.exec(`
         CREATE TABLE override_rules_new (
           id VARCHAR PRIMARY KEY,
           name VARCHAR NOT NULL UNIQUE,
-          conditions JSON NOT NULL,
+          grouped_conditions JSON NOT NULL,
           target_taxonomy_node_id VARCHAR NOT NULL,
           priority DOUBLE NOT NULL,
           is_active BOOLEAN DEFAULT TRUE,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         INSERT INTO override_rules_new
-          SELECT id, name, conditions, target_taxonomy_node_id, CAST(priority AS DOUBLE), is_active, created_at
+          SELECT id, name, ${groupedSelect}, target_taxonomy_node_id, CAST(priority AS DOUBLE), is_active, created_at
           FROM override_rules;
         DROP TABLE override_rules;
         ALTER TABLE override_rules_new RENAME TO override_rules;
@@ -321,7 +328,7 @@ export class DuckDBDatabase implements Database {
       CREATE TABLE IF NOT EXISTS override_rules (
         id VARCHAR PRIMARY KEY,
         name VARCHAR NOT NULL UNIQUE,
-        conditions JSON NOT NULL,
+        grouped_conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
         priority DOUBLE NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,

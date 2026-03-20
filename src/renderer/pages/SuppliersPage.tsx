@@ -469,7 +469,7 @@ export default function SuppliersPage() {
                       return (
                         <React.Fragment key={`${gi}-${ci}`}>
                           {ci > 0 && (
-                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{group.connector}</span>
+                            <span className="text-[8px] font-bold text-gray-400 uppercase px-0.5 flex-shrink-0">{validConds[ci - 1].connector ?? group.connector}</span>
                           )}
                           <span className="inline-flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] text-blue-800 whitespace-nowrap flex-shrink-0">
                             <span className="font-medium">{c.field}</span>

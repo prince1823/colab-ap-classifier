@@ -106,10 +106,13 @@ export default function OverrideRulesPage() {
   }
 
   const handleToggle = async (rule: OverrideRule) => {
+    // Optimistic update — no loading flash
+    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r))
     try {
       await ipc.rules.update(rule.id, { isActive: !rule.isActive })
-      await loadData()
     } catch (e) {
+      // Revert on failure
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: rule.isActive } : r))
       setError(e instanceof Error ? e.message : 'Failed to toggle rule')
     }
   }
@@ -329,7 +332,7 @@ export default function OverrideRulesPage() {
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Conditions</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Priority</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Target</th>
-              <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Active</th>
+              <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Status</th>
               <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
             </tr>
           </thead>

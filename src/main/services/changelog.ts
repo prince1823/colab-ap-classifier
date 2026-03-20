@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Database, ChangelogStore as IChangelogStore } from '../../shared/types/services';
-import type { ChangeLog, ChangeSource } from '../../shared/types/changelog';
+import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from '../../shared/types/changelog';
 
 interface ChangeLogRow {
   id: string;
@@ -38,9 +38,48 @@ function rowToChangeLog(row: ChangeLogRow): ChangeLog {
 export class ChangelogStore implements IChangelogStore {
   constructor(private db: Database) {}
 
-  async listChanges(): Promise<ChangeLog[]> {
+  private buildFilterSQL(filter?: ChangelogFilter): { whereSQL: string; params: unknown[] } {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    // Always exclude legacy "Reverted:" entries
+    conditions.push("(description IS NULL OR description NOT LIKE 'Reverted:%')");
+
+    if (filter?.viewFilter === 'changes') {
+      conditions.push("source != 'feedback'");
+    } else if (filter?.viewFilter === 'feedback') {
+      conditions.push("source = 'feedback'");
+    }
+
+    if (filter?.search?.trim()) {
+      const pattern = `%${filter.search.trim()}%`;
+      conditions.push('(description ILIKE ? OR source ILIKE ?)');
+      params.push(pattern, pattern);
+    }
+
+    const whereSQL = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    return { whereSQL, params };
+  }
+
+  async getCount(filter?: ChangelogFilter): Promise<number> {
+    const { whereSQL, params } = this.buildFilterSQL(filter);
+    const result = await this.db.get<{ cnt: number | bigint }>(
+      `SELECT COUNT(*) as cnt FROM change_log ${whereSQL}`,
+      ...params
+    );
+    return Number(result?.cnt ?? 0);
+  }
+
+  async listChanges(filter?: ChangelogFilter): Promise<ChangeLog[]> {
+    const { whereSQL, params } = this.buildFilterSQL(filter);
+
+    const page = filter?.page || 1;
+    const pageSize = filter?.pageSize;
+    const limitClause = pageSize ? `LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}` : '';
+
     const rows = await this.db.all<ChangeLogRow>(
-      'SELECT * FROM change_log ORDER BY created_at DESC'
+      `SELECT * FROM change_log ${whereSQL} ORDER BY created_at DESC ${limitClause}`,
+      ...params
     );
     const entries = rows.map(rowToChangeLog);
 
@@ -80,6 +119,14 @@ export class ChangelogStore implements IChangelogStore {
     }
 
     return entries;
+  }
+
+  async listChangesPaginated(filter?: ChangelogFilter): Promise<PaginatedChangelog> {
+    const page = filter?.page || 1;
+    const pageSize = filter?.pageSize || 50;
+    const totalCount = await this.getCount(filter);
+    const rows = await this.listChanges({ ...filter, page, pageSize });
+    return { rows, totalCount, page, pageSize };
   }
 
   async logChange(entry: Omit<ChangeLog, 'id' | 'createdAt'>): Promise<string> {

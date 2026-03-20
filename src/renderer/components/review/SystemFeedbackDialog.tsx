@@ -1,12 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
+import { ipc } from '../../lib/ipc'
 import type { ChangeLog } from '../../../shared/types/changelog'
 
 interface SystemFeedbackDialogProps {
   isOpen: boolean
   onClose: () => void
-  entries: ChangeLog[]
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
   feedbackText: string
@@ -18,7 +18,6 @@ interface SystemFeedbackDialogProps {
 export default function SystemFeedbackDialog({
   isOpen,
   onClose,
-  entries,
   selectedIds,
   onToggleSelect,
   feedbackText,
@@ -27,6 +26,24 @@ export default function SystemFeedbackDialog({
   analyzing,
 }: SystemFeedbackDialogProps) {
   const [search, setSearch] = useState('')
+  const [entries, setEntries] = useState<ChangeLog[]>([])
+  const [loadingEntries, setLoadingEntries] = useState(false)
+
+  // Self-fetch all entries when dialog opens
+  useEffect(() => {
+    if (!isOpen) return
+    let cancelled = false
+    setLoadingEntries(true)
+    ipc.changelog.list({ pageSize: 10000 }).then(result => {
+      if (!cancelled) {
+        setEntries(result.rows)
+        setLoadingEntries(false)
+      }
+    }).catch(() => {
+      if (!cancelled) setLoadingEntries(false)
+    })
+    return () => { cancelled = true }
+  }, [isOpen])
 
   const filteredEntries = useMemo(() => {
     if (!search.trim()) return entries
@@ -74,7 +91,9 @@ export default function SystemFeedbackDialog({
 
         {/* Entry list */}
         <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
-          {filteredEntries.length === 0 ? (
+          {loadingEntries ? (
+            <p className="text-sm text-gray-400 italic text-center py-4">Loading changes...</p>
+          ) : filteredEntries.length === 0 ? (
             <p className="text-sm text-gray-400 italic text-center py-4">
               {entries.length === 0 ? 'No changes recorded yet.' : 'No matching changes.'}
             </p>

@@ -14,3 +14,17 @@ export interface ChangeLog {
   /** Computed at read-time: supplier names for transaction changes */
   supplierNames?: string[];
 }
+
+export interface ChangelogFilter {
+  search?: string;
+  viewFilter?: 'all' | 'changes' | 'feedback';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PaginatedChangelog {
+  rows: ChangeLog[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}

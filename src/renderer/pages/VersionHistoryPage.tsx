@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { ipc } from '../lib/ipc'
-import type { ChangeLog } from '../../shared/types/changelog'
+import type { ChangeLog, ChangelogFilter } from '../../shared/types/changelog'
 import type { Transaction } from '../../shared/types/transactions'
 import type { FeedbackRecommendation } from '../../shared/types/feedback'
 import SystemFeedbackModal from '../components/review/SystemFeedbackModal'
@@ -76,10 +76,6 @@ function getChangedFields(
   }
   return changes
 }
-
-// Module-level cache so data persists across navigations (component unmount/remount)
-let _cachedEntries: ChangeLog[] | null = null
-let _cachedTaxonomyMap: Map<string, string> | null = null
 
 /** Inline transaction drill-down panel for a changelog entry */
 function ChangeTransactionPanel({
@@ -277,16 +273,28 @@ function ChangeTransactionPanel({
 }
 
 export default function VersionHistoryPage() {
-  const [allEntries, setAllEntries] = useState<ChangeLog[]>(_cachedEntries || [])
-  const [loading, setLoading] = useState(!_cachedEntries)
+  const [entries, setEntries] = useState<ChangeLog[]>([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [taxonomyMap, setTaxonomyMapState] = useState<Map<string, string>>(_cachedTaxonomyMap || new Map())
+  const [taxonomyMap, setTaxonomyMap] = useState<Map<string, string>>(new Map())
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [reverting, setReverting] = useState<string | null>(null)
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
   const [supplierDropdownId, setSupplierDropdownId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [viewFilter, setViewFilter] = useState<'all' | 'changes' | 'feedback'>('all')
+
+  // Debounce search input (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1) }, [debouncedSearch, viewFilter])
 
   // Close supplier dropdown when clicking outside
   useEffect(() => {
@@ -295,21 +303,6 @@ export default function VersionHistoryPage() {
     document.addEventListener('click', handleClick)
     return () => document.removeEventListener('click', handleClick)
   }, [supplierDropdownId])
-
-  // Filter out legacy "Reverted:" entries, apply view filter, and search
-  const displayEntries = allEntries.filter(e => {
-    if (e.description?.startsWith('Reverted:')) return false
-    if (viewFilter === 'changes' && e.source === 'feedback') return false
-    if (viewFilter === 'feedback' && e.source !== 'feedback') return false
-    if (!searchQuery.trim()) return true
-    const q = searchQuery.trim().toLowerCase()
-    const haystack = [
-      e.description,
-      ...(e.supplierNames || []),
-      e.source,
-    ].filter(Boolean).join(' ').toLowerCase()
-    return haystack.includes(q)
-  })
 
   // Feedback state
   const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false)
@@ -320,40 +313,39 @@ export default function VersionHistoryPage() {
   const [applying, setApplying] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
-  const setTaxonomyMap = useCallback((m: Map<string, string>) => {
-    _cachedTaxonomyMap = m
-    setTaxonomyMapState(m)
-  }, [])
-
-  const loadData = useCallback(async () => {
-    if (!_cachedEntries) setLoading(true)
+  const fetchPage = useCallback(async (p: number) => {
+    setLoading(true)
     setError(null)
     try {
-      const [data, nodes] = await Promise.all([
-        ipc.changelog.list(),
+      const filter: ChangelogFilter = {
+        page: p,
+        pageSize: PAGE_SIZE,
+        search: debouncedSearch || undefined,
+        viewFilter: viewFilter === 'all' ? undefined : viewFilter,
+      }
+      const [result, nodes] = await Promise.all([
+        ipc.changelog.list(filter),
         ipc.taxonomy.getNodes(),
       ])
-      _cachedEntries = data
-      setAllEntries(data)
+      setEntries(result.rows)
+      setTotalCount(result.totalCount)
+      setPage(result.page)
       setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load history')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [debouncedSearch, viewFilter])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => { fetchPage(page) }, [fetchPage])
 
   const handleRevert = async (changeId: string) => {
     setReverting(changeId)
     setError(null)
     try {
       await ipc.changelog.revert(changeId)
-      // Optimistically toggle isReverted on the entry
-      setAllEntries(prev => prev.map(e =>
-        e.id === changeId ? { ...e, isReverted: !e.isReverted } : e
-      ))
+      await fetchPage(page)
       if (expandedTxId === changeId) setExpandedTxId(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to revert')
@@ -406,20 +398,15 @@ export default function VersionHistoryPage() {
       setFeedbackText('')
       setSuccessMessage('Feedback applied successfully.')
       setTimeout(() => setSuccessMessage(null), 3000)
-      // Refresh entries in background without full-page reload
-      const [data, nodes] = await Promise.all([
-        ipc.changelog.list(),
-        ipc.taxonomy.getNodes(),
-      ])
-      _cachedEntries = data
-      setAllEntries(data)
-      setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
+      await fetchPage(1)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply feedback')
     } finally {
       setApplying(false)
     }
   }
+
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
   if (loading) {
     return (
@@ -437,7 +424,7 @@ export default function VersionHistoryPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Version History</h2>
-          <p className="mt-1 text-sm text-gray-500">{displayEntries.length} changes recorded</p>
+          <p className="mt-1 text-sm text-gray-500">{totalCount} changes recorded</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -471,13 +458,13 @@ export default function VersionHistoryPage() {
       {error && <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {successMessage && <div className="rounded-md bg-green-50 p-4 text-sm text-green-700">{successMessage}</div>}
 
-      {displayEntries.length === 0 ? (
+      {entries.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
           No changes recorded yet.
         </div>
       ) : (
         <div className="space-y-2">
-          {displayEntries.map((entry) => {
+          {entries.map((entry) => {
             const isExpanded = expandedId === entry.id
             const isReverted = entry.isReverted
             const changes = getChangedFields(entry.oldValues, entry.newValues, taxonomyMap)
@@ -729,6 +716,31 @@ export default function VersionHistoryPage() {
         </div>
       )}
 
+      {/* Pagination controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-2">
+          <span className="text-xs text-gray-500">
+            Page {page} of {totalPages}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded p-1 hover:bg-gray-100 disabled:opacity-30"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="rounded p-1 hover:bg-gray-100 disabled:opacity-30"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Recommendation modal */}
       {recommendation && (
         <SystemFeedbackModal
@@ -742,7 +754,6 @@ export default function VersionHistoryPage() {
       <SystemFeedbackDialog
         isOpen={feedbackDialogOpen}
         onClose={handleDialogClose}
-        entries={displayEntries}
         selectedIds={selectedIds}
         onToggleSelect={toggleSelect}
         feedbackText={feedbackText}

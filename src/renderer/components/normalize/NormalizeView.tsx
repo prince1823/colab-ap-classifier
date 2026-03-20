@@ -165,8 +165,37 @@ export default function NormalizeView() {
   // ── Flatten into table rows (aliases shown inline) ───────────────
 
   const flatRows: FlatRow[] = useMemo(() => {
-    return filtered.map(r => ({ normalized: r }))
+    // Sort by parent name so same-parent rows are adjacent (no-parent rows go last)
+    const sorted = [...filtered].sort((a, b) => {
+      const pa = a.supplier.parentName?.toLowerCase() ?? '\uffff'
+      const pb = b.supplier.parentName?.toLowerCase() ?? '\uffff'
+      if (pa !== pb) return pa < pb ? -1 : 1
+      return a.supplier.supplierName.toLowerCase() < b.supplier.supplierName.toLowerCase() ? -1 : 1
+    })
+    return sorted.map(r => ({ normalized: r }))
   }, [filtered])
+
+  // Compute parent grouping: for each row, whether it's the first in its parent group and the group span
+  const parentGroupInfo = useMemo(() => {
+    const info: { isFirst: boolean; rowSpan: number }[] = []
+    let i = 0
+    while (i < flatRows.length) {
+      const parentName = flatRows[i].normalized.supplier.parentName
+      if (!parentName) {
+        info.push({ isFirst: true, rowSpan: 1 })
+        i++
+        continue
+      }
+      let j = i + 1
+      while (j < flatRows.length && flatRows[j].normalized.supplier.parentName === parentName) j++
+      const span = j - i
+      for (let k = i; k < j; k++) {
+        info.push({ isFirst: k === i, rowSpan: span })
+      }
+      i = j
+    }
+    return info
+  }, [flatRows])
 
   // ── Actions ───────────────────────────────────────────────────────
 
@@ -744,8 +773,13 @@ export default function NormalizeView() {
                       }`}
                       onClick={() => setFocusedRowIndex(idx)}
                     >
-                      {/* Col 0: Parent */}
-                      <td className={`px-3 py-2.5 text-gray-400 border border-gray-300 align-top ${cellFocus(idx, 0)} ${cellSelect(0, isSelected)}`} onClick={() => { setFocusedColIndex(0) }}>
+                      {/* Col 0: Parent (rowSpan for same-parent groups) */}
+                      {parentGroupInfo[idx]?.isFirst && (
+                      <td
+                        rowSpan={parentGroupInfo[idx]?.rowSpan ?? 1}
+                        className={`px-3 py-2.5 text-gray-400 border border-gray-300 align-top ${cellFocus(idx, 0)} ${cellSelect(0, isSelected)}`}
+                        onClick={() => { setFocusedColIndex(0) }}
+                      >
                         {editingParentId === s.id ? (
                           <input
                             ref={editParentInputRef}
@@ -812,6 +846,7 @@ export default function NormalizeView() {
                           </span>
                         )}
                       </td>
+                      )}
 
                       {/* Col 1: Normalized name */}
                       <td className={`px-3 py-2.5 border border-gray-300 align-top ${cellFocus(idx, 1)} ${cellSelect(1, isSelected)}`} onClick={() => { setFocusedColIndex(1) }}>

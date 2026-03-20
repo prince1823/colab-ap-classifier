@@ -354,9 +354,10 @@ export default function HierarchicalPivotView({
   const prevModalOpenRef = useRef(modalOpen)
 
   // Auto-focus the table on mount so keyboard navigation works immediately
+  // Use preventScroll to avoid resetting scroll position on data refresh
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.focus()
+      scrollRef.current.focus({ preventScroll: true })
     }
   }, [pivotData])
 
@@ -521,6 +522,7 @@ export default function HierarchicalPivotView({
   const { focusedIndex, selectedKeys, handleKeyDown, clearSelection, setFocusedIndex } = usePivotKeyboard({
     visibleRows,
     rowVirtualizer,
+    scrollRef,
     onCmdK: handleCmdK,
     onCmdF: handleCmdF,
     onCmdS: handleCmdS,

@@ -175,6 +175,30 @@ export class SupplierService implements ISupplierService {
     );
   }
 
+  async mergeParents(survivorId: string, losingIds: string[]): Promise<void> {
+    if (losingIds.length === 0) return;
+    if (losingIds.includes(survivorId)) {
+      throw new Error('Survivor cannot be one of the losing parents');
+    }
+    const survivor = await this.db.get<{ id: string }>(
+      'SELECT id FROM supplier_parents WHERE id = ?',
+      survivorId
+    );
+    if (!survivor) {
+      throw new Error(`Survivor is not a valid parent: ${survivorId}`);
+    }
+    const placeholders = losingIds.map(() => '?').join(',');
+    await this.db.run(
+      `UPDATE project_suppliers SET parent_supplier_id = ? WHERE parent_supplier_id IN (${placeholders})`,
+      survivorId,
+      ...losingIds
+    );
+    await this.db.run(
+      `DELETE FROM supplier_parents WHERE id IN (${placeholders})`,
+      ...losingIds
+    );
+  }
+
   async deleteSupplier(supplierId: string): Promise<void> {
     const row = await this.db.get<{ cnt: number }>(
       'SELECT COUNT(*) AS cnt FROM transactions WHERE project_supplier_id = ?',
@@ -477,16 +501,14 @@ export class SupplierService implements ISupplierService {
     return { id: row.id, name: row.name, createdAt: String(row.created_at) };
   }
 
-  async changeParent(supplierId: string, parentId: string | null): Promise<void> {
+  async assignParent(supplierIds: string[], parentId: string | null): Promise<void> {
+    if (supplierIds.length === 0) return;
+    const placeholders = supplierIds.map(() => '?').join(',');
     await this.db.run(
-      'UPDATE project_suppliers SET parent_supplier_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      `UPDATE project_suppliers SET parent_supplier_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
       parentId,
-      supplierId
+      ...supplierIds
     );
-  }
-
-  async removeParent(supplierId: string): Promise<void> {
-    return this.changeParent(supplierId, null);
   }
 
   async renameParent(parentId: string, newName: string): Promise<void> {

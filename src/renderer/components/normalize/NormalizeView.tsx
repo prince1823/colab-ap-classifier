@@ -56,7 +56,7 @@ export default function NormalizeView() {
   const [aliasCache, setAliasCache] = useState<Map<string, AliasData[]>>(new Map())
 
   // Selection: set of normalized supplier IDs
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectedSupplierIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   // Focus
   const [focusedRowIndex, setFocusedRowIndex] = useState(0)
@@ -297,7 +297,7 @@ export default function NormalizeView() {
       if (!ok) return
       // Unassign all children first
       try {
-        await Promise.all(children.map(s => ipc.suppliers.removeParent(s.id)))
+        await ipc.suppliers.assignParent(children.map(s => s.id), null)
         setSuppliers(prev => prev.map(s =>
           s.parentSupplierId === parentId ? { ...s, parentSupplierId: null, parentName: null } : s
         ))
@@ -334,18 +334,11 @@ export default function NormalizeView() {
 
   const handleChangeParent = useCallback(async (supplierId: string, parentId: string | null) => {
     try {
-      if (parentId) {
-        await ipc.suppliers.changeParent(supplierId, parentId)
-        const parent = parents.find(p => p.id === parentId)
-        setSuppliers(prev => prev.map(s =>
-          s.id === supplierId ? { ...s, parentSupplierId: parentId, parentName: parent?.name ?? null } : s
-        ))
-      } else {
-        await ipc.suppliers.removeParent(supplierId)
-        setSuppliers(prev => prev.map(s =>
-          s.id === supplierId ? { ...s, parentSupplierId: null, parentName: null } : s
-        ))
-      }
+      await ipc.suppliers.assignParent([supplierId], parentId)
+      const parent = parentId ? parents.find(p => p.id === parentId) : null
+      setSuppliers(prev => prev.map(s =>
+        s.id === supplierId ? { ...s, parentSupplierId: parentId, parentName: parent?.name ?? null } : s
+      ))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to change parent')
     }
@@ -356,7 +349,7 @@ export default function NormalizeView() {
     try {
       const parent = await ipc.suppliers.addParent(name) as SupplierParent
       setParents(prev => [...prev, parent])
-      await ipc.suppliers.changeParent(supplierId, parent.id)
+      await ipc.suppliers.assignParent([supplierId], parent.id)
       setSuppliers(prev => prev.map(s =>
         s.id === supplierId ? { ...s, parentSupplierId: parent.id, parentName: parent.name } : s
       ))
@@ -458,8 +451,8 @@ export default function NormalizeView() {
   }, [])
 
   const selectedSuppliers = useMemo(() =>
-    suppliers.filter(s => selectedIds.has(s.id)),
-    [suppliers, selectedIds]
+    suppliers.filter(s => selectedSupplierIds.has(s.id)),
+    [suppliers, selectedSupplierIds]
   )
 
   // ── Keyboard navigation ───────────────────────────────────────────
@@ -474,7 +467,7 @@ export default function NormalizeView() {
     // Cmd+M: merge modal
     if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
       e.preventDefault()
-      if (selectedIds.size >= 2) setShowMergeModal(true)
+      if (selectedSupplierIds.size >= 2) setShowMergeModal(true)
       return
     }
 
@@ -581,7 +574,7 @@ export default function NormalizeView() {
         break
       }
     }
-  }, [flatRows, focusedRowIndex, expanded, selectedIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleExpand, toggleSelect, startEdit])
+  }, [flatRows, focusedRowIndex, expanded, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleExpand, toggleSelect, startEdit])
 
   // Scroll focused row into view
   useEffect(() => {
@@ -611,13 +604,13 @@ export default function NormalizeView() {
           {filtered.length} supplier{filtered.length !== 1 ? 's' : ''}
         </span>
 
-        {selectedIds.size >= 2 && (
+        {selectedSupplierIds.size >= 2 && (
           <button
             onClick={() => setShowMergeModal(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 transition-colors flex-shrink-0"
           >
             <Merge size={13} />
-            Merge {selectedIds.size}
+            Merge {selectedSupplierIds.size}
           </button>
         )}
 
@@ -748,7 +741,7 @@ export default function NormalizeView() {
                   const nr = row.normalized
                   const s = nr.supplier
                   const isExpanded = expanded.has(s.id)
-                  const isSelected = selectedIds.has(s.id)
+                  const isSelected = selectedSupplierIds.has(s.id)
                   const hasAliases = nr.aliasesLoaded ? nr.aliases.length > 0 : (s.aliases?.length ?? 0) > 0
 
                   return (

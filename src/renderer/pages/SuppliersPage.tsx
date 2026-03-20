@@ -144,7 +144,7 @@ export default function SuppliersPage() {
     setSaving(true)
     try {
       if (!newValue) {
-        await ipc.suppliers.removeParent(supplier.id)
+        await ipc.suppliers.assignParent([supplier.id], null)
         updateSuppliers(prev => prev.map(s =>
           s.id === supplier.id ? { ...s, parentSupplierId: null, parentName: null } : s
         ))
@@ -152,7 +152,7 @@ export default function SuppliersPage() {
         const parents = await ipc.suppliers.listParents()
         const existing = parents.find(p => p.name.toLowerCase() === newValue.toLowerCase())
         const parent = existing ?? await ipc.suppliers.addParent(newValue)
-        await ipc.suppliers.changeParent(supplier.id, parent.id)
+        await ipc.suppliers.assignParent([supplier.id], parent.id)
         updateSuppliers(prev => prev.map(s =>
           s.id === supplier.id ? { ...s, parentSupplierId: parent.id, parentName: parent.name } : s
         ))

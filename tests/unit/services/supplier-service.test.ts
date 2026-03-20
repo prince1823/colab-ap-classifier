@@ -127,6 +127,62 @@ describe('SupplierService', () => {
     });
   });
 
+  describe('mergeParents', () => {
+    it('should reassign child suppliers from losing parents to survivor and delete losers', async () => {
+      // Survivor exists in supplier_parents
+      vi.mocked(db.get).mockResolvedValue({ id: 'parent-survivor' });
+      vi.mocked(db.run).mockResolvedValue(undefined);
+
+      await service.mergeParents('parent-survivor', ['parent-loser-1', 'parent-loser-2']);
+
+      // Reassign child suppliers
+      expect(db.run).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE project_suppliers SET parent_supplier_id = ?'),
+        'parent-survivor',
+        'parent-loser-1',
+        'parent-loser-2'
+      );
+      // Delete losing parent rows
+      expect(db.run).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM supplier_parents'),
+        'parent-loser-1',
+        'parent-loser-2'
+      );
+    });
+
+    it('should preserve aliases — transactions are untouched during parent merge', async () => {
+      vi.mocked(db.get).mockResolvedValue({ id: 'parent-survivor' });
+      vi.mocked(db.run).mockResolvedValue(undefined);
+
+      await service.mergeParents('parent-survivor', ['parent-loser-1']);
+
+      // transactions table must not be touched — aliases live on original_supplier_name
+      const runCalls = vi.mocked(db.run).mock.calls;
+      const touchesTransactions = runCalls.some(([sql]) =>
+        typeof sql === 'string' && sql.toLowerCase().includes('transactions')
+      );
+      expect(touchesTransactions).toBe(false);
+    });
+
+    it('should throw if survivorId is a supplier ID, not a parent ID', async () => {
+      // supplier_parents lookup returns nothing — this is a supplier ID, not a parent ID
+      vi.mocked(db.get).mockResolvedValue(undefined);
+
+      await expect(service.mergeParents('supplier-id-not-parent', ['parent-loser-1']))
+        .rejects.toThrow('Survivor is not a valid parent');
+    });
+
+    it('should throw if survivor is included in losingIds', async () => {
+      await expect(service.mergeParents('parent-a', ['parent-a', 'parent-b']))
+        .rejects.toThrow('Survivor cannot be one of the losing parents');
+    });
+
+    it('should no-op when losingIds is empty', async () => {
+      await service.mergeParents('parent-survivor', []);
+      expect(db.run).not.toHaveBeenCalled();
+    });
+  });
+
   describe('filterTailSpend', () => {
     it('should return supplier IDs below threshold', async () => {
       // transactionColumnExists checks for spend_amount via db.get

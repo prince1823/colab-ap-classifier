@@ -94,10 +94,10 @@ export interface IPCInvokeMap {
   'suppliers:delete':          { args: [supplierId: string]; result: void };
   'suppliers:listParents':     { args: []; result: SupplierParent[] };
   'suppliers:addParent':       { args: [name: string]; result: SupplierParent };
-  'suppliers:changeParent':    { args: [supplierId: string, parentId: string | null]; result: void };
-  'suppliers:removeParent':    { args: [supplierId: string]; result: void };
+  'suppliers:assignParent':    { args: [supplierIds: string[], parentId: string | null]; result: void };
   'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
   'suppliers:deleteParent':    { args: [parentId: string]; result: void };
+  'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
 
   // Rules
   'rules:list':   { args: []; result: OverrideRule[] };

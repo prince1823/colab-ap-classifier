@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
-  Maximize2, Minimize2, Trash2, Plus, Search, X,
+  Trash2, Plus, Search, X,
   Merge, ArrowRightLeft,
 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
@@ -24,15 +24,8 @@ interface NormalizedRow {
   aliasesLoaded: boolean
 }
 
-type RowType = 'normalized' | 'alias'
-
 interface FlatRow {
-  type: RowType
-  // For normalized rows
-  normalized?: NormalizedRow
-  // For alias rows
-  alias?: AliasData
-  aliasNormalized?: NormalizedRow
+  normalized: NormalizedRow
 }
 
 // ── Component ────────────────────────────────────────────────────────
@@ -45,9 +38,6 @@ export default function NormalizeView() {
 
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Expanded state: set of supplier IDs whose aliases are visible
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
   // Alias cache: supplierId → AliasData[]
   const [aliasCache, setAliasCache] = useState<Map<string, AliasData[]>>(new Map())
 
@@ -59,6 +49,7 @@ export default function NormalizeView() {
   const COL_COUNT = 6
   const [focusedRowIndex, setFocusedRowIndex] = useState(0)
   const [focusedColIndex, setFocusedColIndex] = useState(0) // start on Parent
+  const [focusedAliasIndex, setFocusedAliasIndex] = useState(0) // which alias mini-cell is focused when col=2
   const outerRef = useRef<HTMLDivElement>(null)  // owns onKeyDown — always focus this
   const tableRef = useRef<HTMLDivElement>(null)  // scroll container
 
@@ -87,6 +78,9 @@ export default function NormalizeView() {
   // Pending parent delete confirmation (holds parentSupplierId)
   const [pendingDeleteParentRowId, setPendingDeleteParentRowId] = useState<string | null>(null)
 
+  // Track which supplier rows show all aliases vs first 4
+  const [expandedAliases, setExpandedAliases] = useState<Set<string>>(new Set())
+
   // Re-focus outer div whenever all modals/popovers/edits are closed (also on initial load)
   useEffect(() => {
     if (!loading && !showMergeModal && !reassigningAlias && !parentTypeahead && !editingId && !editingParentId) {
@@ -114,49 +108,32 @@ export default function NormalizeView() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // ── Load aliases on expand ────────────────────────────────────────
+  // ── Auto-load all aliases ────────────────────────────────────────
 
-  const loadAliases = useCallback(async (supplierId: string) => {
-    if (aliasCache.has(supplierId)) return
-    try {
-      const aliases = await ipc.suppliers.getAliases(supplierId)
-      // getAliases returns string[] of raw alias names
-      // We don't have per-alias spend/txn from backend yet, so we'll show the name only
-      const aliasData: AliasData[] = (aliases as string[]).map(name => ({
-        rawName: name,
-        spend: 0,
-        txnCount: 0,
-      }))
-      setAliasCache(prev => new Map(prev).set(supplierId, aliasData))
-    } catch {
-      // non-fatal
-    }
-  }, [aliasCache])
-
-  const toggleExpand = useCallback((supplierId: string) => {
-    setExpanded(prev => {
-      const next = new Set(prev)
-      if (next.has(supplierId)) {
-        next.delete(supplierId)
-      } else {
-        next.add(supplierId)
-        loadAliases(supplierId)
-      }
+  const loadAllAliases = useCallback(async (supplierIds: string[]) => {
+    const results = await Promise.all(
+      supplierIds.map(async (id) => {
+        try {
+          const aliases = await ipc.suppliers.getAliases(id)
+          return [id, (aliases as string[]).map(name => ({ rawName: name, spend: 0, txnCount: 0 }))] as const
+        } catch {
+          return [id, []] as const
+        }
+      })
+    )
+    setAliasCache(prev => {
+      const next = new Map(prev)
+      for (const [id, data] of results) next.set(id, data)
       return next
     })
-  }, [loadAliases])
+  }, [])
 
-  const allExpanded = suppliers.length > 0 && suppliers.every(s => expanded.has(s.id))
-
-  const toggleExpandAll = useCallback(() => {
-    if (allExpanded) {
-      setExpanded(new Set())
-    } else {
-      const allIds = suppliers.map(s => s.id)
-      setExpanded(new Set(allIds))
-      allIds.forEach(id => loadAliases(id))
+  useEffect(() => {
+    if (suppliers.length > 0) {
+      const unloaded = suppliers.filter(s => !aliasCache.has(s.id))
+      if (unloaded.length > 0) loadAllAliases(unloaded.map(s => s.id))
     }
-  }, [allExpanded, suppliers, loadAliases])
+  }, [suppliers, aliasCache, loadAllAliases])
 
   // ── Build normalized rows ─────────────────────────────────────────
 
@@ -182,20 +159,11 @@ export default function NormalizeView() {
     )
   }, [normalizedRows, searchQuery])
 
-  // ── Flatten into table rows ───────────────────────────────────────
+  // ── Flatten into table rows (aliases shown inline) ───────────────
 
   const flatRows: FlatRow[] = useMemo(() => {
-    const rows: FlatRow[] = []
-    for (const r of filtered) {
-      rows.push({ type: 'normalized', normalized: r })
-      if (expanded.has(r.supplier.id)) {
-        for (const a of r.aliases) {
-          rows.push({ type: 'alias', alias: a, aliasNormalized: r })
-        }
-      }
-    }
-    return rows
-  }, [filtered, expanded])
+    return filtered.map(r => ({ normalized: r }))
+  }, [filtered])
 
   // ── Actions ───────────────────────────────────────────────────────
 
@@ -223,7 +191,6 @@ export default function NormalizeView() {
     try {
       await ipc.suppliers.delete(supplierId)
       setSuppliers(prev => prev.filter(s => s.id !== supplierId))
-      setExpanded(prev => { const n = new Set(prev); n.delete(supplierId); return n })
       setSelectedIds(prev => { const n = new Set(prev); n.delete(supplierId); return n })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Delete failed')
@@ -309,7 +276,6 @@ export default function NormalizeView() {
       // Immediately remove losers from local state — no full reload, no visual disruption
       setSuppliers(prev => prev.filter(s => !losingSet.has(s.id)))
       setSelectedIds(prev => { const n = new Set(prev); losingSet.forEach(id => n.delete(id)); n.delete(survivorId); return n })
-      setExpanded(prev => { const n = new Set(prev); losingSet.forEach(id => n.delete(id)); return n })
       setAliasCache(prev => {
         const n = new Map(prev)
         losingSet.forEach(id => n.delete(id))
@@ -490,10 +456,10 @@ export default function NormalizeView() {
       return
     }
 
-    // Cmd+P: parent typeahead (normalized rows only)
+    // Cmd+P: parent typeahead
     if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
       e.preventDefault()
-      if (row.type === 'normalized' && row.normalized) {
+      if (row.normalized) {
         const el = tableRef.current?.querySelector(`[data-row-index="${focusedRowIndex}"]`)
         if (el) {
           const rect = el.getBoundingClientRect()
@@ -506,95 +472,104 @@ export default function NormalizeView() {
       return
     }
 
-    // Shift+R: reassign alias (alias rows only)
-    if (!e.metaKey && !e.ctrlKey && !e.altKey && e.shiftKey && e.key === 'R') {
-      e.preventDefault()
-      if (row.type === 'alias' && row.alias && row.aliasNormalized) {
-        setReassigningAlias({ alias: row.alias, normalized: row.aliasNormalized })
-      }
-      return
+    // Helper: get visible alias count for current row
+    const getVisibleAliasCount = () => {
+      const nr = row.normalized
+      if (!nr.aliasesLoaded || nr.aliases.length === 0) return 0
+      const showAll = expandedAliases.has(nr.supplier.id)
+      return showAll ? nr.aliases.length : Math.min(4, nr.aliases.length)
     }
 
     switch (e.key) {
       case 'ArrowUp': {
         e.preventDefault()
-        if (e.shiftKey) {
-          // Extend selection (normalized rows only)
-          for (let i = focusedRowIndex - 1; i >= 0; i--) {
-            if (flatRows[i].type === 'normalized' && flatRows[i].normalized) {
-              setFocusedRowIndex(i)
-              toggleSelect(flatRows[i].normalized!.supplier.id)
-              break
-            }
+        if (focusedColIndex === 2) {
+          // Navigate within alias mini-cells
+          if (focusedAliasIndex > 0) {
+            setFocusedAliasIndex(focusedAliasIndex - 1)
+            return
+          }
+          // At top alias — move to previous row, stay on alias col, focus last alias
+          if (focusedRowIndex > 0) {
+            setFocusedRowIndex(focusedRowIndex - 1)
+            const prevRow = flatRows[focusedRowIndex - 1]
+            const prevShowAll = expandedAliases.has(prevRow.normalized.supplier.id)
+            const prevCount = prevRow.normalized.aliasesLoaded
+              ? (prevShowAll ? prevRow.normalized.aliases.length : Math.min(4, prevRow.normalized.aliases.length))
+              : 0
+            setFocusedAliasIndex(Math.max(0, prevCount - 1))
+          }
+        } else if (e.shiftKey) {
+          const prev = focusedRowIndex - 1
+          if (prev >= 0) {
+            setFocusedRowIndex(prev)
+            toggleSelect(flatRows[prev].normalized.supplier.id)
           }
         } else {
           setFocusedRowIndex(Math.max(0, focusedRowIndex - 1))
+          setFocusedAliasIndex(0)
         }
         break
       }
       case 'ArrowDown': {
         e.preventDefault()
-        if (e.shiftKey) {
-          for (let i = focusedRowIndex + 1; i < flatRows.length; i++) {
-            if (flatRows[i].type === 'normalized' && flatRows[i].normalized) {
-              setFocusedRowIndex(i)
-              toggleSelect(flatRows[i].normalized!.supplier.id)
-              break
-            }
+        if (focusedColIndex === 2) {
+          const visCount = getVisibleAliasCount()
+          if (focusedAliasIndex < visCount - 1) {
+            setFocusedAliasIndex(focusedAliasIndex + 1)
+            return
+          }
+          // At bottom alias — move to next row, stay on alias col, focus first alias
+          if (focusedRowIndex < flatRows.length - 1) {
+            setFocusedRowIndex(focusedRowIndex + 1)
+            setFocusedAliasIndex(0)
+          }
+        } else if (e.shiftKey) {
+          const next = focusedRowIndex + 1
+          if (next < flatRows.length) {
+            setFocusedRowIndex(next)
+            toggleSelect(flatRows[next].normalized.supplier.id)
           }
         } else {
           setFocusedRowIndex(Math.min(flatRows.length - 1, focusedRowIndex + 1))
+          setFocusedAliasIndex(0)
         }
         break
       }
       case 'ArrowRight': {
         e.preventDefault()
-        if (e.metaKey || e.ctrlKey) {
-          // Cmd+Right: expand aliases
-          const nr = row.type === 'normalized' ? row.normalized
-            : row.type === 'alias' ? row.aliasNormalized : null
-          if (nr && !expanded.has(nr.supplier.id)) toggleExpand(nr.supplier.id)
-        } else {
-          setFocusedColIndex(c => Math.min(COL_COUNT - 1, c + 1))
+        if (focusedColIndex < COL_COUNT - 1) {
+          setFocusedColIndex(focusedColIndex + 1)
+          if (focusedColIndex + 1 === 2) setFocusedAliasIndex(0) // entering alias col
         }
         break
       }
       case 'ArrowLeft': {
         e.preventDefault()
-        if (e.metaKey || e.ctrlKey) {
-          // Cmd+Left: collapse aliases
-          const nr = row.type === 'normalized' ? row.normalized
-            : row.type === 'alias' ? row.aliasNormalized : null
-          if (nr && expanded.has(nr.supplier.id)) {
-            // If on an alias row, jump up to the normalized row first
-            if (row.type === 'alias') {
-              const parentIdx = flatRows.findIndex(
-                r => r.type === 'normalized' && r.normalized?.supplier.id === nr.supplier.id
-              )
-              if (parentIdx >= 0) setFocusedRowIndex(parentIdx)
-            }
-            toggleExpand(nr.supplier.id)
-          }
-        } else {
-          setFocusedColIndex(c => Math.max(0, c - 1))
+        if (focusedColIndex > 0) {
+          setFocusedColIndex(focusedColIndex - 1)
         }
         break
       }
       case 'Enter': {
         e.preventDefault()
-        if (row.type === 'normalized' && row.normalized) {
-          if (e.shiftKey) {
-            // Shift+Enter on parent column → inline edit parent name
-            if (focusedColIndex === 0 && row.normalized.supplier.parentName) {
-              startEditParent(row.normalized.supplier.id, row.normalized.supplier.parentName)
-            }
-            // Shift+Enter on name column → inline edit normalized name
-            else if (focusedColIndex === 1) {
-              startEdit(row.normalized.supplier.id, row.normalized.supplier.supplierName)
-            }
-          } else if (focusedColIndex <= 2) {
-            toggleSelect(row.normalized.supplier.id)
+        const nr = row.normalized
+        if (focusedColIndex === 2 && nr.aliasesLoaded && nr.aliases.length > 0) {
+          // Enter on a focused alias → reassign it
+          const showAll = expandedAliases.has(nr.supplier.id)
+          const visible = showAll ? nr.aliases : nr.aliases.slice(0, 4)
+          const alias = visible[focusedAliasIndex]
+          if (alias) {
+            setReassigningAlias({ alias, normalized: nr })
           }
+        } else if (e.shiftKey) {
+          if (focusedColIndex === 0 && nr.supplier.parentName) {
+            startEditParent(nr.supplier.id, nr.supplier.parentName)
+          } else if (focusedColIndex === 1) {
+            startEdit(nr.supplier.id, nr.supplier.supplierName)
+          }
+        } else if (focusedColIndex <= 1) {
+          toggleSelect(nr.supplier.id)
         }
         break
       }
@@ -606,7 +581,7 @@ export default function NormalizeView() {
         break
       }
     }
-  }, [flatRows, focusedRowIndex, focusedColIndex, expanded, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleExpand, toggleSelect, startEdit, startEditParent])
+  }, [flatRows, focusedRowIndex, focusedColIndex, focusedAliasIndex, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleSelect, startEdit, startEditParent, suppliers, focusOuter, expandedAliases])
 
   // Scroll focused row into view
   useEffect(() => {
@@ -614,9 +589,9 @@ export default function NormalizeView() {
     if (el) el.scrollIntoView({ block: 'nearest' })
   }, [focusedRowIndex])
 
-  // Helper: focused cell ring style
+  // Helper: focused cell ring style (suppress on alias col when navigating within aliases)
   const cellFocus = (rowIdx: number, colIdx: number) =>
-    rowIdx === focusedRowIndex && colIdx === focusedColIndex
+    rowIdx === focusedRowIndex && colIdx === focusedColIndex && !(colIdx === 2 && flatRows[rowIdx]?.normalized?.aliasesLoaded && flatRows[rowIdx]?.normalized?.aliases.length > 0)
       ? 'ring-2 ring-inset ring-blue-400'
       : ''
 
@@ -677,15 +652,7 @@ export default function NormalizeView() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Right: expand-all + search */}
-        <button
-          onClick={toggleExpandAll}
-          className="inline-flex items-center justify-center p-1.5 text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50 hover:text-gray-700 transition-colors flex-shrink-0 select-none"
-          title={allExpanded ? 'Collapse all' : 'Expand all'}
-        >
-          {allExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-        </button>
-
+        {/* Right: search */}
         <div className="relative w-48">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
           <input
@@ -722,7 +689,7 @@ export default function NormalizeView() {
               <tr className="bg-gray-50">
                 <th className="w-[18%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Parent</th>
                 <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Normalized Name</th>
-                <th className="w-[22%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Raw Alias</th>
+                <th className="w-[22%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Aliases</th>
                 <th className="w-[10%] px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Spend</th>
                 <th className="w-[7%] px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Txns</th>
                 <th className="w-24 px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Actions</th>
@@ -731,11 +698,8 @@ export default function NormalizeView() {
             <tbody>
               {flatRows.map((row, idx) => {
                 const isFocused = idx === focusedRowIndex
-
-                // ── Normalized name row ──
-                if (row.type === 'normalized' && row.normalized) {
-                  const nr = row.normalized
-                  const s = nr.supplier
+                const nr = row.normalized
+                const s = nr.supplier
                   const isSelected = selectedSupplierIds.has(s.id)
 
                   return (
@@ -748,7 +712,7 @@ export default function NormalizeView() {
                       onClick={() => setFocusedRowIndex(idx)}
                     >
                       {/* Col 0: Parent */}
-                      <td className={`px-3 py-2.5 text-gray-400 border border-gray-300 ${cellFocus(idx, 0)} ${cellSelect(0, isSelected)}`} onClick={() => { setFocusedColIndex(0) }}>
+                      <td className={`px-3 py-2.5 text-gray-400 border border-gray-300 align-top ${cellFocus(idx, 0)} ${cellSelect(0, isSelected)}`} onClick={() => { setFocusedColIndex(0) }}>
                         {editingParentId === s.id ? (
                           <input
                             ref={editParentInputRef}
@@ -817,7 +781,7 @@ export default function NormalizeView() {
                       </td>
 
                       {/* Col 1: Normalized name */}
-                      <td className={`px-3 py-2.5 border border-gray-300 ${cellFocus(idx, 1)} ${cellSelect(1, isSelected)}`} onClick={() => { setFocusedColIndex(1) }}>
+                      <td className={`px-3 py-2.5 border border-gray-300 align-top ${cellFocus(idx, 1)} ${cellSelect(1, isSelected)}`} onClick={() => { setFocusedColIndex(1) }}>
                         <div className="flex items-center gap-2">
                           {editingId === s.id ? (
                             <input
@@ -845,23 +809,82 @@ export default function NormalizeView() {
                         </div>
                       </td>
 
-                      {/* Col 2: Raw alias (empty for normalized row) */}
-                      <td className={`px-3 py-2.5 text-gray-400 italic border border-gray-300 ${cellFocus(idx, 2)} ${cellSelect(2, isSelected)}`} onClick={() => { setFocusedColIndex(2) }}>
-                        {nr.aliasesLoaded ? `${nr.aliases.length} alias${nr.aliases.length !== 1 ? 'es' : ''}` : '—'}
+                      {/* Col 2: Aliases (each in its own mini cell) */}
+                      <td className={`p-0 border border-gray-300 align-top ${cellFocus(idx, 2)} ${cellSelect(2, isSelected)}`} onClick={() => { setFocusedColIndex(2) }}>
+                        {nr.aliasesLoaded ? (
+                          nr.aliases.length > 0 ? (() => {
+                            const showAll = expandedAliases.has(s.id)
+                            const visible = showAll ? nr.aliases : nr.aliases.slice(0, 4)
+                            const remaining = nr.aliases.length - 4
+                            return (
+                              <div className="flex flex-col">
+                                {visible.map((alias, aliasIdx) => (
+                                  <div
+                                    key={alias.rawName}
+                                    className={`flex items-center justify-between gap-1 px-3 py-1 border-b border-gray-200 last:border-b-0 ${
+                                      isFocused && focusedColIndex === 2 && focusedAliasIndex === aliasIdx
+                                        ? 'bg-blue-50 ring-1 ring-inset ring-blue-300'
+                                        : ''
+                                    }`}
+                                    onClick={(e) => { e.stopPropagation(); setFocusedRowIndex(idx); setFocusedColIndex(2); setFocusedAliasIndex(aliasIdx) }}
+                                  >
+                                    <span className="text-stone-500 text-[11px] truncate" title={alias.rawName}>{alias.rawName}</span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        setReassigningAlias({ alias, normalized: nr })
+                                      }}
+                                      className="flex-shrink-0 rounded p-0.5 text-stone-300 hover:text-amber-500 transition-colors"
+                                      title="Reassign alias"
+                                    >
+                                      <ArrowRightLeft size={10} />
+                                    </button>
+                                  </div>
+                                ))}
+                                {remaining > 0 && !showAll && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setExpandedAliases(prev => { const n = new Set(prev); n.add(s.id); return n })
+                                    }}
+                                    className="text-[10px] text-blue-500 hover:text-blue-700 px-3 py-1 text-left transition-colors"
+                                  >
+                                    +{remaining} more
+                                  </button>
+                                )}
+                                {showAll && nr.aliases.length > 4 && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setExpandedAliases(prev => { const n = new Set(prev); n.delete(s.id); return n })
+                                    }}
+                                    className="text-[10px] text-blue-500 hover:text-blue-700 px-3 py-1 text-left border-t border-gray-200 transition-colors"
+                                  >
+                                    show less
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })() : (
+                            <div className="px-3 py-2"><span className="text-gray-300 italic text-[10px]">no aliases</span></div>
+                          )
+                        ) : (
+                          <div className="px-3 py-2"><span className="text-gray-300 text-[10px]">loading...</span></div>
+                        )}
                       </td>
 
                       {/* Col 3: Spend */}
-                      <td className={`px-3 py-2.5 text-right font-medium text-gray-700 tabular-nums border border-gray-300 ${cellFocus(idx, 3)} ${cellSelect(3, isSelected)}`} onClick={() => { setFocusedColIndex(3) }}>
+                      <td className={`px-3 py-2.5 text-right font-medium text-gray-700 tabular-nums border border-gray-300 align-top ${cellFocus(idx, 3)} ${cellSelect(3, isSelected)}`} onClick={() => { setFocusedColIndex(3) }}>
                         {fmtAbbrev(s.totalSpend)}
                       </td>
 
                       {/* Col 4: Txns */}
-                      <td className={`px-3 py-2.5 text-right text-gray-600 tabular-nums border border-gray-300 ${cellFocus(idx, 4)} ${cellSelect(4, isSelected)}`} onClick={() => { setFocusedColIndex(4) }}>
+                      <td className={`px-3 py-2.5 text-right text-gray-600 tabular-nums border border-gray-300 align-top ${cellFocus(idx, 4)} ${cellSelect(4, isSelected)}`} onClick={() => { setFocusedColIndex(4) }}>
                         {s.transactionCount.toLocaleString()}
                       </td>
 
                       {/* Col 5: Actions */}
-                      <td className={`px-2 py-2.5 border border-gray-300 ${cellFocus(idx, 5)} ${cellSelect(5, isSelected)}`} onClick={() => { setFocusedColIndex(5) }}>
+                      <td className={`px-2 py-2.5 border border-gray-300 align-top ${cellFocus(idx, 5)} ${cellSelect(5, isSelected)}`} onClick={() => { setFocusedColIndex(5) }}>
                         <div className="flex items-center justify-end gap-1 pr-1">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteNormalized(s.id) }}
@@ -874,65 +897,6 @@ export default function NormalizeView() {
                       </td>
                     </tr>
                   )
-                }
-
-                // ── Alias row ──
-                if (row.type === 'alias' && row.alias && row.aliasNormalized) {
-                  const alias = row.alias
-                  const nr = row.aliasNormalized
-
-                  return (
-                    <tr
-                      key={`alias-${nr.supplier.id}-${alias.rawName}`}
-                      data-row-index={idx}
-                      className={`cursor-pointer transition-colors ${
-                        isFocused ? 'bg-amber-50' : 'bg-orange-50/30 hover:bg-orange-50/50'
-                      }`}
-                      onClick={() => setFocusedRowIndex(idx)}
-                    >
-                      {/* Col 0: Empty parent cell */}
-                      <td className={`px-3 py-1.5 border border-orange-100 ${cellFocus(idx, 0)}`} onClick={() => { setFocusedColIndex(0) }} />
-
-                      {/* Col 1: Empty normalized name cell */}
-                      <td className={`px-3 py-1.5 border border-orange-100 ${cellFocus(idx, 1)}`} onClick={() => { setFocusedColIndex(1) }} />
-
-                      {/* Col 2: Alias name */}
-                      <td className={`px-3 py-1.5 border border-orange-100 ${cellFocus(idx, 2)}`} onClick={() => { setFocusedColIndex(2) }}>
-                        <div className="flex items-center gap-2 pl-3 border-l-2 border-orange-200">
-                          <span className="text-stone-500 text-[11px]">{alias.rawName}</span>
-                        </div>
-                      </td>
-
-                      {/* Col 3: Spend */}
-                      <td className={`px-3 py-1.5 text-right text-stone-400 tabular-nums border border-orange-100 ${cellFocus(idx, 3)}`} onClick={() => { setFocusedColIndex(3) }}>
-                        {alias.spend > 0 ? fmtAbbrev(alias.spend) : '—'}
-                      </td>
-
-                      {/* Col 4: Txns */}
-                      <td className={`px-3 py-1.5 text-right text-stone-400 tabular-nums border border-orange-100 ${cellFocus(idx, 4)}`} onClick={() => { setFocusedColIndex(4) }}>
-                        {alias.txnCount > 0 ? alias.txnCount.toLocaleString() : '—'}
-                      </td>
-
-                      {/* Col 5: Actions */}
-                      <td className={`px-2 py-1.5 border border-orange-100 ${cellFocus(idx, 5)}`} onClick={() => { setFocusedColIndex(5) }}>
-                        <div className="flex items-center justify-end gap-1 pr-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setReassigningAlias({ alias, normalized: nr })
-                            }}
-                            className="rounded p-1 text-stone-300 hover:text-amber-500 hover:bg-amber-50 transition-colors"
-                            title="Reassign alias (Shift+R)"
-                          >
-                            <ArrowRightLeft size={12} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                }
-
-                return null
               })}
             </tbody>
           </table>

@@ -81,6 +81,9 @@ export default function NormalizeView() {
   // Track which supplier rows show all aliases vs first 4
   const [expandedAliases, setExpandedAliases] = useState<Set<string>>(new Set())
 
+  // Selected alias: { supplierId, alias } — single select
+  const [selectedAlias, setSelectedAlias] = useState<{ supplierId: string; alias: AliasData; normalized: NormalizedRow } | null>(null)
+
   // Re-focus outer div whenever all modals/popovers/edits are closed (also on initial load)
   useEffect(() => {
     if (!loading && !showMergeModal && !reassigningAlias && !parentTypeahead && !editingId && !editingParentId) {
@@ -555,12 +558,16 @@ export default function NormalizeView() {
         e.preventDefault()
         const nr = row.normalized
         if (focusedColIndex === 2 && nr.aliasesLoaded && nr.aliases.length > 0) {
-          // Enter on a focused alias → reassign it
+          // Enter on a focused alias → toggle select it
           const showAll = expandedAliases.has(nr.supplier.id)
           const visible = showAll ? nr.aliases : nr.aliases.slice(0, 4)
           const alias = visible[focusedAliasIndex]
           if (alias) {
-            setReassigningAlias({ alias, normalized: nr })
+            setSelectedAlias(prev =>
+              prev && prev.supplierId === nr.supplier.id && prev.alias.rawName === alias.rawName
+                ? null
+                : { supplierId: nr.supplier.id, alias, normalized: nr }
+            )
           }
         } else if (e.shiftKey) {
           if (focusedColIndex === 0 && nr.supplier.parentName) {
@@ -575,13 +582,23 @@ export default function NormalizeView() {
       }
       case 'Escape': {
         e.preventDefault()
-        if (editingId) setEditingId(null)
+        if (selectedAlias) setSelectedAlias(null)
+        else if (editingId) setEditingId(null)
         else if (editingParentId) setEditingParentId(null)
         else setSelectedIds(new Set())
         break
       }
+      default: {
+        // Shift+R → reassign selected alias
+        if (e.shiftKey && e.key.toLowerCase() === 'r' && selectedAlias) {
+          e.preventDefault()
+          setReassigningAlias({ alias: selectedAlias.alias, normalized: selectedAlias.normalized })
+          setSelectedAlias(null)
+        }
+        break
+      }
     }
-  }, [flatRows, focusedRowIndex, focusedColIndex, focusedAliasIndex, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleSelect, startEdit, startEditParent, suppliers, focusOuter, expandedAliases])
+  }, [flatRows, focusedRowIndex, focusedColIndex, focusedAliasIndex, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleSelect, startEdit, startEditParent, suppliers, focusOuter, expandedAliases, selectedAlias])
 
   // Scroll focused row into view
   useEffect(() => {
@@ -649,8 +666,20 @@ export default function NormalizeView() {
           </button>
         )}
 
-        {/* Spacer */}
-        <div className="flex-1" />
+        {/* Keyboard shortcut hints */}
+        <div className="flex-1 flex items-center justify-center gap-3 text-[10px] text-gray-400 select-none">
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">↑↓</kbd> Navigate</span>
+          <span className="text-gray-300">·</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">⌘P</kbd> Assign Parent</span>
+          <span className="text-gray-300">·</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">⌘M</kbd> Merge</span>
+          <span className="text-gray-300">·</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">⇧Enter</kbd> Edit</span>
+          <span className="text-gray-300">·</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">Enter</kbd> Select Alias</span>
+          <span className="text-gray-300">·</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">⇧R</kbd> Reassign Alias</span>
+        </div>
 
         {/* Right: search */}
         <div className="relative w-48">
@@ -822,9 +851,11 @@ export default function NormalizeView() {
                                   <div
                                     key={alias.rawName}
                                     className={`flex items-center justify-between gap-1 px-3 py-1 border-b border-gray-200 last:border-b-0 ${
-                                      isFocused && focusedColIndex === 2 && focusedAliasIndex === aliasIdx
-                                        ? 'bg-blue-50 ring-1 ring-inset ring-blue-300'
-                                        : ''
+                                      selectedAlias && selectedAlias.supplierId === s.id && selectedAlias.alias.rawName === alias.rawName
+                                        ? 'bg-blue-100 ring-1 ring-inset ring-blue-400'
+                                        : isFocused && focusedColIndex === 2 && focusedAliasIndex === aliasIdx
+                                          ? 'bg-blue-50 ring-1 ring-inset ring-blue-300'
+                                          : ''
                                     }`}
                                     onClick={(e) => { e.stopPropagation(); setFocusedRowIndex(idx); setFocusedColIndex(2); setFocusedAliasIndex(aliasIdx) }}
                                   >

@@ -161,9 +161,10 @@ export default function OverrideRulesPage() {
 
   // Searchable taxonomy dropdown
   const filteredTaxonomyNodes = useMemo(() => {
-    if (!taxonomySearch.trim()) return taxonomyNodes
+    const l3Only = taxonomyNodes.filter(n => n.l3 !== null)
+    if (!taxonomySearch.trim()) return l3Only
     const q = taxonomySearch.toLowerCase()
-    return taxonomyNodes.filter(n => n.fullPath.toLowerCase().includes(q))
+    return l3Only.filter(n => n.fullPath.toLowerCase().includes(q))
   }, [taxonomyNodes, taxonomySearch])
 
   useEffect(() => {

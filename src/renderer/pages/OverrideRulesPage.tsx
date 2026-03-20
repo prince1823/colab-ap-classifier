@@ -28,6 +28,9 @@ export default function OverrideRulesPage() {
   // Conditions modal
   const [conditionsModalOpen, setConditionsModalOpen] = useState(false)
 
+  // Expanded conditions per rule
+  const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set())
+
   // Drag-and-drop reorder state
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [overIdx, setOverIdx] = useState<number | null>(null)
@@ -103,10 +106,13 @@ export default function OverrideRulesPage() {
   }
 
   const handleToggle = async (rule: OverrideRule) => {
+    // Optimistic update — no loading flash
+    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r))
     try {
       await ipc.rules.update(rule.id, { isActive: !rule.isActive })
-      await loadData()
     } catch (e) {
+      // Revert on failure
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: rule.isActive } : r))
       setError(e instanceof Error ? e.message : 'Failed to toggle rule')
     }
   }
@@ -158,9 +164,10 @@ export default function OverrideRulesPage() {
 
   // Searchable taxonomy dropdown
   const filteredTaxonomyNodes = useMemo(() => {
-    if (!taxonomySearch.trim()) return taxonomyNodes
+    const l3Only = taxonomyNodes.filter(n => n.l3 !== null)
+    if (!taxonomySearch.trim()) return l3Only
     const q = taxonomySearch.toLowerCase()
-    return taxonomyNodes.filter(n => n.fullPath.toLowerCase().includes(q))
+    return l3Only.filter(n => n.fullPath.toLowerCase().includes(q))
   }, [taxonomyNodes, taxonomySearch])
 
   useEffect(() => {
@@ -325,7 +332,7 @@ export default function OverrideRulesPage() {
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Conditions</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Priority</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Target</th>
-              <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Active</th>
+              <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Status</th>
               <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
             </tr>
           </thead>
@@ -349,7 +356,29 @@ export default function OverrideRulesPage() {
                 </td>
                 <td className="px-4 py-2 font-medium text-gray-900">{rule.name}</td>
                 <td className="max-w-xs px-4 py-2">
-                  <span className="text-[11px] text-gray-500 leading-tight line-clamp-2">{formatConditionSummary(rule)}</span>
+                  {(() => {
+                    const summary = formatConditionSummary(rule)
+                    const isExpanded = expandedConditions.has(rule.id)
+                    const isLong = summary.length > 80
+                    return (
+                      <div>
+                        <span className={`text-[11px] text-gray-500 leading-tight ${isExpanded ? '' : 'line-clamp-2'}`}>{summary}</span>
+                        {isLong && (
+                          <button
+                            onClick={() => setExpandedConditions(prev => {
+                              const next = new Set(prev)
+                              if (next.has(rule.id)) next.delete(rule.id)
+                              else next.add(rule.id)
+                              return next
+                            })}
+                            className="mt-0.5 block text-[10px] font-medium text-blue-600 hover:text-blue-800"
+                          >
+                            {isExpanded ? 'Show less' : 'Read more'}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </td>
                 <td className="px-4 py-2 text-center text-gray-600">{rule.priorityScore}</td>
                 <td className="px-4 py-2 text-xs text-gray-600">{getNodePath(rule.targetTaxonomyNodeId)}</td>
@@ -360,8 +389,12 @@ export default function OverrideRulesPage() {
                 </td>
                 <td className="px-4 py-2 text-right">
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => openEdit(rule)} className="text-xs text-blue-600 hover:text-blue-800">Edit</button>
-                    <button onClick={() => handleDelete(rule.id)} className="text-xs text-red-500 hover:text-red-700">Delete</button>
+                    <button onClick={() => openEdit(rule)} className="rounded p-1 text-blue-600 hover:bg-blue-50" title="Edit">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
+                    </button>
+                    <button onClick={() => handleDelete(rule.id)} className="rounded p-1 text-red-500 hover:bg-red-50" title="Delete">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                    </button>
                   </div>
                 </td>
               </tr>

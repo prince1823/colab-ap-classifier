@@ -68,12 +68,8 @@ export function registerSuppliersHandlers(
     return suppliers.addParent(name as string);
   });
 
-  registerHandler('suppliers:changeParent', async (_event, supplierId: unknown, parentId: unknown) => {
-    await suppliers.changeParent(supplierId as string, (parentId as string | null));
-  });
-
-  registerHandler('suppliers:removeParent', async (_event, supplierId: unknown) => {
-    await suppliers.removeParent(supplierId as string);
+  registerHandler('suppliers:assignParent', async (_event, supplierIds: unknown, parentId: unknown) => {
+    await suppliers.assignParent(supplierIds as string[], parentId as string | null);
   });
 
   registerHandler('suppliers:renameParent', async (_event, parentId: unknown, newName: unknown) => {
@@ -82,5 +78,9 @@ export function registerSuppliersHandlers(
 
   registerHandler('suppliers:deleteParent', async (_event, parentId: unknown) => {
     await suppliers.deleteParent(parentId as string);
+  });
+
+  registerHandler('suppliers:mergeParents', async (_event, survivorId: unknown, losingIds: unknown) => {
+    await suppliers.mergeParents(survivorId as string, losingIds as string[]);
   });
 }

@@ -100,9 +100,9 @@ export interface IPCInvokeMap {
   'suppliers:listParents':     { args: []; result: SupplierParent[] };
   'suppliers:addParent':       { args: [name: string]; result: SupplierParent };
   'suppliers:assignParent':    { args: [supplierIds: string[], parentId: string | null]; result: void };
-  'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
   'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
   'suppliers:deleteParent':    { args: [parentId: string]; result: void };
+  'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
 
   // Rules
   'rules:list':   { args: []; result: OverrideRule[] };

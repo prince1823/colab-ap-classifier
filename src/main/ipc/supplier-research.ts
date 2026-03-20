@@ -30,7 +30,7 @@ export function registerSupplierResearchHandlers(
     if (info.parentCompanyName) {
       const existing = await suppliers.findParentByName(info.parentCompanyName);
       const parent = existing ?? await suppliers.addParent(info.parentCompanyName);
-      await suppliers.changeParent(id, parent.id);
+      await suppliers.assignParent([id], parent.id);
     }
 
     // Persist research results to project_suppliers and mark as researched

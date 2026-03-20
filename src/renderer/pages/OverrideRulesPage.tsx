@@ -82,7 +82,7 @@ export default function OverrideRulesPage() {
       if (editingRule) {
         await ipc.rules.update(editingRule.id, { name, groupedConditions: grouped, targetTaxonomyNodeId: targetNodeId, priorityScore: priority })
       } else {
-        await ipc.rules.create({ name, source: 'project', groupedConditions: grouped, targetTaxonomyNodeId: targetNodeId, priorityScore: priority })
+        await ipc.rules.create({ name, groupedConditions: grouped, targetTaxonomyNodeId: targetNodeId, priorityScore: priority })
       }
       setShowEditor(false)
       await loadData()
@@ -323,7 +323,6 @@ export default function OverrideRulesPage() {
               <th className="w-8 px-1 py-3"></th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Name</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Conditions</th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Source</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Priority</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Target</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Active</th>
@@ -351,13 +350,6 @@ export default function OverrideRulesPage() {
                 <td className="px-4 py-2 font-medium text-gray-900">{rule.name}</td>
                 <td className="max-w-xs px-4 py-2">
                   <span className="text-[11px] text-gray-500 leading-tight line-clamp-2">{formatConditionSummary(rule)}</span>
-                </td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    rule.source === 'project' ? 'bg-blue-100 text-blue-700' :
-                    rule.source === 'taxonomy' ? 'bg-green-100 text-green-700' :
-                    'bg-purple-100 text-purple-700'
-                  }`}>{rule.source}</span>
                 </td>
                 <td className="px-4 py-2 text-center text-gray-600">{rule.priorityScore}</td>
                 <td className="px-4 py-2 text-xs text-gray-600">{getNodePath(rule.targetTaxonomyNodeId)}</td>

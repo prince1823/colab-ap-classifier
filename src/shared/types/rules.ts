@@ -1,11 +1,8 @@
 import type { GroupedFilter } from './transactions';
 
-export type OverrideRuleSource = 'project' | 'taxonomy' | 'global';
-
 export interface OverrideRule {
   id: string;
   name: string;
-  source: OverrideRuleSource;
   groupedConditions: GroupedFilter;
   targetTaxonomyNodeId: string;
   priorityScore: number;
@@ -15,7 +12,6 @@ export interface OverrideRule {
 
 export interface OverrideRuleCreate {
   name: string;
-  source?: OverrideRuleSource;
   groupedConditions: GroupedFilter;
   targetTaxonomyNodeId: string;
   priorityScore?: number;

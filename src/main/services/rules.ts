@@ -9,7 +9,6 @@ const PRIORITY_PRECISION_THRESHOLD = 1e-10;
 interface RuleRow {
   id: string;
   name: string;
-  source: string;
   grouped_conditions: string;
   target_taxonomy_node_id: string;
   priority: number;
@@ -25,7 +24,6 @@ function rowToRule(row: RuleRow): OverrideRule {
   return {
     id: row.id,
     name: row.name,
-    source: (row.source as OverrideRule['source']) || 'project',
     groupedConditions: grouped,
     targetTaxonomyNodeId: row.target_taxonomy_node_id,
     priorityScore: row.rank,

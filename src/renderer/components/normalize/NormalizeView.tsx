@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
-  ChevronRight, ChevronDown, ChevronsDown, ChevronsUp, Trash2, Plus, Search, X,
+  ChevronsDown, ChevronsUp, Trash2, Plus, Search, X,
   Merge, ArrowRightLeft,
 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
@@ -54,8 +54,11 @@ export default function NormalizeView() {
   // Selection: set of normalized supplier IDs
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  // Focus
+  // Focus — row + column (spreadsheet-style nav)
+  // Columns: 0=parent, 1=name, 2=alias, 3=spend, 4=txns, 5=actions
+  const COL_COUNT = 6
   const [focusedRowIndex, setFocusedRowIndex] = useState(0)
+  const [focusedColIndex, setFocusedColIndex] = useState(0) // start on Parent
   const outerRef = useRef<HTMLDivElement>(null)  // owns onKeyDown — always focus this
   const tableRef = useRef<HTMLDivElement>(null)  // scroll container
 
@@ -63,10 +66,15 @@ export default function NormalizeView() {
     setTimeout(() => outerRef.current?.focus(), 50)
   }, [])
 
-  // Inline editing
+  // Inline editing — normalized name
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
+
+  // Inline editing — parent name
+  const [editingParentId, setEditingParentId] = useState<string | null>(null)
+  const [editParentDraft, setEditParentDraft] = useState('')
+  const editParentInputRef = useRef<HTMLInputElement>(null)
 
   // Modals
   const [showMergeModal, setShowMergeModal] = useState(false)
@@ -77,10 +85,10 @@ export default function NormalizeView() {
 
   // Re-focus outer div whenever all modals/popovers/edits are closed (also on initial load)
   useEffect(() => {
-    if (!loading && !showMergeModal && !reassigningAlias && !parentTypeahead && !editingId) {
+    if (!loading && !showMergeModal && !reassigningAlias && !parentTypeahead && !editingId && !editingParentId) {
       outerRef.current?.focus()
     }
-  }, [loading, showMergeModal, reassigningAlias, parentTypeahead, editingId])
+  }, [loading, showMergeModal, reassigningAlias, parentTypeahead, editingId, editingParentId])
 
   // ── Data loading ──────────────────────────────────────────────────
 
@@ -254,6 +262,19 @@ export default function NormalizeView() {
     setParentTypeahead(null)
   }, [parents])
 
+  const handleRenameParent = useCallback(async (parentId: string, newName: string) => {
+    try {
+      await ipc.suppliers.renameParent(parentId, newName)
+      setParents(prev => prev.map(p => p.id === parentId ? { ...p, name: newName } : p))
+      setSuppliers(prev => prev.map(s =>
+        s.parentSupplierId === parentId ? { ...s, parentName: newName } : s
+      ))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Rename parent failed')
+    }
+    setEditingParentId(null)
+  }, [])
+
   const handleCreateParentAndAssign = useCallback(async (supplierId: string, name: string) => {
     try {
       const parent = await ipc.suppliers.addParent(name) as SupplierParent
@@ -331,6 +352,23 @@ export default function NormalizeView() {
     }
     focusOuter()
   }, [editDraft, suppliers, handleRename, focusOuter])
+
+  const startEditParent = useCallback((supplierId: string, currentParentName: string) => {
+    setEditingParentId(supplierId)
+    setEditParentDraft(currentParentName)
+    setTimeout(() => editParentInputRef.current?.focus(), 0)
+  }, [])
+
+  const commitEditParent = useCallback((supplierId: string) => {
+    const trimmed = editParentDraft.trim()
+    const supplier = suppliers.find(s => s.id === supplierId)
+    if (trimmed && supplier?.parentSupplierId && trimmed !== supplier.parentName) {
+      handleRenameParent(supplier.parentSupplierId, trimmed)
+    } else {
+      setEditingParentId(null)
+    }
+    focusOuter()
+  }, [editParentDraft, suppliers, handleRenameParent, focusOuter])
 
   // ── Selection ─────────────────────────────────────────────────────
 
@@ -423,28 +461,34 @@ export default function NormalizeView() {
       }
       case 'ArrowRight': {
         e.preventDefault()
-        if (row.type === 'normalized' && row.normalized) {
-          if (!expanded.has(row.normalized.supplier.id)) {
-            toggleExpand(row.normalized.supplier.id)
-          }
+        if (e.metaKey || e.ctrlKey) {
+          // Cmd+Right: expand aliases
+          const nr = row.type === 'normalized' ? row.normalized
+            : row.type === 'alias' ? row.aliasNormalized : null
+          if (nr && !expanded.has(nr.supplier.id)) toggleExpand(nr.supplier.id)
+        } else {
+          setFocusedColIndex(c => Math.min(COL_COUNT - 1, c + 1))
         }
         break
       }
       case 'ArrowLeft': {
         e.preventDefault()
-        if (row.type === 'normalized' && row.normalized) {
-          if (expanded.has(row.normalized.supplier.id)) {
-            toggleExpand(row.normalized.supplier.id)
+        if (e.metaKey || e.ctrlKey) {
+          // Cmd+Left: collapse aliases
+          const nr = row.type === 'normalized' ? row.normalized
+            : row.type === 'alias' ? row.aliasNormalized : null
+          if (nr && expanded.has(nr.supplier.id)) {
+            // If on an alias row, jump up to the normalized row first
+            if (row.type === 'alias') {
+              const parentIdx = flatRows.findIndex(
+                r => r.type === 'normalized' && r.normalized?.supplier.id === nr.supplier.id
+              )
+              if (parentIdx >= 0) setFocusedRowIndex(parentIdx)
+            }
+            toggleExpand(nr.supplier.id)
           }
-        } else if (row.type === 'alias' && row.aliasNormalized) {
-          // Collapse parent and jump to it
-          const parentIdx = flatRows.findIndex(
-            r => r.type === 'normalized' && r.normalized?.supplier.id === row.aliasNormalized!.supplier.id
-          )
-          if (parentIdx >= 0) {
-            setFocusedRowIndex(parentIdx)
-            toggleExpand(row.aliasNormalized.supplier.id)
-          }
+        } else {
+          setFocusedColIndex(c => Math.max(0, c - 1))
         }
         break
       }
@@ -452,8 +496,15 @@ export default function NormalizeView() {
         e.preventDefault()
         if (row.type === 'normalized' && row.normalized) {
           if (e.shiftKey) {
-            startEdit(row.normalized.supplier.id, row.normalized.supplier.supplierName)
-          } else {
+            // Shift+Enter on parent column → inline edit parent name
+            if (focusedColIndex === 0 && row.normalized.supplier.parentName) {
+              startEditParent(row.normalized.supplier.id, row.normalized.supplier.parentName)
+            }
+            // Shift+Enter on name column → inline edit normalized name
+            else if (focusedColIndex === 1) {
+              startEdit(row.normalized.supplier.id, row.normalized.supplier.supplierName)
+            }
+          } else if (focusedColIndex <= 2) {
             toggleSelect(row.normalized.supplier.id)
           }
         }
@@ -462,17 +513,30 @@ export default function NormalizeView() {
       case 'Escape': {
         e.preventDefault()
         if (editingId) setEditingId(null)
+        else if (editingParentId) setEditingParentId(null)
         else setSelectedIds(new Set())
         break
       }
     }
-  }, [flatRows, focusedRowIndex, expanded, selectedIds, editingId, showMergeModal, reassigningAlias, parentTypeahead, toggleExpand, toggleSelect, startEdit])
+  }, [flatRows, focusedRowIndex, focusedColIndex, expanded, selectedIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleExpand, toggleSelect, startEdit, startEditParent])
 
   // Scroll focused row into view
   useEffect(() => {
     const el = tableRef.current?.querySelector(`[data-row-index="${focusedRowIndex}"]`)
     if (el) el.scrollIntoView({ block: 'nearest' })
   }, [focusedRowIndex])
+
+  // Helper: focused cell ring style
+  const cellFocus = (rowIdx: number, colIdx: number) =>
+    rowIdx === focusedRowIndex && colIdx === focusedColIndex
+      ? 'ring-2 ring-inset ring-blue-400'
+      : ''
+
+  // Helper: selection highlight — only the focused column gets yellow bg on selected rows
+  const cellSelect = (colIdx: number, isSelected: boolean) =>
+    isSelected && colIdx === focusedColIndex
+      ? 'bg-yellow-100'
+      : ''
 
   // ── Loading state ─────────────────────────────────────────────────
 
@@ -489,7 +553,7 @@ export default function NormalizeView() {
 
   return (
     <div ref={outerRef} className="flex flex-col flex-1 overflow-hidden outline-none" onKeyDown={handleKeyDown} tabIndex={0}>
-      {/* Header: left side (count + merge) + right side (group-by + search) */}
+      {/* Header: left side (count + merge) + right side (expand-all + search) */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
         {/* Left: supplier count + merge button */}
         <span className="text-[10px] text-gray-400 flex-shrink-0">
@@ -552,7 +616,6 @@ export default function NormalizeView() {
           <table className="w-full border-collapse text-xs border border-gray-300">
             <thead className="sticky top-0 z-10">
               <tr className="bg-gray-50">
-                <th className="w-8 px-2 py-2.5 border border-gray-300" />
                 <th className="w-[18%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Parent</th>
                 <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Normalized Name</th>
                 <th className="w-[22%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Raw Alias</th>
@@ -569,33 +632,41 @@ export default function NormalizeView() {
                 if (row.type === 'normalized' && row.normalized) {
                   const nr = row.normalized
                   const s = nr.supplier
-                  const isExpanded = expanded.has(s.id)
                   const isSelected = selectedIds.has(s.id)
-                  const hasAliases = nr.aliasesLoaded ? nr.aliases.length > 0 : (s.aliases?.length ?? 0) > 0
 
                   return (
                     <tr
                       key={`norm-${s.id}`}
                       data-row-index={idx}
                       className={`cursor-pointer transition-colors ${
-                        isFocused ? 'bg-blue-50' : isSelected ? 'bg-violet-50/50' : 'hover:bg-gray-50/50'
+                        isFocused ? 'bg-blue-50' : 'hover:bg-gray-50/50'
                       }`}
-                      onClick={() => { setFocusedRowIndex(idx) }}
+                      onClick={() => setFocusedRowIndex(idx)}
                     >
-                      {/* Expand toggle */}
-                      <td className="px-2 py-2 text-center border border-gray-200">
-  <button
-                          onClick={(e) => { e.stopPropagation(); if (hasAliases) toggleExpand(s.id) }}
-                          className={`rounded p-0.5 transition-colors ${hasAliases ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 cursor-pointer' : 'text-gray-200 cursor-default'}`}
-                        >
-                          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                        </button>
-                      </td>
-
-                      {/* Parent column — always visible */}
-                      <td className="px-3 py-2 text-gray-400 border border-gray-200">
-                        {s.parentName ? (
-                          <span className="text-gray-600">{s.parentName}</span>
+                      {/* Col 0: Parent */}
+                      <td className={`px-3 py-2 text-gray-400 border border-gray-200 ${cellFocus(idx, 0)} ${cellSelect(0, isSelected)}`} onClick={() => { setFocusedColIndex(0) }}>
+                        {editingParentId === s.id ? (
+                          <input
+                            ref={editParentInputRef}
+                            value={editParentDraft}
+                            onChange={e => setEditParentDraft(e.target.value)}
+                            onBlur={() => commitEditParent(s.id)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') { e.stopPropagation(); commitEditParent(s.id) }
+                              if (e.key === 'Escape') { e.stopPropagation(); setEditingParentId(null); focusOuter() }
+                            }}
+                            className="w-full px-2 py-0.5 border border-blue-300 rounded text-xs outline-none focus:ring-1 focus:ring-blue-400"
+                            autoFocus
+                            onClick={e => e.stopPropagation()}
+                          />
+                        ) : s.parentName ? (
+                          <span
+                            className="text-gray-600 cursor-pointer hover:text-blue-600 transition-colors"
+                            onDoubleClick={() => startEditParent(s.id, s.parentName!)}
+                            title="Double-click or Shift+Enter to rename"
+                          >
+                            {s.parentName}
+                          </span>
                         ) : (
                           <span
                             className="inline-flex items-center gap-0.5 text-gray-300 hover:text-violet-500 cursor-pointer transition-colors"
@@ -610,8 +681,8 @@ export default function NormalizeView() {
                         )}
                       </td>
 
-                      {/* Normalized name */}
-                      <td className="px-3 py-2 border border-gray-200">
+                      {/* Col 1: Normalized name */}
+                      <td className={`px-3 py-2 border border-gray-200 ${cellFocus(idx, 1)} ${cellSelect(1, isSelected)}`} onClick={() => { setFocusedColIndex(1) }}>
                         <div className="flex items-center gap-2">
                           {editingId === s.id ? (
                             <input
@@ -629,11 +700,7 @@ export default function NormalizeView() {
                             />
                           ) : (
                             <span
-                              className={`font-medium cursor-pointer transition-colors hover:text-blue-600 ${
-                                isSelected
-                                  ? 'bg-yellow-100 text-yellow-900 px-1 rounded'
-                                  : 'text-gray-800'
-                              }`}
+                              className="font-medium cursor-pointer transition-colors hover:text-blue-600 text-gray-800"
                               onDoubleClick={() => startEdit(s.id, s.supplierName)}
                               title="Double-click to rename"
                             >
@@ -643,23 +710,24 @@ export default function NormalizeView() {
                         </div>
                       </td>
 
-                      {/* Raw alias (empty for normalized row) */}
-                      <td className="px-3 py-2 text-gray-300 italic border border-gray-200">
+                      {/* Col 2: Raw alias (empty for normalized row) */}
+                      <td className={`px-3 py-2 text-gray-300 italic border border-gray-200 ${cellFocus(idx, 2)} ${cellSelect(2, isSelected)}`} onClick={() => { setFocusedColIndex(2) }}>
                         {nr.aliasesLoaded ? `${nr.aliases.length} alias${nr.aliases.length !== 1 ? 'es' : ''}` : '—'}
                       </td>
 
-                      {/* Spend */}
-                      <td className="px-3 py-2 text-right font-medium text-gray-700 tabular-nums border border-gray-200">
+                      {/* Col 3: Spend */}
+                      <td className={`px-3 py-2 text-right font-medium text-gray-700 tabular-nums border border-gray-200 ${cellFocus(idx, 3)} ${cellSelect(3, isSelected)}`} onClick={() => { setFocusedColIndex(3) }}>
                         {fmtAbbrev(s.totalSpend)}
                       </td>
 
-                      {/* Txns */}
-                      <td className="px-3 py-2 text-right text-gray-500 tabular-nums border border-gray-200">
+                      {/* Col 4: Txns */}
+                      <td className={`px-3 py-2 text-right text-gray-500 tabular-nums border border-gray-200 ${cellFocus(idx, 4)} ${cellSelect(4, isSelected)}`} onClick={() => { setFocusedColIndex(4) }}>
                         {s.transactionCount.toLocaleString()}
                       </td>
 
-                      {/* Actions */}
-                      <td className="px-2 py-2 border border-gray-200">
+                      {/* Col 6: Actions */}
+                      {/* Col 5: Actions */}
+                      <td className={`px-2 py-2 border border-gray-200 ${cellFocus(idx, 5)} ${cellSelect(5, isSelected)}`} onClick={() => { setFocusedColIndex(5) }}>
                         <div className="flex items-center justify-end gap-1 pr-1">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteNormalized(s.id) }}
@@ -688,34 +756,31 @@ export default function NormalizeView() {
                       }`}
                       onClick={() => setFocusedRowIndex(idx)}
                     >
-                      {/* Indent */}
-                      <td className="px-2 py-1.5 border border-gray-200" />
+                      {/* Col 0: Empty parent cell */}
+                      <td className={`px-3 py-1.5 border border-gray-200 ${cellFocus(idx, 0)}`} onClick={() => { setFocusedColIndex(0) }} />
 
-                      {/* Empty parent cell */}
-                      <td className="px-3 py-1.5 border border-gray-200" />
+                      {/* Col 1: Empty normalized name cell */}
+                      <td className={`px-3 py-1.5 border border-gray-200 ${cellFocus(idx, 1)}`} onClick={() => { setFocusedColIndex(1) }} />
 
-                      {/* Empty normalized name cell */}
-                      <td className="px-3 py-1.5 border border-gray-200" />
-
-                      {/* Alias name */}
-                      <td className="px-3 py-1.5 border border-gray-200">
+                      {/* Col 2: Alias name */}
+                      <td className={`px-3 py-1.5 border border-gray-200 ${cellFocus(idx, 2)}`} onClick={() => { setFocusedColIndex(2) }}>
                         <div className="flex items-center gap-2 pl-2 border-l-2 border-gray-200">
                           <span className="text-gray-600">{alias.rawName}</span>
                         </div>
                       </td>
 
-                      {/* Spend */}
-                      <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums border border-gray-200">
+                      {/* Col 3: Spend */}
+                      <td className={`px-3 py-1.5 text-right text-gray-400 tabular-nums border border-gray-200 ${cellFocus(idx, 3)}`} onClick={() => { setFocusedColIndex(3) }}>
                         {alias.spend > 0 ? fmtAbbrev(alias.spend) : '—'}
                       </td>
 
-                      {/* Txns */}
-                      <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums border border-gray-200">
+                      {/* Col 4: Txns */}
+                      <td className={`px-3 py-1.5 text-right text-gray-400 tabular-nums border border-gray-200 ${cellFocus(idx, 4)}`} onClick={() => { setFocusedColIndex(4) }}>
                         {alias.txnCount > 0 ? alias.txnCount.toLocaleString() : '—'}
                       </td>
 
-                      {/* Actions */}
-                      <td className="px-2 py-1.5 border border-gray-200">
+                      {/* Col 5: Actions */}
+                      <td className={`px-2 py-1.5 border border-gray-200 ${cellFocus(idx, 5)}`} onClick={() => { setFocusedColIndex(5) }}>
                         <div className="flex items-center justify-end gap-1 pr-1">
                           <button
                             onClick={(e) => {

@@ -101,6 +101,11 @@ export default function SuppliersPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  // Reload supplier data when switching back from normalize tab
+  useEffect(() => {
+    if (viewMode === 'suppliers') loadData()
+  }, [viewMode]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Subscribe to research progress
   useEffect(() => {
     const unsub = ipc.suppliers.onResearchProgress((progress: ResearchProgress) => {

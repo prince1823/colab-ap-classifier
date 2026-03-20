@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
-  ChevronsDown, ChevronsUp, Trash2, Plus, Search, X,
+  Maximize2, Minimize2, Trash2, Plus, Search, X,
   Merge, ArrowRightLeft,
 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
@@ -582,7 +582,7 @@ export default function NormalizeView() {
           className="inline-flex items-center justify-center p-1.5 text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50 hover:text-gray-700 transition-colors flex-shrink-0 select-none"
           title={allExpanded ? 'Collapse all' : 'Expand all'}
         >
-          {allExpanded ? <ChevronsUp size={13} /> : <ChevronsDown size={13} />}
+          {allExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
         </button>
 
         <div className="relative w-48">

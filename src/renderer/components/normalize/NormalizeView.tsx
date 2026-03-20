@@ -339,6 +339,10 @@ export default function NormalizeView() {
         next.set(toId, [...toAliases, { rawName: aliasName, spend: 0, txnCount: 0 }])
         return next
       })
+      // Refresh spend totals — transactions moved, so both suppliers' spend changed
+      ipc.suppliers.list().then(fresh => {
+        setSuppliers(fresh as ProjectSupplierView[])
+      }).catch(() => {})
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Reassign failed')
     }

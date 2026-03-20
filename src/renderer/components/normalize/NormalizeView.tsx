@@ -778,7 +778,7 @@ export default function NormalizeView() {
                       <td
                         rowSpan={parentGroupInfo[idx]?.rowSpan ?? 1}
                         className={`px-3 py-2.5 text-gray-400 border border-gray-300 align-top ${cellFocus(idx, 0)} ${cellSelect(0, isSelected)}`}
-                        onClick={() => { setFocusedColIndex(0) }}
+                        onClick={(e) => { e.stopPropagation(); setFocusedRowIndex(idx); setFocusedColIndex(0) }}
                       >
                         {editingParentId === s.id ? (
                           <input
@@ -819,14 +819,14 @@ export default function NormalizeView() {
                             <span className="group/parent inline-flex items-center gap-1">
                               <span
                                 className="font-semibold text-gray-700 cursor-pointer hover:text-blue-600 transition-colors"
-                                onDoubleClick={() => startEditParent(s.id, s.parentName!)}
+                                onDoubleClick={(e) => { e.stopPropagation(); startEditParent(s.id, s.parentName!) }}
                                 title="Double-click or Shift+Enter to rename"
                               >
                                 {s.parentName}
                               </span>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setPendingDeleteParentRowId(s.id) }}
-                                className="opacity-0 group-hover/parent:opacity-100 rounded p-0.5 text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all"
+                                className="rounded p-0.5 text-stone-300 hover:text-red-400 transition-colors"
                                 title="Delete parent"
                               >
                                 <X size={11} />
@@ -868,7 +868,7 @@ export default function NormalizeView() {
                           ) : (
                             <span
                               className="font-medium cursor-pointer transition-colors hover:text-blue-600 text-gray-800"
-                              onDoubleClick={() => startEdit(s.id, s.supplierName)}
+                              onDoubleClick={(e) => { e.stopPropagation(); startEdit(s.id, s.supplierName) }}
                               title="Double-click to rename"
                             >
                               {s.supplierName}

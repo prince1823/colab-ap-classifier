@@ -1,20 +1,61 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import type { ProjectSupplierView } from '../../../shared/types/suppliers'
+import type { ProjectSupplierView, SupplierParent } from '../../../shared/types/suppliers'
 import { fmtAbbrev } from '../../utils/formatSpend'
 
-interface Props {
+interface MergeItem {
+  id: string
+  name: string
+  subtitle?: string
+  spend?: number
+  txnCount?: number
+}
+
+interface SupplierModeProps {
+  mode?: 'supplier'
   suppliers: ProjectSupplierView[]
   onMerge: (survivorId: string, losingIds: string[]) => void
   onClose: () => void
 }
 
-export default function MergeModal({ suppliers, onMerge, onClose }: Props) {
-  const [survivorId, setSurvivorId] = useState(suppliers[0]?.id ?? '')
+interface ParentModeProps {
+  mode: 'parent'
+  parents: SupplierParent[]
+  childCounts: Map<string, number>  // parentId → number of children
+  onMerge: (survivorId: string, losingIds: string[]) => void
+  onClose: () => void
+}
+
+type Props = SupplierModeProps | ParentModeProps
+
+function toItems(props: Props): MergeItem[] {
+  if (props.mode === 'parent') {
+    return props.parents.map(p => ({
+      id: p.id,
+      name: p.name,
+      subtitle: `${props.childCounts.get(p.id) ?? 0} supplier(s)`,
+    }))
+  }
+  // Default: supplier mode
+  return props.suppliers.map(s => ({
+    id: s.id,
+    name: s.supplierName,
+    subtitle: s.parentName ? `Parent: ${s.parentName}` : undefined,
+    spend: s.totalSpend,
+    txnCount: s.transactionCount,
+  }))
+}
+
+export default function MergeModal(props: Props) {
+  const { onMerge, onClose } = props
+  const items = toItems(props)
+  const isParentMode = props.mode === 'parent'
+
+  const [survivorId, setSurvivorId] = useState(items[0]?.id ?? '')
   const [loading, setLoading] = useState(false)
 
-  // focusIndex: 0..n-1 = supplier rows, n = Cancel, n+1 = Merge
-  const CANCEL_IDX = suppliers.length
-  const MERGE_IDX = suppliers.length + 1
+  // focusIndex: 0..n-1 = item rows, n = Cancel, n+1 = Merge
+  const CANCEL_IDX = items.length
+  const MERGE_IDX = items.length + 1
   const [focusIndex, setFocusIndex] = useState(0)
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -27,13 +68,13 @@ export default function MergeModal({ suppliers, onMerge, onClose }: Props) {
   const handleMerge = useCallback(async () => {
     if (!survivorId || loading) return
     setLoading(true)
-    const losingIds = suppliers.filter(s => s.id !== survivorId).map(s => s.id)
+    const losingIds = items.filter(s => s.id !== survivorId).map(s => s.id)
     await onMerge(survivorId, losingIds)
     setLoading(false)
-  }, [survivorId, loading, suppliers, onMerge])
+  }, [survivorId, loading, items, onMerge])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const total = suppliers.length + 2 // rows + Cancel + Merge
+    const total = items.length + 2 // rows + Cancel + Merge
 
     switch (e.key) {
       case 'ArrowDown': {
@@ -48,9 +89,8 @@ export default function MergeModal({ suppliers, onMerge, onClose }: Props) {
       }
       case 'Enter': {
         e.preventDefault()
-        if (focusIndex < suppliers.length) {
-          // Select this supplier as survivor
-          setSurvivorId(suppliers[focusIndex].id)
+        if (focusIndex < items.length) {
+          setSurvivorId(items[focusIndex].id)
         } else if (focusIndex === CANCEL_IDX) {
           onClose()
         } else if (focusIndex === MERGE_IDX) {
@@ -64,9 +104,11 @@ export default function MergeModal({ suppliers, onMerge, onClose }: Props) {
         break
       }
     }
-  }, [focusIndex, suppliers, CANCEL_IDX, MERGE_IDX, onClose, handleMerge])
+  }, [focusIndex, items, CANCEL_IDX, MERGE_IDX, onClose, handleMerge])
 
   const isFocusedBtn = (idx: number) => focusIndex === idx
+
+  const survivorName = items.find(s => s.id === survivorId)?.name ?? ''
 
   return (
     <div
@@ -82,20 +124,24 @@ export default function MergeModal({ suppliers, onMerge, onClose }: Props) {
       >
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-800">Merge Suppliers</h3>
+          <h3 className="text-sm font-semibold text-gray-800">
+            {isParentMode ? 'Merge Parents' : 'Merge Suppliers'}
+          </h3>
           <p className="text-[11px] text-gray-400 mt-0.5">
-            Select which name survives. Aliases from losing suppliers fold into the winner.
+            {isParentMode
+              ? 'Select which parent survives. Children from losing parents move to the winner.'
+              : 'Select which name survives. Aliases from losing suppliers fold into the winner.'}
           </p>
         </div>
 
-        {/* Supplier list */}
+        {/* Item list */}
         <div className="flex-1 overflow-y-auto px-5 py-3">
-          {suppliers.map((s, i) => {
+          {items.map((item, i) => {
             const isRowFocused = focusIndex === i
-            const isSurvivor = survivorId === s.id
+            const isSurvivor = survivorId === item.id
             return (
               <label
-                key={s.id}
+                key={item.id}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors mb-1 ${
                   isRowFocused
                     ? 'ring-2 ring-violet-400 bg-violet-50 border border-violet-200'
@@ -103,25 +149,31 @@ export default function MergeModal({ suppliers, onMerge, onClose }: Props) {
                     ? 'bg-violet-50 border border-violet-200'
                     : 'hover:bg-gray-50 border border-transparent'
                 }`}
-                onClick={() => { setSurvivorId(s.id); setFocusIndex(i) }}
+                onClick={() => { setSurvivorId(item.id); setFocusIndex(i) }}
               >
                 <input
                   type="radio"
                   name="survivor"
                   checked={isSurvivor}
-                  onChange={() => setSurvivorId(s.id)}
+                  onChange={() => setSurvivorId(item.id)}
                   className="accent-violet-600"
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium text-gray-800 truncate">{s.supplierName}</div>
-                  {s.parentName && (
-                    <div className="text-[10px] text-gray-400">Parent: {s.parentName}</div>
+                  <div className="text-xs font-medium text-gray-800 truncate">{item.name}</div>
+                  {item.subtitle && (
+                    <div className="text-[10px] text-gray-400">{item.subtitle}</div>
                   )}
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <div className="text-xs font-medium text-gray-700 tabular-nums">{fmtAbbrev(s.totalSpend)}</div>
-                  <div className="text-[10px] text-gray-400 tabular-nums">{s.transactionCount} txn</div>
-                </div>
+                {(item.spend !== undefined || item.txnCount !== undefined) && (
+                  <div className="text-right flex-shrink-0">
+                    {item.spend !== undefined && (
+                      <div className="text-xs font-medium text-gray-700 tabular-nums">{fmtAbbrev(item.spend)}</div>
+                    )}
+                    {item.txnCount !== undefined && (
+                      <div className="text-[10px] text-gray-400 tabular-nums">{item.txnCount} txn</div>
+                    )}
+                  </div>
+                )}
               </label>
             )
           })}
@@ -148,7 +200,7 @@ export default function MergeModal({ suppliers, onMerge, onClose }: Props) {
               isFocusedBtn(MERGE_IDX) ? 'ring-2 ring-violet-400 ring-offset-1' : ''
             }`}
           >
-            {loading ? 'Merging...' : `Merge into "${suppliers.find(s => s.id === survivorId)?.supplierName ?? ''}"`}
+            {loading ? 'Merging...' : `Merge into "${survivorName}"`}
           </button>
         </div>
       </div>

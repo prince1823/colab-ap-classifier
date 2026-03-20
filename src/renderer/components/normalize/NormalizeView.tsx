@@ -78,6 +78,7 @@ export default function NormalizeView() {
 
   // Modals
   const [showMergeModal, setShowMergeModal] = useState(false)
+  const [mergeMode, setMergeMode] = useState<'supplier' | 'parent'>('supplier')
   const [reassigningAlias, setReassigningAlias] = useState<{ alias: AliasData; normalized: NormalizedRow } | null>(null)
 
   // Parent typeahead
@@ -327,6 +328,37 @@ export default function NormalizeView() {
     setShowMergeModal(false)
   }, [])
 
+  const handleMergeParents = useCallback(async (survivorId: string, losingIds: string[]) => {
+    try {
+      await ipc.suppliers.mergeParents(survivorId, losingIds)
+
+      const losingSet = new Set(losingIds)
+      const survivorParent = parents.find(p => p.id === survivorId)
+
+      // Update local state: reassign children of losers to survivor, remove loser parents
+      setSuppliers(prev => prev.map(s =>
+        s.parentSupplierId && losingSet.has(s.parentSupplierId)
+          ? { ...s, parentSupplierId: survivorId, parentName: survivorParent?.name ?? null }
+          : s
+      ))
+      setParents(prev => prev.filter(p => !losingSet.has(p.id)))
+      setSelectedIds(new Set())
+
+      // Background refresh
+      Promise.all([
+        ipc.suppliers.list(),
+        ipc.suppliers.listParents(),
+      ]).then(([freshSuppliers, freshParents]) => {
+        setSuppliers(freshSuppliers as ProjectSupplierView[])
+        setParents(freshParents as SupplierParent[])
+      }).catch(() => {})
+
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Merge parents failed')
+    }
+    setShowMergeModal(false)
+  }, [parents])
+
   const handleReassignAlias = useCallback(async (aliasName: string, fromId: string, toId: string) => {
     try {
       await ipc.suppliers.assignAlias(toId, aliasName)
@@ -400,6 +432,24 @@ export default function NormalizeView() {
     [suppliers, selectedSupplierIds]
   )
 
+  // Unique parents from selected suppliers (for parent merge mode)
+  const selectedParents = useMemo(() => {
+    const parentIds = new Set<string>()
+    for (const sid of selectedSupplierIds) {
+      const sup = suppliers.find(s => s.id === sid)
+      if (sup?.parentSupplierId) parentIds.add(sup.parentSupplierId)
+    }
+    return parents.filter(p => parentIds.has(p.id))
+  }, [suppliers, parents, selectedSupplierIds])
+
+  const parentChildCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const p of selectedParents) {
+      counts.set(p.id, suppliers.filter(s => s.parentSupplierId === p.id).length)
+    }
+    return counts
+  }, [selectedParents, suppliers])
+
   // ── Keyboard navigation ───────────────────────────────────────────
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -412,7 +462,23 @@ export default function NormalizeView() {
     // Cmd+M: merge modal
     if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
       e.preventDefault()
-      if (selectedSupplierIds.size >= 2) setShowMergeModal(true)
+      if (selectedSupplierIds.size >= 2) {
+        if (focusedColIndex === 0) {
+          // Parent column focused — merge parents
+          const uniqueParentIds = new Set<string>()
+          for (const sid of selectedSupplierIds) {
+            const sup = suppliers.find(s => s.id === sid)
+            if (sup?.parentSupplierId) uniqueParentIds.add(sup.parentSupplierId)
+          }
+          if (uniqueParentIds.size >= 2) {
+            setMergeMode('parent')
+            setShowMergeModal(true)
+          }
+        } else {
+          setMergeMode('supplier')
+          setShowMergeModal(true)
+        }
+      }
       return
     }
 
@@ -576,7 +642,23 @@ export default function NormalizeView() {
 
         {selectedSupplierIds.size >= 2 && (
           <button
-            onClick={() => setShowMergeModal(true)}
+            onClick={() => {
+              if (focusedColIndex === 0) {
+                const uniqueParentIds = new Set<string>()
+                for (const sid of selectedSupplierIds) {
+                  const sup = suppliers.find(s => s.id === sid)
+                  if (sup?.parentSupplierId) uniqueParentIds.add(sup.parentSupplierId)
+                }
+                if (uniqueParentIds.size >= 2) {
+                  setMergeMode('parent')
+                } else {
+                  setMergeMode('supplier')
+                }
+              } else {
+                setMergeMode('supplier')
+              }
+              setShowMergeModal(true)
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 transition-colors flex-shrink-0"
           >
             <Merge size={13} />
@@ -850,7 +932,16 @@ export default function NormalizeView() {
       </div>
 
       {/* Merge modal */}
-      {showMergeModal && selectedSuppliers.length >= 2 && (
+      {showMergeModal && mergeMode === 'parent' && selectedParents.length >= 2 && (
+        <MergeModal
+          mode="parent"
+          parents={selectedParents}
+          childCounts={parentChildCounts}
+          onMerge={handleMergeParents}
+          onClose={() => { setShowMergeModal(false); focusOuter() }}
+        />
+      )}
+      {showMergeModal && mergeMode === 'supplier' && selectedSuppliers.length >= 2 && (
         <MergeModal
           suppliers={selectedSuppliers}
           onMerge={handleMerge}

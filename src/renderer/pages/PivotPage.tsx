@@ -2,6 +2,7 @@ import { useMemo, useCallback, useEffect, useState } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
+import CreateRuleModal from '../components/review/CreateRuleModal'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useReclassification } from '../hooks/useReclassification'
@@ -77,6 +78,7 @@ export default function PivotPage() {
 
   // Transient UI state (OK to lose on tab switch)
   const [drillDownRow, setDrillDownRow] = useState<FlattenedPivotRow | null>(null)
+  const [createRuleRows, setCreateRuleRows] = useState<FlattenedPivotRow[] | null>(null)
 
   // Flat conditions derived from grouped for backward compat (chips, badge count, etc.)
   const advancedConditions = useMemo(() =>
@@ -160,6 +162,10 @@ export default function PivotPage() {
     reclassify.open(rows)
   }, [reclassify])
 
+  const handleCreateRule = useCallback((rows: FlattenedPivotRow[]) => {
+    setCreateRuleRows(rows)
+  }, [])
+
   return (
     <div className="flex flex-col h-full p-4 gap-3">
       <div className="flex-shrink-0 flex items-center justify-between">
@@ -167,7 +173,7 @@ export default function PivotPage() {
           <h2 className="text-lg font-semibold text-gray-900">Review</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Navigate with arrow keys, Enter to select rows.
-            <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | ⌘S supplier info | Double-click to filter</span>
+            <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | ⌘L create rule | ⌘S supplier info | Double-click to filter</span>
           </p>
         </div>
       </div>
@@ -191,8 +197,9 @@ export default function PivotPage() {
           spendDisplayMode={spendDisplayMode}
           onSpendDisplayModeChange={setSpendDisplayMode}
           onReclassify={handleReclassify}
+          onCreateRule={handleCreateRule}
           onDrillDown={setDrillDownRow}
-          modalOpen={reclassify.isOpen || showAdvancedFilter}
+          modalOpen={reclassify.isOpen || showAdvancedFilter || !!createRuleRows}
           advancedFilterCount={advancedConditions.length}
           onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
           advancedConditions={advancedConditions}
@@ -234,6 +241,13 @@ export default function PivotPage() {
         availableFields={advancedFilterFields}
         pillFilterState={filterState}
         onClearPillFilters={() => setFilterState({})}
+      />
+
+      <CreateRuleModal
+        isOpen={!!createRuleRows}
+        onClose={() => setCreateRuleRows(null)}
+        selectedRows={createRuleRows ?? []}
+        onCreated={refetch}
       />
     </div>
   )

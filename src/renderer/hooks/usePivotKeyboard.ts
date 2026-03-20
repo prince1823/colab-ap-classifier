@@ -9,6 +9,7 @@ interface UsePivotKeyboardOptions {
   onCmdK: (rows: FlattenedPivotRow[]) => void
   onCmdF: (rows: FlattenedPivotRow[]) => void
   onCmdS?: (rows: FlattenedPivotRow[]) => void
+  onCmdL?: (rows: FlattenedPivotRow[]) => void
   onToggleExpand: (key: string) => void
   onClearAllFilters: () => void
   disabled: boolean
@@ -29,6 +30,7 @@ export function usePivotKeyboard({
   onCmdK,
   onCmdF,
   onCmdS,
+  onCmdL,
   onToggleExpand,
   onClearAllFilters,
   disabled,
@@ -229,6 +231,14 @@ export function usePivotKeyboard({
         }
         break
       }
+      case 'l': {
+        if (metaKey && onCmdL) {
+          e.preventDefault()
+          const rows = getExplicitlySelectedRows()
+          if (rows.length > 0) onCmdL(rows)
+        }
+        break
+      }
       case 'Escape': {
         // Only clear filters when Escape is pressed on the table itself,
         // not when it bubbles from a filter popover or modal
@@ -246,7 +256,7 @@ export function usePivotKeyboard({
         break
       }
     }
-  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onCmdS, onToggleExpand, onClearAllFilters, getSelectedRows, getExplicitlySelectedRows, clearSelection])
+  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onCmdS, onCmdL, onToggleExpand, onClearAllFilters, getSelectedRows, getExplicitlySelectedRows, clearSelection])
 
   return {
     focusedIndex,

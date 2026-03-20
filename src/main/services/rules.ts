@@ -17,10 +17,20 @@ interface RuleRow {
   created_at: string;
 }
 
+function parseGroupedConditions(raw: unknown): GroupedFilter {
+  const fallback: GroupedFilter = { groupConnector: 'AND', groups: [] };
+  if (!raw) return fallback;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (parsed && typeof parsed === 'object' && Array.isArray((parsed as GroupedFilter).groups)) {
+      return parsed as GroupedFilter;
+    }
+  } catch { /* ignore */ }
+  return fallback;
+}
+
 function rowToRule(row: RuleRow): OverrideRule {
-  const grouped: GroupedFilter = typeof row.grouped_conditions === 'string'
-    ? JSON.parse(row.grouped_conditions)
-    : row.grouped_conditions;
+  const grouped = parseGroupedConditions(row.grouped_conditions);
   return {
     id: row.id,
     name: row.name,

@@ -185,10 +185,10 @@ export interface SupplierService {
   listParents(): Promise<SupplierParent[]>;
   addParent(name: string): Promise<SupplierParent>;
   findParentByName(name: string): Promise<SupplierParent | null>;
-  changeParent(supplierId: string, parentId: string | null): Promise<void>;
-  removeParent(supplierId: string): Promise<void>;
+  assignParent(supplierIds: string[], parentId: string | null): Promise<void>;
   renameParent(parentId: string, newName: string): Promise<void>;
   deleteParent(parentId: string): Promise<void>;
+  mergeParents(survivorId: string, losingIds: string[]): Promise<void>;
 }
 
 export interface RuleStore {

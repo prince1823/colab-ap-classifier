@@ -147,10 +147,10 @@ export const ipc = {
     delete: (supplierId: string) => invoke('suppliers:delete', supplierId),
     listParents: () => invoke('suppliers:listParents'),
     addParent: (name: string) => invoke('suppliers:addParent', name),
-    changeParent: (supplierId: string, parentId: string | null) => invoke('suppliers:changeParent', supplierId, parentId),
-    removeParent: (supplierId: string) => invoke('suppliers:removeParent', supplierId),
+    assignParent: (supplierIds: string[], parentId: string | null) => invoke('suppliers:assignParent', supplierIds, parentId),
     renameParent: (parentId: string, newName: string) => invoke('suppliers:renameParent', parentId, newName),
     deleteParent: (parentId: string) => invoke('suppliers:deleteParent', parentId),
+    mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
   },
 
   // ── Rules (4 channels) ──

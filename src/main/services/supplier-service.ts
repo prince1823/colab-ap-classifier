@@ -136,11 +136,7 @@ export class SupplierService implements ISupplierService {
        FROM transactions t
        WHERE t.project_supplier_id = ?
        AND t.original_supplier_name IS NOT NULL
-       AND t.original_supplier_name != (
-         SELECT supplier_name FROM project_suppliers WHERE id = ?
-       )
        ORDER BY t.original_supplier_name`,
-      supplierId,
       supplierId
     );
     return rows.map(r => r.original_supplier_name);
@@ -171,6 +167,30 @@ export class SupplierService implements ISupplierService {
     );
     await this.db.run(
       `DELETE FROM project_suppliers WHERE id IN (${placeholders})`,
+      ...losingIds
+    );
+  }
+
+  async mergeParents(survivorId: string, losingIds: string[]): Promise<void> {
+    if (losingIds.length === 0) return;
+    if (losingIds.includes(survivorId)) {
+      throw new Error('Survivor cannot be one of the losing parents');
+    }
+    const survivor = await this.db.get<{ id: string }>(
+      'SELECT id FROM supplier_parents WHERE id = ?',
+      survivorId
+    );
+    if (!survivor) {
+      throw new Error(`Survivor is not a valid parent: ${survivorId}`);
+    }
+    const placeholders = losingIds.map(() => '?').join(',');
+    await this.db.run(
+      `UPDATE project_suppliers SET parent_supplier_id = ? WHERE parent_supplier_id IN (${placeholders})`,
+      survivorId,
+      ...losingIds
+    );
+    await this.db.run(
+      `DELETE FROM supplier_parents WHERE id IN (${placeholders})`,
       ...losingIds
     );
   }
@@ -360,15 +380,12 @@ export class SupplierService implements ISupplierService {
       total_spend: number | bigint;
     }>(sql, ...allParams);
 
-    // Bulk-fetch project-local aliases (distinct raw names per supplier, excluding canonical name)
+    // Bulk-fetch project-local aliases (all distinct raw names per supplier)
     const aliasRows = await this.db.all<{ project_supplier_id: string; original_supplier_name: string }>(
       `SELECT DISTINCT t.project_supplier_id, t.original_supplier_name
        FROM transactions t
        WHERE t.project_supplier_id IS NOT NULL
-       AND t.original_supplier_name IS NOT NULL
-       AND t.original_supplier_name != (
-         SELECT ps.supplier_name FROM project_suppliers ps WHERE ps.id = t.project_supplier_id
-       )`
+       AND t.original_supplier_name IS NOT NULL`
     );
     const aliasMap = new Map<string, string[]>();
     for (const r of aliasRows) {
@@ -474,16 +491,14 @@ export class SupplierService implements ISupplierService {
     return { id: row.id, name: row.name, createdAt: String(row.created_at) };
   }
 
-  async changeParent(supplierId: string, parentId: string | null): Promise<void> {
+  async assignParent(supplierIds: string[], parentId: string | null): Promise<void> {
+    if (supplierIds.length === 0) return;
+    const placeholders = supplierIds.map(() => '?').join(',');
     await this.db.run(
-      'UPDATE project_suppliers SET parent_supplier_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      `UPDATE project_suppliers SET parent_supplier_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
       parentId,
-      supplierId
+      ...supplierIds
     );
-  }
-
-  async removeParent(supplierId: string): Promise<void> {
-    return this.changeParent(supplierId, null);
   }
 
   async renameParent(parentId: string, newName: string): Promise<void> {

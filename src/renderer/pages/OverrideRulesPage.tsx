@@ -44,9 +44,9 @@ export default function OverrideRulesPage() {
         ipc.taxonomy.getNodes(),
         ipc.transactions.getFilterFields(),
       ])
-      setRules(r)
-      setTaxonomyNodes(n)
-      setFilterFields(fields)
+      setRules(r ?? [])
+      setTaxonomyNodes(n ?? [])
+      setFilterFields(fields ?? [])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load rules')
     } finally {
@@ -70,7 +70,7 @@ export default function OverrideRulesPage() {
   const openEdit = (rule: OverrideRule) => {
     setEditingRule(rule)
     setName(rule.name)
-    setGrouped(rule.groupedConditions.groups.length > 0 ? rule.groupedConditions : { groupConnector: 'AND', groups: [makeEmptyGroup()] })
+    setGrouped(rule.groupedConditions?.groups?.length > 0 ? rule.groupedConditions : { groupConnector: 'AND', groups: [makeEmptyGroup()] })
     setTargetNodeId(rule.targetTaxonomyNodeId)
     setPriority(rule.priorityScore)
     setTaxonomySearch('')
@@ -190,7 +190,7 @@ export default function OverrideRulesPage() {
 
   const formatConditionSummary = (rule: OverrideRule) => {
     const { groupedConditions } = rule
-    if (groupedConditions.groups.length === 0) return 'No conditions'
+    if (!groupedConditions?.groups?.length) return 'No conditions'
     return groupedConditions.groups.map((g, gi) => {
       const groupStr = g.conditions
         .filter(c => c.field)

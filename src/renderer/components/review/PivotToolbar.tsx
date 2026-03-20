@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Plus, X, ChevronUp, ChevronDown, Filter, Layers, Pin } from 'lucide-react'
+import { Plus, X, ChevronUp, ChevronDown, Filter, Layers, Pin, Flag } from 'lucide-react'
 import { useDrag, useDrop } from 'react-dnd'
 import * as Popover from '@radix-ui/react-popover'
 import type { Aggregation, SpendDisplayMode } from '../../types/pivot'
@@ -62,6 +62,9 @@ interface PivotToolbarProps {
   /* Advanced filter */
   advancedFilterCount?: number
   onOpenAdvancedFilter?: () => void
+  /* Flagged for review toggle */
+  flaggedForReviewOnly?: boolean
+  onFlaggedForReviewOnlyChange?: (on: boolean) => void
 }
 
 /** Columns to exclude from the filter list (non-filterable) */
@@ -94,6 +97,8 @@ export default function PivotToolbar({
   showSpendToggle,
   advancedFilterCount = 0,
   onOpenAdvancedFilter,
+  flaggedForReviewOnly = false,
+  onFlaggedForReviewOnlyChange,
 }: PivotToolbarProps) {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [addMenuSearch, setAddMenuSearch] = useState('')
@@ -402,8 +407,19 @@ export default function PivotToolbar({
         )}
       </div>
 
-      {/* Collapse cycle + Review — right side */}
+      {/* Flagged for review toggle + Collapse cycle — right side */}
       <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
+        {onFlaggedForReviewOnlyChange && (
+          <button
+            className={`pivot-toolbar-icon-btn${flaggedForReviewOnly ? ' pivot-toolbar-icon-btn-active' : ''}`}
+            onClick={() => onFlaggedForReviewOnlyChange(!flaggedForReviewOnly)}
+            title={flaggedForReviewOnly ? 'Showing flagged for review — click to show all' : 'Show only flagged for review'}
+            data-active={flaggedForReviewOnly ? '' : undefined}
+          >
+            <Flag size={12} />
+            <span style={{ fontSize: 9, fontWeight: 700, marginLeft: 2 }}>Review</span>
+          </button>
+        )}
         <button
           className="pivot-toolbar-icon-btn"
           onClick={onCycleCollapse}

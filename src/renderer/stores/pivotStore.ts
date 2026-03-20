@@ -18,6 +18,8 @@ interface PivotState {
   advancedGrouped: GroupedFilter | null
   /** Whether the advanced filter modal is open */
   showAdvancedFilter: boolean
+  /** Toggle: show only rows flagged for review */
+  flaggedForReviewOnly: boolean
 
   // Actions
   setRowDimensions: (dims: string[]) => void
@@ -27,6 +29,7 @@ interface PivotState {
   setSpendDisplayMode: (mode: SpendDisplayMode) => void
   setAdvancedGrouped: (grouped: GroupedFilter | null) => void
   setShowAdvancedFilter: (show: boolean) => void
+  setFlaggedForReviewOnly: (on: boolean) => void
   clearAllFilters: () => void
   /** Reset all state (e.g., on project switch) */
   reset: () => void
@@ -40,6 +43,7 @@ const INITIAL_STATE = {
   spendDisplayMode: 'absolute' as SpendDisplayMode,
   advancedGrouped: null as GroupedFilter | null,
   showAdvancedFilter: false,
+  flaggedForReviewOnly: false,
 }
 
 export const usePivotStore = create<PivotState>()((set) => ({
@@ -52,6 +56,7 @@ export const usePivotStore = create<PivotState>()((set) => ({
   setSpendDisplayMode: (mode) => set({ spendDisplayMode: mode }),
   setAdvancedGrouped: (grouped) => set({ advancedGrouped: grouped }),
   setShowAdvancedFilter: (show) => set({ showAdvancedFilter: show }),
-  clearAllFilters: () => set({ filterState: {}, advancedGrouped: null }),
+  setFlaggedForReviewOnly: (on) => set({ flaggedForReviewOnly: on }),
+  clearAllFilters: () => set({ filterState: {}, advancedGrouped: null, flaggedForReviewOnly: false }),
   reset: () => set(INITIAL_STATE),
 }))

@@ -17,12 +17,29 @@ interface RuleRow {
   created_at: string;
 }
 
+function parseConditions(raw: unknown): OverrideRule['conditions'] {
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; }
+    catch { return []; }
+  }
+  if (Array.isArray(raw)) return raw;
+  // DuckDB may return JSON as a nested object — try common wrapper patterns
+  if (typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    if (Array.isArray(obj.value)) return obj.value;
+    // If it's a single condition object, wrap it
+    if ('field' in obj && 'operator' in obj) return [obj as unknown as OverrideRule['conditions'][0]];
+  }
+  return [];
+}
+
 function rowToRule(row: RuleRow): OverrideRule {
   return {
     id: row.id,
     name: row.name,
     source: (row.source as OverrideRule['source']) || 'project',
-    conditions: typeof row.conditions === 'string' ? JSON.parse(row.conditions) : row.conditions,
+    conditions: parseConditions(row.conditions),
     targetTaxonomyNodeId: row.target_taxonomy_node_id,
     priorityScore: row.rank,
     isActive: row.is_active,

@@ -30,9 +30,9 @@ export default function OverrideRulesPage() {
         ipc.taxonomy.getNodes(),
         ipc.transactions.getColumns(),
       ])
-      setRules(r)
-      setTaxonomyNodes(n)
-      setColumns(cols)
+      setRules(r ?? [])
+      setTaxonomyNodes(n ?? [])
+      setColumns(cols ?? [])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load rules')
     } finally {
@@ -54,7 +54,7 @@ export default function OverrideRulesPage() {
   const openEdit = (rule: OverrideRule) => {
     setEditingRule(rule)
     setName(rule.name)
-    setConditions(rule.conditions.length > 0 ? rule.conditions.map(c => ({ ...c, connector: c.connector || 'AND' })) : [{ field: '', operator: 'equals', value: '', connector: 'AND' }])
+    setConditions(rule.conditions?.length > 0 ? rule.conditions.map(c => ({ ...c, connector: c.connector || 'AND' })) : [{ field: '', operator: 'equals', value: '', connector: 'AND' }])
     setTargetNodeId(rule.targetTaxonomyNodeId)
     setPriority(rule.priorityScore)
     setShowEditor(true)
@@ -98,8 +98,8 @@ export default function OverrideRulesPage() {
 
   const getNodePath = (nodeId: string) => taxonomyNodes.find((n) => n.id === nodeId)?.fullPath || nodeId
 
-  const formatConditionSummary = (conds: FilterCondition[]) => {
-    if (conds.length === 0) return 'No conditions'
+  const formatConditionSummary = (conds: FilterCondition[] | undefined | null) => {
+    if (!conds || conds.length === 0) return 'No conditions'
     return conds.map((c, i) => {
       const parts = `${c.field} ${OPERATOR_LABELS[c.operator]} "${c.value}"`
       if (i < conds.length - 1) {

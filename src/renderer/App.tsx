@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import AppShell from './components/AppShell'
+import ErrorBoundary from './components/review/ErrorBoundary'
 import LicenseGate from './components/LicenseGate'
 import ProjectView from './views/ProjectView'
 import TaxonomyView from './views/TaxonomyView'
@@ -14,6 +15,7 @@ import VersionHistoryView from './views/VersionHistoryView'
 
 function App() {
   return (
+    <ErrorBoundary>
     <DndProvider backend={HTML5Backend}>
     <LicenseGate>
       <Routes>
@@ -31,6 +33,7 @@ function App() {
       </Routes>
     </LicenseGate>
     </DndProvider>
+    </ErrorBoundary>
   )
 }
 

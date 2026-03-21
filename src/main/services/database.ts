@@ -254,6 +254,14 @@ export class DuckDBDatabase implements Database {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name);
       `);
     }
+
+    // Migrate: ensure source column exists on override_rules
+    const sourceCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'source'"
+    );
+    if (sourceCol.length === 0) {
+      await this.exec("ALTER TABLE override_rules ADD COLUMN source VARCHAR DEFAULT 'manual'");
+    }
   }
 
   async closeDatabase(): Promise<void> {
@@ -366,6 +374,7 @@ export class DuckDBDatabase implements Database {
         target_taxonomy_node_id VARCHAR NOT NULL,
         priority DOUBLE NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
+        source VARCHAR DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 

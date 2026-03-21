@@ -158,6 +158,22 @@ export default function PivotPage() {
     [filterableColumns, supplierSuggestions]
   )
 
+  const [generating, setGenerating] = useState(false)
+
+  const handleGenerateRules = useCallback(async () => {
+    setGenerating(true)
+    try {
+      await ipc.transactions.markAllReviewed()
+      const result = await ipc.rules.generate()
+      alert(`Created ${result.rulesCreated} rules for ${result.suppliersProcessed} suppliers.`)
+      refetch()
+    } catch (err) {
+      alert(`Error generating rules: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setGenerating(false)
+    }
+  }, [refetch])
+
   const handleExport = useCallback(async () => {
     await ipc.export.csv(filter)
   }, [filter])
@@ -180,6 +196,13 @@ export default function PivotPage() {
             <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | ⌘L create rule | ⌘S supplier info | Double-click to filter</span>
           </p>
         </div>
+        <button
+          onClick={handleGenerateRules}
+          disabled={generating}
+          className="px-3 py-1 rounded-md border border-gray-300 text-[11px] font-medium text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {generating ? 'Generating...' : 'Generate Rules'}
+        </button>
       </div>
 
       <div className="flex-1 min-h-0">

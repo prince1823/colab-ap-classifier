@@ -24,7 +24,7 @@ import type {
 import type { ClassificationProgress, ResearchProgress, QCProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
 import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
 import type { FeedbackAnalyzeInput, FeedbackRecommendation, FeedbackApplyInput } from './feedback';
@@ -63,6 +63,7 @@ export interface IPCInvokeMap {
   'transactions:pivotAggregation':  { args: [dimensions: string[], valueDimension: string, filters?: TransactionFilter]; result: PivotAggregationResult };
   'transactions:getIdsByConditions': { args: [conditions: FilterCondition[]]; result: string[] };
   'transactions:getFilterFields':    { args: []; result: FieldDefinition[] };
+  'transactions:markAllReviewed':   { args: []; result: number };
 
   // Classification
   'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
@@ -106,10 +107,11 @@ export interface IPCInvokeMap {
   'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
 
   // Rules
-  'rules:list':   { args: []; result: OverrideRule[] };
-  'rules:create': { args: [input: OverrideRuleCreate]; result: { id: string } };
-  'rules:update': { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
-  'rules:delete': { args: [ruleId: string]; result: void };
+  'rules:list':     { args: []; result: OverrideRule[] };
+  'rules:create':   { args: [input: OverrideRuleCreate]; result: { id: string } };
+  'rules:update':   { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
+  'rules:delete':   { args: [ruleId: string]; result: void };
+  'rules:generate': { args: []; result: GenerateRulesResult };
 
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };

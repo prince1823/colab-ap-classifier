@@ -10,6 +10,7 @@ import {
   createMockChangelogStore,
   createMockTransactionStore,
   createMockSupplierUniverse,
+  createMockProjectStore,
 } from '../helpers/mock-services';
 import { RuleStore } from '../../src/main/services/rules';
 import { TransactionStore } from '../../src/main/services/transactions';
@@ -25,7 +26,7 @@ describe('Integration: Rules', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db = createMockDatabase();
-    rules = new RuleStore(db, createMockTransactionStore());
+    rules = new RuleStore(db, createMockTransactionStore(), createMockProjectStore());
   });
 
   it('should list rules with parsed conditions', async () => {

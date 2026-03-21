@@ -1,5 +1,7 @@
 import type { GroupedFilter } from './transactions';
 
+export type RuleSource = 'manual' | 'auto_generated';
+
 export interface OverrideRule {
   id: string;
   name: string;
@@ -7,6 +9,7 @@ export interface OverrideRule {
   targetTaxonomyNodeId: string;
   priorityScore: number;
   isActive: boolean;
+  source: RuleSource;
   createdAt: string;
 }
 
@@ -15,6 +18,7 @@ export interface OverrideRuleCreate {
   groupedConditions: GroupedFilter;
   targetTaxonomyNodeId: string;
   priorityScore?: number;
+  source?: RuleSource;
 }
 
 export interface OverrideRuleUpdate {
@@ -23,4 +27,9 @@ export interface OverrideRuleUpdate {
   targetTaxonomyNodeId?: string;
   priorityScore?: number;
   isActive?: boolean;
+}
+
+export interface GenerateRulesResult {
+  rulesCreated: number;
+  suppliersProcessed: number;
 }

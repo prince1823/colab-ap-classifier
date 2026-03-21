@@ -96,7 +96,7 @@ export function createContainer(): ServiceContainer {
   const project = new ProjectStore(db, transactions, supplierUniverse);
   const taxonomy = new TaxonomyStore(db, project);
   const suppliers = new SupplierService(db, supplierUniverse);
-  const rules = new RuleStore(db, transactions);
+  const rules = new RuleStore(db, transactions, project);
   const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
   const exportSvc = new ExportService(db);
 

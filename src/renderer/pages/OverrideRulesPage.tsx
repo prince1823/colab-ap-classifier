@@ -332,6 +332,7 @@ export default function OverrideRulesPage() {
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Conditions</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Priority</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Target</th>
+              <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Source</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Status</th>
               <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
             </tr>
@@ -382,6 +383,15 @@ export default function OverrideRulesPage() {
                 </td>
                 <td className="px-4 py-2 text-center text-gray-600">{rule.priorityScore}</td>
                 <td className="px-4 py-2 text-xs text-gray-600">{getNodePath(rule.targetTaxonomyNodeId)}</td>
+                <td className="px-4 py-2 text-center">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    rule.source === 'auto_generated'
+                      ? 'bg-purple-50 text-purple-700'
+                      : 'bg-gray-100 text-gray-600'
+                  }`}>
+                    {rule.source === 'auto_generated' ? 'Auto' : 'Manual'}
+                  </span>
+                </td>
                 <td className="px-4 py-2 text-center">
                   <button onClick={() => handleToggle(rule)} className={`text-xs font-medium ${rule.isActive ? 'text-green-600' : 'text-gray-400'}`}>
                     {rule.isActive ? 'Active' : 'Inactive'}

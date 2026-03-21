@@ -752,4 +752,17 @@ export class TransactionStore implements ITransactionStore {
     const rows = await this.db.all<{ id: string }>(sql, ...params);
     return rows.map((r) => String(r.id));
   }
+
+  async markAllReviewed(): Promise<number> {
+    const result = await this.db.get<{ cnt: number }>(
+      "SELECT COUNT(*) as cnt FROM transactions WHERE human_reviewed = FALSE"
+    );
+    const count = Number(result?.cnt ?? 0);
+    if (count > 0) {
+      await this.db.run(
+        "UPDATE transactions SET human_reviewed = TRUE, updated_at = CURRENT_TIMESTAMP WHERE human_reviewed = FALSE"
+      );
+    }
+    return count;
+  }
 }

@@ -56,4 +56,8 @@ export function registerTransactionsHandlers(transactions: TransactionStore): vo
   registerHandler('transactions:getFilterFields', async () => {
     return transactions.getFilterFields();
   });
+
+  registerHandler('transactions:markAllReviewed', async () => {
+    return transactions.markAllReviewed();
+  });
 }

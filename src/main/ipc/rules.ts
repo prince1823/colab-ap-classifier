@@ -18,4 +18,8 @@ export function registerRulesHandlers(rules: RuleStore): void {
   registerHandler('rules:delete', async (_event, ruleId: unknown) => {
     return rules.deleteRule(ruleId as string);
   });
+
+  registerHandler('rules:generate', async () => {
+    return rules.generate_rules_preview();
+  });
 }

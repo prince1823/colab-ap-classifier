@@ -30,6 +30,9 @@ const PRESET_LABELS: Record<ScopePreset, string> = {
 
 export default function ClassificationPage() {
   const storeProgress = useWorkflowStore((s) => s.classificationProgress)
+  const subscribeToClassificationProgress = useWorkflowStore((s) => s.subscribeToClassificationProgress)
+  const subscribeToQCProgress = useWorkflowStore((s) => s.subscribeToQCProgress)
+  const qcProgress = useWorkflowStore((s) => s.qcProgress)
 
   // Local copy that persists terminal states even after the store clears progress
   const [localProgress, setLocalProgress] = useState<ClassificationProgress | null>(storeProgress)
@@ -40,10 +43,13 @@ export default function ClassificationPage() {
   const [customConditions, setCustomConditions] = useState<FilterCondition[]>([])
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
 
-  // Load filter fields on mount
+  // Load filter fields on mount, subscribe to classification + QC progress via store
   useEffect(() => {
     ipc.transactions.getFilterFields().then(setFilterFields).catch(console.error)
-  }, [])
+    const unsubscribeClassification = subscribeToClassificationProgress()
+    const unsubscribeQC = subscribeToQCProgress()
+    return () => { unsubscribeClassification(); unsubscribeQC() }
+  }, [subscribeToClassificationProgress, subscribeToQCProgress])
 
   // Sync local state from the store.
   useEffect(() => {
@@ -60,6 +66,23 @@ export default function ClassificationPage() {
     localProgress !== null && localProgress.status === 'running'
 
   const isCompleted = localProgress?.status === 'completed'
+  const isQCRunning = qcProgress?.status === 'running'
+
+  const [qcPendingCount, setQCPendingCount] = useState<number | null>(null)
+
+  const handleRunQC = async () => {
+    const count = await ipc.qc.count({ humanReviewed: false })
+    setQCPendingCount(count)
+  }
+
+  const handleConfirmQC = async () => {
+    setQCPendingCount(null)
+    await ipc.qc.start({ humanReviewed: false })
+  }
+
+  const handleCancelQC = () => {
+    setQCPendingCount(null)
+  }
 
   // Compute the active conditions based on preset
   const activeConditions: FilterCondition[] = preset === 'custom'
@@ -155,13 +178,49 @@ export default function ClassificationPage() {
 
       {localProgress && <ProgressDisplay progress={localProgress} />}
 
-      {isCompleted && (
-        <div className="rounded-md bg-green-50 p-4 text-sm text-green-700">
-          You can now go to the <strong>Review</strong> tab to examine the results, or to <strong>Output</strong> to export.
+      <div className="space-y-2">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleRunQC}
+            disabled={isQCRunning || qcPendingCount !== null}
+            title="Runs on all classified rows where human review has not been applied"
+            className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+              !isQCRunning && qcPendingCount === null
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'cursor-not-allowed bg-gray-100 text-gray-400'
+            }`}
+          >
+            {isQCRunning ? 'Running QC…' : 'Run QC Agent'}
+          </button>
+          {isCompleted && !isQCRunning && qcPendingCount === null && (
+            <p className="text-sm text-gray-500">
+              You can now go to the <strong>Review</strong> tab to examine the results, or to <strong>Output</strong> to export.
+            </p>
+          )}
         </div>
-      )}
+        {qcPendingCount !== null && (
+          <div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm">
+            <span className="text-blue-800">
+              <strong>{qcPendingCount}</strong> supplier{qcPendingCount !== 1 ? 's' : ''} will be QC&apos;d (unreviewed rows only).
+            </span>
+            <button
+              onClick={handleConfirmQC}
+              className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={handleCancelQC}
+              className="rounded border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
 
-      {!isRunning && !localProgress && !error && (
+
+{!isRunning && !localProgress && !error && (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">
           <p className="text-sm">No classification in progress.</p>
           <p className="mt-1 text-xs">Select a scope and click &quot;Start Classification&quot; to begin.</p>

@@ -71,7 +71,8 @@ export interface IPCInvokeMap {
   'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
 
   // QC
-  'qc:start':     { args: []; result: void };
+  'qc:start':     { args: [filter?: TransactionFilter]; result: void };
+  'qc:count':     { args: [filter?: TransactionFilter]; result: number };
   'qc:cancel':    { args: []; result: void };
   'qc:isRunning': { args: []; result: boolean };
 

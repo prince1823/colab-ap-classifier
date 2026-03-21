@@ -76,9 +76,10 @@ export const ipc = {
       on('classification:progress', callback),
   },
 
-  // ── QC (3 channels + 1 event) ──
+  // ── QC (4 channels + 1 event) ──
   qc: {
-    start: () => invoke('qc:start'),
+    count: (filter?: TransactionFilter) => invoke('qc:count', filter),
+    start: (filter?: TransactionFilter) => invoke('qc:start', filter),
     cancel: () => invoke('qc:cancel'),
     isRunning: () => invoke('qc:isRunning'),
     onProgress: (callback: (progress: QCProgress) => void) =>

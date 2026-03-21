@@ -242,7 +242,8 @@ export interface ClassificationRunner {
 }
 
 export interface QCRunner {
-  runQC(): Promise<void>;
+  runQC(filter?: TransactionFilter): Promise<void>;
+  getSupplierCount(filter?: TransactionFilter): Promise<number>;
   getIsRunning(): boolean;
   cancel(): void;
 }

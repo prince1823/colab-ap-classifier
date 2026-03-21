@@ -39,9 +39,9 @@ export default function OverrideRulesPage() {
   // Expanded conditions per rule
   const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set())
 
-  // Drag-and-drop reorder state
-  const [dragIdx, setDragIdx] = useState<number | null>(null)
-  const [overIdx, setOverIdx] = useState<number | null>(null)
+  // Drag-and-drop reorder — refs only, no React state during drag for performance
+  const dragIdxRef = useRef<number | null>(null)
+  const prevOverRow = useRef<HTMLElement | null>(null)
 
   const loadData = async () => {
     setLoading(true)
@@ -125,50 +125,71 @@ export default function OverrideRulesPage() {
     }
   }
 
-  // Drag-and-drop reorder
+  // Drag-and-drop reorder — all visual feedback via DOM, zero React re-renders during drag
   const handleDragStart = useCallback((e: React.DragEvent, idx: number) => {
-    setDragIdx(idx)
+    dragIdxRef.current = idx
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', String(idx))
-    // Make the dragged row semi-transparent
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '0.4'
-    }
+    requestAnimationFrame(() => {
+      if (e.currentTarget instanceof HTMLElement) {
+        e.currentTarget.style.opacity = '0.4'
+      }
+    })
   }, [])
 
   const handleDragEnd = useCallback((e: React.DragEvent) => {
     if (e.currentTarget instanceof HTMLElement) {
       e.currentTarget.style.opacity = '1'
     }
-    setDragIdx(null)
-    setOverIdx(null)
+    if (prevOverRow.current) {
+      prevOverRow.current.style.borderTop = ''
+      prevOverRow.current = null
+    }
+    dragIdxRef.current = null
   }, [])
 
-  const handleDragOver = useCallback((e: React.DragEvent, idx: number) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    setOverIdx(idx)
+    const row = (e.currentTarget as HTMLElement)
+    if (prevOverRow.current !== row) {
+      if (prevOverRow.current) prevOverRow.current.style.borderTop = ''
+      if (dragIdxRef.current !== null) {
+        row.style.borderTop = '2px solid #60a5fa'
+      }
+      prevOverRow.current = row
+    }
   }, [])
 
   const handleDrop = useCallback(async (e: React.DragEvent, toIdx: number) => {
     e.preventDefault()
-    const fromIdx = dragIdx
-    setDragIdx(null)
-    setOverIdx(null)
+    if (prevOverRow.current) {
+      prevOverRow.current.style.borderTop = ''
+      prevOverRow.current = null
+    }
+    const fromIdx = dragIdxRef.current
+    dragIdxRef.current = null
     if (fromIdx === null || fromIdx === toIdx) return
 
     const rule = rules[fromIdx]
     if (!rule) return
 
-    // New rank is 1-based position (toIdx + 1)
+    // Optimistically reorder locally
+    const reordered = [...rules]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    const updated = reordered.map((r, i) => ({ ...r, priorityScore: i + 1 }))
+    setRules(updated)
+
+    // Persist to backend silently
     const newRank = toIdx + 1
     try {
       await ipc.rules.update(rule.id, { priorityScore: newRank })
-      await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to reorder rule')
+      await loadData()
     }
-  }, [dragIdx, rules])
+  }, [rules])
 
   // Searchable taxonomy dropdown
   const filteredTaxonomyNodes = useMemo(() => {
@@ -559,13 +580,9 @@ export default function OverrideRulesPage() {
                   draggable={groupBy === 'none'}
                   onDragStart={groupBy === 'none' ? (e) => handleDragStart(e, idx) : undefined}
                   onDragEnd={groupBy === 'none' ? handleDragEnd : undefined}
-                  onDragOver={groupBy === 'none' ? (e) => handleDragOver(e, idx) : undefined}
+                  onDragOver={groupBy === 'none' ? handleDragOver : undefined}
                   onDrop={groupBy === 'none' ? (e) => handleDrop(e, idx) : undefined}
-                  className={`hover:bg-gray-50 ${
-                    groupBy === 'none' && overIdx === idx && dragIdx !== null && dragIdx !== idx
-                      ? 'border-t-2 border-blue-400'
-                      : ''
-                  }`}
+                  className="hover:bg-gray-50"
                 >
                   <td className="w-8 px-1 py-2 text-center text-gray-300 hover:text-gray-500">
                     {groupBy === 'none' && (
@@ -573,13 +590,8 @@ export default function OverrideRulesPage() {
                     )}
                   </td>
                   <td className="px-4 py-2 font-medium text-gray-900">
+                    <span className="text-gray-400 mr-1">{rule.priorityScore})</span>
                     {rule.name}
-                    <sup
-                      className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 px-1 text-[9px] font-bold text-white shadow-sm"
-                      title={`Priority: ${rule.priorityScore}`}
-                    >
-                      {rule.priorityScore}
-                    </sup>
                   </td>
                   <td className="max-w-xs px-4 py-2">
                     {(() => {

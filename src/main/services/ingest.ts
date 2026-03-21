@@ -130,16 +130,28 @@ function readFilePrefix(filePath: string, maxBytes: number = PREVIEW_BUFFER_SIZE
 async function countLines(filePath: string): Promise<number> {
   return new Promise((resolve, reject) => {
     let lineCount = 0;
+    let lastByte = 0;
+    let totalBytes = 0;
     const stream = fs.createReadStream(filePath, { highWaterMark: 256 * 1024 });
     stream.on('data', (chunk: string | Buffer) => {
       const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
       for (let i = 0; i < buf.length; i++) {
         if (buf[i] === 0x0a) lineCount++;
       }
+      if (buf.length > 0) {
+        lastByte = buf[buf.length - 1];
+        totalBytes += buf.length;
+      }
     });
     stream.on('end', () => {
-      // Subtract header row; handle files with no trailing newline
-      resolve(Math.max(0, lineCount > 0 ? lineCount - 1 : 0));
+      if (totalBytes === 0) {
+        resolve(0);
+        return;
+      }
+      // If file doesn't end with newline, the last line wasn't counted
+      if (lastByte !== 0x0a) lineCount++;
+      // Subtract 1 for the header row
+      resolve(Math.max(0, lineCount - 1));
     });
     stream.on('error', reject);
   });
@@ -276,7 +288,11 @@ export class IngestService implements IIngestService {
   }
 
   private emitProgress(progress: IngestProgress): void {
-    this.eventBus.emit('ingest:progress', progress);
+    try {
+      this.eventBus.emit('ingest:progress', progress);
+    } catch {
+      // Never let a listener error crash the import
+    }
   }
 
   async importCSV(
@@ -308,6 +324,14 @@ export class IngestService implements IIngestService {
       canonical === 'supplier_name' ? 'original_supplier_name' : canonical;
 
     const canonicalNames = Object.keys(mapping);
+
+    // Validate canonical names are safe identifiers before using in SQL
+    for (const canonical of canonicalNames) {
+      const col = dbColumn(canonical);
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(col)) {
+        throw new Error(`Invalid column name: ${col}`);
+      }
+    }
 
     // ALTER TABLE to add mapped canonical columns
     const existingColumns = await this.db.all<{ column_name: string }>(
@@ -390,7 +414,7 @@ export class IngestService implements IIngestService {
                 status: 'running',
                 totalRows: estimatedTotal,
                 processedRows: rowsInserted,
-                percentage: estimatedTotal > 0 ? Math.round((rowsInserted / estimatedTotal) * 100) : 0,
+                percentage: estimatedTotal > 0 ? Math.min(99, Math.round((rowsInserted / estimatedTotal) * 100)) : 0,
                 currentStep: `Inserted ${rowsInserted.toLocaleString()} of ~${estimatedTotal.toLocaleString()} rows...`,
               });
               parser.resume();
@@ -399,12 +423,13 @@ export class IngestService implements IIngestService {
               streamError = err instanceof Error ? err : new Error(String(err));
               readStream.destroy();
               parser.destroy();
+              reject(streamError);
             });
         }
       });
 
       parser.on('end', () => {
-        if (streamError) return;
+        if (streamError) return; // already rejected in catch handler
         // Flush remaining batch
         const remaining = batch;
         const batchStartIndex = rowIndex;

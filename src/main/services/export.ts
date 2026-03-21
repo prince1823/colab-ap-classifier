@@ -108,12 +108,17 @@ export class ExportService implements IExportService {
 
     // Stream export in batches to avoid loading all rows into memory
     const ws = fs.createWriteStream(filePath, { encoding: 'utf-8' });
+
+    // Capture write errors early (e.g. disk full) so the loop can abort
+    let writeError: Error | null = null;
+    ws.on('error', (err) => { writeError = err; });
+
     ws.write(headers.map(escapeCSV).join(',') + '\r\n');
 
     let totalExported = 0;
     let offset = 0;
 
-    while (true) {
+    while (!writeError) {
       const rows = await this.db.all<Record<string, unknown>>(
         `SELECT t.*, ps.supplier_name, tax.full_path as classification_path
          FROM transactions t
@@ -151,6 +156,12 @@ export class ExportService implements IExportService {
 
       totalExported += rows.length;
       offset += EXPORT_BATCH_SIZE;
+    }
+
+    // If a write error occurred during the loop, throw it
+    if (writeError) {
+      ws.destroy();
+      throw writeError;
     }
 
     // Close the stream and wait for it to finish

@@ -189,10 +189,11 @@ export default function OverrideRulesPage() {
 
   const getNodePath = (nodeId: string) => taxonomyNodes.find((n) => n.id === nodeId)?.fullPath || nodeId
 
-  const formatConditionSummary = (rule: OverrideRule) => {
-    const { groupedConditions } = rule
-    if (!groupedConditions?.groups?.length) return 'No conditions'
-    return groupedConditions.groups.map((g, gi) => {
+  const formatGroupedFilter = (gf: GroupedFilter) => {
+    if (!gf?.groups?.length) return 'No conditions'
+    const hasConditions = gf.groups.some(g => g.conditions.some(c => c.field))
+    if (!hasConditions) return 'No conditions configured'
+    return gf.groups.map((g, gi) => {
       const groupStr = g.conditions
         .filter(c => c.field)
         .map((c, ci, arr) => {
@@ -201,9 +202,15 @@ export default function OverrideRulesPage() {
           return part
         })
         .join(' ')
-      const prefix = gi > 0 ? ` ${g.groupConnector || groupedConditions.groupConnector} ` : ''
-      return groupedConditions.groups.length > 1 ? `${prefix}(${groupStr})` : `${prefix}${groupStr}`
+      const prefix = gi > 0 ? ` ${g.groupConnector || gf.groupConnector} ` : ''
+      return gf.groups.length > 1 ? `${prefix}(${groupStr})` : `${prefix}${groupStr}`
     }).join('')
+  }
+
+  const formatConditionSummary = (rule: OverrideRule) => {
+    const { groupedConditions } = rule
+    if (!groupedConditions?.groups?.length) return 'No conditions'
+    return formatGroupedFilter(groupedConditions)
   }
 
   const filteredRules = useMemo(() => {
@@ -325,11 +332,8 @@ export default function OverrideRulesPage() {
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Conditions</label>
             <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-              <span className="text-xs text-gray-600 truncate">
-                {(() => {
-                  const count = grouped.groups.flatMap(g => g.conditions.filter(c => c.field)).length
-                  return count > 0 ? `${count} condition${count !== 1 ? 's' : ''} configured` : 'No conditions configured'
-                })()}
+              <span className="text-xs text-gray-600 truncate" title={formatGroupedFilter(grouped)}>
+                {formatGroupedFilter(grouped)}
               </span>
               <button
                 type="button"

@@ -369,7 +369,6 @@ export default function OverrideRulesPage() {
               <th className="w-8 px-1 py-3"></th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Name</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Conditions</th>
-              <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Priority</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Target</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Source</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Status</th>
@@ -394,7 +393,15 @@ export default function OverrideRulesPage() {
                 <td className="w-8 px-1 py-2 cursor-grab text-center text-gray-300 hover:text-gray-500">
                   <svg className="mx-auto h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
                 </td>
-                <td className="px-4 py-2 font-medium text-gray-900">{rule.name}</td>
+                <td className="px-4 py-2 font-medium text-gray-900">
+                  {rule.name}
+                  <sup
+                    className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 px-1 text-[9px] font-bold text-white shadow-sm"
+                    title={`Priority: ${rule.priorityScore}`}
+                  >
+                    {rule.priorityScore}
+                  </sup>
+                </td>
                 <td className="max-w-xs px-4 py-2">
                   {(() => {
                     const summary = formatConditionSummary(rule)
@@ -420,7 +427,6 @@ export default function OverrideRulesPage() {
                     )
                   })()}
                 </td>
-                <td className="px-4 py-2 text-center text-gray-600">{rule.priorityScore}</td>
                 <td className="px-4 py-2 text-xs text-gray-600">{getNodePath(rule.targetTaxonomyNodeId)}</td>
                 <td className="px-4 py-2 text-center">
                   <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${

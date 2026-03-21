@@ -166,7 +166,7 @@ export default function CreateRuleModal({
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative bg-white rounded-xl shadow-2xl w-[560px] max-h-[85vh] flex flex-col">
+      <div className="relative bg-white rounded-xl shadow-2xl w-[560px] max-h-[85vh] flex flex-col" style={{ overflow: 'visible' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
@@ -184,36 +184,56 @@ export default function CreateRuleModal({
         </div>
 
         {/* Body */}
-        <div className="px-5 py-4 overflow-y-auto flex-1 space-y-4">
+        <div className="px-5 py-4 flex-1 space-y-4" style={{ overflow: 'visible' }}>
           {error && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
           )}
 
-          {/* Rule Name */}
+          {/* Conditions — top row */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. IT Software suppliers"
-              autoFocus
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
+            <label className="mb-1 block text-xs font-medium text-gray-600">Conditions</label>
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+              <span className="text-xs text-gray-600" style={{ wordBreak: 'break-word' }}>
+                {conditionCount > 0 ? (
+                  <ConditionSummary grouped={grouped} />
+                ) : (
+                  <span className="italic text-gray-400">No conditions configured</span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setConditionsModalOpen(true)}
+                className="ml-3 shrink-0 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50"
+              >
+                Edit Conditions
+              </button>
+            </div>
           </div>
 
-          {/* Priority */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Priority</label>
-            <input
-              type="number"
-              value={priority}
-              onChange={(e) => setPriority(Number(e.target.value))}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
-            <p className="mt-0.5 text-[10px] text-gray-400">Lower number = higher priority. Rules are evaluated in priority order.</p>
+          {/* Rule Name + Priority — same row */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. IT Software suppliers"
+                autoFocus
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </div>
+            <div style={{ width: 100 }}>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Priority</label>
+              <input
+                type="number"
+                value={priority}
+                onChange={(e) => setPriority(Number(e.target.value))}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </div>
           </div>
 
-          {/* Target Classification */}
+          {/* Target Classification — own row */}
           <div ref={taxonomyDropdownRef} className="relative">
             <label className="mb-1 block text-xs font-medium text-gray-600">Target Classification</label>
             <button
@@ -260,30 +280,6 @@ export default function CreateRuleModal({
                     </li>
                   ))}
                 </ul>
-              </div>
-            )}
-          </div>
-
-          {/* Conditions */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Conditions</label>
-            <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-              <span className="text-xs text-gray-600 truncate">
-                {conditionCount > 0
-                  ? `${conditionCount} condition${conditionCount !== 1 ? 's' : ''} configured (from selection)`
-                  : 'No conditions configured'}
-              </span>
-              <button
-                type="button"
-                onClick={() => setConditionsModalOpen(true)}
-                className="ml-3 shrink-0 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50"
-              >
-                Edit Conditions
-              </button>
-            </div>
-            {conditionCount > 0 && (
-              <div className="mt-1.5 rounded border border-gray-100 bg-gray-50/50 px-2.5 py-1.5">
-                <ConditionSummary grouped={grouped} />
               </div>
             )}
           </div>

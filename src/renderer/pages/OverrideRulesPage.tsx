@@ -28,6 +28,8 @@ export default function OverrideRulesPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [taxonomyDropdownOpen, setTaxonomyDropdownOpen] = useState(false)
   const [groupByDropdownOpen, setGroupByDropdownOpen] = useState(false)
+  type SourceFilter = 'all' | 'manual' | 'auto'
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
   const taxonomyDropdownRef = useRef<HTMLDivElement>(null)
   const groupByDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -229,24 +231,34 @@ export default function OverrideRulesPage() {
   }
 
   const filteredRules = useMemo(() => {
-    if (!ruleSearch.trim()) return rules
-    const q = ruleSearch.toLowerCase()
-    return rules.filter(r => {
-      const target = getNodePath(r.targetTaxonomyNodeId).toLowerCase()
-      const conditions = formatConditionSummary(r).toLowerCase()
-      const source = r.source === 'auto_generated' ? 'auto' : 'manual'
-      const status = r.isActive ? 'active' : 'inactive'
-      const priority = String(r.priorityScore)
-      return (
-        r.name.toLowerCase().includes(q) ||
-        target.includes(q) ||
-        conditions.includes(q) ||
-        source.includes(q) ||
-        status.includes(q) ||
-        priority.includes(q)
-      )
-    })
-  }, [rules, ruleSearch, taxonomyNodes])
+    let result = rules
+    // Apply source filter
+    if (sourceFilter === 'manual') {
+      result = result.filter(r => r.source !== 'auto_generated')
+    } else if (sourceFilter === 'auto') {
+      result = result.filter(r => r.source === 'auto_generated')
+    }
+    // Apply search filter
+    if (ruleSearch.trim()) {
+      const q = ruleSearch.toLowerCase()
+      result = result.filter(r => {
+        const target = getNodePath(r.targetTaxonomyNodeId).toLowerCase()
+        const conditions = formatConditionSummary(r).toLowerCase()
+        const source = r.source === 'auto_generated' ? 'auto' : 'manual'
+        const status = r.isActive ? 'active' : 'inactive'
+        const priority = String(r.priorityScore)
+        return (
+          r.name.toLowerCase().includes(q) ||
+          target.includes(q) ||
+          conditions.includes(q) ||
+          source.includes(q) ||
+          status.includes(q) ||
+          priority.includes(q)
+        )
+      })
+    }
+    return result
+  }, [rules, ruleSearch, taxonomyNodes, sourceFilter])
 
   const getConditionFieldsKey = (rule: OverrideRule): string => {
     const fields = new Set<string>()
@@ -329,6 +341,21 @@ export default function OverrideRulesPage() {
           <p className="mt-1 text-sm text-gray-500">{rules.length} rules</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSourceFilter(prev => prev === 'all' ? 'manual' : prev === 'manual' ? 'auto' : 'all')}
+            className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              sourceFilter === 'all'
+                ? 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'
+                : sourceFilter === 'manual'
+                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                : 'border-purple-300 bg-purple-50 text-purple-700'
+            }`}
+            title={`Showing: ${sourceFilter === 'all' ? 'All rules' : sourceFilter === 'manual' ? 'Manual rules only' : 'Auto-generated rules only'}. Click to cycle.`}
+          >
+            {sourceFilter === 'all' && 'All Rules'}
+            {sourceFilter === 'manual' && 'Manual'}
+            {sourceFilter === 'auto' && 'Auto'}
+          </button>
           <div ref={groupByDropdownRef} className="relative">
             <button
               type="button"

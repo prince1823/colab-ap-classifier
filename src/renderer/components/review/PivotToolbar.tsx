@@ -345,8 +345,8 @@ export default function PivotToolbar({
         )}
       </div>
 
-      {/* Spend toggle + Advanced filter (value/aggregation hidden) */}
-      <div className="pivot-toolbar-section">
+      {/* Right side: $, Filter, Review, Collapse, Freeze */}
+      <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
         {showSpendToggle && (
           <button
             className="pivot-toolbar-icon-btn"
@@ -385,10 +385,6 @@ export default function PivotToolbar({
             )}
           </button>
         )}
-      </div>
-
-      {/* Flagged for review toggle + Collapse cycle — right side */}
-      <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
         {onFlaggedForReviewOnlyChange && (
           <button
             className={`pivot-toolbar-icon-btn${flaggedForReviewOnly ? ' pivot-toolbar-icon-btn-active' : ''}`}

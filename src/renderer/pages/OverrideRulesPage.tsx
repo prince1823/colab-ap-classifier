@@ -23,7 +23,7 @@ export default function OverrideRulesPage() {
   const [saving, setSaving] = useState(false)
   const [taxonomySearch, setTaxonomySearch] = useState('')
   const [ruleSearch, setRuleSearch] = useState('')
-  type GroupByMode = 'none' | 'condition_fields' | 'supplier_name' | 'target_classification' | 'priority'
+  type GroupByMode = 'none' | 'condition_fields' | 'supplier_name' | 'supplier_line_desc' | 'supplier_line_gl' | 'target_classification'
   const [groupBy, setGroupBy] = useState<GroupByMode>('none')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [taxonomyDropdownOpen, setTaxonomyDropdownOpen] = useState(false)
@@ -261,21 +261,33 @@ export default function OverrideRulesPage() {
 
   const groupedRules = useMemo(() => {
     if (groupBy === 'none') return [{ key: '__all__', rules: filteredRules }]
-    const getSupplierKey = (rule: OverrideRule): string => {
+    const getConditionValue = (rule: OverrideRule, field: string): string => {
       for (const group of rule.groupedConditions?.groups ?? []) {
         for (const cond of group.conditions) {
-          if (cond.field === 'supplier_name' && cond.value) return String(cond.value)
+          if (cond.field === field && cond.value) return String(cond.value)
         }
       }
-      return 'No supplier'
+      return ''
+    }
+    const getSupplierKey = (rule: OverrideRule): string => getConditionValue(rule, 'supplier_name') || 'No supplier'
+    const getSupplierLineKey = (rule: OverrideRule): string => {
+      const supplier = getConditionValue(rule, 'supplier_name') || 'No supplier'
+      const line = getConditionValue(rule, 'line_description') || 'No line desc'
+      return `${supplier} | ${line}`
+    }
+    const getSupplierLineGlKey = (rule: OverrideRule): string => {
+      const supplier = getConditionValue(rule, 'supplier_name') || 'No supplier'
+      const line = getConditionValue(rule, 'line_description') || 'No line desc'
+      const gl = getConditionValue(rule, 'gl_description') || 'No GL desc'
+      return `${supplier} | ${line} | ${gl}`
     }
     const getTargetKey = (rule: OverrideRule): string => getNodePath(rule.targetTaxonomyNodeId) || 'Unclassified'
-    const getPriorityKey = (rule: OverrideRule): string => String(rule.priorityScore)
     const keyFns: Record<string, (r: OverrideRule) => string> = {
       condition_fields: getConditionFieldsKey,
       supplier_name: getSupplierKey,
+      supplier_line_desc: getSupplierLineKey,
+      supplier_line_gl: getSupplierLineGlKey,
       target_classification: getTargetKey,
-      priority: getPriorityKey,
     }
     const keyFn = keyFns[groupBy] ?? getConditionFieldsKey
     const map = new Map<string, OverrideRule[]>()
@@ -324,7 +336,7 @@ export default function OverrideRulesPage() {
               className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-400"
             >
               <svg className="h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
-              <span>{{ none: 'No grouping', condition_fields: 'Condition fields', supplier_name: 'Supplier name', target_classification: 'Classification', priority: 'Priority' }[groupBy]}</span>
+              <span>{{ none: 'No grouping', condition_fields: 'Condition fields', supplier_name: 'Supplier', supplier_line_desc: 'Supplier + Line', supplier_line_gl: 'Supplier + Line + GL', target_classification: 'Classification' }[groupBy]}</span>
               <svg className={`h-3 w-3 text-gray-400 transition-transform ${groupByDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
             </button>
             {groupByDropdownOpen && (
@@ -333,8 +345,9 @@ export default function OverrideRulesPage() {
                   ['none', 'No grouping'],
                   ['condition_fields', 'Condition fields'],
                   ['supplier_name', 'Supplier name'],
+                  ['supplier_line_desc', 'Supplier + Line desc'],
+                  ['supplier_line_gl', 'Supplier + Line + GL desc'],
                   ['target_classification', 'Target classification'],
-                  ['priority', 'Priority'],
                 ] as [GroupByMode, string][]).map(([value, label]) => (
                   <button
                     key={value}

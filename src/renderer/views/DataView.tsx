@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import DataUploadStep from './data-steps/DataUploadStep'
@@ -14,6 +14,7 @@ import type {
   DeriveMappingsSource,
   CompletedUpload,
 } from '../../shared/types/column-mapping'
+import type { IngestProgress } from '../../shared/types/classification'
 
 type Step = 'upload' | 'mapping' | 'priority'
 
@@ -39,6 +40,10 @@ export default function DataView() {
   const [importing, setImporting] = useState(false)
   const [derivingMappings, setDerivingMappings] = useState(false)
   const [mappingFromPrevious, setMappingFromPrevious] = useState(false)
+  const [importProgress, setImportProgress] = useState<IngestProgress | null>(null)
+
+  // Ref to hold pending mapping rows so the progress callback can access them
+  const pendingMappingsRef = useRef<MappingRow[]>([])
 
   // Load existing uploads on mount
   useEffect(() => {
@@ -58,6 +63,46 @@ export default function DataView() {
       // No uploads yet — that's fine
     })
   }, [])
+
+  // Listen for import progress events
+  useEffect(() => {
+    const unsubscribe = ipc.ingest.onProgress((progress: IngestProgress) => {
+      setImportProgress(progress)
+
+      if (progress.status === 'completed' && progress.result) {
+        const result = progress.result
+        const rows = pendingMappingsRef.current
+
+        setCompletedUploads((prev) => [
+          ...prev,
+          {
+            uploadId: result.uploadId,
+            fileName: activeFilePath?.split('/').pop() ?? 'unknown',
+            rowCount: result.rowsInserted,
+            mappings: rows,
+          },
+        ])
+
+        // Clear active state, return to upload step
+        setActiveFilePath(null)
+        setActivePreview(null)
+        setActiveDerivedMappings(null)
+        setImporting(false)
+        setImportProgress(null)
+        setStep('upload')
+        pendingMappingsRef.current = []
+
+        refreshGateState()
+      } else if (progress.status === 'failed') {
+        setError(progress.error || 'Import failed')
+        setImporting(false)
+        setImportProgress(null)
+        pendingMappingsRef.current = []
+      }
+    })
+
+    return unsubscribe
+  }, [activeFilePath, refreshGateState])
 
   const handleFileReady = async (
     path: string,
@@ -88,6 +133,11 @@ export default function DataView() {
     if (!activeFilePath) return
     setImporting(true)
     setError(null)
+    setImportProgress(null)
+
+    // Store rows for the progress callback to use on completion
+    pendingMappingsRef.current = rows
+
     try {
       // Build simple ColumnMapping from mapping rows
       const columnMapping: ColumnMapping = {}
@@ -97,7 +147,8 @@ export default function DataView() {
         }
       }
 
-      const result = await ipc.ingest.importCSV(activeFilePath, columnMapping)
+      // Fire-and-forget — completion handled by ingest:progress event listener
+      await ipc.ingest.importCSV(activeFilePath, columnMapping)
 
       // Only set default column_priorities if none exist yet
       const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
@@ -107,29 +158,11 @@ export default function DataView() {
         const rest = mappedCols.filter((c) => c !== 'supplier_name')
         await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
       }
-
-      // Add to completed uploads
-      setCompletedUploads((prev) => [
-        ...prev,
-        {
-          uploadId: result.uploadId,
-          fileName: activeFilePath.split('/').pop() ?? activeFilePath,
-          rowCount: result.rowsInserted,
-          mappings: rows,
-        },
-      ])
-
-      // Clear active state, return to upload step
-      setActiveFilePath(null)
-      setActivePreview(null)
-      setActiveDerivedMappings(null)
-      setStep('upload')
-
-      await refreshGateState()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
-    } finally {
       setImporting(false)
+      setImportProgress(null)
+      pendingMappingsRef.current = []
     }
   }
 
@@ -222,6 +255,7 @@ export default function DataView() {
             onBack={() => setStep('upload')}
             importing={importing}
             fromPreviousMapping={mappingFromPrevious}
+            importProgress={importProgress}
           />
         )}
         {step === 'priority' && (

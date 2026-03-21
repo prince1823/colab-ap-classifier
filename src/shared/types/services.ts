@@ -211,7 +211,7 @@ export interface ChangelogStore {
 
 export interface IngestService {
   selectFile(): Promise<string | null>;
-  parseCSVPreview(filePath: string): CSVPreview;
+  parseCSVPreview(filePath: string): Promise<CSVPreview>;
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
   importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
   getUploadHistory(): Promise<UploadRecord[]>;

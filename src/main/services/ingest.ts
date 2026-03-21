@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { dialog, BrowserWindow } from 'electron';
-import { parse } from 'csv-parse/sync';
+import { parse as parseSync } from 'csv-parse/sync';
+import { parse as parseStream } from 'csv-parse';
 import { randomUUID } from 'crypto';
 import type {
   CSVPreview,
@@ -20,11 +21,17 @@ import type {
   TransactionStore as ITransactionStore,
   SupplierService as ISupplierService,
   ColumnMappingAgent,
+  EventBus,
   UploadRecord,
 } from '../../shared/types/services';
+import type { IngestProgress } from '../../shared/types/classification';
 
 const SAMPLE_ROW_LIMIT = 10;
+const IMPORT_BATCH_SIZE = 5000;
+const PREVIEW_BUFFER_SIZE = 65536; // 64KB for preview/detection
 const DELIMITERS = [',', ';', '\t'] as const;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function detectEncoding(buffer: Buffer): BufferEncoding {
   if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
@@ -64,7 +71,7 @@ function tryParseWithDelimiter(
   delimiter: string
 ): Record<string, string>[] | null {
   try {
-    const records = parse(content, {
+    const records = parseSync(content, {
       columns: true,
       delimiter,
       skip_empty_lines: true,
@@ -97,6 +104,95 @@ function detectDelimiter(content: string): string {
   return bestDelimiter;
 }
 
+/**
+ * Read a small prefix of a file for encoding/delimiter detection.
+ * Avoids loading the entire file into memory.
+ */
+function readFilePrefix(filePath: string, maxBytes: number = PREVIEW_BUFFER_SIZE): { buffer: Buffer; encoding: BufferEncoding; content: string } {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const stat = fs.fstatSync(fd);
+    const readSize = Math.min(maxBytes, stat.size);
+    const buffer = Buffer.alloc(readSize);
+    fs.readSync(fd, buffer, 0, readSize, 0);
+    const encoding = detectEncoding(buffer);
+    const content = stripBom(buffer.toString(encoding));
+    return { buffer, encoding, content };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Count lines in a file by streaming through it counting newline bytes.
+ * Subtracts 1 for the header row. Much faster than parsing all rows.
+ */
+async function countLines(filePath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let lineCount = 0;
+    const stream = fs.createReadStream(filePath, { highWaterMark: 256 * 1024 });
+    stream.on('data', (chunk: string | Buffer) => {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+      for (let i = 0; i < buf.length; i++) {
+        if (buf[i] === 0x0a) lineCount++;
+      }
+    });
+    stream.on('end', () => {
+      // Subtract header row; handle files with no trailing newline
+      resolve(Math.max(0, lineCount > 0 ? lineCount - 1 : 0));
+    });
+    stream.on('error', reject);
+  });
+}
+
+/**
+ * Parse the first N sample rows from a CSV using streaming parser.
+ */
+async function parseSampleRows(
+  filePath: string,
+  encoding: BufferEncoding,
+  delimiter: string,
+  limit: number
+): Promise<Record<string, string>[]> {
+  return new Promise((resolve, reject) => {
+    const rows: Record<string, string>[] = [];
+    const stream = fs.createReadStream(filePath, { encoding });
+    const parser = stream.pipe(parseStream({
+      columns: true,
+      delimiter,
+      skip_empty_lines: true,
+      relax_column_count: true,
+      trim: true,
+      bom: true,
+    }));
+
+    parser.on('data', (record: Record<string, string>) => {
+      rows.push(record);
+      if (rows.length >= limit) {
+        parser.destroy();
+        stream.destroy();
+        resolve(rows);
+      }
+    });
+    parser.on('end', () => resolve(rows));
+    parser.on('error', (err) => {
+      // If we already collected enough rows before error (e.g. stream destroyed), resolve
+      if (rows.length > 0) {
+        resolve(rows);
+      } else {
+        reject(err);
+      }
+    });
+    stream.on('error', (err) => {
+      if (rows.length > 0) {
+        resolve(rows);
+      } else {
+        reject(err);
+      }
+    });
+  });
+}
+
 function emptyMappingSuggestion(columns: string[]): ColumnMappingResult {
   return {
     mappings: {},
@@ -108,12 +204,15 @@ function emptyMappingSuggestion(columns: string[]): ColumnMappingResult {
   };
 }
 
+// ─── Service ──────────────────────────────────────────────────────────────────
+
 export class IngestService implements IIngestService {
   constructor(
     private db: Database,
     private transactions: ITransactionStore,
     private suppliers: ISupplierService,
-    private columnMappingAgent: ColumnMappingAgent
+    private columnMappingAgent: ColumnMappingAgent,
+    private eventBus: EventBus
   ) {}
 
   async selectFile(): Promise<string | null> {
@@ -131,7 +230,7 @@ export class IngestService implements IIngestService {
     return result.filePaths[0];
   }
 
-  parseCSVPreview(filePath: string): CSVPreview {
+  async parseCSVPreview(filePath: string): Promise<CSVPreview> {
     if (!filePath || filePath.trim().length === 0) {
       throw new Error('File path must not be empty');
     }
@@ -140,10 +239,8 @@ export class IngestService implements IIngestService {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    const buffer = fs.readFileSync(filePath);
-    const encoding = detectEncoding(buffer);
-    const rawContent = buffer.toString(encoding);
-    const content = stripBom(rawContent);
+    // Read only a small prefix for encoding/delimiter detection
+    const { encoding, content } = readFilePrefix(filePath);
 
     if (content.trim().length === 0) {
       throw new Error('File is empty');
@@ -151,23 +248,19 @@ export class IngestService implements IIngestService {
 
     const delimiter = detectDelimiter(content);
 
-    const allRecords = parse(content, {
-      columns: true,
-      delimiter,
-      skip_empty_lines: true,
-      relax_column_count: true,
-      trim: true,
-    }) as Record<string, string>[];
+    // Stream just the first N sample rows instead of parsing the entire file
+    const sampleRows = await parseSampleRows(filePath, encoding, delimiter, SAMPLE_ROW_LIMIT);
 
-    if (allRecords.length === 0) {
+    if (sampleRows.length === 0) {
       throw new Error('CSV file contains no data rows');
     }
 
-    const columns = Object.keys(allRecords[0]);
-    const sampleRows = allRecords.slice(0, SAMPLE_ROW_LIMIT);
-    const totalRows = allRecords.length;
+    const columns = Object.keys(sampleRows[0]);
 
-    return { columns, sampleRows, totalRows };
+    // Count total rows via fast line counting (no full parse)
+    const totalRows = await countLines(filePath);
+
+    return { columns, sampleRows, totalRows: totalRows || sampleRows.length };
   }
 
   async suggestMappings(
@@ -182,6 +275,10 @@ export class IngestService implements IIngestService {
     }
   }
 
+  private emitProgress(progress: IngestProgress): void {
+    this.eventBus.emit('ingest:progress', progress);
+  }
+
   async importCSV(
     filePath: string,
     columnMapping: ColumnMapping,
@@ -191,30 +288,22 @@ export class IngestService implements IIngestService {
       throw new Error(`CSV file not found: ${filePath}`);
     }
 
-    const buffer = fs.readFileSync(filePath);
-    const encoding = detectEncoding(buffer);
-    const rawContent = buffer.toString(encoding);
-    const content = stripBom(rawContent);
-    const delimiter = detectDelimiter(content);
+    // Read prefix for encoding/delimiter detection (not the whole file)
+    const { encoding, content: prefixContent } = readFilePrefix(filePath);
+    const delimiter = detectDelimiter(prefixContent);
 
-    const allRecords = parse(content, {
-      columns: true,
-      delimiter,
-      skip_empty_lines: true,
-      relax_column_count: true,
-      trim: true,
-    }) as Record<string, string>[];
+    // Estimate total rows for progress reporting
+    const estimatedTotal = await countLines(filePath);
 
-    if (allRecords.length === 0) {
-      throw new Error('CSV file contains no data rows');
-    }
+    this.emitProgress({
+      status: 'running',
+      totalRows: estimatedTotal,
+      processedRows: 0,
+      percentage: 0,
+      currentStep: 'Starting import...',
+    });
 
     const mapping = columnMapping || {};
-
-    // supplier_name maps to the original_supplier_name DB column (audit trail).
-    // The canonical supplier_name is resolved via JOIN to project_suppliers after normalization.
-    // We remap at the SQL level only — the mapping object stays unmutated so it's
-    // stored correctly in the uploads table for reuse.
     const dbColumn = (canonical: string) =>
       canonical === 'supplier_name' ? 'original_supplier_name' : canonical;
 
@@ -235,24 +324,26 @@ export class IngestService implements IIngestService {
 
     this.transactions.invalidateColumnCache();
 
-    // Insert in batches
+    // Build column list once for all batches
+    const colNames: string[] = ['id', 'row_index'];
+    for (const canonical of canonicalNames) {
+      colNames.push(`"${dbColumn(canonical)}"`);
+    }
+
+    // Stream CSV and insert in batches
     let rowsInserted = 0;
-    const BATCH_SIZE = 500;
+    let rowIndex = 0;
+    let batch: Record<string, string>[] = [];
 
-    for (let batchStart = 0; batchStart < allRecords.length; batchStart += BATCH_SIZE) {
-      const batch = allRecords.slice(batchStart, batchStart + BATCH_SIZE);
-
-      const colNames: string[] = ['id', 'row_index'];
-      for (const canonical of canonicalNames) {
-        colNames.push(`"${dbColumn(canonical)}"`);
-      }
+    const flushBatch = async (records: Record<string, string>[], startIndex: number) => {
+      if (records.length === 0) return;
 
       const valueRows: string[] = [];
-      for (let i = 0; i < batch.length; i++) {
-        const rec = batch[i];
-        const rowIndex = batchStart + i;
+      for (let i = 0; i < records.length; i++) {
+        const rec = records[i];
+        const idx = startIndex + i;
         const id = randomUUID();
-        const vals: string[] = [`'${id}'`, `${rowIndex}`];
+        const vals: string[] = [`'${id}'`, `${idx}`];
 
         for (const canonical of canonicalNames) {
           const rawValue = rec[mapping[canonical]];
@@ -266,10 +357,88 @@ export class IngestService implements IIngestService {
 
       const sql = `INSERT INTO transactions (${colNames.join(', ')}) VALUES ${valueRows.join(',\n')}`;
       await this.db.exec(sql);
-      rowsInserted += batch.length;
+    };
+
+    // Stream through the file row by row
+    await new Promise<void>((resolve, reject) => {
+      const readStream = fs.createReadStream(filePath, { encoding });
+      const parser = readStream.pipe(parseStream({
+        columns: true,
+        delimiter,
+        skip_empty_lines: true,
+        relax_column_count: true,
+        trim: true,
+        bom: true,
+      }));
+
+      let streamError: Error | null = null;
+
+      parser.on('data', (record: Record<string, string>) => {
+        batch.push(record);
+
+        if (batch.length >= IMPORT_BATCH_SIZE) {
+          parser.pause();
+          const currentBatch = batch;
+          const batchStartIndex = rowIndex;
+          batch = [];
+          rowIndex += currentBatch.length;
+
+          flushBatch(currentBatch, batchStartIndex)
+            .then(() => {
+              rowsInserted += currentBatch.length;
+              this.emitProgress({
+                status: 'running',
+                totalRows: estimatedTotal,
+                processedRows: rowsInserted,
+                percentage: estimatedTotal > 0 ? Math.round((rowsInserted / estimatedTotal) * 100) : 0,
+                currentStep: `Inserted ${rowsInserted.toLocaleString()} of ~${estimatedTotal.toLocaleString()} rows...`,
+              });
+              parser.resume();
+            })
+            .catch((err) => {
+              streamError = err instanceof Error ? err : new Error(String(err));
+              readStream.destroy();
+              parser.destroy();
+            });
+        }
+      });
+
+      parser.on('end', () => {
+        if (streamError) return;
+        // Flush remaining batch
+        const remaining = batch;
+        const batchStartIndex = rowIndex;
+        batch = [];
+
+        flushBatch(remaining, batchStartIndex)
+          .then(() => {
+            rowsInserted += remaining.length;
+            resolve();
+          })
+          .catch(reject);
+      });
+
+      parser.on('error', (err) => {
+        if (!streamError) reject(err);
+      });
+      readStream.on('error', (err) => {
+        if (!streamError) reject(err);
+      });
+    });
+
+    if (rowsInserted === 0) {
+      throw new Error('CSV file contains no data rows');
     }
 
-    // Save upload record — mapping is unmutated, stores supplier_name (not original_supplier_name)
+    this.emitProgress({
+      status: 'running',
+      totalRows: estimatedTotal,
+      processedRows: rowsInserted,
+      percentage: 95,
+      currentStep: 'Saving upload record...',
+    });
+
+    // Save upload record
     const finalUploadId = uploadId || randomUUID();
     const fileName = path.basename(filePath);
     const enrichedMapping = toEnrichedMapping(mapping);
@@ -282,6 +451,14 @@ export class IngestService implements IIngestService {
       JSON.stringify(enrichedMapping),
       rowsInserted
     );
+
+    this.emitProgress({
+      status: 'running',
+      totalRows: estimatedTotal,
+      processedRows: rowsInserted,
+      percentage: 97,
+      currentStep: 'Normalizing suppliers...',
+    });
 
     // Link transactions to project_suppliers via original_supplier_name
     await this.suppliers.normalizeAllTransactions();
@@ -297,7 +474,18 @@ export class IngestService implements IIngestService {
       }
     }
 
-    return { rowsInserted, uploadId: finalUploadId };
+    const result = { rowsInserted, uploadId: finalUploadId };
+
+    this.emitProgress({
+      status: 'completed',
+      totalRows: rowsInserted,
+      processedRows: rowsInserted,
+      percentage: 100,
+      currentStep: 'Import complete',
+      result,
+    });
+
+    return result;
   }
 
   async getUploadHistory(): Promise<UploadRecord[]> {

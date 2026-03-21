@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronRight, ChevronLeft } from 'lucide-react'
+import { X, ChevronRight, ChevronLeft, Check } from 'lucide-react'
 import { GroupedFilterBuilder, makeEmptyGroup } from '../FilterConditionBuilder'
 import AdvancedFilterModal from './AdvancedFilterModal'
 import { ipc } from '../../lib/ipc'
@@ -70,6 +70,7 @@ export default function CreateRuleModal({
   const [grouped, setGrouped] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   // Taxonomy
   const [taxonomyNodes, setTaxonomyNodes] = useState<TaxonomyNode[]>([])
@@ -108,6 +109,7 @@ export default function CreateRuleModal({
     setTargetNodeId('')
     setError(null)
     setSaving(false)
+    setSuccessMessage(null)
     setTaxonomySearch('')
     setTaxonomyDropdownOpen(false)
     setGrouped(buildConditionsFromRows(selectedRows))
@@ -169,15 +171,36 @@ export default function CreateRuleModal({
         priorityScore: priority,
       })
       onCreated?.()
-      onClose()
+      setSuccessMessage(`Rule "${name.trim()}" created successfully!`)
+      setSaving(false)
+      setTimeout(() => {
+        setSuccessMessage(null)
+        onClose()
+      }, 2500)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create rule')
-    } finally {
       setSaving(false)
     }
   }
 
   if (!isOpen) return null
+
+  // Success state — green checkmark, auto-closes after 2.5s
+  if (successMessage) {
+    return createPortal(
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/40" />
+        <div className="relative bg-white rounded-xl shadow-2xl w-[560px] flex flex-col items-center py-10 px-8">
+          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-4">
+            <Check size={24} className="text-green-600" />
+          </div>
+          <p className="text-sm font-medium text-gray-900">{successMessage}</p>
+          <p className="text-xs text-gray-400 mt-1">This dialog will close automatically.</p>
+        </div>
+      </div>,
+      document.body
+    )
+  }
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">

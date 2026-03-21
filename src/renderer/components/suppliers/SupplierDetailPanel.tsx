@@ -19,7 +19,6 @@ const DETAIL_FIELDS: {
   { key: 'serviceType', label: 'Service Type', editable: true, type: 'text' },
   { key: 'naicsCode', label: 'NAICS Code', editable: true, type: 'text' },
   { key: 'naicsDescription', label: 'NAICS Description', editable: true, type: 'text', wide: true },
-  { key: 'confidence', label: 'Confidence', editable: false, type: 'readonly' },
   { key: 'productsServices', label: 'Products & Services', editable: true, type: 'text', wide: true },
   { key: 'description', label: 'Description', editable: true, type: 'text', wide: true },
   { key: 'websiteUrl', label: 'Website', editable: true, type: 'text', wide: true },
@@ -240,8 +239,6 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
     return String(v)
   }
 
-  const confidenceVal = getVal('confidence')
-
   const handleSave = (key: keyof SupplierInfo | 'parentName', val: string) => {
     if (key === 'parentName') {
       onSaveParentName(supplier, val)
@@ -299,22 +296,6 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       {/* Info grid */}
       <div className="detail-info-grid">
         {DETAIL_FIELDS.map((field) => {
-          // Readonly confidence field
-          if (field.key === 'confidence') {
-            return (
-              <div key={field.key} className="detail-field">
-                <label className="detail-field-label">{field.label}</label>
-                <div className="detail-field-value">
-                  {confidenceVal ? (
-                    <span className={`confidence-badge ${confidenceVal}`}>{confidenceVal}</span>
-                  ) : (
-                    <span className="text-gray-300 italic">—</span>
-                  )}
-                </div>
-              </div>
-            )
-          }
-
           // Editable field with keyboard nav
           const currentNavIdx = navIdx
           navIdx++

@@ -22,6 +22,7 @@ export default function OverrideRulesPage() {
   const [priority, setPriority] = useState(100)
   const [saving, setSaving] = useState(false)
   const [taxonomySearch, setTaxonomySearch] = useState('')
+  const [ruleSearch, setRuleSearch] = useState('')
   const [taxonomyDropdownOpen, setTaxonomyDropdownOpen] = useState(false)
   const taxonomyDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -205,6 +206,26 @@ export default function OverrideRulesPage() {
     }).join('')
   }
 
+  const filteredRules = useMemo(() => {
+    if (!ruleSearch.trim()) return rules
+    const q = ruleSearch.toLowerCase()
+    return rules.filter(r => {
+      const target = getNodePath(r.targetTaxonomyNodeId).toLowerCase()
+      const conditions = formatConditionSummary(r).toLowerCase()
+      const source = r.source === 'auto_generated' ? 'auto' : 'manual'
+      const status = r.isActive ? 'active' : 'inactive'
+      const priority = String(r.priorityScore)
+      return (
+        r.name.toLowerCase().includes(q) ||
+        target.includes(q) ||
+        conditions.includes(q) ||
+        source.includes(q) ||
+        status.includes(q) ||
+        priority.includes(q)
+      )
+    })
+  }, [rules, ruleSearch, taxonomyNodes])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -223,9 +244,23 @@ export default function OverrideRulesPage() {
           <h2 className="text-lg font-semibold text-gray-900">Override Rules</h2>
           <p className="mt-1 text-sm text-gray-500">{rules.length} rules</p>
         </div>
-        <button onClick={openCreate} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-          Add Rule
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search rules..."
+              value={ruleSearch}
+              onChange={(e) => setRuleSearch(e.target.value)}
+              className="w-64 rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <button onClick={openCreate} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Add Rule
+          </button>
+        </div>
       </div>
 
       {error && <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>}
@@ -338,7 +373,7 @@ export default function OverrideRulesPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">
-            {rules.map((rule, idx) => (
+            {filteredRules.map((rule, idx) => (
               <tr
                 key={rule.id}
                 draggable

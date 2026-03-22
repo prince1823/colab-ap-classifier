@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronRight, ChevronLeft, Check } from 'lucide-react'
-import { GroupedFilterBuilder, makeEmptyGroup } from '../FilterConditionBuilder'
+import { X, Check } from 'lucide-react'
+import { makeEmptyGroup } from '../FilterConditionBuilder'
 import AdvancedFilterModal from './AdvancedFilterModal'
 import { ipc } from '../../lib/ipc'
 import type { GroupedFilter, ConditionGroup, FilterCondition } from '../../../shared/types/transactions'
@@ -63,7 +63,6 @@ export default function CreateRuleModal({
   selectedRows,
   onCreated,
 }: CreateRuleModalProps) {
-  const [step, setStep] = useState<1 | 2>(1)
   const [name, setName] = useState('')
   const [priority, setPriority] = useState(100)
   const [targetNodeId, setTargetNodeId] = useState('')
@@ -76,13 +75,23 @@ export default function CreateRuleModal({
   const [taxonomyNodes, setTaxonomyNodes] = useState<TaxonomyNode[]>([])
   const [taxonomySearch, setTaxonomySearch] = useState('')
   const [taxonomyDropdownOpen, setTaxonomyDropdownOpen] = useState(false)
+  const [taxonomyHighlightIdx, setTaxonomyHighlightIdx] = useState(-1)
   const taxonomyDropdownRef = useRef<HTMLDivElement>(null)
+  const taxonomyListRef = useRef<HTMLUListElement>(null)
 
   // Conditions modal
   const [conditionsModalOpen, setConditionsModalOpen] = useState(false)
 
   // Filter fields for condition builder
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
+
+  // Refs for keyboard navigation
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const priorityInputRef = useRef<HTMLInputElement>(null)
+  const taxonomyBtnRef = useRef<HTMLButtonElement>(null)
+  const taxonomySearchRef = useRef<HTMLInputElement>(null)
+  const editConditionsBtnRef = useRef<HTMLButtonElement>(null)
+  const saveBtnRef = useRef<HTMLButtonElement>(null)
 
   // Load taxonomy nodes (full L1|L2|L3 paths only) and filter fields when modal opens
   useEffect(() => {
@@ -103,7 +112,6 @@ export default function CreateRuleModal({
     const justOpened = isOpen && !prevOpenRef.current
     prevOpenRef.current = isOpen
     if (!justOpened) return
-    setStep(1)
     setName('')
     setPriority(100)
     setTargetNodeId('')
@@ -112,7 +120,10 @@ export default function CreateRuleModal({
     setSuccessMessage(null)
     setTaxonomySearch('')
     setTaxonomyDropdownOpen(false)
+    setTaxonomyHighlightIdx(-1)
     setGrouped(buildConditionsFromRows(selectedRows))
+    // Focus the rule name input after modal opens
+    requestAnimationFrame(() => nameInputRef.current?.focus())
   }, [isOpen, selectedRows])
 
   // Close taxonomy dropdown on outside click
@@ -132,32 +143,29 @@ export default function CreateRuleModal({
     return taxonomyNodes.filter(n => n.fullPath.toLowerCase().includes(q))
   }, [taxonomyNodes, taxonomySearch])
 
+  // Reset highlight when filtered list changes
+  useEffect(() => {
+    setTaxonomyHighlightIdx(-1)
+  }, [filteredTaxonomyNodes])
+
   const getNodePath = (nodeId: string) =>
     taxonomyNodes.find(n => n.id === nodeId)?.fullPath || nodeId
 
   const conditionCount = grouped.groups.flatMap(g => g.conditions.filter(c => c.field)).length
 
-  const handleNext = () => {
+  const handleSave = useCallback(async () => {
     if (conditionCount === 0) {
       setError('At least one condition is required')
       return
     }
-    setError(null)
-    setStep(2)
-  }
-
-  const handleBack = () => {
-    setError(null)
-    setStep(1)
-  }
-
-  const handleSave = async () => {
     if (!name.trim()) {
       setError('Rule name is required')
+      nameInputRef.current?.focus()
       return
     }
     if (!targetNodeId) {
       setError('Target classification is required')
+      taxonomyBtnRef.current?.focus()
       return
     }
 
@@ -181,7 +189,60 @@ export default function CreateRuleModal({
       setError(e instanceof Error ? e.message : 'Failed to create rule')
       setSaving(false)
     }
-  }
+  }, [conditionCount, name, targetNodeId, grouped, priority, onCreated, onClose])
+
+  // Taxonomy dropdown keyboard handling
+  const handleTaxonomySearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setTaxonomyHighlightIdx(i => Math.min(i + 1, filteredTaxonomyNodes.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setTaxonomyHighlightIdx(i => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter' && taxonomyHighlightIdx >= 0 && taxonomyHighlightIdx < filteredTaxonomyNodes.length) {
+      e.preventDefault()
+      const node = filteredTaxonomyNodes[taxonomyHighlightIdx]
+      setTargetNodeId(node.id)
+      setTaxonomyDropdownOpen(false)
+      setTaxonomySearch('')
+      // Move focus to save button after selecting
+      requestAnimationFrame(() => saveBtnRef.current?.focus())
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setTaxonomyDropdownOpen(false)
+      taxonomyBtnRef.current?.focus()
+    }
+  }, [filteredTaxonomyNodes, taxonomyHighlightIdx])
+
+  // Scroll highlighted taxonomy item into view
+  useEffect(() => {
+    if (taxonomyHighlightIdx < 0 || !taxonomyListRef.current) return
+    const items = taxonomyListRef.current.children
+    if (items[taxonomyHighlightIdx]) {
+      (items[taxonomyHighlightIdx] as HTMLElement).scrollIntoView({ block: 'nearest' })
+    }
+  }, [taxonomyHighlightIdx])
+
+  // Global keyboard handler for the modal
+  const handleModalKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Don't interfere with taxonomy dropdown keyboard nav
+    if (taxonomyDropdownOpen) return
+
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      onClose()
+      return
+    }
+
+    // Cmd/Ctrl+Enter to save from anywhere in the modal
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      handleSave()
+      return
+    }
+
+    // Tab navigation is native — just let it flow through the focusable elements
+  }, [taxonomyDropdownOpen, onClose, handleSave])
 
   if (!isOpen) return null
 
@@ -203,7 +264,10 @@ export default function CreateRuleModal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      onKeyDown={handleModalKeyDown}
+    >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
@@ -211,189 +275,163 @@ export default function CreateRuleModal({
       <div className="relative bg-white rounded-xl shadow-2xl w-[560px] max-h-[85vh] flex flex-col" style={{ overflow: 'visible' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <div>
-            <h3 className="text-base font-semibold text-gray-900">Create Override Rule</h3>
-            <div className="flex items-center gap-2 mt-1">
-              {/* Step indicators */}
-              <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full ${
-                step === 1 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'
-              }`}>
-                1. Conditions
-              </span>
-              <ChevronRight size={10} className="text-gray-300" />
-              <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full ${
-                step === 2 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'
-              }`}>
-                2. Rule Details
-              </span>
-            </div>
-          </div>
+          <h3 className="text-base font-semibold text-gray-900">Create Override Rule</h3>
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+            tabIndex={-1}
           >
             <X size={16} />
           </button>
         </div>
 
-        {/* Body */}
-        <div className="px-5 py-4 flex-1 space-y-4" style={{ overflow: 'visible' }}>
+        {/* Body — single scrollable view with all fields */}
+        <div className="px-5 py-4 flex-1 space-y-4 overflow-y-auto" style={{ overflow: 'visible' }}>
           {error && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
           )}
 
-          {/* ---- Step 1: Conditions ---- */}
-          {step === 1 && (
-            <>
-              <div>
-                <p className="text-xs text-gray-500 mb-3">
-                  Auto-suggested conditions based on your selection ({selectedRows.length} row{selectedRows.length !== 1 ? 's' : ''}). Review and edit if needed.
-                </p>
-                <label className="mb-1 block text-xs font-medium text-gray-600">Conditions</label>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
-                  {conditionCount > 0 ? (
-                    <ConditionSummary grouped={grouped} />
-                  ) : (
-                    <span className="text-xs italic text-gray-400">No conditions configured</span>
+          {/* Conditions section */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Conditions</label>
+            <p className="text-[10px] text-gray-400 mb-2">
+              Auto-suggested from your selection ({selectedRows.length} row{selectedRows.length !== 1 ? 's' : ''})
+            </p>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+              {conditionCount > 0 ? (
+                <ConditionSummary grouped={grouped} />
+              ) : (
+                <span className="text-xs italic text-gray-400">No conditions configured</span>
+              )}
+            </div>
+            <button
+              ref={editConditionsBtnRef}
+              type="button"
+              onClick={() => setConditionsModalOpen(true)}
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50 transition-colors focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              Edit Conditions
+            </button>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-gray-100" />
+
+          {/* Rule Name + Priority — same row */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label htmlFor="rule-name" className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
+              <input
+                id="rule-name"
+                ref={nameInputRef}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. IT Software suppliers"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </div>
+            <div style={{ width: 100 }}>
+              <label htmlFor="rule-priority" className="mb-1 block text-xs font-medium text-gray-600">Priority</label>
+              <input
+                id="rule-priority"
+                ref={priorityInputRef}
+                type="number"
+                value={priority}
+                onChange={(e) => setPriority(Number(e.target.value))}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </div>
+          </div>
+
+          {/* Target Classification */}
+          <div ref={taxonomyDropdownRef} className="relative">
+            <label className="mb-1 block text-xs font-medium text-gray-600">Target Classification</label>
+            <button
+              ref={taxonomyBtnRef}
+              type="button"
+              onClick={() => {
+                setTaxonomyDropdownOpen(!taxonomyDropdownOpen)
+                if (!taxonomyDropdownOpen) {
+                  requestAnimationFrame(() => taxonomySearchRef.current?.focus())
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown' || e.key === ' ') {
+                  e.preventDefault()
+                  setTaxonomyDropdownOpen(true)
+                  requestAnimationFrame(() => taxonomySearchRef.current?.focus())
+                }
+              }}
+              className="flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm hover:border-gray-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              <span className={targetNodeId ? 'text-gray-900 truncate' : 'text-gray-400'}>
+                {targetNodeId ? getNodePath(targetNodeId) : 'Select classification...'}
+              </span>
+              <svg className={`ml-2 h-4 w-4 shrink-0 text-gray-400 transition-transform ${taxonomyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+            </button>
+            {taxonomyDropdownOpen && (
+              <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg">
+                <div className="border-b border-gray-100 p-2">
+                  <input
+                    ref={taxonomySearchRef}
+                    value={taxonomySearch}
+                    onChange={(e) => setTaxonomySearch(e.target.value)}
+                    onKeyDown={handleTaxonomySearchKeyDown}
+                    placeholder="Search taxonomy..."
+                    className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  />
+                </div>
+                <ul ref={taxonomyListRef} className="max-h-48 overflow-y-auto py-1">
+                  {filteredTaxonomyNodes.length === 0 && (
+                    <li className="px-3 py-2 text-xs text-gray-400">No matches</li>
                   )}
-                </div>
+                  {filteredTaxonomyNodes.map((n, idx) => (
+                    <li
+                      key={n.id}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        setTargetNodeId(n.id)
+                        setTaxonomyDropdownOpen(false)
+                        setTaxonomySearch('')
+                      }}
+                      onMouseEnter={() => setTaxonomyHighlightIdx(idx)}
+                      className={`cursor-pointer px-3 py-1.5 text-xs leading-snug ${
+                        idx === taxonomyHighlightIdx
+                          ? 'bg-blue-50 text-blue-700'
+                          : n.id === targetNodeId
+                            ? 'bg-blue-50 font-medium text-blue-700'
+                            : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {n.fullPath}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <button
-                type="button"
-                onClick={() => setConditionsModalOpen(true)}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50 transition-colors"
-              >
-                Edit Conditions
-              </button>
-            </>
-          )}
-
-          {/* ---- Step 2: Rule Details ---- */}
-          {step === 2 && (
-            <>
-              {/* Condition summary (read-only recap) */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-600">Conditions</label>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                  <ConditionSummary grouped={grouped} />
-                </div>
-              </div>
-
-              {/* Rule Name + Priority — same row */}
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <label className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. IT Software suppliers"
-                    autoFocus
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  />
-                </div>
-                <div style={{ width: 100 }}>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">Priority</label>
-                  <input
-                    type="number"
-                    value={priority}
-                    onChange={(e) => setPriority(Number(e.target.value))}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  />
-                </div>
-              </div>
-
-              {/* Target Classification */}
-              <div ref={taxonomyDropdownRef} className="relative">
-                <label className="mb-1 block text-xs font-medium text-gray-600">Target Classification</label>
-                <button
-                  type="button"
-                  onClick={() => setTaxonomyDropdownOpen(!taxonomyDropdownOpen)}
-                  className="flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm hover:border-gray-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                >
-                  <span className={targetNodeId ? 'text-gray-900 truncate' : 'text-gray-400'}>
-                    {targetNodeId ? getNodePath(targetNodeId) : 'Select classification...'}
-                  </span>
-                  <svg className={`ml-2 h-4 w-4 shrink-0 text-gray-400 transition-transform ${taxonomyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
-                </button>
-                {taxonomyDropdownOpen && (
-                  <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg">
-                    <div className="border-b border-gray-100 p-2">
-                      <input
-                        value={taxonomySearch}
-                        onChange={(e) => setTaxonomySearch(e.target.value)}
-                        placeholder="Search taxonomy..."
-                        autoFocus
-                        className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                      />
-                    </div>
-                    <ul className="max-h-48 overflow-y-auto py-1">
-                      {filteredTaxonomyNodes.length === 0 && (
-                        <li className="px-3 py-2 text-xs text-gray-400">No matches</li>
-                      )}
-                      {filteredTaxonomyNodes.map((n) => (
-                        <li
-                          key={n.id}
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            setTargetNodeId(n.id)
-                            setTaxonomyDropdownOpen(false)
-                            setTaxonomySearch('')
-                          }}
-                          className={`cursor-pointer px-3 py-1.5 text-xs leading-snug ${
-                            n.id === targetNodeId
-                              ? 'bg-blue-50 font-medium text-blue-700'
-                              : 'text-gray-700 hover:bg-gray-50'
-                          }`}
-                        >
-                          {n.fullPath}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50/50 rounded-b-xl">
-          <div>
-            {step === 2 && (
-              <button
-                onClick={handleBack}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <ChevronLeft size={12} />
-                Back
-              </button>
-            )}
-          </div>
+          <span className="text-[10px] text-gray-400">
+            {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to save
+          </span>
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus:ring-1 focus:ring-blue-400"
             >
               Cancel
             </button>
-            {step === 1 && (
-              <button
-                onClick={handleNext}
-                className="flex items-center gap-1 px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-              >
-                Next
-                <ChevronRight size={12} />
-              </button>
-            )}
-            {step === 2 && (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors"
-              >
-                {saving ? 'Creating...' : 'Create Rule'}
-              </button>
-            )}
+            <button
+              ref={saveBtnRef}
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
+            >
+              {saving ? 'Creating...' : 'Save Rule'}
+            </button>
           </div>
         </div>
       </div>

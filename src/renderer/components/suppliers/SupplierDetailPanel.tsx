@@ -364,8 +364,8 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
                         onClick={(e) => {
                           e.preventDefault()
                           e.stopPropagation()
-                          const url = src.startsWith('http://') || src.startsWith('https://') ? src : `https://${src}`
-                          window.open(url, '_blank')
+                          const url = src.startsWith('http://') || src.startsWith('https://') ? src : `https://${src}`;
+                          (window as any).electronAPI.openExternal(url)
                         }}
                         title={src}
                       >

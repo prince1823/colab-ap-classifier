@@ -2,7 +2,7 @@
 import { loadEnv } from './load-env';
 loadEnv();
 
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, shell, ipcMain } from 'electron';
 import path from 'path';
 import { createContainer } from './container';
 import { registerAllHandlers } from './ipc';
@@ -50,6 +50,11 @@ function createWindow(): void {
 app.whenReady().then(() => {
   const services = createContainer();
   registerAllHandlers(services);
+
+  // Open external URLs in the system default browser
+  ipcMain.handle('shell:openExternal', (_event, url: string) => {
+    return shell.openExternal(url);
+  });
   createWindow();
 
   // Forward EventBus events to renderer

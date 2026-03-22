@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import DataUploadStep from './data-steps/DataUploadStep'
-import DataMappingStep from './data-steps/DataMappingStep'
-import DataMergePreviewStep from './data-steps/DataMergePreviewStep'
+import DataMappingStep, { type ColumnState } from './data-steps/DataMappingStep'
 import DataPriorityStep from './data-steps/DataPriorityStep'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
@@ -16,12 +15,11 @@ import type {
   CompletedUpload,
 } from '../../shared/types/column-mapping'
 
-type Step = 'upload' | 'mapping' | 'preview' | 'priority'
+type Step = 'upload' | 'mapping' | 'priority'
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'upload', label: 'Upload CSV' },
   { key: 'mapping', label: 'Column Mapping' },
-  { key: 'preview', label: 'Merge Preview' },
   { key: 'priority', label: 'Column Priority' },
 ]
 
@@ -41,7 +39,8 @@ export default function DataView() {
   const [importing, setImporting] = useState(false)
   const [derivingMappings, setDerivingMappings] = useState(false)
   const [mappingFromPrevious, setMappingFromPrevious] = useState(false)
-  const [activeMappingRows, setActiveMappingRows] = useState<MappingRow[] | null>(null)
+  // Preserved column states so going back from priority doesn't lose edits
+  const [preservedColumnStates, setPreservedColumnStates] = useState<ColumnState[] | null>(null)
 
   // Load existing uploads on mount
   useEffect(() => {
@@ -87,19 +86,16 @@ export default function DataView() {
     }
   }
 
-  const handleMappingsPreview = (rows: MappingRow[]) => {
-    setActiveMappingRows(rows)
-    setStep('preview')
-  }
-
-  const handleConfirmImport = async () => {
-    if (!activeFilePath || !activeMappingRows) return
+  // Called from DataMappingStep when user clicks "Import & Continue"
+  const handleImport = async (rows: MappingRow[], columnStates?: ColumnState[]) => {
+    if (!activeFilePath) return
+    if (columnStates) setPreservedColumnStates(columnStates)
     setImporting(true)
     setError(null)
     try {
       // Build simple ColumnMapping from mapping rows
       const columnMapping: ColumnMapping = {}
-      for (const row of activeMappingRows) {
+      for (const row of rows) {
         if (row.csvColumn) {
           columnMapping[row.canonical] = row.csvColumn
         }
@@ -110,7 +106,7 @@ export default function DataView() {
       // Only set default column_priorities if none exist yet
       const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
       if (!existingPriorities || existingPriorities.length === 0) {
-        const mappedCols = activeMappingRows.filter((r) => r.csvColumn).map((r) => r.canonical)
+        const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
         const supplierFirst = mappedCols.filter((c) => c === 'supplier_name')
         const rest = mappedCols.filter((c) => c !== 'supplier_name')
         await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
@@ -123,18 +119,18 @@ export default function DataView() {
           uploadId: result.uploadId,
           fileName: activeFilePath.split('/').pop() ?? activeFilePath,
           rowCount: result.rowsInserted,
-          mappings: activeMappingRows,
+          mappings: rows,
         },
       ])
 
-      // Clear active state, return to upload step
+      await refreshGateState()
+
+      // Clear active cycle state and move to priority
       setActiveFilePath(null)
       setActivePreview(null)
       setActiveDerivedMappings(null)
-      setActiveMappingRows(null)
-      setStep('upload')
-
-      await refreshGateState()
+      setPreservedColumnStates(null)
+      setStep('priority')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
     } finally {
@@ -227,17 +223,10 @@ export default function DataView() {
           <DataMappingStep
             preview={activePreview}
             derivedMappings={activeDerivedMappings}
-            onApply={handleMappingsPreview}
+            onApply={handleImport}
             onBack={() => setStep('upload')}
             fromPreviousMapping={mappingFromPrevious}
-          />
-        )}
-        {step === 'preview' && activePreview && activeMappingRows && (
-          <DataMergePreviewStep
-            preview={activePreview}
-            mappingRows={activeMappingRows}
-            onConfirm={handleConfirmImport}
-            onBack={() => setStep('mapping')}
+            preservedColumnStates={preservedColumnStates}
             importing={importing}
             isFirstUpload={completedUploads.length === 0}
           />

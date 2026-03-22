@@ -75,7 +75,7 @@ export default function DataUploadStep({
                   onClick={() => handleChooseSource('llm')}
                   className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
                 >
-                  AI Suggestion &rarr;
+                  Column Mapping &rarr;
                 </button>
                 <button
                   onClick={() => { setPreview(null); setFilePath(null) }}

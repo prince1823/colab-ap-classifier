@@ -545,6 +545,7 @@ export default function OverrideRulesPage() {
           <thead className="bg-gray-50">
             <tr>
               <th className="w-8 px-1 py-3"></th>
+              <th className="w-16 px-3 py-3 text-center text-xs font-medium uppercase text-gray-500">Priority</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Name</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Conditions</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Target</th>
@@ -560,7 +561,7 @@ export default function OverrideRulesPage() {
                   className="cursor-pointer border-l-2 border-blue-400 bg-gray-50 hover:bg-gray-100"
                   onClick={() => toggleGroup(key)}
                 >
-                  <td colSpan={7} className="px-4 py-2">
+                  <td colSpan={8} className="px-4 py-2">
                     <div className="flex items-center gap-2">
                       <svg
                         className={`h-4 w-4 text-gray-500 transition-transform duration-150 ${collapsedGroups.has(key) ? '' : 'rotate-90'}`}
@@ -589,8 +590,8 @@ export default function OverrideRulesPage() {
                       <svg className="mx-auto h-4 w-4 cursor-grab" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
                     )}
                   </td>
+                  <td className="w-16 px-3 py-2 text-center text-sm font-medium text-gray-500">{rule.priorityScore}</td>
                   <td className="px-4 py-2 font-medium text-gray-900">
-                    <span className="text-gray-400 mr-1">{rule.priorityScore})</span>
                     {rule.name}
                   </td>
                   <td className="max-w-xs px-4 py-2">

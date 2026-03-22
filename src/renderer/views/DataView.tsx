@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import DataUploadStep from './data-steps/DataUploadStep'
 import DataMappingStep from './data-steps/DataMappingStep'
+import DataMergePreviewStep from './data-steps/DataMergePreviewStep'
 import DataPriorityStep from './data-steps/DataPriorityStep'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
@@ -15,11 +16,12 @@ import type {
   CompletedUpload,
 } from '../../shared/types/column-mapping'
 
-type Step = 'upload' | 'mapping' | 'priority'
+type Step = 'upload' | 'mapping' | 'preview' | 'priority'
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'upload', label: 'Upload CSV' },
   { key: 'mapping', label: 'Column Mapping' },
+  { key: 'preview', label: 'Merge Preview' },
   { key: 'priority', label: 'Column Priority' },
 ]
 
@@ -39,6 +41,7 @@ export default function DataView() {
   const [importing, setImporting] = useState(false)
   const [derivingMappings, setDerivingMappings] = useState(false)
   const [mappingFromPrevious, setMappingFromPrevious] = useState(false)
+  const [activeMappingRows, setActiveMappingRows] = useState<MappingRow[] | null>(null)
 
   // Load existing uploads on mount
   useEffect(() => {
@@ -84,14 +87,19 @@ export default function DataView() {
     }
   }
 
-  const handleMappingsApplied = async (rows: MappingRow[]) => {
-    if (!activeFilePath) return
+  const handleMappingsPreview = (rows: MappingRow[]) => {
+    setActiveMappingRows(rows)
+    setStep('preview')
+  }
+
+  const handleConfirmImport = async () => {
+    if (!activeFilePath || !activeMappingRows) return
     setImporting(true)
     setError(null)
     try {
       // Build simple ColumnMapping from mapping rows
       const columnMapping: ColumnMapping = {}
-      for (const row of rows) {
+      for (const row of activeMappingRows) {
         if (row.csvColumn) {
           columnMapping[row.canonical] = row.csvColumn
         }
@@ -102,7 +110,7 @@ export default function DataView() {
       // Only set default column_priorities if none exist yet
       const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
       if (!existingPriorities || existingPriorities.length === 0) {
-        const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
+        const mappedCols = activeMappingRows.filter((r) => r.csvColumn).map((r) => r.canonical)
         const supplierFirst = mappedCols.filter((c) => c === 'supplier_name')
         const rest = mappedCols.filter((c) => c !== 'supplier_name')
         await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
@@ -115,7 +123,7 @@ export default function DataView() {
           uploadId: result.uploadId,
           fileName: activeFilePath.split('/').pop() ?? activeFilePath,
           rowCount: result.rowsInserted,
-          mappings: rows,
+          mappings: activeMappingRows,
         },
       ])
 
@@ -123,6 +131,7 @@ export default function DataView() {
       setActiveFilePath(null)
       setActivePreview(null)
       setActiveDerivedMappings(null)
+      setActiveMappingRows(null)
       setStep('upload')
 
       await refreshGateState()
@@ -218,10 +227,19 @@ export default function DataView() {
           <DataMappingStep
             preview={activePreview}
             derivedMappings={activeDerivedMappings}
-            onApply={handleMappingsApplied}
+            onApply={handleMappingsPreview}
             onBack={() => setStep('upload')}
-            importing={importing}
             fromPreviousMapping={mappingFromPrevious}
+          />
+        )}
+        {step === 'preview' && activePreview && activeMappingRows && (
+          <DataMergePreviewStep
+            preview={activePreview}
+            mappingRows={activeMappingRows}
+            onConfirm={handleConfirmImport}
+            onBack={() => setStep('mapping')}
+            importing={importing}
+            isFirstUpload={completedUploads.length === 0}
           />
         )}
         {step === 'priority' && (

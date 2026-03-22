@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev-renderer",
+      "name": "dev-log",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:renderer"],
+      "runtimeArgs": ["run", "dev:log"],
       "port": 5173
     }
   ]

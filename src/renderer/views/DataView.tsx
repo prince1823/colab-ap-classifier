@@ -54,6 +54,7 @@ export default function DataView() {
             canonical,
             csvColumn,
           })),
+          createdAt: u.createdAt,
         }))
       )
     }).catch(() => {
@@ -123,6 +124,7 @@ export default function DataView() {
           fileName: activeFilePath.split('/').pop() ?? activeFilePath,
           rowCount: result.rowsInserted,
           mappings: rows,
+          createdAt: new Date().toISOString(),
         },
       ])
 

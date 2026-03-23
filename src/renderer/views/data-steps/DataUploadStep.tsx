@@ -246,6 +246,7 @@ export default function DataUploadStep({
                   <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">File</th>
                   <th className="whitespace-nowrap px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Rows</th>
                   <th className="whitespace-nowrap px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Columns</th>
+                  <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Uploaded At</th>
                   {hasActiveFile && (
                     <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Mapping</th>
                   )}
@@ -262,6 +263,14 @@ export default function DataUploadStep({
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right text-gray-600">
                       {upload.mappings.filter((m) => m.csvColumn).length}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-500">
+                      {upload.createdAt
+                        ? new Date(upload.createdAt).toLocaleString(undefined, {
+                            year: 'numeric', month: 'short', day: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
+                          })
+                        : '—'}
                     </td>
                     {hasActiveFile && (
                       <td className="whitespace-nowrap px-4 py-2.5 text-center">

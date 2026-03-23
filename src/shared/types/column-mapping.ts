@@ -89,4 +89,5 @@ export interface CompletedUpload {
   fileName: string;
   rowCount: number;
   mappings: MappingRow[];
+  createdAt?: string;
 }

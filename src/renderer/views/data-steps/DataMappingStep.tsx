@@ -538,7 +538,8 @@ export default function DataMappingStep({
   const hasAddressIncluded = columns.some((c) => c.included && isAddressColumn(c.canonical))
   const hasAddressColumn = columns.some((c) => isAddressColumn(c.canonical))
   const includedCount = columns.filter((c) => c.included).length
-  const mappedCanonicalCount = canonicalPool.filter((c) => canonicalToCsv.has(c)).length
+  const assignedCanonicals = canonicalPool.filter((c) => columns.some((col) => col.canonical === c) || REQUIRED.has(c))
+  const mappedCanonicalCount = assignedCanonicals.filter((c) => canonicalToCsv.has(c)).length
 
   const handleApply = () => {
     const rows: MappingRow[] = columns
@@ -726,11 +727,15 @@ export default function DataMappingStep({
           <div className="px-3 py-2.5 border-b border-gray-200 bg-white rounded-t-md">
             <h4 className="text-xs font-semibold text-gray-700">Mapping Summary</h4>
             <p className="text-[10px] text-gray-400 mt-0.5">
-              {mappedCanonicalCount} of {canonicalPool.length} mapped
+              {mappedCanonicalCount} of {assignedCanonicals.length} mapped
             </p>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-1">
-            {canonicalPool.map((canonical) => {
+            {canonicalPool.filter((canonical) => {
+              // Show only canonicals that are assigned to a column or are required
+              const isAssigned = columns.some((c) => c.canonical === canonical)
+              return isAssigned || REQUIRED.has(canonical)
+            }).map((canonical) => {
               const csvCol = canonicalToCsv.get(canonical)
               const isMapped = !!csvCol
               const isRequired = REQUIRED.has(canonical)
@@ -801,7 +806,7 @@ export default function DataMappingStep({
                 Importing...
               </>
             ) : (
-              'Import & Continue \u2192'
+              'Next \u2192'
             )}
           </button>
         </div>

@@ -176,25 +176,25 @@ export default function DataUploadStep({
               <p className="text-sm font-medium text-gray-900">
                 {filePath!.split('/').pop()} &mdash; {preview.totalRows.toLocaleString()} rows detected
               </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleChooseSource('llm')}
-                  className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                >
-                  Column Mapping &rarr;
-                </button>
-                <button
-                  onClick={() => { setPreview(null); setFilePath(null) }}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Choose Different File
-                </button>
-              </div>
+              <button
+                onClick={() => { setPreview(null); setFilePath(null) }}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Choose Different File
+              </button>
             </div>
             {error && (
               <div className="mb-2 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</div>
             )}
             <CSVPreviewTable preview={preview} />
+            <div className="flex justify-end mt-3">
+              <button
+                onClick={() => handleChooseSource('llm')}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-blue-600 hover:text-white hover:border-blue-600"
+              >
+                AI Suggested Column Mapping &rarr;
+              </button>
+            </div>
           </>
         )}
         {!preview && !loading && (
@@ -246,7 +246,6 @@ export default function DataUploadStep({
                   <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">File</th>
                   <th className="whitespace-nowrap px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Rows</th>
                   <th className="whitespace-nowrap px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Columns</th>
-                  <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Status</th>
                   {hasActiveFile && (
                     <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Mapping</th>
                   )}
@@ -263,11 +262,6 @@ export default function DataUploadStep({
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right text-gray-600">
                       {upload.mappings.filter((m) => m.csvColumn).length}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-center">
-                      <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                        Imported
-                      </span>
                     </td>
                     {hasActiveFile && (
                       <td className="whitespace-nowrap px-4 py-2.5 text-center">

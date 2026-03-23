@@ -40,7 +40,7 @@ export default function OverrideRulesPage() {
   const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set())
 
   // Drag-and-drop reorder — refs only, no React state during drag for performance
-  const dragIdxRef = useRef<number | null>(null)
+  const dragIdRef = useRef<string | null>(null)
   const prevOverRow = useRef<HTMLElement | null>(null)
 
   const loadData = async () => {
@@ -126,10 +126,10 @@ export default function OverrideRulesPage() {
   }
 
   // Drag-and-drop reorder — all visual feedback via DOM, zero React re-renders during drag
-  const handleDragStart = useCallback((e: React.DragEvent, idx: number) => {
-    dragIdxRef.current = idx
+  const handleDragStart = useCallback((e: React.DragEvent, ruleId: string) => {
+    dragIdRef.current = ruleId
     e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', String(idx))
+    e.dataTransfer.setData('text/plain', ruleId)
     requestAnimationFrame(() => {
       if (e.currentTarget instanceof HTMLElement) {
         e.currentTarget.style.opacity = '0.4'
@@ -145,7 +145,7 @@ export default function OverrideRulesPage() {
       prevOverRow.current.style.borderTop = ''
       prevOverRow.current = null
     }
-    dragIdxRef.current = null
+    dragIdRef.current = null
   }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -161,35 +161,24 @@ export default function OverrideRulesPage() {
     }
   }, [])
 
-  const handleDrop = useCallback(async (e: React.DragEvent, toIdx: number) => {
+  const handleDrop = useCallback(async (e: React.DragEvent, targetRule: OverrideRule) => {
     e.preventDefault()
     if (prevOverRow.current) {
       prevOverRow.current.style.borderTop = ''
       prevOverRow.current = null
     }
-    const fromIdx = dragIdxRef.current
-    dragIdxRef.current = null
-    if (fromIdx === null || fromIdx === toIdx) return
+    const draggedId = dragIdRef.current
+    dragIdRef.current = null
+    if (!draggedId || draggedId === targetRule.id) return
 
-    const rule = rules[fromIdx]
-    if (!rule) return
-
-    // Optimistically reorder locally
-    const reordered = [...rules]
-    const [moved] = reordered.splice(fromIdx, 1)
-    reordered.splice(toIdx, 0, moved)
-    const updated = reordered.map((r, i) => ({ ...r, priorityScore: i + 1 }))
-    setRules(updated)
-
-    // Persist to backend silently
-    const newRank = toIdx + 1
     try {
-      await ipc.rules.update(rule.id, { priorityScore: newRank })
+      await ipc.rules.update(draggedId, { priorityScore: targetRule.priorityScore })
+      await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to reorder rule')
       await loadData()
     }
-  }, [rules])
+  }, [])
 
   // Searchable taxonomy dropdown
   const filteredTaxonomyNodes = useMemo(() => {
@@ -575,14 +564,14 @@ export default function OverrideRulesPage() {
                   </td>
                 </tr>
               )}
-              {!collapsedGroups.has(key) && groupRuleList.map((rule, idx) => (
+              {!collapsedGroups.has(key) && groupRuleList.map((rule) => (
                 <tr
                   key={rule.id}
                   draggable={groupBy === 'none'}
-                  onDragStart={groupBy === 'none' ? (e) => handleDragStart(e, idx) : undefined}
+                  onDragStart={groupBy === 'none' ? (e) => handleDragStart(e, rule.id) : undefined}
                   onDragEnd={groupBy === 'none' ? handleDragEnd : undefined}
                   onDragOver={groupBy === 'none' ? handleDragOver : undefined}
-                  onDrop={groupBy === 'none' ? (e) => handleDrop(e, idx) : undefined}
+                  onDrop={groupBy === 'none' ? (e) => handleDrop(e, rule) : undefined}
                   className="hover:bg-gray-50"
                 >
                   <td className="w-8 px-1 py-2 text-center text-gray-300 hover:text-gray-500">

@@ -3,16 +3,12 @@ import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactio
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource } from '../../shared/types/rules';
 import type { GroupedFilter } from '../../shared/types/transactions';
 
-// Minimum gap between two float priorities before renormalization is triggered.
-const PRIORITY_PRECISION_THRESHOLD = 1e-10;
-
 interface RuleRow {
   id: string;
   name: string;
   grouped_conditions: string;
   target_taxonomy_node_id: string;
   priority: number;
-  rank: number;
   is_active: boolean;
   source: string;
   created_at: string;
@@ -37,7 +33,7 @@ function rowToRule(row: RuleRow): OverrideRule {
     name: row.name,
     groupedConditions: grouped,
     targetTaxonomyNodeId: row.target_taxonomy_node_id,
-    priorityScore: row.rank,
+    priorityScore: row.priority,
     isActive: row.is_active,
     source: (row.source ?? 'manual') as RuleSource,
     createdAt: row.created_at,
@@ -176,36 +172,32 @@ export class RuleStore implements IRuleStore {
 
   async listRules(): Promise<OverrideRule[]> {
     const rows = await this.db.all<RuleRow>(
-      'SELECT *, ROW_NUMBER() OVER (ORDER BY priority ASC) as rank FROM override_rules ORDER BY priority ASC'
+      'SELECT * FROM override_rules ORDER BY priority ASC, created_at DESC'
     );
     return rows.map(rowToRule);
   }
 
   async createRule(input: OverrideRuleCreate): Promise<{ id: string }> {
     const id = uuidv4();
-    let float: number;
+    let priority: number;
 
-    if (input.priorityScore === undefined) {
-      float = await this.getNextPriority();
+    if (input.priorityScore !== undefined) {
+      priority = Math.round(input.priorityScore);
     } else {
-      float = await this.floatForRank(input.priorityScore);
+      const result = await this.db.get<{ max_priority: number | null }>(
+        'SELECT MAX(priority) as max_priority FROM override_rules'
+      );
+      priority = (result?.max_priority ?? 0) + 1;
     }
 
     const source = input.source ?? 'manual';
 
-    try {
-      await this.db.run(
-        `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, priority, is_active, source, created_at)
-         VALUES (?, ?, ?, ?, ?, TRUE, ?, CURRENT_TIMESTAMP)`,
-        id, input.name, JSON.stringify(input.groupedConditions),
-        input.targetTaxonomyNodeId, float, source
-      );
-    } catch (err) {
-      if (err instanceof Error && err.message.toLowerCase().includes('unique')) {
-        throw new Error(`A rule named "${input.name}" already exists. Rule names must be unique.`);
-      }
-      throw err;
-    }
+    await this.db.run(
+      `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, priority, is_active, source, created_at)
+       VALUES (?, ?, ?, ?, ?, TRUE, ?, CURRENT_TIMESTAMP)`,
+      id, input.name, JSON.stringify(input.groupedConditions),
+      input.targetTaxonomyNodeId, priority, source
+    );
 
     return { id };
   }
@@ -220,25 +212,17 @@ export class RuleStore implements IRuleStore {
     if (updates.isActive !== undefined) { setClauses.push('is_active = ?'); params.push(updates.isActive); }
 
     if (updates.priorityScore !== undefined) {
-      const float = await this.floatForRank(updates.priorityScore, ruleId);
       setClauses.push('priority = ?');
-      params.push(float);
+      params.push(Math.round(updates.priorityScore));
     }
 
     if (setClauses.length === 0) return;
 
     params.push(ruleId);
-    try {
-      await this.db.run(
-        `UPDATE override_rules SET ${setClauses.join(', ')} WHERE id = ?`,
-        ...params
-      );
-    } catch (err) {
-      if (err instanceof Error && err.message.toLowerCase().includes('unique')) {
-        throw new Error(`A rule named "${updates.name}" already exists. Rule names must be unique.`);
-      }
-      throw err;
-    }
+    await this.db.run(
+      `UPDATE override_rules SET ${setClauses.join(', ')} WHERE id = ?`,
+      ...params
+    );
   }
 
   async deleteRule(ruleId: string): Promise<void> {
@@ -311,11 +295,10 @@ export class RuleStore implements IRuleStore {
       supplierMap.get(key)!.push(row);
     }
 
-    // 5. Collect existing rule names for collision detection + suppliers already covered by rules
-    const existingRuleRows = await this.db.all<{ name: string; grouped_conditions: string }>(
-      'SELECT name, grouped_conditions FROM override_rules'
+    // 5. Collect suppliers already covered by rules
+    const existingRuleRows = await this.db.all<{ grouped_conditions: string }>(
+      'SELECT grouped_conditions FROM override_rules'
     );
-    const existingNames = new Set(existingRuleRows.map(r => r.name));
     const suppliersWithRules = new Set<string>();
     for (const row of existingRuleRows) {
       const grouped = parseGroupedConditions(row.grouped_conditions);
@@ -361,10 +344,7 @@ export class RuleStore implements IRuleStore {
         drafts = generateMultiCategoryRules(supplierName, categories, validPriorities);
       }
 
-      // Deduplicate names and create rules
       for (const draft of drafts) {
-        draft.name = deduplicateName(draft.name, existingNames);
-        existingNames.add(draft.name);
         await this.createRule(draft);
         rulesCreated++;
       }
@@ -375,88 +355,5 @@ export class RuleStore implements IRuleStore {
     return { rulesCreated, suppliersProcessed };
   }
 
-  /**
-   * Compute the float priority for inserting/moving a rule to a given rank.
-   * If excludeId is provided, that rule is excluded from the rank calculation
-   * (used when reordering an existing rule).
-   * Triggers renormalization if the gap between neighbors is below precision threshold.
-   */
-  private async floatForRank(rank: number, excludeId?: string): Promise<number> {
-    const safeRank = Math.max(1, Math.floor(rank));
-    let { prev, next } = await this.getNeighborFloats(safeRank, excludeId);
-
-    if (prev !== null && next !== null && next - prev < PRIORITY_PRECISION_THRESHOLD) {
-      await this.renormalize();
-      ({ prev, next } = await this.getNeighborFloats(safeRank, excludeId));
-    }
-
-    return this.computeFloat(prev, next);
-  }
-
-  /**
-   * Returns the internal float priorities immediately before and after rank P
-   * in the sorted list, optionally excluding a specific rule by id.
-   */
-  private async getNeighborFloats(
-    rank: number,
-    excludeId?: string
-  ): Promise<{ prev: number | null; next: number | null }> {
-    const where = excludeId ? 'WHERE id != ?' : '';
-    const baseParams: unknown[] = excludeId ? [excludeId] : [];
-
-    const [prevRow, nextRow] = await Promise.all([
-      rank > 1
-        ? this.db.get<{ priority: number }>(
-            `SELECT priority FROM override_rules ${where} ORDER BY priority ASC LIMIT 1 OFFSET ?`,
-            ...baseParams, rank - 2
-          )
-        : Promise.resolve(undefined),
-      this.db.get<{ priority: number }>(
-        `SELECT priority FROM override_rules ${where} ORDER BY priority ASC LIMIT 1 OFFSET ?`,
-        ...baseParams, rank - 1
-      ),
-    ]);
-
-    return {
-      prev: prevRow?.priority ?? null,
-      next: nextRow?.priority ?? null,
-    };
-  }
-
-  private computeFloat(prev: number | null, next: number | null): number {
-    if (prev === null && next === null) return 1.0;
-    if (prev === null) return next! - 1.0;
-    if (next === null) return prev + 1.0;
-    return (prev + next) / 2;
-  }
-
-  /**
-   * Reassign all priorities as 1.0, 2.0, 3.0, ... resetting float precision.
-   * O(n) but called only when float gaps near exhaustion (~every 52 bisections).
-   */
-  private async renormalize(): Promise<void> {
-    await this.db.exec(`
-      UPDATE override_rules
-      SET priority = sub.new_priority
-      FROM (
-        SELECT id, ROW_NUMBER() OVER (ORDER BY priority ASC) AS new_priority
-        FROM override_rules
-      ) sub
-      WHERE override_rules.id = sub.id
-    `);
-  }
-
-  private async getNextPriority(): Promise<number> {
-    const result = await this.db.get<{ max_priority: number | null }>(
-      'SELECT MAX(priority) as max_priority FROM override_rules'
-    );
-    return (result?.max_priority ?? 0) + 1;
-  }
 }
 
-function deduplicateName(name: string, existingNames: Set<string>): string {
-  if (!existingNames.has(name)) return name;
-  let suffix = 2;
-  while (existingNames.has(`${name} (${suffix})`)) suffix++;
-  return `${name} (${suffix})`;
-}

@@ -193,10 +193,32 @@ export class DuckDBDatabase implements Database {
       await this.exec('ALTER TABLE transactions ADD COLUMN applied_rule_id VARCHAR');
     }
 
-    // Migrate: ensure override_rules.name is unique
+    // Migrate: drop name unique index and convert priority DOUBLE→INTEGER for existing projects
     try {
-      await this.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name)');
-    } catch { /* index may already exist or constraint already enforced */ }
+      await this.exec('DROP INDEX IF EXISTS idx_override_rules_name');
+    } catch { /* ignore */ }
+    const priorityColType = await this.all<{ data_type: string }>(
+      "SELECT data_type FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'priority'"
+    );
+    if (priorityColType.length > 0 && priorityColType[0].data_type.toUpperCase() === 'DOUBLE') {
+      await this.exec(`
+        CREATE TABLE override_rules_int_migration (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL,
+          grouped_conditions JSON NOT NULL,
+          target_taxonomy_node_id VARCHAR NOT NULL,
+          priority INTEGER NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          source VARCHAR DEFAULT 'manual',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO override_rules_int_migration
+          SELECT id, name, grouped_conditions, target_taxonomy_node_id, CAST(ROUND(priority) AS INTEGER), is_active, source, created_at
+          FROM override_rules;
+        DROP TABLE override_rules;
+        ALTER TABLE override_rules_int_migration RENAME TO override_rules;
+      `);
+    }
 
     // Migrate: ensure supplier_parents table exists
     const spTable = await this.all<{ table_name: string }>(
@@ -239,19 +261,18 @@ export class DuckDBDatabase implements Database {
       await this.exec(`
         CREATE TABLE override_rules_new (
           id VARCHAR PRIMARY KEY,
-          name VARCHAR NOT NULL UNIQUE,
+          name VARCHAR NOT NULL,
           grouped_conditions JSON NOT NULL,
           target_taxonomy_node_id VARCHAR NOT NULL,
-          priority DOUBLE NOT NULL,
+          priority INTEGER NOT NULL,
           is_active BOOLEAN DEFAULT TRUE,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         INSERT INTO override_rules_new
-          SELECT id, name, ${groupedSelect}, target_taxonomy_node_id, CAST(priority AS DOUBLE), is_active, created_at
+          SELECT id, name, ${groupedSelect}, target_taxonomy_node_id, CAST(ROUND(CAST(priority AS DOUBLE)) AS INTEGER), is_active, created_at
           FROM override_rules;
         DROP TABLE override_rules;
         ALTER TABLE override_rules_new RENAME TO override_rules;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name);
       `);
     }
 
@@ -369,10 +390,10 @@ export class DuckDBDatabase implements Database {
 
       CREATE TABLE IF NOT EXISTS override_rules (
         id VARCHAR PRIMARY KEY,
-        name VARCHAR NOT NULL UNIQUE,
+        name VARCHAR NOT NULL,
         grouped_conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
-        priority DOUBLE NOT NULL,
+        priority INTEGER NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         source VARCHAR DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

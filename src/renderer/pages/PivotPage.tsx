@@ -13,7 +13,7 @@ import type { FlattenedPivotRow } from '../types/pivot'
 import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { groupedToConditions } from '../components/FilterConditionBuilder'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, ListFilter } from 'lucide-react'
 
 /**
  * Convert dimension pill filters into a TransactionFilter.
@@ -75,6 +75,7 @@ export default function PivotPage() {
     advancedGrouped, setAdvancedGrouped,
     showAdvancedFilter, setShowAdvancedFilter,
     flaggedForReviewOnly, setFlaggedForReviewOnly,
+    classificationFilter, cycleClassificationFilter,
     clearAllFilters,
   } = usePivotStore()
 
@@ -104,7 +105,12 @@ export default function PivotPage() {
     const flaggedCondition = flaggedForReviewOnly
       ? [{ field: 'flagged_for_review', operator: 'is_true' as const, value: '' }]
       : []
-    const allConditions = [...pillConditions, ...advancedConditions, ...flaggedCondition]
+    const classificationCondition = classificationFilter === 'classified'
+      ? [{ field: 'classification_status', operator: 'not_equals' as const, value: 'unclassified' }]
+      : classificationFilter === 'unclassified'
+        ? [{ field: 'classification_status', operator: 'equals' as const, value: 'unclassified' }]
+        : []
+    const allConditions = [...pillConditions, ...advancedConditions, ...flaggedCondition, ...classificationCondition]
     if (allConditions.length === 0) return undefined
 
     // If we have a grouped filter, merge pill conditions as an extra group
@@ -121,7 +127,7 @@ export default function PivotPage() {
 
     // Only pill filters, no grouping needed
     return { conditions: allConditions } as TransactionFilter
-  }, [filterState, advancedConditions, advancedGrouped, flaggedForReviewOnly])
+  }, [filterState, advancedConditions, advancedGrouped, flaggedForReviewOnly, classificationFilter])
 
   const { pivotData, totalCount, refetch } = useServerPivotData(
     rowDimensions,
@@ -211,6 +217,20 @@ export default function PivotPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={cycleClassificationFilter}
+            title={classificationFilter === 'all' ? 'Showing all rows — click for classified only' : classificationFilter === 'classified' ? 'Showing classified — click for unclassified only' : 'Showing unclassified — click to show all'}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors ${
+              classificationFilter === 'all'
+                ? 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
+                : classificationFilter === 'classified'
+                  ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                  : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+            }`}
+          >
+            <ListFilter size={12} />
+            {classificationFilter === 'all' ? 'All' : classificationFilter === 'classified' ? 'Classified' : 'Unclassified'}
+          </button>
           <button
             ref={refreshBtnRef}
             onClick={handleRefresh}

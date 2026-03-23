@@ -20,6 +20,8 @@ interface PivotState {
   showAdvancedFilter: boolean
   /** Toggle: show only rows flagged for review */
   flaggedForReviewOnly: boolean
+  /** Classification status filter: 'all' | 'classified' | 'unclassified' */
+  classificationFilter: 'all' | 'classified' | 'unclassified'
 
   // Actions
   setRowDimensions: (dims: string[]) => void
@@ -30,6 +32,8 @@ interface PivotState {
   setAdvancedGrouped: (grouped: GroupedFilter | null) => void
   setShowAdvancedFilter: (show: boolean) => void
   setFlaggedForReviewOnly: (on: boolean) => void
+  setClassificationFilter: (filter: 'all' | 'classified' | 'unclassified') => void
+  cycleClassificationFilter: () => void
   clearAllFilters: () => void
   /** Reset all state (e.g., on project switch) */
   reset: () => void
@@ -44,6 +48,7 @@ const INITIAL_STATE = {
   advancedGrouped: null as GroupedFilter | null,
   showAdvancedFilter: false,
   flaggedForReviewOnly: false,
+  classificationFilter: 'all' as 'all' | 'classified' | 'unclassified',
 }
 
 export const usePivotStore = create<PivotState>()((set) => ({
@@ -57,6 +62,12 @@ export const usePivotStore = create<PivotState>()((set) => ({
   setAdvancedGrouped: (grouped) => set({ advancedGrouped: grouped }),
   setShowAdvancedFilter: (show) => set({ showAdvancedFilter: show }),
   setFlaggedForReviewOnly: (on) => set({ flaggedForReviewOnly: on }),
-  clearAllFilters: () => set({ filterState: {}, advancedGrouped: null, flaggedForReviewOnly: false }),
+  setClassificationFilter: (filter) => set({ classificationFilter: filter }),
+  cycleClassificationFilter: () => set((state) => {
+    const order: Array<'all' | 'classified' | 'unclassified'> = ['all', 'classified', 'unclassified']
+    const idx = order.indexOf(state.classificationFilter)
+    return { classificationFilter: order[(idx + 1) % 3] }
+  }),
+  clearAllFilters: () => set({ filterState: {}, advancedGrouped: null, flaggedForReviewOnly: false, classificationFilter: 'all' }),
   reset: () => set(INITIAL_STATE),
 }))

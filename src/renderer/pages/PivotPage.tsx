@@ -29,23 +29,28 @@ function buildTransactionFilter(pillState: Record<string, string[]>): Transactio
 /** Columns that are internal DB plumbing — never shown in the UI. */
 const INTERNAL_COLS = new Set([
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
-  'classification_status', 'human_reviewed',
   'original_supplier_name', 'project_supplier_id',
   'applied_rule_id',
   'created_at', 'updated_at',
 ])
 
-/** Virtual columns resolved via JOIN — excluded from pivot dimension dropdowns (added manually below). */
-const VIRTUAL_COLS = new Set(['classification_l1', 'classification_l2', 'classification_l3', 'is_tail_spend', 'is_researched', 'applied_rule_name'])
+/** Virtual/derived columns excluded from pivot dimension dropdowns (some added manually in availableColumns). */
+const VIRTUAL_COLS = new Set([
+  'classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
+  'is_tail_spend', 'is_researched', 'applied_rule_name',
+  'classification_status', 'human_reviewed',
+])
 
 /** Columns excluded from pivot dropdowns but still available in advanced filters. */
-const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched'])
+const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched', 'classification_status', 'human_reviewed'])
 
 const COLUMN_LABELS: Record<string, string> = {
   classification_l1: 'Classification L1',
   classification_l2: 'Classification L2',
   classification_l3: 'Classification L3',
   classification_path: 'Classification Path (L1 › L2 › L3)',
+  classification_status: 'Classification Status',
+  human_reviewed: 'Human Reviewed',
   supplier_name: 'Supplier',
   applied_rule_name: 'Applied Rule',
   is_tail_spend: 'Tail Spend',
@@ -60,6 +65,10 @@ const COLUMN_LABELS: Record<string, string> = {
   quarter: 'Quarter',
   month: 'Month',
   country: 'Country',
+}
+
+const ENUM_FIELDS: Record<string, string[]> = {
+  classification_status: ['unclassified', 'classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent', 'classification_error'],
 }
 
 const NUMERIC_COLS = new Set(['spend_amount', 'amount', 'invoice_amount'])
@@ -159,7 +168,8 @@ export default function PivotPage() {
     filterableColumns.map(col => ({
       name: col,
       label: COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      type: BOOLEAN_COLS.has(col) ? 'boolean' as const : NUMERIC_COLS.has(col) ? 'number' as const : 'string' as const,
+      type: BOOLEAN_COLS.has(col) ? 'boolean' as const : ENUM_FIELDS[col] ? 'enum' as const : NUMERIC_COLS.has(col) ? 'number' as const : 'string' as const,
+      ...(ENUM_FIELDS[col] ? { enumValues: ENUM_FIELDS[col] } : {}),
       ...(col === 'supplier_name' && supplierSuggestions.length > 0 ? { suggestions: supplierSuggestions } : {}),
     })),
     [filterableColumns, supplierSuggestions]

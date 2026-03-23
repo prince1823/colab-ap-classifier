@@ -29,6 +29,7 @@ function createWindow(): void {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
     title: 'Colab91 Classifier',
   });

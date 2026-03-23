@@ -345,28 +345,8 @@ export default function PivotToolbar({
         )}
       </div>
 
-      {/* Value + Aggregation + Spend toggle */}
-      <div className="pivot-toolbar-section">
-        <span className="pivot-toolbar-label">Value:</span>
-        <select
-          className="pivot-toolbar-select"
-          value={valueDimension}
-          onChange={e => onValueDimensionChange(e.target.value)}
-        >
-          {numericColumns.map(col => (
-            <option key={col} value={col}>{colLabel(col)}</option>
-          ))}
-        </select>
-        <select
-          className="pivot-toolbar-select"
-          value={aggregation}
-          onChange={e => onAggregationChange(e.target.value as Aggregation)}
-          style={{ width: 60 }}
-        >
-          <option value="sum">Sum</option>
-          <option value="count">Count</option>
-          <option value="average">Avg</option>
-        </select>
+      {/* Right side: $, Filter, Review, Collapse, Freeze */}
+      <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
         {showSpendToggle && (
           <button
             className="pivot-toolbar-icon-btn"
@@ -405,10 +385,6 @@ export default function PivotToolbar({
             )}
           </button>
         )}
-      </div>
-
-      {/* Flagged for review toggle + Collapse cycle — right side */}
-      <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
         {onFlaggedForReviewOnlyChange && (
           <button
             className={`pivot-toolbar-icon-btn${flaggedForReviewOnly ? ' pivot-toolbar-icon-btn-active' : ''}`}

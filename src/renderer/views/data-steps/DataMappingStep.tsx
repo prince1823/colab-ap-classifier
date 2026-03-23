@@ -72,6 +72,10 @@ function buildInitialState(
     if (row.csvColumn) csvToCanonical.set(row.csvColumn, row.canonical)
   }
 
+  // Track which canonical names are already assigned to LLM-mapped columns so
+  // unmapped columns don't silently collide with them at init time.
+  const assignedCanonicals = new Set(csvToCanonical.values())
+
   return preview.columns.map((col) => {
     if (csvToCanonical.has(col)) {
       return {
@@ -82,10 +86,11 @@ function buildInitialState(
       }
     }
     const snaked = toSnakeCase(col)
+    const collides = assignedCanonicals.has(snaked)
     return {
       csvColumn: col,
-      canonical: snaked,
-      included: fromPrevious ? false : true,
+      canonical: collides ? '' : snaked,
+      included: fromPrevious ? false : !collides,
       locked: false,
     }
   })
@@ -543,7 +548,12 @@ export default function DataMappingStep({
   }, [])
 
   const handleSetCanonical = useCallback((index: number, newCanonical: string) => {
-    setColumns((prev) => prev.map((c, i) => (i === index ? { ...c, canonical: newCanonical } : c)))
+    setColumns((prev) => prev.map((c, i) => {
+      if (i === index) return { ...c, canonical: newCanonical }
+      // Auto-swap: clear the canonical from whichever other unlocked column currently holds it
+      if (newCanonical && c.canonical === newCanonical && !c.locked) return { ...c, canonical: '' }
+      return c
+    }))
   }, [])
 
   const handleAddCanonical = useCallback(() => {

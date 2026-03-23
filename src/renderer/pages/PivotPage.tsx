@@ -84,9 +84,49 @@ export default function PivotPage() {
     advancedGrouped, setAdvancedGrouped,
     showAdvancedFilter, setShowAdvancedFilter,
     flaggedForReviewOnly, setFlaggedForReviewOnly,
-    classificationFilter, cycleClassificationFilter,
     clearAllFilters,
   } = usePivotStore()
+
+  // Derive classification filter state from advancedGrouped
+  const classificationFilter = useMemo((): 'all' | 'classified' | 'unclassified' => {
+    if (!advancedGrouped) return 'all'
+    const cond = advancedGrouped.groups.flatMap(g => g.conditions).find(c => c.field === 'classification_status')
+    if (!cond) return 'all'
+    if (cond.operator === 'equals' && cond.value === 'unclassified') return 'unclassified'
+    if (cond.operator === 'not_equals' && cond.value === 'unclassified') return 'classified'
+    return 'all'
+  }, [advancedGrouped])
+
+  const cycleClassificationFilter = useCallback(() => {
+    const order: Array<'all' | 'classified' | 'unclassified'> = ['all', 'classified', 'unclassified']
+    const next = order[(order.indexOf(classificationFilter) + 1) % 3]
+
+    // Strip existing classification_status conditions
+    const stripped = advancedGrouped
+      ? {
+          ...advancedGrouped,
+          groups: advancedGrouped.groups.map(g => ({
+            ...g,
+            conditions: g.conditions.filter(c => c.field !== 'classification_status'),
+          })).filter(g => g.conditions.length > 0),
+        }
+      : null
+
+    if (next === 'all') {
+      // Just remove the condition
+      setAdvancedGrouped(stripped && stripped.groups.length > 0 ? stripped : null)
+    } else {
+      // Add the new condition as a group
+      const newCondition = next === 'classified'
+        ? { field: 'classification_status', operator: 'not_equals' as const, value: 'unclassified' }
+        : { field: 'classification_status', operator: 'equals' as const, value: 'unclassified' }
+      const existingGroups = stripped?.groups ?? []
+      setAdvancedGrouped({
+        groupConnector: stripped?.groupConnector ?? 'AND',
+        groups: [...existingGroups, { connector: 'AND' as const, conditions: [newCondition] }],
+      })
+    }
+  }, [classificationFilter, advancedGrouped, setAdvancedGrouped])
 
   // Transient UI state (OK to lose on tab switch)
   const [drillDownRow, setDrillDownRow] = useState<FlattenedPivotRow | null>(null)
@@ -114,12 +154,7 @@ export default function PivotPage() {
     const flaggedCondition = flaggedForReviewOnly
       ? [{ field: 'flagged_for_review', operator: 'is_true' as const, value: '' }]
       : []
-    const classificationCondition = classificationFilter === 'classified'
-      ? [{ field: 'classification_status', operator: 'not_equals' as const, value: 'unclassified' }]
-      : classificationFilter === 'unclassified'
-        ? [{ field: 'classification_status', operator: 'equals' as const, value: 'unclassified' }]
-        : []
-    const allConditions = [...pillConditions, ...advancedConditions, ...flaggedCondition, ...classificationCondition]
+    const allConditions = [...pillConditions, ...advancedConditions, ...flaggedCondition]
     if (allConditions.length === 0) return undefined
 
     // If we have a grouped filter, merge pill conditions as an extra group
@@ -136,7 +171,7 @@ export default function PivotPage() {
 
     // Only pill filters, no grouping needed
     return { conditions: allConditions } as TransactionFilter
-  }, [filterState, advancedConditions, advancedGrouped, flaggedForReviewOnly, classificationFilter])
+  }, [filterState, advancedConditions, advancedGrouped, flaggedForReviewOnly])
 
   const { pivotData, totalCount, refetch } = useServerPivotData(
     rowDimensions,

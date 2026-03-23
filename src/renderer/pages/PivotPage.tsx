@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useEffect, useState } from 'react'
+import { useMemo, useCallback, useEffect, useState, useRef } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
@@ -13,6 +13,7 @@ import type { FlattenedPivotRow } from '../types/pivot'
 import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { groupedToConditions } from '../components/FilterConditionBuilder'
+import { RefreshCw } from 'lucide-react'
 
 /**
  * Convert dimension pill filters into a TransactionFilter.
@@ -159,8 +160,12 @@ export default function PivotPage() {
   )
 
   const [generating, setGenerating] = useState(false)
+  const [confirmGenerate, setConfirmGenerate] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const refreshBtnRef = useRef<HTMLButtonElement>(null)
 
   const handleGenerateRules = useCallback(async () => {
+    setConfirmGenerate(false)
     setGenerating(true)
     try {
       await ipc.transactions.markAllReviewed()
@@ -171,6 +176,15 @@ export default function PivotPage() {
       alert(`Error generating rules: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setGenerating(false)
+    }
+  }, [refetch])
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await refetch()
+    } finally {
+      setTimeout(() => setRefreshing(false), 400)
     }
   }, [refetch])
 
@@ -196,13 +210,24 @@ export default function PivotPage() {
             <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | ⌘L create rule | ⌘S supplier info | Double-click to filter</span>
           </p>
         </div>
-        <button
-          onClick={handleGenerateRules}
-          disabled={generating}
-          className="px-3 py-1 rounded-md border border-gray-300 text-[11px] font-medium text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {generating ? 'Generating...' : 'Generate Rules'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            ref={refreshBtnRef}
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Refresh data"
+            className="p-1.5 rounded-md border border-gray-300 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={() => setConfirmGenerate(true)}
+            disabled={generating}
+            className="px-3 py-1 rounded-md border border-gray-300 text-[11px] font-medium text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {generating ? 'Generating...' : 'Generate Rules'}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0">
@@ -278,6 +303,33 @@ export default function PivotPage() {
         selectedRows={createRuleRows ?? []}
         onCreated={refetch}
       />
+
+      {/* Generate Rules confirmation modal */}
+      {confirmGenerate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmGenerate(false)} />
+          <div className="relative rounded-lg bg-white shadow-xl p-6 max-w-sm w-full mx-4">
+            <h3 className="text-sm font-semibold text-gray-900">Generate Rules</h3>
+            <p className="mt-2 text-xs text-gray-600">
+              This will mark all current classifications as reviewed and generate override rules for all reviewed suppliers. Continue?
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmGenerate(false)}
+                className="px-3 py-1.5 rounded-md border border-gray-300 bg-white text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGenerateRules}
+                className="px-3 py-1.5 rounded-md bg-blue-600 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

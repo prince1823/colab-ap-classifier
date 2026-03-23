@@ -19,7 +19,7 @@ type Step = 'upload' | 'mapping' | 'priority'
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'upload', label: 'Upload CSV' },
-  { key: 'mapping', label: 'Column Mapping' },
+  { key: 'mapping', label: 'Review Column Mapping' },
   { key: 'priority', label: 'Column Priority' },
 ]
 
@@ -78,7 +78,10 @@ export default function DataView() {
         source
       )
       setActiveDerivedMappings(derived)
-      setStep('mapping')
+      // LLM source: go directly to mapping step; previous upload: stay and show preview modal
+      if (source === 'llm') {
+        setStep('mapping')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to derive mappings')
     } finally {
@@ -217,6 +220,10 @@ export default function DataView() {
             onFileReady={handleFileReady}
             onProceedToPriority={() => setStep('priority')}
             derivingMappings={derivingMappings}
+            derivedMappings={activeDerivedMappings}
+            preview={activePreview}
+            onConfirmMapping={() => setStep('mapping')}
+            onCancelPreview={() => { setActiveDerivedMappings(null) }}
           />
         )}
         {step === 'mapping' && activePreview && activeDerivedMappings && (
@@ -224,7 +231,7 @@ export default function DataView() {
             preview={activePreview}
             derivedMappings={activeDerivedMappings}
             onApply={handleImport}
-            onBack={() => setStep('upload')}
+            onBack={() => { setActiveDerivedMappings(null); setStep('upload') }}
             fromPreviousMapping={mappingFromPrevious}
             preservedColumnStates={preservedColumnStates}
             importing={importing}

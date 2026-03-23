@@ -227,6 +227,15 @@ export default function CreateRuleModal({
     }
   }, [taxonomyHighlightIdx])
 
+  // Ordered list of focusable refs for arrow-key navigation
+  const focusOrder = useMemo(() => [
+    editConditionsBtnRef,
+    nameInputRef,
+    priorityInputRef,
+    taxonomyBtnRef,
+    saveBtnRef,
+  ], [])
+
   // Global keyboard handler for the modal
   const handleModalKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Don't interfere with taxonomy dropdown keyboard nav
@@ -245,8 +254,19 @@ export default function CreateRuleModal({
       return
     }
 
-    // Tab navigation is native — just let it flow through the focusable elements
-  }, [taxonomyDropdownOpen, onClose, handleSave])
+    // Arrow key navigation between form fields
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const active = document.activeElement
+      const currentIdx = focusOrder.findIndex(ref => ref.current === active)
+      if (currentIdx === -1) return
+
+      e.preventDefault()
+      const nextIdx = e.key === 'ArrowDown'
+        ? Math.min(currentIdx + 1, focusOrder.length - 1)
+        : Math.max(currentIdx - 1, 0)
+      focusOrder[nextIdx].current?.focus()
+    }
+  }, [taxonomyDropdownOpen, onClose, handleSave, focusOrder])
 
   if (!isOpen) return null
 

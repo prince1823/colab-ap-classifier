@@ -225,6 +225,8 @@ export function createMockIngestService(): IngestService {
     getStoredMappings: vi.fn().mockResolvedValue(null),
     importCSV: vi.fn().mockResolvedValue({ rowsInserted: 0, uploadId: 'upload-1' }),
     getUploadHistory: vi.fn().mockResolvedValue([]),
+    getUploadStatsBatch: vi.fn().mockResolvedValue({}),
+    deleteUpload: vi.fn().mockResolvedValue({ deletedRows: 0 }),
   };
 }
 

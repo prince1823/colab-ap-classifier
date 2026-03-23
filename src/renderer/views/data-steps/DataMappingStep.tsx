@@ -260,17 +260,29 @@ function MergePreviewContent({
   columns,
   preview,
   isFirstUpload,
+  columnSearch = '',
 }: {
   columns: ColumnState[]
   preview: CSVPreview
   isFirstUpload: boolean
+  columnSearch?: string
 }) {
   const [existingRows, setExistingRows] = useState<FlatRow[]>([])
   const [existingTotalCount, setExistingTotalCount] = useState(0)
   const [loading, setLoading] = useState(!isFirstUpload)
 
   const includedColumns = useMemo(() => columns.filter((c) => c.included), [columns])
-  const canonicalNames = useMemo(() => includedColumns.map((c) => c.canonical), [includedColumns])
+  const canonicalNames = useMemo(() => [...new Set(includedColumns.map((c) => c.canonical))], [includedColumns])
+  const filteredCanonicalNames = useMemo(() => {
+    if (!columnSearch.trim()) return canonicalNames
+    const q = columnSearch.toLowerCase()
+    const matched = new Set(
+      includedColumns
+        .filter((c) => c.csvColumn.toLowerCase().includes(q) || c.canonical.toLowerCase().includes(q))
+        .map((c) => c.canonical)
+    )
+    return [...matched]
+  }, [includedColumns, canonicalNames, columnSearch])
 
   // Build new rows mapped through current column assignments
   const newRows = useMemo(() => {
@@ -368,11 +380,17 @@ function MergePreviewContent({
               <th className="w-20 px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-gray-400 border-r border-gray-200">
                 Source
               </th>
-              {canonicalNames.map((col) => (
-                <th key={col} className="px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500 min-w-[120px]">
-                  {col}
+              {filteredCanonicalNames.map((col) => {
+                const csvCol = includedColumns.find((c) => c.canonical === col)?.csvColumn
+                return (
+                <th key={col} className="px-3 py-2 text-left min-w-[120px]">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500">{col}</div>
+                  {csvCol && csvCol !== col && (
+                    <div className="text-[9px] text-gray-400 truncate" title={csvCol}>{csvCol}</div>
+                  )}
                 </th>
-              ))}
+                )
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -390,7 +408,7 @@ function MergePreviewContent({
                     </div>
                   </td>
                 ) : null}
-                {canonicalNames.map((col) => (
+                {filteredCanonicalNames.map((col) => (
                   <td key={col} className="px-3 py-2 text-xs text-gray-500 truncate max-w-[150px]" title={row[col]}>
                     {row[col]}
                   </td>
@@ -401,7 +419,7 @@ function MergePreviewContent({
             {/* Divider */}
             {existingRows.length > 0 && newRows.length > 0 && (
               <tr>
-                <td colSpan={canonicalNames.length + 1} className="px-3 py-1 bg-gray-100 border-y-2 border-gray-200">
+                <td colSpan={filteredCanonicalNames.length + 1} className="px-3 py-1 bg-gray-100 border-y-2 border-gray-200">
                   <div className="flex items-center gap-3">
                     <div className="flex-1 h-px bg-gray-300"></div>
                     <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
@@ -427,7 +445,7 @@ function MergePreviewContent({
                     </div>
                   </td>
                 ) : null}
-                {canonicalNames.map((col) => (
+                {filteredCanonicalNames.map((col) => (
                   <td key={col} className="px-3 py-2 text-xs text-gray-700 truncate max-w-[150px]" title={row[col]}>
                     {row[col]}
                   </td>
@@ -479,6 +497,7 @@ export default function DataMappingStep({
   const [newCanonicalInput, setNewCanonicalInput] = useState('')
   const [showAddInput, setShowAddInput] = useState(false)
   const [activeTab, setActiveTab] = useState<ActiveTab>('mapping')
+  const [columnSearch, setColumnSearch] = useState('')
 
   /* ── Derived data ── */
 
@@ -503,6 +522,16 @@ export default function DataMappingStep({
     () => preview.sampleRows.slice(0, MAX_PREVIEW_ROWS),
     [preview.sampleRows]
   )
+
+  // Filter columns by search query (matches CSV column name or canonical name)
+  const filteredColumnIndices = useMemo(() => {
+    if (!columnSearch.trim()) return columns.map((_, i) => i)
+    const q = columnSearch.toLowerCase()
+    return columns
+      .map((col, i) => ({ col, i }))
+      .filter(({ col }) => col.csvColumn.toLowerCase().includes(q) || col.canonical.toLowerCase().includes(q))
+      .map(({ i }) => i)
+  }, [columns, columnSearch])
 
   /* ── Callbacks ── */
 
@@ -581,7 +610,7 @@ export default function DataMappingStep({
         {/* ═══ LEFT PANEL ═══ */}
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Tab bar */}
-          <div className="flex-shrink-0 flex border-b border-gray-200 mb-0">
+          <div className="flex-shrink-0 flex items-center border-b border-gray-200 mb-0">
             <button
               onClick={() => setActiveTab('mapping')}
               className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
@@ -605,6 +634,14 @@ export default function DataMappingStep({
                 <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
               )}
             </button>
+            <div className="ml-auto px-2 pb-1">
+              <input
+                value={columnSearch}
+                onChange={(e) => setColumnSearch(e.target.value)}
+                placeholder="Search columns..."
+                className="text-xs border border-gray-200 rounded px-2 py-1 w-40 outline-none focus:border-blue-400"
+              />
+            </div>
           </div>
 
           {/* Tab content */}
@@ -620,7 +657,9 @@ export default function DataMappingStep({
                     >
                       #
                     </th>
-                    {columns.map((col, index) => (
+                    {filteredColumnIndices.map((index) => {
+                      const col = columns[index]
+                      return (
                       <th
                         key={`csv-${index}`}
                         className={`px-3 py-1.5 text-left min-w-[130px] max-w-[200px] transition-opacity ${
@@ -641,10 +680,12 @@ export default function DataMappingStep({
                           )}
                         </div>
                       </th>
-                    ))}
+                      )
+                    })}
                   </tr>
                   <tr className="border-b border-gray-200 bg-blue-50/30">
-                    {columns.map((col, index) => {
+                    {filteredColumnIndices.map((index) => {
+                      const col = columns[index]
                       const isRequired = REQUIRED.has(col.canonical)
                       const isAddress = isAddressColumn(col.canonical)
                       return (
@@ -689,7 +730,9 @@ export default function DataMappingStep({
                   {displayRows.map((row, ri) => (
                     <tr key={ri} className="hover:bg-gray-50">
                       <td className="px-2 py-2 text-center text-xs text-gray-400 select-none border-r border-gray-100">{ri + 1}</td>
-                      {columns.map((col, ci) => (
+                      {filteredColumnIndices.map((ci) => {
+                        const col = columns[ci]
+                        return (
                         <td
                           key={ci}
                           className={`px-3 py-2 text-xs truncate max-w-[180px] transition-opacity ${
@@ -699,12 +742,13 @@ export default function DataMappingStep({
                         >
                           {String(row[col.csvColumn] ?? '\u2014')}
                         </td>
-                      ))}
+                        )
+                      })}
                     </tr>
                   ))}
                   {preview.totalRows > MAX_PREVIEW_ROWS && (
                     <tr>
-                      <td colSpan={columns.length + 1} className="px-3 py-2 text-center text-[11px] text-gray-400 bg-gray-50">
+                      <td colSpan={filteredColumnIndices.length + 1} className="px-3 py-2 text-center text-[11px] text-gray-400 bg-gray-50">
                         Showing {MAX_PREVIEW_ROWS} of {preview.totalRows.toLocaleString()} rows
                       </td>
                     </tr>
@@ -717,6 +761,7 @@ export default function DataMappingStep({
                 columns={columns}
                 preview={preview}
                 isFirstUpload={isFirstUpload}
+                columnSearch={columnSearch}
               />
             )}
           </div>

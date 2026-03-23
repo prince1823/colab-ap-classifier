@@ -4,12 +4,11 @@ import { useWorkflowStore } from '../stores/workflowStore'
 import type { CompanyContext } from '../../shared/types/project'
 
 const FIELDS: { key: keyof CompanyContext; label: string; placeholder: string; multiline?: boolean }[] = [
-  { key: 'companyName', label: 'Company Name', placeholder: 'e.g. Acme Corp, Global Industries' },
-  { key: 'industry', label: 'Industry', placeholder: 'e.g. Manufacturing, Technology, Healthcare' },
-  { key: 'sector', label: 'Sector', placeholder: 'e.g. Automotive, SaaS, Pharmaceuticals' },
-  { key: 'description', label: 'Company Description', placeholder: 'Brief description of the company', multiline: true },
-  { key: 'businessFocus', label: 'Business Focus', placeholder: 'Core business activities and focus areas', multiline: true },
-  { key: 'procurementNuances', label: 'Procurement Nuances', placeholder: 'Special procurement patterns or considerations', multiline: true },
+  { key: 'companyName', label: 'Company Name', placeholder: 'e.g. InnovaHealth' },
+  { key: 'industry', label: 'Industry', placeholder: 'e.g. Healthcare' },
+  { key: 'description', label: 'Description', placeholder: 'e.g. InnovaHealth is a mid-sized regional health system operating hospitals, outpatient clinics, and specialty care centers across the Midwest. Primary spend categories include medical supplies, pharmaceuticals, facilities management, and IT.', multiline: true },
+  { key: 'sisterCompanies', label: 'Sister Companies', placeholder: 'e.g. InnovaHealth Labs, InnovaHealth Insurance, Innova Physician Group' },
+  { key: 'additionalDetails', label: 'Additional Details', placeholder: 'e.g. Operates under GPO contracts for most medical supply categories. High spend on single-source vendors for specialized surgical equipment. IT spend growing due to EHR migration.', multiline: true },
 ]
 
 export default function CompanyContextPage() {
@@ -19,10 +18,9 @@ export default function CompanyContextPage() {
   const [form, setForm] = useState<CompanyContext>({
     companyName: '',
     industry: '',
-    sector: '',
     description: '',
-    businessFocus: '',
-    procurementNuances: '',
+    sisterCompanies: '',
+    additionalDetails: '',
   })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -33,10 +31,9 @@ export default function CompanyContextPage() {
       setForm({
         companyName: metadata.companyContext.companyName || '',
         industry: metadata.companyContext.industry || '',
-        sector: metadata.companyContext.sector || '',
         description: metadata.companyContext.description || '',
-        businessFocus: metadata.companyContext.businessFocus || '',
-        procurementNuances: metadata.companyContext.procurementNuances || '',
+        sisterCompanies: metadata.companyContext.sisterCompanies || '',
+        additionalDetails: metadata.companyContext.additionalDetails || '',
       })
     }
   }, [metadata])

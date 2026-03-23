@@ -49,7 +49,7 @@ Taxonomy descriptions are AUTHORITATIVE — they define category boundaries.
 
 1. REVIEW COMPANY CONTEXT:
    a. Read the company_context provided — it describes the business domain
-   b. Use industry/sector/business_focus/procurement_nuances to understand operational priorities
+   b. Use industry/description/sister_companies/additional_details to understand operational priorities
    c. Use it to understand domain-specific terminology
 
 2. EXAMINE TAXONOMY PATHS WITH DESCRIPTIONS:
@@ -185,10 +185,9 @@ export function buildUserPrompt(input: ClassificationInput): string {
 
   const contextParts: string[] = [];
   contextParts.push(`Industry: ${companyContext.industry}`);
-  if (companyContext.sector) contextParts.push(`Sector: ${companyContext.sector}`);
   if (companyContext.description) contextParts.push(`Description: ${companyContext.description}`);
-  if (companyContext.businessFocus) contextParts.push(`Business Focus: ${companyContext.businessFocus}`);
-  if (companyContext.procurementNuances) contextParts.push(`Procurement Nuances: ${companyContext.procurementNuances}`);
+  if (companyContext.sisterCompanies) contextParts.push(`Sister Companies: ${companyContext.sisterCompanies}`);
+  if (companyContext.additionalDetails) contextParts.push(`Additional Details: ${companyContext.additionalDetails}`);
 
   const columnPriorityNote = columnPriorities && columnPriorities.length > 0
     ? '\nTransaction fields are listed in order of classification priority (most important first). Identical rows are grouped with a count.\n'

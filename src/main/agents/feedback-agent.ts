@@ -140,10 +140,9 @@ export function buildUserPrompt(input: FeedbackAgentInput): string {
   if (companyContext) {
     if (companyContext.companyName) contextParts.push(`Company: ${companyContext.companyName}`);
     if (companyContext.industry) contextParts.push(`Industry: ${companyContext.industry}`);
-    if (companyContext.sector) contextParts.push(`Sector: ${companyContext.sector}`);
     if (companyContext.description) contextParts.push(`Description: ${companyContext.description}`);
-    if (companyContext.businessFocus) contextParts.push(`Business Focus: ${companyContext.businessFocus}`);
-    if (companyContext.procurementNuances) contextParts.push(`Procurement Nuances: ${companyContext.procurementNuances}`);
+    if (companyContext.sisterCompanies) contextParts.push(`Sister Companies: ${companyContext.sisterCompanies}`);
+    if (companyContext.additionalDetails) contextParts.push(`Additional Details: ${companyContext.additionalDetails}`);
   }
 
   return `## User Feedback

@@ -91,20 +91,24 @@ function buildInitialState(
   })
 }
 
-/* ── Searchable Column Picker (custom dropdown) ── */
+/* ── Canonical Picker (dropdown in table header) ── */
 
-function ColumnPicker({
+function CanonicalPicker({
   value,
-  allCsvColumns,
-  csvToCanonicalMap,
-  thisCanonical,
+  canonicalPool,
+  usedCanonicals,
+  locked,
+  isRequired,
   onChange,
+  onAddCanonical,
 }: {
-  value: string | null
-  allCsvColumns: string[]
-  csvToCanonicalMap: Map<string, string>
-  thisCanonical: string
-  onChange: (csvColumn: string | null) => void
+  value: string
+  canonicalPool: string[]
+  usedCanonicals: Map<string, string> // canonical → csvColumn that uses it
+  locked: boolean
+  isRequired?: boolean
+  onChange: (canonical: string) => void
+  onAddCanonical: (canonical: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -129,156 +133,123 @@ function ColumnPicker({
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    return allCsvColumns.filter((csv) => csv.toLowerCase().includes(q))
-  }, [allCsvColumns, search])
+    return canonicalPool.filter((c) => c.toLowerCase().includes(q))
+  }, [canonicalPool, search])
 
-  const { unmapped, mapped } = useMemo(() => {
-    const u: string[] = []
-    const m: string[] = []
-    for (const csv of filtered) {
-      const usedBy = csvToCanonicalMap.get(csv)
-      if (!usedBy || usedBy === thisCanonical) u.push(csv)
-      else m.push(csv)
+  const searchSnaked = useMemo(() => toSnakeCase(search), [search])
+  const isNewCanonical = searchSnaked && !canonicalPool.includes(searchSnaked)
+
+  const handleCreateAndSelect = () => {
+    if (!isNewCanonical) return
+    onAddCanonical(searchSnaked)
+    onChange(searchSnaked)
+    setOpen(false)
+    setSearch('')
+  }
+
+  const { available, taken } = useMemo(() => {
+    const a: string[] = []
+    const t: string[] = []
+    for (const c of filtered) {
+      const usedBy = usedCanonicals.get(c)
+      if (!usedBy || usedBy === value) a.push(c)
+      else t.push(c)
     }
-    return { unmapped: u, mapped: m }
-  }, [filtered, csvToCanonicalMap, thisCanonical])
+    return { available: a, taken: t }
+  }, [filtered, usedCanonicals, value])
 
   return (
-    <div ref={containerRef} className="relative flex-1 min-w-0">
+    <div ref={containerRef} className="relative min-w-0 flex-1">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
-        className={`w-full text-left text-[11px] rounded border px-2 py-1 truncate flex items-center gap-1 transition-colors ${
-          value
-            ? 'border-green-300 bg-white text-gray-700 hover:border-green-400'
-            : 'border-gray-300 bg-gray-50 text-gray-400 hover:border-gray-400'
+        onClick={() => { if (!locked) setOpen(!open) }}
+        className={`w-full text-left text-[11px] font-mono rounded px-1.5 py-0.5 flex items-center gap-1 transition-colors ${
+          locked
+            ? 'text-blue-600 cursor-default'
+            : 'text-blue-700 hover:bg-blue-100 hover:text-blue-900 cursor-pointer'
         }`}
+        disabled={locked}
+        title={value}
       >
-        <span className="truncate flex-1">{value ?? '-- unmapped --'}</span>
-        <svg className="w-3 h-3 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        <span className="truncate">{value}{isRequired && <sup className="text-red-500 text-[9px] font-bold ml-0.5">*</sup>}</span>
+        {!locked && (
+          <svg className="w-3 h-3 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        )}
       </button>
 
       {open && (
-        <div className="absolute z-50 left-0 right-0 mt-1 bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden"
-          style={{ minWidth: '220px' }}
+        <div className="absolute z-50 left-0 mt-1 bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden"
+          style={{ minWidth: '200px' }}
         >
           <div className="p-1.5 border-b border-gray-100">
             <input
               ref={inputRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search columns..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && isNewCanonical) handleCreateAndSelect()
+              }}
+              placeholder="Search or create canonical name..."
               className="w-full text-xs border border-gray-200 rounded px-2 py-1 outline-none focus:border-blue-400"
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
-            {value && (
+            {available.map((c) => (
               <button
+                key={c}
                 type="button"
-                onClick={() => { onChange(null); setOpen(false); setSearch('') }}
-                className="w-full text-left px-3 py-1.5 text-[11px] text-red-500 hover:bg-red-50 border-b border-gray-50"
-              >
-                &#10005; Remove mapping
-              </button>
-            )}
-            {unmapped.map((csv) => (
-              <button
-                key={csv}
-                type="button"
-                onClick={() => { onChange(csv); setOpen(false); setSearch('') }}
-                className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-blue-50 flex items-center gap-1.5 ${
-                  csv === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'
+                onClick={() => { onChange(c); setOpen(false); setSearch('') }}
+                className={`w-full text-left px-3 py-1.5 text-[11px] font-mono hover:bg-blue-50 flex items-center gap-1.5 ${
+                  c === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'
                 }`}
               >
-                {csv === value && <span className="text-blue-500 flex-shrink-0">&#10003;</span>}
-                <span className="truncate">{csv}</span>
+                {c === value && <span className="text-blue-500 flex-shrink-0">&#10003;</span>}
+                <span className="truncate">{c}</span>
+                {REQUIRED.has(c) && (
+                  <span className="text-red-500 text-[10px] font-bold flex-shrink-0 ml-auto" title="Required">*</span>
+                )}
               </button>
             ))}
-            {mapped.length > 0 && (
+            {taken.length > 0 && (
               <>
                 <div className="px-3 py-1 text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-50 border-t border-gray-100">
-                  Used by other mappings
+                  Used by other columns
                 </div>
-                {mapped.map((csv) => {
-                  const usedBy = csvToCanonicalMap.get(csv)!
+                {taken.map((c) => {
+                  const usedBy = usedCanonicals.get(c)!
                   return (
                     <button
-                      key={csv}
+                      key={c}
                       type="button"
-                      onClick={() => { onChange(csv); setOpen(false); setSearch('') }}
-                      className="w-full text-left px-3 py-1.5 text-[11px] text-gray-400 hover:bg-amber-50 hover:text-gray-600 flex items-center justify-between"
+                      onClick={() => { onChange(c); setOpen(false); setSearch('') }}
+                      className="w-full text-left px-3 py-1.5 text-[11px] font-mono text-gray-400 hover:bg-amber-50 hover:text-gray-600 flex items-center justify-between"
                     >
-                      <span className="truncate">{csv}</span>
+                      <span className="truncate">{c}</span>
                       <span className="text-[9px] text-gray-300 flex-shrink-0 ml-1">{usedBy}</span>
                     </button>
                   )
                 })}
               </>
             )}
-            {filtered.length === 0 && (
-              <div className="px-3 py-2 text-[11px] text-gray-400 text-center">No columns match</div>
+            {filtered.length === 0 && !isNewCanonical && (
+              <div className="px-3 py-2 text-[11px] text-gray-400 text-center">No match</div>
+            )}
+            {isNewCanonical && (
+              <button
+                type="button"
+                onClick={handleCreateAndSelect}
+                className="w-full text-left px-3 py-1.5 text-[11px] font-mono text-blue-600 hover:bg-blue-50 border-t border-gray-100 flex items-center gap-1.5"
+              >
+                <span className="flex-shrink-0">+</span>
+                <span>Create &quot;{searchSnaked}&quot;</span>
+                <span className="text-[9px] text-gray-400 ml-auto">Enter</span>
+              </button>
             )}
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-/* ── Canonical Column Card (Right Panel) ── */
-
-function CanonicalCard({
-  canonical,
-  isRequired,
-  isAddress,
-  mappedCsvColumn,
-  allCsvColumns,
-  csvToCanonicalMap,
-  onChangeMapping,
-}: {
-  canonical: string
-  isRequired: boolean
-  isAddress: boolean
-  mappedCsvColumn: string | null
-  allCsvColumns: string[]
-  csvToCanonicalMap: Map<string, string>
-  onChangeMapping: (canonical: string, csvColumn: string | null) => void
-}) {
-  const isMapped = mappedCsvColumn !== null
-
-  return (
-    <div
-      className={`rounded-lg border px-3 py-2.5 transition-all ${
-        isMapped
-          ? 'border-green-200 bg-green-50/50'
-          : isRequired
-            ? 'border-red-200 bg-red-50/30'
-            : 'border-gray-200 bg-white'
-      }`}
-    >
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <span className="text-xs font-mono font-semibold text-gray-800 truncate" title={canonical}>
-          {canonical}
-        </span>
-        {isRequired && (
-          <span className="rounded px-1 py-0.5 text-[8px] font-bold bg-red-100 text-red-600 flex-shrink-0">REQ</span>
-        )}
-        {isAddress && !isRequired && (
-          <span className="rounded px-1 py-0.5 text-[8px] font-bold bg-amber-100 text-amber-600 flex-shrink-0">REC</span>
-        )}
-        {isMapped && (
-          <span className="text-green-500 text-[10px] flex-shrink-0 ml-auto" title="Mapped">&#10003;</span>
-        )}
-      </div>
-      <ColumnPicker
-        value={mappedCsvColumn}
-        allCsvColumns={allCsvColumns}
-        csvToCanonicalMap={csvToCanonicalMap}
-        thisCanonical={canonical}
-        onChange={(csv) => onChangeMapping(canonical, csv)}
-      />
     </div>
   )
 }
@@ -502,8 +473,6 @@ export default function DataMappingStep({
   const [columns, setColumns] = useState<ColumnState[]>(() =>
     preservedColumnStates ?? buildInitialState(preview, derivedMappings, fromPreviousMapping)
   )
-  const [editingIndex, setEditingIndex] = useState<number | null>(null)
-  const [editValue, setEditValue] = useState('')
   const [canonicalPool, setCanonicalPool] = useState<string[]>(() =>
     buildCanonicalPool(derivedMappings, preservedColumnStates ?? buildInitialState(preview, derivedMappings, fromPreviousMapping))
   )
@@ -521,10 +490,11 @@ export default function DataMappingStep({
     return map
   }, [columns])
 
-  const csvToCanonicalMap = useMemo(() => {
+  // Map of canonical → csvColumn for all assigned canonicals (to detect which are taken)
+  const usedCanonicals = useMemo(() => {
     const map = new Map<string, string>()
     for (const col of columns) {
-      if (col.included && col.canonical) map.set(col.csvColumn, col.canonical)
+      if (col.canonical) map.set(col.canonical, col.csvColumn)
     }
     return map
   }, [columns])
@@ -543,41 +513,9 @@ export default function DataMappingStep({
     })
   }, [])
 
-  const startEditCanonical = useCallback(
-    (index: number) => {
-      if (columns[index].locked) return
-      setEditingIndex(index)
-      setEditValue(columns[index].canonical)
-    },
-    [columns]
-  )
-
-  const commitEditCanonical = useCallback(() => {
-    if (editingIndex === null) return
-    const snaked = toSnakeCase(editValue) || columns[editingIndex].canonical
-    setColumns((prev) => prev.map((c, i) => (i === editingIndex ? { ...c, canonical: snaked } : c)))
-    setCanonicalPool((prev) => (prev.includes(snaked) ? prev : [...prev, snaked]))
-    setEditingIndex(null)
-  }, [editingIndex, editValue, columns])
-
-  const cancelEdit = useCallback(() => setEditingIndex(null), [])
-
-  const handleCanonicalMappingChange = useCallback(
-    (canonical: string, csvColumn: string | null) => {
-      setColumns((prev) => {
-        return prev.map((c) => {
-          if (c.canonical === canonical && c.csvColumn !== csvColumn) {
-            return { ...c, canonical: toSnakeCase(c.csvColumn), included: false }
-          }
-          if (csvColumn && c.csvColumn === csvColumn) {
-            return { ...c, canonical, included: true }
-          }
-          return c
-        })
-      })
-    },
-    []
-  )
+  const handleSetCanonical = useCallback((index: number, newCanonical: string) => {
+    setColumns((prev) => prev.map((c, i) => (i === index ? { ...c, canonical: newCanonical } : c)))
+  }, [])
 
   const handleAddCanonical = useCallback(() => {
     const snaked = toSnakeCase(newCanonicalInput)
@@ -616,7 +554,7 @@ export default function DataMappingStep({
       {/* Top bar */}
       <div className="flex-shrink-0 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-medium text-gray-700">Column Mapping</h3>
+          <h3 className="text-sm font-medium text-gray-700">Review Column Mapping</h3>
           <p className="text-xs text-gray-400 mt-0.5">
             Map your CSV columns to canonical names. Switch to Merge Preview to see how new data aligns with existing data.
           </p>
@@ -637,7 +575,7 @@ export default function DataMappingStep({
         </div>
       )}
 
-      {/* Split panel: Left (tabs: mapping table / merge preview) + Right (canonical panel) */}
+      {/* Split panel: Left (tabs: mapping table / merge preview) + Right (mapping summary) */}
       <div className="flex-1 min-h-0 flex gap-3">
         {/* ═══ LEFT PANEL ═══ */}
         <div className="flex-1 min-w-0 flex flex-col">
@@ -708,7 +646,6 @@ export default function DataMappingStep({
                     {columns.map((col, index) => {
                       const isRequired = REQUIRED.has(col.canonical)
                       const isAddress = isAddressColumn(col.canonical)
-                      const isEditing = editingIndex === index
                       return (
                         <th
                           key={`canonical-${index}`}
@@ -716,36 +653,16 @@ export default function DataMappingStep({
                             !col.included ? 'opacity-40' : ''
                           }`}
                         >
-                          <div className="flex items-center gap-1">
-                            {isEditing ? (
-                              <input
-                                autoFocus
-                                value={editValue}
-                                onChange={(e) => setEditValue(e.target.value)}
-                                onBlur={commitEditCanonical}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') commitEditCanonical()
-                                  if (e.key === 'Escape') cancelEdit()
-                                }}
-                                className="flex-1 min-w-0 text-xs font-mono bg-white border border-blue-300 rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
-                              />
-                            ) : (
-                              <button
-                                onClick={() => startEditCanonical(index)}
-                                className={`text-left text-[11px] font-mono truncate rounded px-1 py-0.5 transition-colors ${
-                                  col.locked
-                                    ? 'text-blue-600 cursor-default'
-                                    : 'text-blue-700 hover:bg-blue-100 hover:text-blue-900'
-                                }`}
-                                title={col.locked ? 'Locked by previous mapping' : `Click to rename — currently: ${col.canonical}`}
-                                disabled={col.locked}
-                              >
-                                {col.canonical}
-                              </button>
-                            )}
-                            {isRequired && (
-                              <span className="rounded px-1 py-0.5 text-[7px] font-bold bg-red-100 text-red-600 flex-shrink-0">REQ</span>
-                            )}
+                          <div className="flex items-center gap-1 min-w-0">
+                            <CanonicalPicker
+                              value={col.canonical}
+                              canonicalPool={canonicalPool}
+                              usedCanonicals={usedCanonicals}
+                              locked={col.locked}
+                              isRequired={isRequired}
+                              onChange={(newCanonical) => handleSetCanonical(index, newCanonical)}
+                              onAddCanonical={(c) => setCanonicalPool((prev) => prev.includes(c) ? prev : [...prev, c])}
+                            />
                             {isAddress && !isRequired && col.included && (
                               <span className="rounded px-1 py-0.5 text-[7px] font-bold bg-amber-100 text-amber-600 flex-shrink-0">REC</span>
                             )}
@@ -804,60 +721,48 @@ export default function DataMappingStep({
           </div>
         </div>
 
-        {/* ═══ RIGHT: Canonical Columns Panel ═══ */}
+        {/* ═══ RIGHT: Mapping Summary Panel ═══ */}
         <div className="w-72 flex-shrink-0 flex flex-col rounded-md border border-gray-200 bg-gray-50/50">
           <div className="px-3 py-2.5 border-b border-gray-200 bg-white rounded-t-md">
-            <h4 className="text-xs font-semibold text-gray-700">Canonical Columns</h4>
+            <h4 className="text-xs font-semibold text-gray-700">Mapping Summary</h4>
             <p className="text-[10px] text-gray-400 mt-0.5">
               {mappedCanonicalCount} of {canonicalPool.length} mapped
             </p>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-2">
-            {canonicalPool.map((canonical) => (
-              <CanonicalCard
-                key={canonical}
-                canonical={canonical}
-                isRequired={REQUIRED.has(canonical)}
-                isAddress={isAddressColumn(canonical)}
-                mappedCsvColumn={canonicalToCsv.get(canonical) ?? null}
-                allCsvColumns={preview.columns}
-                csvToCanonicalMap={csvToCanonicalMap}
-                onChangeMapping={handleCanonicalMappingChange}
-              />
-            ))}
-          </div>
-          <div className="px-2 py-2 border-t border-gray-200 bg-white rounded-b-md">
-            {showAddInput ? (
-              <div className="flex gap-1.5">
-                <input
-                  autoFocus
-                  value={newCanonicalInput}
-                  onChange={(e) => setNewCanonicalInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleAddCanonical()
-                    if (e.key === 'Escape') { setShowAddInput(false); setNewCanonicalInput('') }
-                  }}
-                  placeholder="new_column_name"
-                  className="flex-1 min-w-0 text-xs font-mono border border-gray-300 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-blue-400"
-                />
-                <button onClick={handleAddCanonical} className="rounded bg-blue-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-blue-700">
-                  Add
-                </button>
-                <button
-                  onClick={() => { setShowAddInput(false); setNewCanonicalInput('') }}
-                  className="rounded border border-gray-300 px-2 py-1 text-[10px] font-medium text-gray-500 hover:bg-gray-50"
+          <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-1">
+            {canonicalPool.map((canonical) => {
+              const csvCol = canonicalToCsv.get(canonical)
+              const isMapped = !!csvCol
+              const isRequired = REQUIRED.has(canonical)
+              return (
+                <div
+                  key={canonical}
+                  className={`rounded-md border px-3 py-2 text-xs ${
+                    isMapped
+                      ? 'border-green-200 bg-green-50/50'
+                      : isRequired
+                        ? 'border-red-200 bg-red-50/30'
+                        : 'border-gray-200 bg-white'
+                  }`}
                 >
-                  &#10005;
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowAddInput(true)}
-                className="w-full rounded-md border border-dashed border-gray-300 px-3 py-1.5 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-colors"
-              >
-                + Add Canonical Column
-              </button>
-            )}
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-semibold text-gray-800 truncate" title={canonical}>
+                      {canonical}{isRequired && <sup className="text-red-500 text-[9px] font-bold ml-0.5">*</sup>}
+                    </span>
+                    {isMapped && (
+                      <span className="text-green-500 text-[10px] flex-shrink-0 ml-auto">&#10003;</span>
+                    )}
+                  </div>
+                  {isMapped ? (
+                    <p className="mt-0.5 text-[10px] text-green-600 truncate" title={csvCol}>
+                      &rarr; {csvCol}
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 text-[10px] text-gray-400">Unmapped</p>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>

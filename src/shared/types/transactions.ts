@@ -7,6 +7,9 @@ export interface Transaction {
   classificationPath: string | null;
   classificationStatus: ClassificationStatus;
   humanReviewed: boolean;
+  flaggedForReview: boolean;
+  appliedRuleId: string | null;
+  appliedRuleName: string | null;
   canonicalFields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -18,6 +21,8 @@ export interface TransactionFilter {
   classificationStatus?: ClassificationStatus;
   spendMin?: number;
   spendMax?: number;
+  /** If set, filters by human_reviewed flag. false = only unreviewed rows. */
+  humanReviewed?: boolean;
   /** Generic conditions using the same shape as override rules */
   conditions?: FilterCondition[];
   /** Grouped conditions with proper parenthesization (takes precedence over conditions if set) */
@@ -101,6 +106,8 @@ export interface TransactionUpdate {
   ids: string[];
   taxonomyNodeId?: string;
   classificationStatus?: ClassificationStatus;
+  flaggedForReview?: boolean;
+  appliedRuleId?: string | null;
 }
 
 /**

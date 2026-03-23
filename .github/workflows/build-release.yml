@@ -65,26 +65,3 @@ jobs:
           echo "=== app-unpacked contents (if exists) ==="
           ls -la release/*/unpacked/node_modules/@duckdb/ 2>/dev/null || ls -la release/*-unpacked/resources/app.asar.unpacked/node_modules/@duckdb/ 2>/dev/null || echo "No unpacked dir found at expected paths"
 
-      - name: Upload macOS DMG
-        if: matrix.platform == 'mac'
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-dmg
-          path: release/*.dmg
-          if-no-files-found: error
-
-      - name: Upload macOS ZIP
-        if: matrix.platform == 'mac'
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-zip
-          path: release/*.zip
-          if-no-files-found: error
-
-      - name: Upload Windows installer
-        if: matrix.platform == 'win'
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: release/*.exe
-          if-no-files-found: error

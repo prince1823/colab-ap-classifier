@@ -36,7 +36,7 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents'];
 
 export { convertPlaceholders };
 
@@ -113,7 +113,7 @@ export class DuckDBDatabase implements Database {
           supplier_name VARCHAR NOT NULL UNIQUE,
           confirmation_status VARCHAR DEFAULT 'pending',
           is_tail_spend BOOLEAN DEFAULT FALSE,
-          parent_supplier_name VARCHAR,
+          parent_supplier_id VARCHAR,
           data_source VARCHAR DEFAULT 'manual',
           universe_match BOOLEAN DEFAULT FALSE,
           is_researched BOOLEAN DEFAULT FALSE,
@@ -150,6 +150,118 @@ export class DuckDBDatabase implements Database {
     try {
       await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
     } catch { /* column doesn't exist, ignore */ }
+
+    // Migrate: add is_reverted column to change_log
+    try {
+      await this.exec('ALTER TABLE change_log ADD COLUMN is_reverted BOOLEAN DEFAULT FALSE');
+    } catch { /* column already exists, ignore */ }
+
+    // Migrate: clean up old "Reverted:" entries — mark originals as reverted and delete the revert rows
+    try {
+      // Mark original entries as reverted if a "Reverted:" entry exists for them
+      await this.exec(`
+        UPDATE change_log SET is_reverted = TRUE
+        WHERE is_reverted = FALSE
+          AND description IS NOT NULL
+          AND id IN (
+            SELECT cl2.reverted_change_id FROM change_log cl2
+            WHERE cl2.reverted_change_id IS NOT NULL
+          )
+      `);
+      // Delete old "Reverted:" rows (those with description starting with 'Reverted:')
+      await this.exec("DELETE FROM change_log WHERE description LIKE 'Reverted:%'");
+    } catch { /* ignore — reverted_change_id column may not exist */ }
+
+    // Drop old reverted_change_id column if it exists
+    try {
+      await this.exec('ALTER TABLE change_log DROP COLUMN reverted_change_id');
+    } catch { /* column doesn't exist, ignore */ }
+
+    // Migrate: ensure flagged_for_review column exists on transactions
+    const frCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'flagged_for_review'"
+    );
+    if (frCol.length === 0) {
+      await this.exec('ALTER TABLE transactions ADD COLUMN flagged_for_review BOOLEAN DEFAULT FALSE');
+    }
+
+    // Migrate: ensure applied_rule_id column exists on transactions
+    const appliedRuleCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'applied_rule_id'"
+    );
+    if (appliedRuleCol.length === 0) {
+      await this.exec('ALTER TABLE transactions ADD COLUMN applied_rule_id VARCHAR');
+    }
+
+    // Migrate: ensure override_rules.name is unique
+    try {
+      await this.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name)');
+    } catch { /* index may already exist or constraint already enforced */ }
+
+    // Migrate: ensure supplier_parents table exists
+    const spTable = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'supplier_parents'"
+    );
+    if (spTable.length === 0) {
+      await this.exec(`
+        CREATE TABLE IF NOT EXISTS supplier_parents (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL UNIQUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    }
+
+    // Migrate: replace parent_supplier_name with parent_supplier_id FK on project_suppliers
+    const parentIdCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'parent_supplier_id'"
+    );
+    if (parentIdCol.length === 0) {
+      await this.exec(`ALTER TABLE project_suppliers ADD COLUMN parent_supplier_id VARCHAR;`);
+    }
+    try {
+      await this.exec('ALTER TABLE project_suppliers DROP COLUMN parent_supplier_name');
+    } catch { /* column already removed, ignore */ }
+
+    // Migrate: drop flat conditions column and make grouped_conditions the sole conditions store.
+    // Recreates the table if conditions column still exists (handles INTEGER priority and old schema in one pass).
+    const conditionsCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'conditions'"
+    );
+    if (conditionsCol.length > 0) {
+      const hasGroupedCond = await this.all<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'grouped_conditions'"
+      );
+      // Carry over grouped_conditions if it exists; otherwise seed from flat conditions as a single-group fallback
+      const groupedSelect = hasGroupedCond.length > 0
+        ? 'COALESCE(grouped_conditions, conditions)'
+        : 'conditions';
+      await this.exec(`
+        CREATE TABLE override_rules_new (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL UNIQUE,
+          grouped_conditions JSON NOT NULL,
+          target_taxonomy_node_id VARCHAR NOT NULL,
+          priority DOUBLE NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO override_rules_new
+          SELECT id, name, ${groupedSelect}, target_taxonomy_node_id, CAST(priority AS DOUBLE), is_active, created_at
+          FROM override_rules;
+        DROP TABLE override_rules;
+        ALTER TABLE override_rules_new RENAME TO override_rules;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name);
+      `);
+    }
+
+    // Migrate: ensure source column exists on override_rules
+    const sourceCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'source'"
+    );
+    if (sourceCol.length === 0) {
+      await this.exec("ALTER TABLE override_rules ADD COLUMN source VARCHAR DEFAULT 'manual'");
+    }
   }
 
   async closeDatabase(): Promise<void> {
@@ -250,17 +362,19 @@ export class DuckDBDatabase implements Database {
         human_reviewed BOOLEAN DEFAULT FALSE,
         original_supplier_name VARCHAR,
         project_supplier_id VARCHAR,
+        applied_rule_id VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS override_rules (
         id VARCHAR PRIMARY KEY,
-        name VARCHAR NOT NULL,
-        conditions JSON NOT NULL,
+        name VARCHAR NOT NULL UNIQUE,
+        grouped_conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
-        priority INTEGER NOT NULL,
+        priority DOUBLE NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
+        source VARCHAR DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -273,6 +387,7 @@ export class DuckDBDatabase implements Database {
         old_values JSON,
         new_values JSON,
         description TEXT,
+        is_reverted BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -287,12 +402,18 @@ export class DuckDBDatabase implements Database {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS supplier_parents (
+        id VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS project_suppliers (
         id VARCHAR PRIMARY KEY,
         supplier_name VARCHAR NOT NULL UNIQUE,
         confirmation_status VARCHAR DEFAULT 'pending',
         is_tail_spend BOOLEAN DEFAULT FALSE,
-        parent_supplier_name VARCHAR,
+        parent_supplier_id VARCHAR,
         data_source VARCHAR DEFAULT 'manual',
         universe_match BOOLEAN DEFAULT FALSE,
         is_researched BOOLEAN DEFAULT FALSE,

@@ -1,8 +1,8 @@
 import { registerHandler } from './register';
-import type { ProjectStore, Database, SupplierUniverse } from '../../shared/types/services';
+import type { ProjectStore, Database, SupplierUniverse, SupplierService } from '../../shared/types/services';
 import type { ProjectMetadata, ProjectMetadataUpdate, CompanyContext } from '../../shared/types/project';
 
-export function registerProjectHandlers(project: ProjectStore, db: Database, supplierUniverse: SupplierUniverse): void {
+export function registerProjectHandlers(project: ProjectStore, db: Database, supplierUniverse: SupplierUniverse, suppliers: SupplierService): void {
   registerHandler('project:new', async (_event, projectName: unknown, filePath?: unknown) => {
     let targetPath = filePath as string | undefined;
     if (!targetPath) {
@@ -76,6 +76,7 @@ export function registerProjectHandlers(project: ProjectStore, db: Database, sup
     }
     if (u.tailSpendThreshold !== undefined) {
       await project.setSetting('tail_spend_threshold', u.tailSpendThreshold);
+      await suppliers.filterTailSpend(u.tailSpendThreshold);
     }
   });
 }

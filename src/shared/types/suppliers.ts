@@ -14,8 +14,15 @@ export interface SupplierInfo {
   primaryRevenueStreams?: string;
   serviceCategories?: string;
   targetMarket?: string;
+  parentCompanyName?: string;
   confidence?: 'high' | 'medium' | 'low';
   sources?: string[];
+}
+
+export interface SupplierParent {
+  id: string;
+  name: string;
+  createdAt: string;
 }
 
 /** A supplier from the shared supplier_universe.db */
@@ -42,7 +49,7 @@ export interface ProjectSupplier {
   supplierName: string;
   confirmationStatus: SupplierConfirmationStatus;
   isTailSpend: boolean;
-  parentSupplierName: string | null;
+  parentSupplierId: string | null;
   parentName: string | null;
   supplierInfo: SupplierInfo | null;
   mappedTaxonomyPaths: string[] | null;
@@ -58,8 +65,6 @@ export interface ProjectSupplierView extends ProjectSupplier {
 }
 
 export interface SupplierUpdateInput {
-  parentSupplierId?: string | null;
-  parentName?: string | null;
   supplierInfo?: SupplierInfo;
   aliases?: string[] | null;
   mappedTaxonomyPaths?: string[] | null;

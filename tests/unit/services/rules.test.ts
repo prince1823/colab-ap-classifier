@@ -1,18 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RuleStore } from '../../../src/main/services/rules';
-import { createMockDatabase, createMockTransactionStore } from '../../helpers/mock-services';
-import type { Database, TransactionStore } from '../../../src/shared/types/services';
+import { createMockDatabase, createMockTransactionStore, createMockProjectStore } from '../../helpers/mock-services';
+import type { Database, TransactionStore, ProjectStore } from '../../../src/shared/types/services';
+
+// Minimal transaction rows for generate_rules_preview tests
+function makeTxnRow(supplierName: string, taxonomyNodeId: string) {
+  return { id: 'tx-1', supplier_name: supplierName, taxonomy_node_id: taxonomyNodeId, full_path: 'L1|L2|L3' };
+}
+
+// Existing rule row with a supplier_name condition in grouped_conditions JSON
+function makeExistingRuleRow(supplierName: string) {
+  return {
+    name: supplierName,
+    grouped_conditions: JSON.stringify({
+      groupConnector: 'AND',
+      groups: [{ connector: 'AND', conditions: [{ field: 'supplier_name', operator: 'equals', value: supplierName }] }],
+    }),
+  };
+}
 
 describe('RuleStore', () => {
   let db: Database;
   let transactions: TransactionStore;
+  let project: ProjectStore;
   let store: RuleStore;
 
   beforeEach(() => {
     vi.clearAllMocks();
     db = createMockDatabase();
     transactions = createMockTransactionStore();
-    store = new RuleStore(db, transactions);
+    project = createMockProjectStore();
+    store = new RuleStore(db, transactions, project);
   });
 
   describe('listRules', () => {
@@ -109,6 +127,55 @@ describe('RuleStore', () => {
     it('should delete by id', async () => {
       await store.deleteRule('rule1');
       expect(db.run).toHaveBeenCalledWith('DELETE FROM override_rules WHERE id = ?', 'rule1');
+    });
+  });
+
+  describe('generate_rules_preview', () => {
+    beforeEach(() => {
+      vi.mocked(project.getSetting).mockResolvedValue(['gl_description'] as any);
+      vi.mocked(transactions.getColumns).mockResolvedValue(['gl_description']);
+      vi.mocked(db.get).mockResolvedValue({ max_priority: 0 });
+      vi.mocked(db.run).mockResolvedValue(undefined as any);
+    });
+
+    it('skips suppliers that already have a rule and only creates rules for new ones', async () => {
+      // db.all called twice: (1) eligible transactions, (2) existing rules
+      vi.mocked(db.all)
+        .mockResolvedValueOnce([
+          makeTxnRow('Acme Corp', 'node-1'),
+          makeTxnRow('NewCo', 'node-2'),
+        ])
+        .mockResolvedValueOnce([makeExistingRuleRow('Acme Corp')]);
+
+      const result = await store.generate_rules_preview();
+
+      expect(result.rulesCreated).toBe(1);
+      expect(result.suppliersProcessed).toBe(1);
+      // createRule is called once (only for NewCo)
+      expect(db.run).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns zero counts when all suppliers already have rules', async () => {
+      vi.mocked(db.all)
+        .mockResolvedValueOnce([makeTxnRow('Acme Corp', 'node-1')])
+        .mockResolvedValueOnce([makeExistingRuleRow('Acme Corp')]);
+
+      const result = await store.generate_rules_preview();
+
+      expect(result.rulesCreated).toBe(0);
+      expect(result.suppliersProcessed).toBe(0);
+      expect(db.run).not.toHaveBeenCalled();
+    });
+
+    it('creates rules for all suppliers when no existing rules', async () => {
+      vi.mocked(db.all)
+        .mockResolvedValueOnce([makeTxnRow('Acme Corp', 'node-1'), makeTxnRow('NewCo', 'node-2')])
+        .mockResolvedValueOnce([]); // no existing rules
+
+      const result = await store.generate_rules_preview();
+
+      expect(result.rulesCreated).toBe(2);
+      expect(result.suppliersProcessed).toBe(2);
     });
   });
 

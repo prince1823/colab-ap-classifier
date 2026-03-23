@@ -1,5 +1,5 @@
 import Exa from 'exa-js';
-import type { WebSearch } from '../../shared/types/services';
+import type { WebSearch, IAppConfigService } from '../../shared/types/services';
 
 export interface ExaSearchResult {
   title: string;
@@ -10,17 +10,27 @@ export interface ExaSearchResult {
 
 export class ExaWebSearch implements WebSearch {
   private client: Exa | null = null;
+  private configService: Pick<IAppConfigService, 'getExaApiKey'> | null;
+
+  constructor(configService?: Pick<IAppConfigService, 'getExaApiKey'>) {
+    this.configService = configService ?? null;
+  }
+
+  private getApiKey(): string | null {
+    return this.configService?.getExaApiKey() ?? process.env.EXA_API_KEY ?? null;
+  }
 
   private getClient(): Exa | null {
-    if (this.client) return this.client;
-    const apiKey = process.env.EXA_API_KEY;
+    const apiKey = this.getApiKey();
     if (!apiKey) return null;
-    this.client = new Exa(apiKey);
+    // Always create a fresh client when using configService so key updates take effect immediately
+    if (this.configService) return new Exa(apiKey);
+    if (!this.client) this.client = new Exa(apiKey);
     return this.client;
   }
 
   isAvailable(): boolean {
-    return !!process.env.EXA_API_KEY;
+    return this.getApiKey() !== null;
   }
 
   async searchSupplier(

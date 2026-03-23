@@ -130,6 +130,34 @@ export class AppConfigService implements IAppConfigService {
     this.save();
   }
 
+  // ─── Exa Settings ───────────────────────────────────────────────────────────
+
+  getExaApiKey(): string | null {
+    const stored = this.config.keys?.['exa'];
+    if (stored) {
+      try {
+        if (safeStorage.isEncryptionAvailable()) {
+          return safeStorage.decryptString(Buffer.from(stored, 'base64'));
+        }
+        return stored;
+      } catch {
+        // decryption failed — fall through to env var
+      }
+    }
+    return process.env.EXA_API_KEY || null;
+  }
+
+  async setExaApiKey(key: string): Promise<void> {
+    if (!this.config.keys) this.config.keys = {};
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(key);
+      this.config.keys['exa'] = encrypted.toString('base64');
+    } else {
+      this.config.keys['exa'] = key;
+    }
+    this.save();
+  }
+
   // ─── Supplier Universe Path ─────────────────────────────────────────────────
 
   getSupplierUniversePath(): string | null {

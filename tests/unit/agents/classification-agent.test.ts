@@ -3,6 +3,7 @@ import {
   buildSystemPrompt,
   buildUserPrompt,
   parseResponse,
+  normalizePath,
   validateL1,
   validateDepth,
   findClosestTaxonomyMatch,
@@ -589,15 +590,162 @@ describe('findClosestTaxonomyMatch', () => {
     expect(result).toMatch(/^Indirect\|IT Services\|/);
   });
 
-  it('should match by L1 prefix when L2 differs', () => {
+  it('should return original path when L1 does not match', () => {
     const result = findClosestTaxonomyMatch('Exempt|Unknown|Something', SAMPLE_TAXONOMY);
-    // Should find any depth-3 node under Exempt
-    expect(result).toMatch(/^Exempt\|/);
+    expect(result).toBe('Exempt|Unknown|Something');
   });
 
   it('should return original path when no match found', () => {
     const result = findClosestTaxonomyMatch('Unknown|Category|Path', SAMPLE_TAXONOMY);
     expect(result).toBe('Unknown|Category|Path');
+  });
+});
+
+// --- normalizePath ---
+
+describe('normalizePath', () => {
+  it('lowercases', () => {
+    expect(normalizePath('Non-Clinical')).toBe('non clinical');
+  });
+
+  it('replaces hyphens with spaces', () => {
+    expect(normalizePath('non-clinical')).toBe('non clinical');
+  });
+
+  it('replaces en-dash and em-dash with spaces', () => {
+    expect(normalizePath('non–clinical')).toBe('non clinical');
+    expect(normalizePath('non—clinical')).toBe('non clinical');
+  });
+
+  it('normalizes & to and', () => {
+    expect(normalizePath('IT Product & Services')).toBe('it product and services');
+  });
+
+  it('collapses multiple spaces', () => {
+    expect(normalizePath('foo  bar')).toBe('foo bar');
+  });
+
+  it('handles full pipe-delimited paths', () => {
+    expect(normalizePath('Non-Clinical|IT Product & Services|General Software')).toBe(
+      'non clinical|it product and services|general software'
+    );
+  });
+});
+
+// --- normalizePath matching in validateL1 and findClosestTaxonomyMatch ---
+
+const PUNCTUATION_TAXONOMY: TaxonomyNode[] = [
+  makeTaxonomyNode({ fullPath: 'Non-Clinical', depth: 1, l2: null, l3: null, parentPath: null }),
+  makeTaxonomyNode({ fullPath: 'Non-Clinical|Professional Services', depth: 2, l3: null }),
+  makeTaxonomyNode({ fullPath: 'Non-Clinical|Professional Services|Financial Services', depth: 3 }),
+  makeTaxonomyNode({ fullPath: 'Non-Clinical|IT Product & Services', depth: 2, l3: null }),
+  makeTaxonomyNode({ fullPath: 'Non-Clinical|IT Product & Services|General Software', depth: 3 }),
+  makeTaxonomyNode({ fullPath: 'Non-Clinical|MRO Supplies', depth: 2, l3: null }),
+  makeTaxonomyNode({ fullPath: 'Non-Clinical|MRO Supplies|Janitorial & Cleaning Supplies', depth: 3 }),
+  makeTaxonomyNode({ fullPath: 'Non-Clinical|General & Administrative', depth: 2, l3: null }),
+  makeTaxonomyNode({ fullPath: 'Non-Clinical|General & Administrative|Office Supplies & Equipment', depth: 3 }),
+];
+
+describe('validateL1 normalized matching', () => {
+  it('fixes "non-clinical" (no dash) to "Non-Clinical" via normalization', () => {
+    // LLM returns lowercase no-hyphen; taxonomy has "Non-Clinical"
+    // Both normalize to "non clinical" so it should match
+    const result = validateL1('non clinical|Professional Services|Financial Services', PUNCTUATION_TAXONOMY);
+    expect(result).toBe('Non-Clinical|Professional Services|Financial Services');
+  });
+});
+
+describe('findClosestTaxonomyMatch normalized matching', () => {
+  it('matches path with missing hyphens via normalization', () => {
+    const result = findClosestTaxonomyMatch(
+      'non-clinical|professional services|financial services',
+      PUNCTUATION_TAXONOMY
+    );
+    expect(result).toBe('Non-Clinical|Professional Services|Financial Services');
+  });
+
+  it('matches path with & vs "and" difference via normalization', () => {
+    const result = findClosestTaxonomyMatch(
+      'non-clinical|it product and services|general software',
+      PUNCTUATION_TAXONOMY
+    );
+    expect(result).toBe('Non-Clinical|IT Product & Services|General Software');
+  });
+
+  it('matches via normalized L1|L2 prefix when L3 differs by punctuation', () => {
+    const result = findClosestTaxonomyMatch(
+      'non-clinical|it product and services|unknown l3',
+      PUNCTUATION_TAXONOMY
+    );
+    expect(result).toBe('Non-Clinical|IT Product & Services|General Software');
+  });
+
+  it('returns original path when nothing matches even after normalization', () => {
+    const result = findClosestTaxonomyMatch(
+      'non-clinical|completely unknown|category',
+      PUNCTUATION_TAXONOMY
+    );
+    expect(result).toBe('non-clinical|completely unknown|category');
+  });
+
+  // Real issue #214 scenario: taxonomy uses spaces (no hyphens), LLM returns hyphens.
+  // Case-insensitive match does NOT catch this — only normalization does.
+  it('matches hyphenated LLM path against space-separated taxonomy node (issue #214)', () => {
+    const taxonomyWithSpaces: TaxonomyNode[] = [
+      makeTaxonomyNode({ fullPath: 'Non Clinical', depth: 1, l2: null, l3: null, parentPath: null }),
+      makeTaxonomyNode({ fullPath: 'Non Clinical|Professional Services', depth: 2, l3: null }),
+      makeTaxonomyNode({ fullPath: 'Non Clinical|Professional Services|Financial Services', depth: 3 }),
+      makeTaxonomyNode({ fullPath: 'Non Clinical|IT Product & Services', depth: 2, l3: null }),
+      makeTaxonomyNode({ fullPath: 'Non Clinical|IT Product & Services|General Software', depth: 3 }),
+      makeTaxonomyNode({ fullPath: 'Non Clinical|MRO Supplies', depth: 2, l3: null }),
+      makeTaxonomyNode({ fullPath: 'Non Clinical|MRO Supplies|Janitorial & Cleaning Supplies', depth: 3 }),
+      makeTaxonomyNode({ fullPath: 'Non Clinical|General & Administrative', depth: 2, l3: null }),
+      makeTaxonomyNode({ fullPath: 'Non Clinical|General & Administrative|Office Supplies & Equipment', depth: 3 }),
+    ];
+
+    // Exact log lines from issue #214
+    expect(findClosestTaxonomyMatch('non-clinical|professional services|financial services', taxonomyWithSpaces))
+      .toBe('Non Clinical|Professional Services|Financial Services');
+    expect(findClosestTaxonomyMatch('non-clinical|it product & services|general software', taxonomyWithSpaces))
+      .toBe('Non Clinical|IT Product & Services|General Software');
+    expect(findClosestTaxonomyMatch('non-clinical|mro supplies|janitorial & cleaning supplies', taxonomyWithSpaces))
+      .toBe('Non Clinical|MRO Supplies|Janitorial & Cleaning Supplies');
+    expect(findClosestTaxonomyMatch('non-clinical|general & administrative|office supplies & equipment', taxonomyWithSpaces))
+      .toBe('Non Clinical|General & Administrative|Office Supplies & Equipment');
+  });
+});
+
+// --- validateClassification end-to-end (issue #214 paths) ---
+
+describe('validateClassification issue #214 paths', () => {
+  const taxonomyWithSpaces: TaxonomyNode[] = [
+    makeTaxonomyNode({ fullPath: 'Non Clinical', depth: 1, l2: null, l3: null, parentPath: null }),
+    makeTaxonomyNode({ fullPath: 'Non Clinical|Professional Services', depth: 2, l3: null }),
+    makeTaxonomyNode({ fullPath: 'Non Clinical|Professional Services|Financial Services', depth: 3 }),
+    makeTaxonomyNode({ fullPath: 'Non Clinical|IT Product & Services', depth: 2, l3: null }),
+    makeTaxonomyNode({ fullPath: 'Non Clinical|IT Product & Services|General Software', depth: 3 }),
+    makeTaxonomyNode({ fullPath: 'Non Clinical|MRO Supplies', depth: 2, l3: null }),
+    makeTaxonomyNode({ fullPath: 'Non Clinical|MRO Supplies|Janitorial & Cleaning Supplies', depth: 3 }),
+    makeTaxonomyNode({ fullPath: 'Non Clinical|General & Administrative', depth: 2, l3: null }),
+    makeTaxonomyNode({ fullPath: 'Non Clinical|General & Administrative|Office Supplies & Equipment', depth: 3 }),
+  ];
+
+  it('resolves all four warn-log paths from issue #214 to canonical taxonomy nodes', () => {
+    const input: ClassificationResult = {
+      classifications: [
+        { id: 1, classificationPath: 'non-clinical|professional services|financial services' },
+        { id: 2, classificationPath: 'non-clinical|it product & services|general software' },
+        { id: 3, classificationPath: 'non-clinical|mro supplies|janitorial & cleaning supplies' },
+        { id: 4, classificationPath: 'non-clinical|general & administrative|office supplies & equipment' },
+      ],
+      assignments: { '1': [1], '2': [2], '3': [3], '4': [4] },
+    };
+
+    const result = validateClassification(input, taxonomyWithSpaces);
+    expect(result.classifications[0].classificationPath).toBe('Non Clinical|Professional Services|Financial Services');
+    expect(result.classifications[1].classificationPath).toBe('Non Clinical|IT Product & Services|General Software');
+    expect(result.classifications[2].classificationPath).toBe('Non Clinical|MRO Supplies|Janitorial & Cleaning Supplies');
+    expect(result.classifications[3].classificationPath).toBe('Non Clinical|General & Administrative|Office Supplies & Equipment');
   });
 });
 
@@ -700,7 +848,7 @@ describe('LLMClassificationAgent', () => {
     expect(result.assignments).toEqual({ '1': [1, 2] });
   });
 
-  it('should pass maxTokens=2048 to LLM client', async () => {
+  it('should pass maxTokens=16384 to LLM client', async () => {
     vi.mocked(mockLLM.chat).mockResolvedValueOnce(MOCK_LLM_RESPONSE);
 
     await agent.classifyInvoiceGroup(makeInput());
@@ -708,7 +856,7 @@ describe('LLMClassificationAgent', () => {
     const [, , options] = vi.mocked(mockLLM.chat).mock.calls[0];
     expect(options).toEqual({
       temperature: 0,
-      maxTokens: 2048,
+      maxTokens: 16384,
     });
   });
 

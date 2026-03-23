@@ -1,30 +1,35 @@
-import type { FilterCondition } from './transactions';
+import type { GroupedFilter } from './transactions';
 
-export type OverrideRuleSource = 'project' | 'taxonomy' | 'global';
+export type RuleSource = 'manual' | 'auto_generated';
 
 export interface OverrideRule {
   id: string;
   name: string;
-  source: OverrideRuleSource;
-  conditions: FilterCondition[];
+  groupedConditions: GroupedFilter;
   targetTaxonomyNodeId: string;
   priorityScore: number;
   isActive: boolean;
+  source: RuleSource;
   createdAt: string;
 }
 
 export interface OverrideRuleCreate {
   name: string;
-  source?: OverrideRuleSource;
-  conditions: FilterCondition[];
+  groupedConditions: GroupedFilter;
   targetTaxonomyNodeId: string;
   priorityScore?: number;
+  source?: RuleSource;
 }
 
 export interface OverrideRuleUpdate {
   name?: string;
-  conditions?: FilterCondition[];
+  groupedConditions?: GroupedFilter;
   targetTaxonomyNodeId?: string;
   priorityScore?: number;
   isActive?: boolean;
+}
+
+export interface GenerateRulesResult {
+  rulesCreated: number;
+  suppliersProcessed: number;
 }

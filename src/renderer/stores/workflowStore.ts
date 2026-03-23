@@ -2,13 +2,15 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { ipc } from '../lib/ipc'
 import { usePivotStore } from './pivotStore'
+import { useSupplierFilterStore } from './supplierFilterStore'
 import type { ProjectMetadata } from '../../shared/types/project'
-import type { ClassificationProgress } from '../../shared/types/classification'
+import type { ClassificationProgress, QCProgress } from '../../shared/types/classification'
 
 interface WorkflowState {
   // Core state
   projectMetadata: ProjectMetadata | null
   classificationProgress: ClassificationProgress | null
+  qcProgress: QCProgress | null
 
   // Persisted for auto-reopen only — a plain string, never a partial cast of ProjectMetadata
   projectFilePath: string | null
@@ -40,6 +42,7 @@ interface WorkflowState {
   refreshMetadata: () => Promise<void>
   refreshGateState: () => Promise<void>
   subscribeToClassificationProgress: () => () => void
+  subscribeToQCProgress: () => () => void
   setClassificationProgress: (progress: ClassificationProgress | null) => void
   setLastRoute: (route: string) => void
   reset: () => void
@@ -61,6 +64,7 @@ export const useWorkflowStore = create<WorkflowState>()(
     (set) => ({
       projectMetadata: null,
       classificationProgress: null,
+      qcProgress: null,
       projectFilePath: null,
       lastRoute: null,
       hasProject: false,
@@ -89,8 +93,9 @@ export const useWorkflowStore = create<WorkflowState>()(
       loadProject: async (filePath: string) => {
         try { await ipc.project.close() } catch { /* already closed */ }
         set({ projectMetadata: null, classificationProgress: null, hasProject: false, isClassifying: false, ...INITIAL_GATE_STATE })
-        // Clear pivot page state so stale filters from previous project don't carry over
+        // Clear page state so stale filters from previous project don't carry over
         usePivotStore.getState().reset()
+        useSupplierFilterStore.getState().reset()
 
         const result = await ipc.project.open(filePath)
         if (result?.needsSupplierUniverseSetup) {
@@ -219,6 +224,25 @@ export const useWorkflowStore = create<WorkflowState>()(
         return unsubscribe
       },
 
+      subscribeToQCProgress: () => {
+        let reachedTerminal = false
+
+        const unsubscribe = ipc.qc.onProgress((progress) => {
+          if (reachedTerminal && progress.status === 'running') {
+            return
+          }
+
+          if (progress.status === 'cancelled' || progress.status === 'failed' || progress.status === 'completed') {
+            reachedTerminal = true
+          } else {
+            reachedTerminal = false
+          }
+
+          set({ qcProgress: progress })
+        })
+        return unsubscribe
+      },
+
       setClassificationProgress: (progress) => {
         set({
           classificationProgress: progress,
@@ -235,6 +259,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           projectMetadata: null,
           projectFilePath: null,
           classificationProgress: null,
+          qcProgress: null,
           lastRoute: null,
           hasProject: false,
           isClassifying: false,

@@ -272,6 +272,19 @@ export function parseResponse(responseText: string): ClassificationResult {
 }
 
 /**
+ * Normalize a taxonomy path segment or full path for fuzzy matching.
+ * Lowercases, replaces hyphens/dashes with spaces, normalizes & → and, collapses whitespace.
+ */
+export function normalizePath(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[-–—]/g, ' ')
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Validate that L1 exists in the taxonomy.
  * Returns the corrected path if a case-insensitive match is found in taxonomy L1 values.
  */
@@ -295,6 +308,16 @@ export function validateL1(classificationPath: string, taxonomy: TaxonomyNode[])
   );
   if (matched) {
     parts[0] = matched;
+    return parts.join('|');
+  }
+
+  // Try normalized match (punctuation-insensitive)
+  const normalizedL1 = normalizePath(l1);
+  const normalizedMatch = taxonomyL1Values.find(
+    (v) => normalizePath(v) === normalizedL1
+  );
+  if (normalizedMatch) {
+    parts[0] = normalizedMatch;
     return parts.join('|');
   }
 
@@ -346,30 +369,26 @@ export function findClosestTaxonomyMatch(
     return caseMatch.fullPath;
   }
 
+  // Normalized exact match (punctuation-insensitive)
+  const normalizedPath = normalizePath(classificationPath);
+  const normalizedMatch = taxonomy.find(
+    (node) => normalizePath(node.fullPath) === normalizedPath
+  );
+  if (normalizedMatch) {
+    return normalizedMatch.fullPath;
+  }
+
   // Try matching L1|L2 and finding any L3 under it
   const parts = classificationPath.split('|');
   if (parts.length >= 2) {
-    const l1l2 = `${parts[0]}|${parts[1]}`.toLowerCase();
+    const l1l2Normalized = normalizePath(`${parts[0]}|${parts[1]}`);
     const partialMatch = taxonomy.find(
       (node) =>
         node.depth === 3 &&
-        node.fullPath.toLowerCase().startsWith(l1l2)
+        normalizePath(node.fullPath).startsWith(l1l2Normalized)
     );
     if (partialMatch) {
       return partialMatch.fullPath;
-    }
-  }
-
-  // Try matching just L1 and finding any depth-3 node under it
-  if (parts.length >= 1) {
-    const l1 = parts[0].toLowerCase();
-    const l1Match = taxonomy.find(
-      (node) =>
-        node.depth === 3 &&
-        node.fullPath.toLowerCase().startsWith(l1 + '|')
-    );
-    if (l1Match) {
-      return l1Match.fullPath;
     }
   }
 

@@ -7,6 +7,7 @@ import type {
   ClassificationAgent,
   ResearchAgent,
   ColumnMappingAgent,
+  FeedbackAgent,
   IAppConfigService,
   ILicenseService,
   ChangelogStore as IChangelogStore,
@@ -19,6 +20,7 @@ import type {
   ExportService as IExportService,
   SupplierResearcher as ISupplierResearcher,
   ClassificationRunner as IClassificationRunner,
+  QCRunner as IQCRunner,
 } from '../shared/types/services';
 
 import { DuckDBDatabase } from './services/database';
@@ -30,6 +32,7 @@ import { ExaWebSearch } from './services/exa-search';
 import { LLMClassificationAgent } from './agents/classification-agent';
 import { LLMResearchAgent } from './agents/research-agent';
 import { LLMColumnMappingAgent } from './agents/column-mapping-agent';
+import { LLMFeedbackAgent } from './agents/feedback-agent';
 import { ChangelogStore } from './services/changelog';
 import { TransactionStore } from './services/transactions';
 import { ProjectStore } from './services/project';
@@ -40,6 +43,7 @@ import { IngestService } from './services/ingest';
 import { ExportService } from './services/export';
 import { SupplierResearcher } from './services/supplier-research';
 import { ClassificationRunner } from './services/classification';
+import { QCRunner } from './services/qc';
 import { LicenseService } from './services/license-service';
 
 export interface ServiceContainer {
@@ -55,6 +59,7 @@ export interface ServiceContainer {
   classificationAgent: ClassificationAgent;
   researchAgent: ResearchAgent;
   columnMappingAgent: ColumnMappingAgent;
+  feedbackAgent: FeedbackAgent;
   // Data
   changelog: IChangelogStore;
   transactions: ITransactionStore;
@@ -67,6 +72,7 @@ export interface ServiceContainer {
   // Orchestrators
   researcher: ISupplierResearcher;
   classifier: IClassificationRunner;
+  qc: IQCRunner;
 }
 
 export function createContainer(): ServiceContainer {
@@ -75,13 +81,14 @@ export function createContainer(): ServiceContainer {
   const appConfig = new AppConfigService();
   const supplierUniverse = new DuckDBSupplierUniverse(appConfig);
   const llm = new OpenRouterLLMClient(appConfig);
-  const webSearch = new ExaWebSearch();
+  const webSearch = new ExaWebSearch(appConfig);
   const license = new LicenseService(appConfig, eventBus);
 
   // Agents
   const classificationAgent = new LLMClassificationAgent(llm);
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
+  const feedbackAgent = new LLMFeedbackAgent(llm);
 
   // Data layer (order matters — respect dependency graph)
   const changelog = new ChangelogStore(db);
@@ -89,23 +96,24 @@ export function createContainer(): ServiceContainer {
   const project = new ProjectStore(db, transactions, supplierUniverse);
   const taxonomy = new TaxonomyStore(db, project);
   const suppliers = new SupplierService(db, supplierUniverse);
-  const rules = new RuleStore(db, transactions);
+  const rules = new RuleStore(db, transactions, project);
   const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
   const exportSvc = new ExportService(db);
 
   // Orchestrators
   const researcher = new SupplierResearcher(
-    supplierUniverse, webSearch, researchAgent, eventBus
+    supplierUniverse, webSearch, researchAgent, eventBus, suppliers
   );
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,
     transactions, changelog, classificationAgent, eventBus, supplierUniverse
   );
+  const qc = new QCRunner(db, transactions, eventBus);
 
   return {
     db, supplierUniverse, eventBus, llm, appConfig, webSearch, license,
-    classificationAgent, researchAgent, columnMappingAgent,
+    classificationAgent, researchAgent, columnMappingAgent, feedbackAgent,
     changelog, transactions, project, taxonomy, suppliers, rules,
-    ingest, export: exportSvc, researcher, classifier,
+    ingest, export: exportSvc, researcher, classifier, qc,
   };
 }

@@ -1,12 +1,14 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
-import type { ClassificationProgress, ResearchProgress } from '../../shared/types/classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
+import type { FeedbackAnalyzeInput, FeedbackApplyInput } from '../../shared/types/feedback';
+import type { ChangelogFilter } from '../../shared/types/changelog';
 
 /**
  * Typed invoke wrapper that unwraps the IPCResponse envelope.
@@ -74,6 +76,16 @@ export const ipc = {
       on('classification:progress', callback),
   },
 
+  // ── QC (4 channels + 1 event) ──
+  qc: {
+    count: (filter?: TransactionFilter) => invoke('qc:count', filter),
+    start: (filter?: TransactionFilter) => invoke('qc:start', filter),
+    cancel: () => invoke('qc:cancel'),
+    isRunning: () => invoke('qc:isRunning'),
+    onProgress: (callback: (progress: QCProgress) => void) =>
+      on('qc:progress', callback),
+  },
+
   // ── Transactions (8 channels) ──
   transactions: {
     query: (filters?: TransactionFilter) =>
@@ -93,6 +105,7 @@ export const ipc = {
     getIdsByConditions: (conditions: FilterCondition[]) =>
       invoke('transactions:getIdsByConditions', conditions),
     getFilterFields: () => invoke('transactions:getFilterFields'),
+    markAllReviewed: () => invoke('transactions:markAllReviewed'),
   },
 
   // ── Taxonomy (8 channels) ──
@@ -115,22 +128,34 @@ export const ipc = {
 
   // ── Suppliers (3 channels + research) ──
   suppliers: {
-    list: (filter?: { conditions: FilterCondition[] }) => invoke('suppliers:list', filter),
-    update: (supplierName: string, updates: SupplierUpdateInput) =>
-      invoke('suppliers:update', supplierName, updates),
+    list: (filter?: { conditions?: FilterCondition[]; groupedConditions?: import('../../shared/types/transactions').GroupedFilter }) => invoke('suppliers:list', filter),
+    update: (supplierId: string, updates: SupplierUpdateInput) =>
+      invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
     researchAll: () => invoke('suppliers:researchAll'),
-    researchSingle: (supplierName: string) =>
-      invoke('suppliers:researchSingle', supplierName),
+    researchSingle: (supplierId: string) =>
+      invoke('suppliers:researchSingle', supplierId),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
       on('suppliers:research:progress', callback),
     filterTailSpend: (threshold: number) =>
       invoke('suppliers:filterTailSpend', threshold),
     getFilterFields: () => invoke('suppliers:getFilterFields'),
+    distinctValues: (field: string, limit?: number) => invoke('suppliers:distinctValues', field, limit),
+    getAliases: (supplierId: string) => invoke('suppliers:getAliases', supplierId),
+    assignAlias: (supplierId: string, rawName: string) => invoke('suppliers:assignAlias', supplierId, rawName),
+    rename: (supplierId: string, newName: string) => invoke('suppliers:rename', supplierId, newName),
+    merge: (survivorId: string, losingIds: string[]) => invoke('suppliers:merge', survivorId, losingIds),
+    delete: (supplierId: string) => invoke('suppliers:delete', supplierId),
+    listParents: () => invoke('suppliers:listParents'),
+    addParent: (name: string) => invoke('suppliers:addParent', name),
+    assignParent: (supplierIds: string[], parentId: string | null) => invoke('suppliers:assignParent', supplierIds, parentId),
+    renameParent: (parentId: string, newName: string) => invoke('suppliers:renameParent', parentId, newName),
+    deleteParent: (parentId: string) => invoke('suppliers:deleteParent', parentId),
+    mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
   },
 
-  // ── Rules (4 channels) ──
+  // ── Rules (5 channels) ──
   rules: {
     list: () => invoke('rules:list'),
     create: (input: OverrideRuleCreate) =>
@@ -138,26 +163,37 @@ export const ipc = {
     update: (ruleId: string, updates: OverrideRuleUpdate) =>
       invoke('rules:update', ruleId, updates),
     delete: (ruleId: string) => invoke('rules:delete', ruleId),
+    generate: () => invoke('rules:generate'),
   },
 
   // ── Changelog (2 channels) ──
   changelog: {
-    list: () => invoke('changelog:list'),
+    list: (filter?: ChangelogFilter) => invoke('changelog:list', filter),
     revert: (changeId: string) => invoke('changelog:revert', changeId),
   },
 
-  // ── Export (1 channel) ──
-  export: {
-    csv: (filters?: TransactionFilter) => invoke('export:csv', filters),
+  // ── Feedback (2 channels) ──
+  feedback: {
+    analyze: (input: FeedbackAnalyzeInput) => invoke('feedback:analyze', input),
+    apply: (input: FeedbackApplyInput) => invoke('feedback:apply', input),
   },
 
-  // ── Settings (5 channels) ──
+  // ── Export ──
+  export: {
+    csv: (filters?: TransactionFilter) => invoke('export:csv', filters),
+    saveContent: (content: string, defaultFilename: string) => invoke('export:saveContent', content, defaultFilename),
+  },
+
+  // ── Settings (7 channels) ──
   settings: {
     getLLMConfig: () => invoke('settings:getLLMConfig'),
     setApiKey: (provider: string, key: string) => invoke('settings:setApiKey', provider, key),
     setProvider: (provider: string) => invoke('settings:setProvider', provider),
     setModel: (model: string) => invoke('settings:setModel', model),
     validateApiKey: (provider: string, key: string) => invoke('settings:validateApiKey', provider, key),
+    setExaKey: (key: string) => invoke('settings:setExaKey', key),
+    validateExaKey: (key: string) => invoke('settings:validateExaKey', key),
+    validateStoredExaKey: () => invoke('settings:validateStoredExaKey'),
   },
 
   // ── Supplier Universe (3 channels) ──

@@ -7,6 +7,7 @@ export interface LLMConfigResponse {
   hasOpenRouterKey: boolean;
   hasAnthropicKey: boolean;
   hasOpenAIKey: boolean;
+  hasExaKey: boolean;
 }
 import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type {
@@ -18,13 +19,15 @@ import type {
   TransactionUpdate,
   GroupedTransactionsResult,
   PivotAggregationResult,
+  GroupedFilter,
 } from './transactions';
-import type { ClassificationProgress, ResearchProgress } from './classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
-import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput } from './suppliers';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate } from './rules';
-import type { ChangeLog } from './changelog';
+import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
+import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
+import type { FeedbackAnalyzeInput, FeedbackRecommendation, FeedbackApplyInput } from './feedback';
 
 export interface IPCInvokeMap {
   // Project
@@ -60,11 +63,18 @@ export interface IPCInvokeMap {
   'transactions:pivotAggregation':  { args: [dimensions: string[], valueDimension: string, filters?: TransactionFilter]; result: PivotAggregationResult };
   'transactions:getIdsByConditions': { args: [conditions: FilterCondition[]]; result: string[] };
   'transactions:getFilterFields':    { args: []; result: FieldDefinition[] };
+  'transactions:markAllReviewed':   { args: []; result: number };
 
   // Classification
   'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
   'classification:cancel':     { args: []; result: void };
   'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
+
+  // QC
+  'qc:start':     { args: [filter?: TransactionFilter]; result: void };
+  'qc:count':     { args: [filter?: TransactionFilter]; result: number };
+  'qc:cancel':    { args: []; result: void };
+  'qc:isRunning': { args: []; result: boolean };
 
   // Taxonomy
   'taxonomy:getNodeCount':   { args: []; result: number };
@@ -77,26 +87,44 @@ export interface IPCInvokeMap {
   'taxonomy:importFromFile': { args: [filePath: string]; result: { nodeCount: number; fileName: string } };
 
   // Suppliers
-  'suppliers:list':           { args: [filter?: { conditions: FilterCondition[] }]; result: ProjectSupplierView[] };
-  'suppliers:update':         { args: [supplierName: string, updates: SupplierUpdateInput]; result: void };
+  'suppliers:list':           { args: [filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }]; result: ProjectSupplierView[] };
+  'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: []; result: void };
-  'suppliers:researchSingle': { args: [supplierName: string]; result: SupplierInfo };
+  'suppliers:researchSingle': { args: [supplierId: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
+  'suppliers:distinctValues':  { args: [field: string, limit?: number]; result: string[] };
+  'suppliers:getAliases':      { args: [supplierId: string]; result: string[] };
+  'suppliers:assignAlias':     { args: [supplierId: string, rawName: string]; result: void };
+  'suppliers:rename':          { args: [supplierId: string, newName: string]; result: void };
+  'suppliers:merge':           { args: [survivorId: string, losingIds: string[]]; result: void };
+  'suppliers:delete':          { args: [supplierId: string]; result: void };
+  'suppliers:listParents':     { args: []; result: SupplierParent[] };
+  'suppliers:addParent':       { args: [name: string]; result: SupplierParent };
+  'suppliers:assignParent':    { args: [supplierIds: string[], parentId: string | null]; result: void };
+  'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
+  'suppliers:deleteParent':    { args: [parentId: string]; result: void };
+  'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
 
   // Rules
-  'rules:list':   { args: []; result: OverrideRule[] };
-  'rules:create': { args: [input: OverrideRuleCreate]; result: { id: string } };
-  'rules:update': { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
-  'rules:delete': { args: [ruleId: string]; result: void };
+  'rules:list':     { args: []; result: OverrideRule[] };
+  'rules:create':   { args: [input: OverrideRuleCreate]; result: { id: string } };
+  'rules:update':   { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
+  'rules:delete':   { args: [ruleId: string]; result: void };
+  'rules:generate': { args: []; result: GenerateRulesResult };
 
   // Changelog
-  'changelog:list':   { args: []; result: ChangeLog[] };
+  'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };
   'changelog:revert': { args: [changeId: string]; result: void };
+
+  // Feedback
+  'feedback:analyze': { args: [input: FeedbackAnalyzeInput]; result: FeedbackRecommendation };
+  'feedback:apply':   { args: [input: FeedbackApplyInput]; result: void };
 
   // Export
   'export:csv': { args: [filters?: TransactionFilter]; result: { rowsExported: number } | null };
+  'export:saveContent': { args: [content: string, defaultFilename: string]; result: boolean };
 
   // Settings — LLM
   'settings:getLLMConfig':   { args: []; result: LLMConfigResponse };
@@ -104,6 +132,10 @@ export interface IPCInvokeMap {
   'settings:setProvider':    { args: [provider: string]; result: void };
   'settings:setModel':       { args: [model: string]; result: void };
   'settings:validateApiKey': { args: [provider: string, key: string]; result: { valid: boolean; error?: string } };
+  // Settings — Exa
+  'settings:setExaKey':           { args: [key: string]; result: void };
+  'settings:validateExaKey':      { args: [key: string]; result: { valid: boolean; error?: string } };
+  'settings:validateStoredExaKey': { args: []; result: { valid: boolean; error?: string } };
 
   // Supplier Universe
   'supplier-universe:getPath':    { args: []; result: string | null };
@@ -119,6 +151,7 @@ export interface IPCInvokeMap {
 export interface IPCEventMap {
   'classification:progress':     ClassificationProgress;
   'suppliers:research:progress': ResearchProgress;
+  'qc:progress':                 QCProgress;
   'license:statusChanged':       LicenseStatus;
 }
 

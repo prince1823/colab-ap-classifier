@@ -78,10 +78,11 @@ function buildInitialState(
 
   return preview.columns.map((col) => {
     if (csvToCanonical.has(col)) {
+      const canonical = csvToCanonical.get(col)!
       return {
         csvColumn: col,
-        canonical: csvToCanonical.get(col)!,
-        included: true,
+        canonical,
+        included: REQUIRED.has(canonical) || fromPrevious,
         locked: fromPrevious,
       }
     }
@@ -90,7 +91,7 @@ function buildInitialState(
     return {
       csvColumn: col,
       canonical: collides ? '' : snaked,
-      included: fromPrevious ? false : !collides,
+      included: false,
       locked: false,
     }
   })

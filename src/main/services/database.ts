@@ -36,7 +36,7 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents', 'rule_buckets'];
 
 export { convertPlaceholders };
 
@@ -283,6 +283,61 @@ export class DuckDBDatabase implements Database {
     if (sourceCol.length === 0) {
       await this.exec("ALTER TABLE override_rules ADD COLUMN source VARCHAR DEFAULT 'manual'");
     }
+
+    // Migrate: create rule_buckets table and add bucket_id to override_rules
+    const ruleBucketsExists = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_name = 'rule_buckets'"
+    );
+    if (ruleBucketsExists.length === 0) {
+      await this.exec(`
+        CREATE TABLE rule_buckets (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL,
+          sort_order INTEGER NOT NULL,
+          is_default BOOLEAN DEFAULT FALSE,
+          grouped_conditions JSON,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    }
+
+    // Ensure a default bucket exists
+    const defaultBucket = await this.all<{ id: string }>(
+      "SELECT id FROM rule_buckets WHERE is_default = TRUE"
+    );
+    let defaultBucketId: string;
+    if (defaultBucket.length === 0) {
+      const { v4: uuidv4 } = await import('uuid');
+      defaultBucketId = uuidv4();
+      await this.run(
+        "INSERT INTO rule_buckets (id, name, sort_order, is_default) VALUES (?, 'General Rules', 0, TRUE)",
+        defaultBucketId
+      );
+    } else {
+      defaultBucketId = defaultBucket[0].id;
+    }
+
+    // Migrate: add bucket_id column to override_rules if missing
+    const bucketIdCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'bucket_id'"
+    );
+    if (bucketIdCol.length === 0) {
+      await this.exec("ALTER TABLE override_rules ADD COLUMN bucket_id VARCHAR");
+    }
+
+    // Assign all rules without a bucket to the default bucket
+    await this.run(
+      "UPDATE override_rules SET bucket_id = ? WHERE bucket_id IS NULL",
+      defaultBucketId
+    );
+
+    // Migrate: add grouped_conditions column to rule_buckets if missing
+    const bucketConditionsCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'rule_buckets' AND column_name = 'grouped_conditions'"
+    );
+    if (bucketConditionsCol.length === 0) {
+      await this.exec("ALTER TABLE rule_buckets ADD COLUMN grouped_conditions JSON");
+    }
   }
 
   async closeDatabase(): Promise<void> {
@@ -388,12 +443,22 @@ export class DuckDBDatabase implements Database {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS rule_buckets (
+        id VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL,
+        sort_order INTEGER NOT NULL,
+        is_default BOOLEAN DEFAULT FALSE,
+        grouped_conditions JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS override_rules (
         id VARCHAR PRIMARY KEY,
         name VARCHAR NOT NULL,
         grouped_conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
         priority INTEGER NOT NULL,
+        bucket_id VARCHAR,
         is_active BOOLEAN DEFAULT TRUE,
         source VARCHAR DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

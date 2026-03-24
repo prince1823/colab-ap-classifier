@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactionStore, ProjectStore as IProjectStore } from '../../shared/types/services';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource } from '../../shared/types/rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource, RuleBucket, RuleBucketCreate, RuleBucketUpdate } from '../../shared/types/rules';
 import type { GroupedFilter } from '../../shared/types/transactions';
 
 interface RuleRow {
@@ -9,9 +9,46 @@ interface RuleRow {
   grouped_conditions: string;
   target_taxonomy_node_id: string;
   priority: number;
+  bucket_id: string;
   is_active: boolean;
   source: string;
   created_at: string;
+}
+
+interface BucketRow {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_default: boolean;
+  grouped_conditions: string | null;
+  created_at: string;
+}
+
+function parseBucketConditions(raw: unknown): GroupedFilter | null {
+  if (!raw) return null;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (parsed && typeof parsed === 'object' && Array.isArray((parsed as GroupedFilter).groups)) {
+      // Return null if no real conditions configured
+      const gf = parsed as GroupedFilter;
+      if (gf.groups.length === 0 || gf.groups.every(g => g.conditions.length === 0 || g.conditions.every(c => !c.field))) {
+        return null;
+      }
+      return gf;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function rowToBucket(row: BucketRow): RuleBucket {
+  return {
+    id: row.id,
+    name: row.name,
+    sortOrder: row.sort_order,
+    isDefault: row.is_default,
+    groupedConditions: parseBucketConditions(row.grouped_conditions),
+    createdAt: row.created_at,
+  };
 }
 
 function parseGroupedConditions(raw: unknown): GroupedFilter {
@@ -34,6 +71,7 @@ function rowToRule(row: RuleRow): OverrideRule {
     groupedConditions: grouped,
     targetTaxonomyNodeId: row.target_taxonomy_node_id,
     priorityScore: row.priority,
+    bucketId: row.bucket_id,
     isActive: row.is_active,
     source: (row.source ?? 'manual') as RuleSource,
     createdAt: row.created_at,
@@ -179,8 +217,18 @@ export class RuleStore implements IRuleStore {
 
   async createRule(input: OverrideRuleCreate): Promise<{ id: string }> {
     const id = uuidv4();
-    let priority: number;
 
+    // Resolve bucket — use provided, or default bucket
+    let bucketId = input.bucketId;
+    if (!bucketId) {
+      const defaultBucket = await this.db.get<{ id: string }>(
+        "SELECT id FROM rule_buckets WHERE is_default = TRUE"
+      );
+      bucketId = defaultBucket?.id ?? '';
+    }
+
+    // Flat global priority — buckets are visual only
+    let priority: number;
     if (input.priorityScore !== undefined) {
       priority = Math.round(input.priorityScore);
     } else {
@@ -193,10 +241,10 @@ export class RuleStore implements IRuleStore {
     const source = input.source ?? 'manual';
 
     await this.db.run(
-      `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, priority, is_active, source, created_at)
-       VALUES (?, ?, ?, ?, ?, TRUE, ?, CURRENT_TIMESTAMP)`,
+      `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, priority, bucket_id, is_active, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, TRUE, ?, CURRENT_TIMESTAMP)`,
       id, input.name, JSON.stringify(input.groupedConditions),
-      input.targetTaxonomyNodeId, priority, source
+      input.targetTaxonomyNodeId, priority, bucketId, source
     );
 
     return { id };
@@ -210,6 +258,7 @@ export class RuleStore implements IRuleStore {
     if (updates.groupedConditions !== undefined) { setClauses.push('grouped_conditions = ?'); params.push(JSON.stringify(updates.groupedConditions)); }
     if (updates.targetTaxonomyNodeId !== undefined) { setClauses.push('target_taxonomy_node_id = ?'); params.push(updates.targetTaxonomyNodeId); }
     if (updates.isActive !== undefined) { setClauses.push('is_active = ?'); params.push(updates.isActive); }
+    if (updates.bucketId !== undefined) { setClauses.push('bucket_id = ?'); params.push(updates.bucketId); }
 
     if (updates.priorityScore !== undefined) {
       setClauses.push('priority = ?');
@@ -353,6 +402,123 @@ export class RuleStore implements IRuleStore {
     }
 
     return { rulesCreated, suppliersProcessed };
+  }
+
+  // ─── Bucket operations ──────────────────────────────────────────────────────
+
+  async listBuckets(): Promise<RuleBucket[]> {
+    const rows = await this.db.all<BucketRow>(
+      'SELECT * FROM rule_buckets ORDER BY sort_order ASC, created_at ASC'
+    );
+    return rows.map(rowToBucket);
+  }
+
+  async createBucket(input: RuleBucketCreate): Promise<{ id: string }> {
+    const id = uuidv4();
+    let sortOrder: number;
+
+    if (input.sortOrder !== undefined) {
+      sortOrder = input.sortOrder;
+    } else {
+      const result = await this.db.get<{ max_order: number | null }>(
+        'SELECT MAX(sort_order) as max_order FROM rule_buckets'
+      );
+      sortOrder = (result?.max_order ?? 0) + 1;
+    }
+
+    const conditionsJson = input.groupedConditions ? JSON.stringify(input.groupedConditions) : null;
+
+    await this.db.run(
+      'INSERT INTO rule_buckets (id, name, sort_order, is_default, grouped_conditions, created_at) VALUES (?, ?, ?, FALSE, ?, CURRENT_TIMESTAMP)',
+      id, input.name, sortOrder, conditionsJson
+    );
+
+    return { id };
+  }
+
+  async updateBucket(bucketId: string, updates: RuleBucketUpdate): Promise<void> {
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (updates.name !== undefined) { setClauses.push('name = ?'); params.push(updates.name); }
+    if (updates.sortOrder !== undefined) { setClauses.push('sort_order = ?'); params.push(updates.sortOrder); }
+    if (updates.groupedConditions !== undefined) {
+      setClauses.push('grouped_conditions = ?');
+      params.push(updates.groupedConditions ? JSON.stringify(updates.groupedConditions) : null);
+    }
+
+    if (setClauses.length === 0) return;
+
+    params.push(bucketId);
+    await this.db.run(
+      `UPDATE rule_buckets SET ${setClauses.join(', ')} WHERE id = ?`,
+      ...params
+    );
+  }
+
+  async deleteBucket(bucketId: string): Promise<void> {
+    // Cannot delete default bucket
+    const bucket = await this.db.get<BucketRow>(
+      'SELECT * FROM rule_buckets WHERE id = ?', bucketId
+    );
+    if (!bucket) return;
+    if (bucket.is_default) {
+      throw new Error('Cannot delete the default bucket');
+    }
+
+    // Move all rules from this bucket to the default bucket
+    const defaultBucket = await this.db.get<{ id: string }>(
+      "SELECT id FROM rule_buckets WHERE is_default = TRUE"
+    );
+    if (defaultBucket) {
+      await this.db.run(
+        'UPDATE override_rules SET bucket_id = ? WHERE bucket_id = ?',
+        defaultBucket.id, bucketId
+      );
+    }
+
+    await this.db.run('DELETE FROM rule_buckets WHERE id = ?', bucketId);
+  }
+
+  async reorderBuckets(orderedIds: string[]): Promise<void> {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await this.db.run(
+        'UPDATE rule_buckets SET sort_order = ? WHERE id = ?',
+        i, orderedIds[i]
+      );
+    }
+    // Buckets are visual only — no rule priority changes needed
+  }
+
+  async moveRuleToBucket(ruleId: string, targetBucketId: string, _position?: number): Promise<void> {
+    // Just update the bucket assignment — priority stays the same (global flat order)
+    await this.db.run(
+      'UPDATE override_rules SET bucket_id = ? WHERE id = ?',
+      targetBucketId, ruleId
+    );
+  }
+
+  async reorderRulesInBucket(_bucketId: string, orderedRuleIds: string[]): Promise<void> {
+    // Assign flat sequential priorities to the given rules (visual reorder within bucket)
+    // We keep the same global priority numbers but renumber just these rules
+    // Get the current priorities of these rules to know the range
+    if (orderedRuleIds.length === 0) return;
+
+    const placeholders = orderedRuleIds.map(() => '?').join(',');
+    const currentRules = await this.db.all<{ id: string; priority: number }>(
+      `SELECT id, priority FROM override_rules WHERE id IN (${placeholders}) ORDER BY priority ASC`,
+      ...orderedRuleIds
+    );
+
+    // Use the same priority values but reassign them in the new order
+    const sortedPriorities = currentRules.map(r => r.priority).sort((a, b) => a - b);
+    for (let i = 0; i < orderedRuleIds.length; i++) {
+      const newPriority = sortedPriorities[i] ?? (i + 1);
+      await this.db.run(
+        'UPDATE override_rules SET priority = ? WHERE id = ?',
+        newPriority, orderedRuleIds[i]
+      );
+    }
   }
 
 }

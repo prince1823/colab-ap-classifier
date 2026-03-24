@@ -3,7 +3,7 @@ import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfir
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleBucket, RuleBucketCreate, RuleBucketUpdate } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
@@ -199,6 +199,14 @@ export interface RuleStore {
   deleteRule(ruleId: string): Promise<void>;
   evaluateRules(transactionIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
   generate_rules_preview(): Promise<GenerateRulesResult>;
+  // Bucket operations
+  listBuckets(): Promise<RuleBucket[]>;
+  createBucket(input: RuleBucketCreate): Promise<{ id: string }>;
+  updateBucket(bucketId: string, updates: RuleBucketUpdate): Promise<void>;
+  deleteBucket(bucketId: string): Promise<void>;
+  reorderBuckets(orderedIds: string[]): Promise<void>;
+  moveRuleToBucket(ruleId: string, targetBucketId: string, position?: number): Promise<void>;
+  reorderRulesInBucket(bucketId: string, orderedRuleIds: string[]): Promise<void>;
 }
 
 export interface ChangelogStore {

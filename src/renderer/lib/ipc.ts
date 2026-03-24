@@ -4,7 +4,7 @@ import type { ClassificationProgress, ResearchProgress, QCProgress } from '../..
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
-import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
+import type { OverrideRuleCreate, OverrideRuleUpdate, RuleBucketCreate, RuleBucketUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
 import type { FeedbackAnalyzeInput, FeedbackApplyInput } from '../../shared/types/feedback';
@@ -155,7 +155,7 @@ export const ipc = {
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
   },
 
-  // ── Rules (5 channels) ──
+  // ── Rules (12 channels) ──
   rules: {
     list: () => invoke('rules:list'),
     create: (input: OverrideRuleCreate) =>
@@ -164,6 +164,14 @@ export const ipc = {
       invoke('rules:update', ruleId, updates),
     delete: (ruleId: string) => invoke('rules:delete', ruleId),
     generate: () => invoke('rules:generate'),
+    // Bucket operations
+    listBuckets: () => invoke('rules:listBuckets'),
+    createBucket: (input: RuleBucketCreate) => invoke('rules:createBucket', input),
+    updateBucket: (bucketId: string, updates: RuleBucketUpdate) => invoke('rules:updateBucket', bucketId, updates),
+    deleteBucket: (bucketId: string) => invoke('rules:deleteBucket', bucketId),
+    reorderBuckets: (orderedIds: string[]) => invoke('rules:reorderBuckets', orderedIds),
+    moveRule: (ruleId: string, targetBucketId: string, position?: number) => invoke('rules:moveRule', ruleId, targetBucketId, position),
+    reorderInBucket: (bucketId: string, orderedRuleIds: string[]) => invoke('rules:reorderInBucket', bucketId, orderedRuleIds),
   },
 
   // ── Changelog (2 channels) ──

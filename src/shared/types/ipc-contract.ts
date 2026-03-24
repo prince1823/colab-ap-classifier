@@ -24,7 +24,7 @@ import type {
 import type { ClassificationProgress, ResearchProgress, QCProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleBucket, RuleBucketCreate, RuleBucketUpdate } from './rules';
 import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
 import type { FeedbackAnalyzeInput, FeedbackRecommendation, FeedbackApplyInput } from './feedback';
@@ -113,6 +113,15 @@ export interface IPCInvokeMap {
   'rules:update':   { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
   'rules:delete':   { args: [ruleId: string]; result: void };
   'rules:generate': { args: []; result: GenerateRulesResult };
+
+  // Rule Buckets
+  'rules:listBuckets':      { args: []; result: RuleBucket[] };
+  'rules:createBucket':     { args: [input: RuleBucketCreate]; result: { id: string } };
+  'rules:updateBucket':     { args: [bucketId: string, updates: RuleBucketUpdate]; result: void };
+  'rules:deleteBucket':     { args: [bucketId: string]; result: void };
+  'rules:reorderBuckets':   { args: [orderedIds: string[]]; result: void };
+  'rules:moveRule':         { args: [ruleId: string, targetBucketId: string, position?: number]; result: void };
+  'rules:reorderInBucket':  { args: [bucketId: string, orderedRuleIds: string[]]; result: void };
 
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };

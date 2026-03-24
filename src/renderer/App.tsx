@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
+import { Toaster } from 'sonner'
 import ErrorBoundary from './components/review/ErrorBoundary'
 import AppShell from './components/AppShell'
 import LicenseGate from './components/LicenseGate'
@@ -16,6 +17,7 @@ import VersionHistoryView from './views/VersionHistoryView'
 function App() {
   return (
     <ErrorBoundary>
+    <Toaster richColors position="bottom-right" />
     <DndProvider backend={HTML5Backend}>
     <LicenseGate>
       <Routes>

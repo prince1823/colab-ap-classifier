@@ -54,7 +54,11 @@ export default function ProgressDisplay({ progress }: Props) {
       )}
       {progress.status === 'failed' && (
         <div className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
-          Classification failed. Please check your settings and try again.
+          <p className="font-medium">Classification failed</p>
+          {progress.currentStep && (
+            <p className="mt-1 text-xs text-red-600">{progress.currentStep}</p>
+          )}
+          <p className="mt-1 text-xs text-red-500">Please check your settings and try again.</p>
         </div>
       )}
       {progress.status === 'cancelled' && (

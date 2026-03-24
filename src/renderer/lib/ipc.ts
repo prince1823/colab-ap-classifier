@@ -17,7 +17,11 @@ import type { ChangelogFilter } from '../../shared/types/changelog';
 async function invoke<K extends IPCChannel>(channel: K, ...args: IPCArgs<K>): Promise<IPCResult<K>> {
   const result: IPCResponse<IPCResult<K>> = await window.electronAPI.invoke(channel, ...args);
   if (!result.success) {
-    throw new Error(result.error || `IPC call failed: ${channel}`);
+    const err = new Error(result.error || `IPC call failed: ${channel}`);
+    if (result.code) {
+      (err as Error & { code?: string }).code = result.code;
+    }
+    throw err;
   }
   return result.data as IPCResult<K>;
 }

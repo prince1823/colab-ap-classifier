@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import { app } from 'electron';
 import type { IAppConfigService, ILicenseService, EventBus } from '../../shared/types/services';
+import { debugLog } from '../utils/debug-log';
 import type {
   LicenseStatus,
   LicenseActivationResult,
@@ -92,10 +93,10 @@ export class LicenseService implements ILicenseService {
     if (this.isDevBypass() || this.timer) return;
 
     // Initial check on startup (delayed slightly to not block app launch)
-    setTimeout(() => this.checkNow().catch(() => {}), 3000);
+    setTimeout(() => this.checkNow().catch((e) => debugLog('ERROR', 'Periodic license check failed', e)), 3000);
 
     this.timer = setInterval(() => {
-      this.checkNow().catch(() => {});
+      this.checkNow().catch((e) => debugLog('ERROR', 'Periodic license check failed', e));
     }, CHECK_INTERVAL_MS);
   }
 

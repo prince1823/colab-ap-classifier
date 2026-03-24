@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import { usePivotStore } from './pivotStore'
 import { useSupplierFilterStore } from './supplierFilterStore'
 import type { ProjectMetadata } from '../../shared/types/project'
@@ -106,7 +107,7 @@ export const useWorkflowStore = create<WorkflowState>()(
         try {
           metadata = await ipc.project.getMetadata()
         } catch (e) {
-          console.warn('[loadProject] getMetadata failed, using fallback:', e)
+          showError('Failed to load project metadata', e)
           metadata = {
             id: '',
             projectName: filePath.split('/').pop()?.replace(/\.c91$/, '') ?? 'Unknown',
@@ -134,8 +135,8 @@ export const useWorkflowStore = create<WorkflowState>()(
         let metadata: ProjectMetadata | null = null
         try {
           metadata = await ipc.project.getMetadata()
-        } catch {
-          // keep null
+        } catch (e) {
+          showError('Failed to load project metadata', e)
         }
         set({
           projectMetadata: metadata,
@@ -168,17 +169,17 @@ export const useWorkflowStore = create<WorkflowState>()(
           const metadata = await ipc.project.getMetadata()
           if (!metadata) return
           set({ projectMetadata: metadata, hasProject: true })
-        } catch {
-          // IPC failed — keep existing state intact
+        } catch (e) {
+          showError('Failed to refresh project metadata', e)
         }
       },
 
       refreshGateState: async () => {
         try {
           const [stats, nodeCount, suppliers] = await Promise.all([
-            ipc.transactions.stats().catch(() => null),
-            ipc.taxonomy.getNodeCount().catch(() => 0),
-            ipc.suppliers.list().catch(() => []),
+            ipc.transactions.stats().catch((e) => { showError('Failed to load transaction stats', e); return null }),
+            ipc.taxonomy.getNodeCount().catch((e) => { showError('Failed to load taxonomy count', e); return 0 }),
+            ipc.suppliers.list().catch((e) => { showError('Failed to load suppliers', e); return [] as Awaited<ReturnType<typeof ipc.suppliers.list>> }),
           ])
 
           const totalRows = stats?.totalRows ?? 0
@@ -197,8 +198,8 @@ export const useWorkflowStore = create<WorkflowState>()(
             classifiedRows,
             confirmedSupplierCount,
           })
-        } catch {
-          // Keep existing state on failure
+        } catch (e) {
+          showError('Failed to refresh workflow state', e)
         }
       },
 

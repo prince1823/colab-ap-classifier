@@ -4,6 +4,7 @@ import FileDropZone from '../components/upload/FileDropZone'
 import CSVPreviewTable from '../components/upload/CSVPreviewTable'
 import ColumnMappingEditor from '../components/upload/ColumnMappingEditor'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import { useWorkflowStore } from '../stores/workflowStore'
 import type { CSVPreviewWithMappings, ColumnMappingWithPriority } from '../../shared/types/column-mapping'
 import { toSimpleMapping } from '../../shared/types/column-mapping'
@@ -38,7 +39,8 @@ export default function UploadPage() {
       } else {
         setShowUploader(true)
       }
-    }).catch(() => {
+    }).catch((e) => {
+      showError('Failed to check existing upload', e)
       setShowUploader(true)
     })
   }, [])

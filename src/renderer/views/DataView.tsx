@@ -5,6 +5,7 @@ import DataUploadStep from './data-steps/DataUploadStep'
 import DataMappingStep from './data-steps/DataMappingStep'
 import DataPriorityStep from './data-steps/DataPriorityStep'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import { useWorkflowStore } from '../stores/workflowStore'
 import type {
   CSVPreview,
@@ -54,8 +55,8 @@ export default function DataView() {
           })),
         }))
       )
-    }).catch(() => {
-      // No uploads yet — that's fine
+    }).catch((e) => {
+      showError('Failed to load upload history', e)
     })
   }, [])
 

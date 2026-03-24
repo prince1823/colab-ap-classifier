@@ -25,6 +25,10 @@ export function buildSystemPrompt(): string {
    - Check if the supplier appears to be a subsidiary of the client company (from company_context)
    - If the supplier is a subsidiary/affiliate of the client → classify under Exempt
 
+4. TAX AND ADJUSTMENT LINES:
+   - Lines whose account description indicates a tax accrual or tax payment (e.g. "accrued state sales tax", "sales and use tax", "acc county sales tax", "use tax accrual") should be classified as non-sourceable tax spend only when the supplier is a government entity or tax authority
+   - For non-government suppliers, these lines are accounting entries — classify them with the supplier's primary spend category, do NOT split them out
+
 ## Taxonomy Descriptions and Company Context
 
 The taxonomy includes paths WITH descriptions (when available).
@@ -39,10 +43,9 @@ Taxonomy descriptions are AUTHORITATIVE — they define category boundaries.
 
 ## Signal Prioritization
 
-- Transaction fields are listed in priority order (most important first). Weight earlier fields more heavily in your classification decision.
-- Supplier research info (type, offerings, website, industry) provides strong context about what the supplier does.
-- Taxonomy descriptions (when available) > Generic keyword matching
-- Specific, detailed information > Generic, vague information (regardless of field type)
+- **Supplier name + supplier research is the primary signal.** What the supplier is, what they sell, and what industry they're in should anchor your classification. GL account descriptions and codes are secondary — they reflect how an accountant labeled the entry, not what was actually purchased.
+- Transaction fields are listed in priority order (most important first). The supplier name field will appear first when available — weight it heavily.
+- Taxonomy descriptions (when available) are authoritative over keyword matching
 - Company context helps interpret signals in domain-specific ways
 
 ## Process

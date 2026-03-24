@@ -6,6 +6,7 @@ import DataMappingStep, { type ColumnState } from './data-steps/DataMappingStep'
 import DataPriorityStep from './data-steps/DataPriorityStep'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
+import { REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns'
 import type {
   CSVPreview,
   ColumnMapping,
@@ -97,12 +98,21 @@ export default function DataView() {
     setImporting(true)
     setError(null)
     try {
-      // Build simple ColumnMapping from mapping rows
+      // Build simple ColumnMapping from mapping rows (skip empty canonicals)
       const columnMapping: ColumnMapping = {}
       for (const row of rows) {
-        if (row.csvColumn) {
+        if (row.csvColumn && row.canonical) {
           columnMapping[row.canonical] = row.csvColumn
         }
+      }
+
+      // Validate required canonicals before calling backend
+      const missingRequired = REQUIRED_CANONICAL_COLUMNS.filter((r) => !columnMapping[r])
+      if (missingRequired.length > 0) {
+        const names = missingRequired.map((n) => `"${n}"`).join(', ')
+        throw new Error(
+          `Missing required column${missingRequired.length > 1 ? 's' : ''}: ${names}. Please assign a CSV column to ${missingRequired.length > 1 ? 'each' : 'it'} before importing.`
+        )
       }
 
       const result = await ipc.ingest.importCSV(activeFilePath, columnMapping)

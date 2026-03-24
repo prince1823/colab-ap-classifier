@@ -30,7 +30,11 @@ interface FlatRow {
 
 // ── Component ────────────────────────────────────────────────────────
 
-export default function NormalizeView() {
+interface NormalizeViewProps {
+  onDataChange?: () => void
+}
+
+export default function NormalizeView({ onDataChange }: NormalizeViewProps = {}) {
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [parents, setParents] = useState<SupplierParent[]>([])
   const [loading, setLoading] = useState(true)
@@ -205,11 +209,12 @@ export default function NormalizeView() {
       setSuppliers(prev => prev.map(s =>
         s.id === supplierId ? { ...s, supplierName: newName } : s
       ))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Rename failed')
     }
     setEditingId(null)
-  }, [])
+  }, [onDataChange])
 
   const handleDeleteNormalized = useCallback(async (supplierId: string) => {
     const supplier = suppliers.find(s => s.id === supplierId)
@@ -224,10 +229,11 @@ export default function NormalizeView() {
       await ipc.suppliers.delete(supplierId)
       setSuppliers(prev => prev.filter(s => s.id !== supplierId))
       setSelectedIds(prev => { const n = new Set(prev); n.delete(supplierId); return n })
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Delete failed')
     }
-  }, [suppliers, aliasCache])
+  }, [suppliers, aliasCache, onDataChange])
 
   const handleDeleteAlias = useCallback(async (alias: AliasData, normalizedId: string) => {
     if (!window.confirm(`Remove alias "${alias.rawName}"?`)) return
@@ -250,11 +256,12 @@ export default function NormalizeView() {
       setSuppliers(prev => prev.map(s =>
         s.id === supplierId ? { ...s, parentSupplierId: parentId, parentName: parent?.name ?? null } : s
       ))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to change parent')
     }
     setParentTypeahead(null)
-  }, [parents])
+  }, [parents, onDataChange])
 
   const handleRenameParent = useCallback(async (parentId: string, newName: string) => {
     try {
@@ -263,11 +270,12 @@ export default function NormalizeView() {
       setSuppliers(prev => prev.map(s =>
         s.parentSupplierId === parentId ? { ...s, parentName: newName } : s
       ))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Rename parent failed')
     }
     setEditingParentId(null)
-  }, [])
+  }, [onDataChange])
 
   const handleDeleteParent = useCallback(async (parentId: string) => {
     // Unassign all children first
@@ -279,11 +287,12 @@ export default function NormalizeView() {
       ))
       await ipc.suppliers.deleteParent(parentId)
       setParents(prev => prev.filter(p => p.id !== parentId))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete parent')
     }
     setPendingDeleteParentRowId(null)
-  }, [suppliers])
+  }, [suppliers, onDataChange])
 
   const handleCreateParentAndAssign = useCallback(async (supplierId: string, name: string) => {
     try {
@@ -293,11 +302,12 @@ export default function NormalizeView() {
       setSuppliers(prev => prev.map(s =>
         s.id === supplierId ? { ...s, parentSupplierId: parent.id, parentName: parent.name } : s
       ))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create parent')
     }
     setParentTypeahead(null)
-  }, [])
+  }, [onDataChange])
 
   const handleMerge = useCallback(async (survivorId: string, losingIds: string[]) => {
     try {
@@ -328,11 +338,12 @@ export default function NormalizeView() {
         setSuppliers(fresh as ProjectSupplierView[])
       }).catch(() => { /* non-fatal */ })
 
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Merge failed')
     }
     setShowMergeModal(false)
-  }, [])
+  }, [onDataChange])
 
   const handleMergeParents = useCallback(async (survivorId: string, losingIds: string[]) => {
     try {
@@ -359,11 +370,12 @@ export default function NormalizeView() {
         setParents(freshParents as SupplierParent[])
       }).catch(() => {})
 
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Merge parents failed')
     }
     setShowMergeModal(false)
-  }, [parents])
+  }, [parents, onDataChange])
 
   const handleReassignAlias = useCallback(async (aliasName: string, fromId: string, toId: string) => {
     try {
@@ -381,11 +393,12 @@ export default function NormalizeView() {
       ipc.suppliers.list().then(fresh => {
         setSuppliers(fresh as ProjectSupplierView[])
       }).catch(() => {})
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Reassign failed')
     }
     setReassigningAlias(null)
-  }, [])
+  }, [onDataChange])
 
   // ── Inline edit helpers ───────────────────────────────────────────
 

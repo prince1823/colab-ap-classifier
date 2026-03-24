@@ -258,7 +258,7 @@ export default function PivotPage() {
           <h2 className="text-lg font-semibold text-gray-900">Review</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Navigate with arrow keys, Enter to select rows.
-            <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | ⌘L create rule | ⌘S supplier info | Double-click to filter</span>
+            <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | ⌘L classify & create rule | ⌘S supplier info | Double-click to filter</span>
           </p>
         </div>
         <div className="flex items-center gap-2">

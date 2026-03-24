@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Check } from 'lucide-react'
-import { makeEmptyGroup } from '../FilterConditionBuilder'
+import { makeEmptyGroup, groupedToConditions } from '../FilterConditionBuilder'
 import AdvancedFilterModal from './AdvancedFilterModal'
 import { ipc } from '../../lib/ipc'
 import type { GroupedFilter, ConditionGroup, FilterCondition } from '../../../shared/types/transactions'
@@ -176,14 +176,29 @@ export default function CreateRuleModal({
     setSaving(true)
     setError(null)
     try {
-      await ipc.rules.create({
+      const { id: ruleId } = await ipc.rules.create({
         name: name.trim(),
         groupedConditions: grouped,
         targetTaxonomyNodeId: targetNodeId,
         priorityScore: priority,
       })
+
+      // Reclassify matching transactions to the target taxonomy
+      const flatConditions = groupedToConditions(grouped).filter(c => c.field)
+      if (flatConditions.length > 0) {
+        const ids = await ipc.transactions.getIdsByConditions(flatConditions)
+        if (ids.length > 0) {
+          await ipc.transactions.update({
+            ids,
+            taxonomyNodeId: targetNodeId,
+            classificationStatus: 'classified_by_rule',
+            appliedRuleId: ruleId,
+          })
+        }
+      }
+
       onCreated?.()
-      setSuccessMessage(`Rule "${name.trim()}" created successfully!`)
+      setSuccessMessage(`Rule "${name.trim()}" created and ${flatConditions.length > 0 ? 'applied' : 'saved'}!`)
       setSaving(false)
       closeTimerRef.current = setTimeout(() => {
         setSuccessMessage(null)
@@ -299,7 +314,7 @@ export default function CreateRuleModal({
       <div className="relative bg-white rounded-xl shadow-2xl w-[560px] max-h-[85vh] flex flex-col" style={{ overflow: 'visible' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-base font-semibold text-gray-900">Create Override Rule</h3>
+          <h3 className="text-base font-semibold text-gray-900">Classify and Create Rule</h3>
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
@@ -454,7 +469,7 @@ export default function CreateRuleModal({
               disabled={saving}
               className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
             >
-              {saving ? 'Creating...' : 'Save Rule'}
+              {saving ? 'Creating...' : 'Classify & Create Rule'}
             </button>
           </div>
         </div>

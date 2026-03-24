@@ -318,7 +318,7 @@ export class ClassificationRunner implements IClassificationRunner {
     const unmatchedTxns = txnRows.filter((r) => !matchedTxnIds.has(String(r.id)));
     if (unmatchedTxns.length === 0) return;
 
-    // Get supplier name for research lookup
+    // Get canonical supplier name from project_suppliers
     const supplierRow = await this.db.get<{ supplier_name: string }>(
       'SELECT supplier_name FROM project_suppliers WHERE id = ?',
       projectSupplierId
@@ -332,12 +332,15 @@ export class ClassificationRunner implements IClassificationRunner {
       supplierResearch = await this.supplierUniverse.getSupplier(supplierName);
     }
 
-    // Clean descriptions
+    // Clean descriptions and inject canonical supplier_name, overriding the raw CSV alias
     const cleanedTxns = unmatchedTxns.map((txn) => {
       const cleaned = { ...txn };
       if (typeof cleaned.gl_description === 'string') {
         cleaned.gl_description = cleanDescription(cleaned.gl_description);
       }
+      // supplier_name on transactions holds the raw CSV alias; replace it with the
+      // canonical project supplier name so column priorities reflect the project supplier
+      if (supplierName) cleaned.supplier_name = supplierName;
       return cleaned;
     });
 

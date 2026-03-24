@@ -321,7 +321,6 @@ export default function VersionHistoryPage() {
       ])
       setEntries(result.rows)
       setTotalCount(result.totalCount)
-      setPage(result.page)
       setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load history')
@@ -330,7 +329,7 @@ export default function VersionHistoryPage() {
     }
   }, [viewFilter])
 
-  useEffect(() => { fetchPage(page) }, [fetchPage])
+  useEffect(() => { fetchPage(page) }, [fetchPage, page])
 
   // Client-side search filter (matches supplier names, description, source)
   const filteredEntries = useMemo(() => {

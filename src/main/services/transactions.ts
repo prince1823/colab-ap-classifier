@@ -799,13 +799,20 @@ export class TransactionStore implements ITransactionStore {
   ): Promise<Array<Record<string, unknown>>> {
     const CLASSIFIED_STATUSES = `('classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent')`;
 
-    const selectCols = columnPriorities.length > 0
-      ? ['id', ...columnPriorities.filter((c) => c !== 'id')].join(', ')
-      : '*';
+    // Resolve virtual columns (e.g., supplier_name → ps.supplier_name) and add JOINs
+    const cols = columnPriorities.length > 0
+      ? ['t.id', ...columnPriorities.filter((c) => c !== 'id').map((c) => `${this.resolveColumn(c)} AS ${c}`)]
+      : ['t.*'];
+    const selectCols = cols.join(', ');
+
+    const supplierJoin = this.needsSupplierJoin(columnPriorities) ? SUPPLIER_JOIN : '';
+    const taxonomyJoin = this.needsTaxonomyJoinForColumns(columnPriorities) ? TAXONOMY_JOIN : '';
 
     return this.db.all<Record<string, unknown>>(
       `SELECT ${selectCols}
        FROM transactions t
+       ${supplierJoin}
+       ${taxonomyJoin}
        WHERE CAST(t.project_supplier_id AS VARCHAR) = ?
          AND CAST(t.taxonomy_node_id AS VARCHAR) = ?
          AND t.classification_status IN ${CLASSIFIED_STATUSES}`,

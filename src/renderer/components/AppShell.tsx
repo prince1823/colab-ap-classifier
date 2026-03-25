@@ -114,7 +114,10 @@ export default function AppShell() {
             <div className="flex items-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs">
               <div className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300 border-t-blue-600" />
               <span className="font-medium text-blue-800">
-                Researching: <strong>{researchProgress.currentSupplier}</strong>
+                {researchProgress.currentSupplier
+                  ? <>Researching: <strong>{researchProgress.currentSupplier}</strong></>
+                  : researchProgress.currentStep
+                }
               </span>
               <span className="text-blue-600">
                 {researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}

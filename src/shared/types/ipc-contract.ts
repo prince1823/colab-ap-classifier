@@ -90,7 +90,8 @@ export interface IPCInvokeMap {
   'suppliers:list':           { args: [filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }]; result: ProjectSupplierView[] };
   'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
-  'suppliers:researchAll':    { args: []; result: void };
+  'suppliers:researchAll':    { args: [supplierIds?: string[]]; result: void };
+  'suppliers:cancelResearch': { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierId: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };

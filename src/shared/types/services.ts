@@ -231,7 +231,7 @@ export type ResearchProgressCallback = (progress: ResearchProgress) => void;
 
 export interface SupplierResearcher {
   researchSingle(supplierName: string): Promise<SupplierInfo>;
-  researchAll(onProgress?: ResearchProgressCallback): Promise<void>;
+  researchAll(supplierIds?: string[]): Promise<void>;
   cancel(): void;
 }
 

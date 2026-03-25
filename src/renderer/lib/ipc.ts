@@ -135,7 +135,8 @@ export const ipc = {
       invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
-    researchAll: () => invoke('suppliers:researchAll'),
+    researchAll: (supplierIds?: string[]) => invoke('suppliers:researchAll', supplierIds),
+    cancelResearch: () => invoke('suppliers:cancelResearch'),
     researchSingle: (supplierId: string) =>
       invoke('suppliers:researchSingle', supplierId),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>

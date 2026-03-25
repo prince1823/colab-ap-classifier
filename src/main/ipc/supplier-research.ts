@@ -5,11 +5,16 @@ export function registerSupplierResearchHandlers(
   researcher: SupplierResearcher,
   suppliers: SupplierService
 ): void {
-  registerHandler('suppliers:researchAll', async () => {
+  registerHandler('suppliers:researchAll', async (_event, supplierIds?: unknown) => {
+    const ids = Array.isArray(supplierIds) ? (supplierIds as string[]) : undefined;
     // Fire-and-forget — progress is streamed via EventBus
-    researcher.researchAll().catch((err) => {
+    researcher.researchAll(ids).catch((err) => {
       console.error('[IPC] Supplier research failed:', err);
     });
+  });
+
+  registerHandler('suppliers:cancelResearch', async () => {
+    researcher.cancel();
   });
 
   registerHandler('suppliers:researchSingle', async (_event, supplierId: unknown) => {

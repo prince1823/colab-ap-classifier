@@ -7,11 +7,14 @@ import type {
   SupplierService,
 } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
+import type { ResearchProgress } from '../../shared/types/classification';
 
 export interface SupplierResearchResult extends SupplierInfo {
   confidence: 'high' | 'medium' | 'low';
   sources: string[];
 }
+
+const CONCURRENCY = 3;
 
 export class SupplierResearcher implements ISupplierResearcher {
   private isCancelled = false;
@@ -73,34 +76,86 @@ export class SupplierResearcher implements ISupplierResearcher {
     return result;
   }
 
-  async researchAll(
-    onProgress?: (progress: import('../../shared/types/classification').ResearchProgress) => void
-  ): Promise<void> {
+  async researchAll(supplierIds?: string[]): Promise<void> {
     this.isCancelled = false;
 
-    // Get all project suppliers that need research
-    // Note: This method works with the supplier universe. The caller should
-    // populate the list of supplier names to research.
-    // For now, use the universe to check what needs research.
-    const emitProgress = (
-      done: number,
-      total: number,
-      currentSupplier: string | null,
-      step: string
-    ) => {
-      const progress = {
-        status: (this.isCancelled ? 'cancelled' : done === total ? 'completed' : 'running') as 'running' | 'completed' | 'failed' | 'cancelled',
+    const emit = (done: number, total: number, step: string): void => {
+      const status: ResearchProgress['status'] =
+        this.isCancelled ? 'cancelled' : done === total ? 'completed' : 'running';
+      this.eventBus.emit('suppliers:research:progress', {
+        status,
         totalSuppliers: total,
         processedSuppliers: done,
         percentage: total > 0 ? Math.round((done / total) * 100) : 0,
-        currentSupplier,
+        currentSupplier: null,
         currentStep: step,
-      };
-      this.eventBus.emit('suppliers:research:progress', progress);
-      onProgress?.(progress);
+      } satisfies ResearchProgress);
     };
 
-    emitProgress(0, 0, null, 'Starting research');
+    // Gather candidates
+    let candidates: Array<{ id: string; supplierName: string }>;
+    if (supplierIds && supplierIds.length > 0) {
+      const fetched = await Promise.all(supplierIds.map((id) => this.supplierService.getProjectSupplier(id)));
+      candidates = fetched.filter(
+        (s): s is NonNullable<typeof s> => s !== null && !s.isTailSpend
+      );
+    } else {
+      const all = await this.supplierService.listProjectSuppliers();
+      candidates = all.filter((s) => !s.isResearched && !s.isTailSpend);
+    }
+
+    const total = candidates.length;
+    if (total === 0) {
+      emit(0, 0, 'No suppliers to research');
+      return;
+    }
+
+    emit(0, total, 'Starting research');
+
+    let completed = 0;
+    const queue = [...candidates];
+
+    const worker = async (): Promise<void> => {
+      while (true) {
+        if (this.isCancelled) break;
+        const supplier = queue.shift();
+        if (!supplier) break;
+
+        try {
+          const info = await this.researchSingle(supplier.supplierName);
+
+          if (info.parentCompanyName) {
+            const existing = await this.supplierService.findParentByName(info.parentCompanyName);
+            const parent = existing ?? (await this.supplierService.addParent(info.parentCompanyName));
+            await this.supplierService.assignParent([supplier.id], parent.id);
+          }
+
+          await this.supplierService.updateSupplier(supplier.id, { supplierInfo: info });
+          await this.supplierService.markResearched(supplier.id);
+        } catch (err) {
+          console.error(`[Research] Failed for "${supplier.supplierName}":`, err);
+        }
+
+        completed++;
+        emit(completed, total, 'Researching suppliers...');
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker()));
+
+    // Emit terminal state
+    if (this.isCancelled) {
+      this.eventBus.emit('suppliers:research:progress', {
+        status: 'cancelled',
+        totalSuppliers: total,
+        processedSuppliers: completed,
+        percentage: Math.round((completed / total) * 100),
+        currentSupplier: null,
+        currentStep: 'Cancelled',
+      } satisfies ResearchProgress);
+    } else {
+      emit(total, total, 'Completed');
+    }
   }
 
   cancel(): void {

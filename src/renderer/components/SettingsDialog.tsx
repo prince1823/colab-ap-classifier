@@ -169,8 +169,9 @@ export default function SettingsDialog({ open, onClose }: Props) {
     <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white p-6 shadow-xl">
-          <div className="mb-4 flex items-center justify-between">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white shadow-xl flex flex-col max-h-[85vh]">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 pt-5 pb-4">
             <Dialog.Title className="text-lg font-semibold text-gray-900">Settings</Dialog.Title>
             <Dialog.Close asChild>
               <button className="rounded p-1 text-gray-400 hover:text-gray-600">
@@ -179,184 +180,177 @@ export default function SettingsDialog({ open, onClose }: Props) {
             </Dialog.Close>
           </div>
 
-          <div className="space-y-4">
-            {/* ── Classification Model ── */}
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Classification Model</h3>
+          {/* Scrollable body */}
+          <div className="flex-1 overflow-y-auto px-6 pb-2">
+            <div className="space-y-4">
+              {/* ── Classification Model ── */}
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Classification Model</h3>
 
-            {/* Provider */}
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Provider</label>
-              <div className="flex flex-wrap gap-2">
-                {PROVIDERS.map((p) => (
-                  <label key={p} className="flex cursor-pointer items-center gap-1.5">
-                    <input
-                      type="radio"
-                      name="provider"
-                      value={p}
-                      checked={form.provider === p}
-                      onChange={handleProviderChange}
-                      className="accent-blue-600"
-                    />
-                    <span className="text-sm text-gray-700">{p}</span>
-                  </label>
-                ))}
+              {/* Provider */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Provider</label>
+                <div className="flex flex-wrap gap-2">
+                  {PROVIDERS.map((p) => (
+                    <label key={p} className="flex cursor-pointer items-center gap-1.5">
+                      <input
+                        type="radio"
+                        name="provider"
+                        value={p}
+                        checked={form.provider === p}
+                        onChange={handleProviderChange}
+                        className="accent-blue-600"
+                      />
+                      <span className="text-sm text-gray-700">{p}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {/* Model */}
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Model</label>
-              <input
-                type="text"
-                value={form.model}
-                onChange={handleModelChange}
-                placeholder="claude-3-5-haiku-latest"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              />
-            </div>
+              {/* Model */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Model</label>
+                <input
+                  type="text"
+                  value={form.model}
+                  onChange={handleModelChange}
+                  placeholder="claude-3-5-haiku-latest"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                />
+              </div>
 
-            {/* API Key */}
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                API Key
-                {keyIsSet && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-green-600">
-                    <CheckCircleIcon className="h-3.5 w-3.5" />
-                    currently set
-                  </span>
-                )}
-              </label>
-              <input
-                type="password"
-                value={form.apiKey}
-                onChange={handleApiKeyChange}
-                placeholder={keyIsSet ? 'Enter new key to replace…' : 'Enter API key…'}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              />
-              {form.validationResult && (
-                <div
-                  className={`mt-1 flex items-center gap-1 text-xs ${
-                    form.validationResult.valid ? 'text-green-600' : 'text-red-600'
-                  }`}
-                >
-                  {form.validationResult.valid ? (
-                    <CheckCircleIcon className="h-3.5 w-3.5" />
-                  ) : (
-                    <ExclamationCircleIcon className="h-3.5 w-3.5" />
+              {/* API Key */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  API Key
+                  {keyIsSet && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-green-600">
+                      <CheckCircleIcon className="h-3.5 w-3.5" />
+                      currently set
+                    </span>
                   )}
-                  {form.validationResult.valid ? 'Key is valid' : (form.validationResult.error ?? 'Invalid key')}
-                </div>
-              )}
-            </div>
-
-            {/* Save feedback */}
-            {saveSuccess && (
-              <p className="text-xs text-green-600">Settings saved.</p>
-            )}
-            {saveError && (
-              <p className="text-xs text-red-600">{saveError}</p>
-            )}
-          </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            {form.apiKey.trim() && (
-              <button
-                onClick={handleValidate}
-                disabled={form.isValidating}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {form.isValidating ? 'Validating…' : 'Validate Key'}
-              </button>
-            )}
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {isSaving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-
-          {/* ── Exa Web Search ── */}
-          <div className="mt-6 border-t border-gray-200 pt-4">
-            <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">Exa Web Search</h3>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                API Key
-                {config?.hasExaKey && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-green-600">
-                    <CheckCircleIcon className="h-3.5 w-3.5" />
-                    currently set
-                  </span>
-                )}
-              </label>
-              <input
-                type="password"
-                value={form.exaKey}
-                onChange={handleExaKeyChange}
-                placeholder={config?.hasExaKey ? 'Enter new key to replace…' : 'Enter Exa API key…'}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              />
-              {form.exaValidationResult && (
-                <div
-                  className={`mt-1 flex items-center gap-1 text-xs ${
-                    form.exaValidationResult.valid ? 'text-green-600' : 'text-red-600'
-                  }`}
-                >
-                  {form.exaValidationResult.valid ? (
-                    <CheckCircleIcon className="h-3.5 w-3.5" />
-                  ) : (
-                    <ExclamationCircleIcon className="h-3.5 w-3.5" />
-                  )}
-                  {form.exaValidationResult.valid ? 'Key is valid' : (form.exaValidationResult.error ?? 'Invalid key')}
-                </div>
-              )}
-              {(form.exaKey.trim() || config?.hasExaKey) && (
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={handleValidateExa}
-                    disabled={form.isValidatingExa || isSaving}
-                    className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                </label>
+                <input
+                  type="password"
+                  value={form.apiKey}
+                  onChange={handleApiKeyChange}
+                  placeholder={keyIsSet ? 'Enter new key to replace…' : 'Enter API key…'}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                />
+                {form.validationResult && (
+                  <div
+                    className={`mt-1 flex items-center gap-1 text-xs ${
+                      form.validationResult.valid ? 'text-green-600' : 'text-red-600'
+                    }`}
                   >
-                    {form.isValidatingExa ? 'Validating…' : 'Validate'}
-                  </button>
-                  {form.exaKey.trim() && (
-                    <button
-                      onClick={handleSaveExaKey}
-                      disabled={isSaving}
-                      className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    {form.validationResult.valid ? (
+                      <CheckCircleIcon className="h-3.5 w-3.5" />
+                    ) : (
+                      <ExclamationCircleIcon className="h-3.5 w-3.5" />
+                    )}
+                    {form.validationResult.valid ? 'Key is valid' : (form.validationResult.error ?? 'Invalid key')}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Exa Web Search ── */}
+              <div className="border-t border-gray-200 pt-4">
+                <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">Exa Web Search</h3>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    API Key
+                    {config?.hasExaKey && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-green-600">
+                        <CheckCircleIcon className="h-3.5 w-3.5" />
+                        currently set
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    type="password"
+                    value={form.exaKey}
+                    onChange={handleExaKeyChange}
+                    placeholder={config?.hasExaKey ? 'Enter new key to replace…' : 'Enter Exa API key…'}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                  {form.exaValidationResult && (
+                    <div
+                      className={`mt-1 flex items-center gap-1 text-xs ${
+                        form.exaValidationResult.valid ? 'text-green-600' : 'text-red-600'
+                      }`}
                     >
-                      {isSaving ? 'Saving…' : 'Save'}
-                    </button>
+                      {form.exaValidationResult.valid ? (
+                        <CheckCircleIcon className="h-3.5 w-3.5" />
+                      ) : (
+                        <ExclamationCircleIcon className="h-3.5 w-3.5" />
+                      )}
+                      {form.exaValidationResult.valid ? 'Key is valid' : (form.exaValidationResult.error ?? 'Invalid key')}
+                    </div>
+                  )}
+                  {(form.exaKey.trim() || config?.hasExaKey) && (
+                    <div className="mt-2">
+                      <button
+                        onClick={handleValidateExa}
+                        disabled={form.isValidatingExa || isSaving}
+                        className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        {form.isValidatingExa ? 'Validating…' : 'Validate'}
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
+
+              {/* ── Supplier Universe ── */}
+              <div className="border-t border-gray-200 pt-4">
+                <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">Supplier Universe</h3>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Database File</label>
+                  <div
+                    className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 overflow-x-auto whitespace-nowrap"
+                    title={supplierResolvedPath}
+                  >
+                    {supplierResolvedPath || 'Not configured'}
+                  </div>
+                  <div className="mt-2">
+                    <button
+                      onClick={handleBrowseSupplierUniverse}
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <FolderOpenIcon className="h-3.5 w-3.5" />
+                      Change
+                    </button>
+                  </div>
+                  {supplierPathError && (
+                    <p className="mt-1 text-xs text-red-600">{supplierPathError}</p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* ── Supplier Universe ── */}
-          <div className="mt-6 border-t border-gray-200 pt-4">
-            <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">Supplier Universe</h3>
+          {/* Footer */}
+          <div className="flex items-center justify-between border-t border-gray-200 px-6 py-3">
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Database File</label>
-              <div
-                className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 overflow-x-auto whitespace-nowrap"
-                title={supplierResolvedPath}
-              >
-                {supplierResolvedPath || 'Not configured'}
-              </div>
-              <div className="mt-2">
+              {saveSuccess && <p className="text-xs text-green-600">Settings saved.</p>}
+              {saveError && <p className="text-xs text-red-600">{saveError}</p>}
+            </div>
+            <div className="flex items-center gap-2">
+              {form.apiKey.trim() && (
                 <button
-                  onClick={handleBrowseSupplierUniverse}
-                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  onClick={handleValidate}
+                  disabled={form.isValidating}
+                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                 >
-                  <FolderOpenIcon className="h-3.5 w-3.5" />
-                  Change
+                  {form.isValidating ? 'Validating…' : 'Validate Key'}
                 </button>
-              </div>
-              {supplierPathError && (
-                <p className="mt-1 text-xs text-red-600">{supplierPathError}</p>
               )}
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isSaving ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </div>
         </Dialog.Content>

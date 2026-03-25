@@ -157,4 +157,65 @@ describe('TransactionStore', () => {
       expect(String(selectCall![0])).toContain('LIMIT 25 OFFSET 50');
     });
   });
+
+  describe('applyRule', () => {
+    const grouped = {
+      groupConnector: 'AND' as const,
+      groups: [{ connector: 'AND' as const, conditions: [{ field: 'supplier_name', operator: 'equals' as const, value: 'Acme' }] }],
+    };
+
+    it('throws if the rule id does not exist', async () => {
+      vi.mocked(db.get).mockResolvedValueOnce(null); // rule not found
+
+      await expect(store.applyRule('nonexistent-id', grouped, 'node-1'))
+        .rejects.toThrow('Rule not found: nonexistent-id');
+    });
+
+    it('returns 0 and skips update when no transactions match', async () => {
+      vi.mocked(db.get).mockResolvedValueOnce({ id: 'rule-1' }); // rule exists
+      // getIdsByGroupedConditions → db.all returns empty
+      vi.mocked(db.all).mockResolvedValueOnce([]);
+
+      const count = await store.applyRule('rule-1', grouped, 'node-1');
+      expect(count).toBe(0);
+      // updateTransactions should not have been called
+      const updateCall = vi.mocked(db.run).mock.calls.find(c =>
+        String(c[0]).includes('UPDATE transactions')
+      );
+      expect(updateCall).toBeUndefined();
+    });
+
+    it('updates matching transactions with classified_by_rule status and correct source', async () => {
+      vi.mocked(db.get).mockResolvedValueOnce({ id: 'rule-1' }); // rule exists
+      vi.mocked(db.all)
+        .mockResolvedValueOnce([{ id: 'tx-1' }, { id: 'tx-2' }]) // getIdsByGroupedConditions
+        .mockResolvedValueOnce([]) // supplier names in changelog
+      vi.mocked(db.get)
+        .mockResolvedValueOnce({ id: 'rule-1' }) // rule exists (first call above already consumed)
+
+      // Re-setup: rule exists check, then matched ids, then changelog queries
+      vi.mocked(db.get).mockReset();
+      vi.mocked(db.all).mockReset();
+      vi.mocked(db.run).mockReset();
+
+      vi.mocked(db.get).mockResolvedValueOnce({ id: 'rule-1' }); // rule lookup
+      vi.mocked(db.all)
+        .mockResolvedValueOnce([{ id: 'tx-1' }, { id: 'tx-2' }]) // getIdsByGroupedConditions
+        .mockResolvedValueOnce([]) // supplier names for changelog
+      vi.mocked(db.get).mockResolvedValueOnce(null); // taxonomy path (optional)
+
+      const count = await store.applyRule('rule-1', grouped, 'node-1');
+      expect(count).toBe(2);
+
+      const updateCall = vi.mocked(db.run).mock.calls.find(c =>
+        String(c[0]).includes('UPDATE transactions SET')
+      );
+      expect(updateCall).toBeDefined();
+      expect(String(updateCall![0])).toContain('classification_status = ?');
+      expect(String(updateCall![0])).toContain('applied_rule_id = ?');
+      // Verify classified_by_rule and ruleId appear in params
+      expect(updateCall!).toContain('classified_by_rule');
+      expect(updateCall!).toContain('rule-1');
+    });
+  });
 });

@@ -176,14 +176,15 @@ export default function CreateRuleModal({
     setSaving(true)
     setError(null)
     try {
-      await ipc.rules.create({
+      const { matchedCount } = await ipc.rules.createAndApply({
         name: name.trim(),
         groupedConditions: grouped,
         targetTaxonomyNodeId: targetNodeId,
         priorityScore: priority,
       })
+
       onCreated?.()
-      setSuccessMessage(`Rule "${name.trim()}" created successfully!`)
+      setSuccessMessage(`Rule "${name.trim()}" created and applied to ${matchedCount} transaction${matchedCount !== 1 ? 's' : ''}.`)
       setSaving(false)
       closeTimerRef.current = setTimeout(() => {
         setSuccessMessage(null)
@@ -227,6 +228,15 @@ export default function CreateRuleModal({
     }
   }, [taxonomyHighlightIdx])
 
+  // Ordered list of focusable refs for arrow-key navigation
+  const focusOrder = useMemo(() => [
+    editConditionsBtnRef,
+    nameInputRef,
+    priorityInputRef,
+    taxonomyBtnRef,
+    saveBtnRef,
+  ], [])
+
   // Global keyboard handler for the modal
   const handleModalKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Don't interfere with taxonomy dropdown keyboard nav
@@ -245,8 +255,19 @@ export default function CreateRuleModal({
       return
     }
 
-    // Tab navigation is native — just let it flow through the focusable elements
-  }, [taxonomyDropdownOpen, onClose, handleSave])
+    // Arrow key navigation between form fields
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const active = document.activeElement
+      const currentIdx = focusOrder.findIndex(ref => ref.current === active)
+      if (currentIdx === -1) return
+
+      e.preventDefault()
+      const nextIdx = e.key === 'ArrowDown'
+        ? Math.min(currentIdx + 1, focusOrder.length - 1)
+        : Math.max(currentIdx - 1, 0)
+      focusOrder[nextIdx].current?.focus()
+    }
+  }, [taxonomyDropdownOpen, onClose, handleSave, focusOrder])
 
   if (!isOpen) return null
 
@@ -279,7 +300,7 @@ export default function CreateRuleModal({
       <div className="relative bg-white rounded-xl shadow-2xl w-[560px] max-h-[85vh] flex flex-col" style={{ overflow: 'visible' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-base font-semibold text-gray-900">Create Override Rule</h3>
+          <h3 className="text-base font-semibold text-gray-900">Classify and Create Rule</h3>
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
@@ -434,7 +455,7 @@ export default function CreateRuleModal({
               disabled={saving}
               className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
             >
-              {saving ? 'Creating...' : 'Save Rule'}
+              {saving ? 'Creating...' : 'Classify & Create Rule'}
             </button>
           </div>
         </div>

@@ -155,11 +155,13 @@ export const ipc = {
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
   },
 
-  // ── Rules (5 channels) ──
+  // ── Rules (6 channels) ──
   rules: {
     list: () => invoke('rules:list'),
     create: (input: OverrideRuleCreate) =>
       invoke('rules:create', input),
+    createAndApply: (input: OverrideRuleCreate) =>
+      invoke('rules:createAndApply', input),
     update: (ruleId: string, updates: OverrideRuleUpdate) =>
       invoke('rules:update', ruleId, updates),
     delete: (ruleId: string) => invoke('rules:delete', ruleId),

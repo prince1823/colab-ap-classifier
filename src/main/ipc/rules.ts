@@ -11,6 +11,10 @@ export function registerRulesHandlers(rules: RuleStore): void {
     return rules.createRule(input as OverrideRuleCreate);
   });
 
+  registerHandler('rules:createAndApply', async (_event, input: unknown) => {
+    return rules.createAndApplyRule(input as OverrideRuleCreate);
+  });
+
   registerHandler('rules:update', async (_event, ruleId: unknown, updates: unknown) => {
     return rules.updateRule(ruleId as string, updates as OverrideRuleUpdate);
   });

@@ -20,7 +20,6 @@ interface PivotState {
   showAdvancedFilter: boolean
   /** Toggle: show only rows flagged for review */
   flaggedForReviewOnly: boolean
-
   // Actions
   setRowDimensions: (dims: string[]) => void
   setValueDimension: (dim: string) => void

@@ -6,7 +6,7 @@ import { useWorkflowStore } from '../stores/workflowStore'
 
 export default function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const { subscribeToClassificationProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset } = useWorkflowStore()
+  const { subscribeToClassificationProgress, subscribeToResearchProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress } = useWorkflowStore()
   const location = useLocation()
   const navigate = useNavigate()
   const autoReopenAttempted = useRef(false)
@@ -50,6 +50,16 @@ export default function AppShell() {
     const unsubscribe = subscribeToClassificationProgress()
     return unsubscribe
   }, [hasProject, subscribeToClassificationProgress])
+
+  // Subscribe to research progress events (from EventBus) when a project is open
+  useEffect(() => {
+    if (!hasProject) return
+    const unsubscribe = subscribeToResearchProgress()
+    return unsubscribe
+  }, [hasProject, subscribeToResearchProgress])
+
+  // Show research progress on non-supplier pages
+  const showGlobalResearchProgress = researchProgress?.status === 'running' && location.pathname !== '/suppliers'
 
   // Refresh metadata + gate state on every route change so views stay in sync.
   useEffect(() => {
@@ -100,6 +110,23 @@ export default function AppShell() {
           onSwitchProject={handleSwitchProject}
         />
         <main className="flex flex-1 flex-col overflow-hidden">
+          {showGlobalResearchProgress && researchProgress && (
+            <div className="flex items-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs">
+              <div className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300 border-t-blue-600" />
+              <span className="font-medium text-blue-800">
+                Researching: <strong>{researchProgress.currentSupplier}</strong>
+              </span>
+              <span className="text-blue-600">
+                {researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}
+              </span>
+              <div className="ml-auto h-1.5 w-32 overflow-hidden rounded-full bg-blue-200">
+                <div
+                  className="h-full rounded-full bg-blue-600 transition-all"
+                  style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-auto">
             <Outlet />
           </div>

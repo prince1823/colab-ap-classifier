@@ -4,13 +4,14 @@ import { ipc } from '../lib/ipc'
 import { usePivotStore } from './pivotStore'
 import { useSupplierFilterStore } from './supplierFilterStore'
 import type { ProjectMetadata } from '../../shared/types/project'
-import type { ClassificationProgress, QCProgress } from '../../shared/types/classification'
+import type { ClassificationProgress, QCProgress, ResearchProgress } from '../../shared/types/classification'
 
 interface WorkflowState {
   // Core state
   projectMetadata: ProjectMetadata | null
   classificationProgress: ClassificationProgress | null
   qcProgress: QCProgress | null
+  researchProgress: ResearchProgress | null
 
   // Persisted for auto-reopen only — a plain string, never a partial cast of ProjectMetadata
   projectFilePath: string | null
@@ -44,6 +45,8 @@ interface WorkflowState {
   subscribeToClassificationProgress: () => () => void
   subscribeToQCProgress: () => () => void
   setClassificationProgress: (progress: ClassificationProgress | null) => void
+  setResearchProgress: (progress: ResearchProgress | null) => void
+  subscribeToResearchProgress: () => () => void
   setLastRoute: (route: string) => void
   reset: () => void
 }
@@ -65,6 +68,7 @@ export const useWorkflowStore = create<WorkflowState>()(
       projectMetadata: null,
       classificationProgress: null,
       qcProgress: null,
+      researchProgress: null,
       projectFilePath: null,
       lastRoute: null,
       hasProject: false,
@@ -250,6 +254,22 @@ export const useWorkflowStore = create<WorkflowState>()(
         })
       },
 
+      setResearchProgress: (progress) => {
+        set({ researchProgress: progress })
+      },
+
+      subscribeToResearchProgress: () => {
+        const unsubscribe = ipc.suppliers.onResearchProgress((progress) => {
+          set({ researchProgress: progress })
+          if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
+            setTimeout(() => {
+              set({ researchProgress: null })
+            }, 3000)
+          }
+        })
+        return unsubscribe
+      },
+
       setLastRoute: (route: string) => {
         set({ lastRoute: route })
       },
@@ -260,6 +280,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           projectFilePath: null,
           classificationProgress: null,
           qcProgress: null,
+          researchProgress: null,
           lastRoute: null,
           hasProject: false,
           isClassifying: false,

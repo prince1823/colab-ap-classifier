@@ -236,8 +236,8 @@ export interface SupplierResearcher {
 }
 
 export interface ClassificationRunner {
-  classifyAll(conditions?: FilterCondition[]): Promise<void>;
-  getScopeCount(conditions?: FilterCondition[]): Promise<number>;
+  classifyAll(groupedFilter?: import('./transactions').GroupedFilter): Promise<void>;
+  getScopeCount(groupedFilter?: import('./transactions').GroupedFilter): Promise<number>;
   classifySupplier(projectSupplierId: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], scopedTxnIds?: Set<string>): Promise<void>;
   getIsRunning(): boolean;
   cancel(): Promise<void>;

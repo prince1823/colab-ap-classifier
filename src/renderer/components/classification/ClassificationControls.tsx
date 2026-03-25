@@ -1,17 +1,22 @@
 import { useState } from 'react'
 import { ipc } from '../../lib/ipc'
 import { useWorkflowStore } from '../../stores/workflowStore'
-import type { FilterCondition } from '../../../shared/types/transactions'
+import type { GroupedFilter } from '../../../shared/types/transactions'
 
 interface Props {
   isRunning: boolean
-  conditions: FilterCondition[]
+  groupedFilter: GroupedFilter
   onStarted: () => void
   onError: (msg: string) => void
   onCancelled: () => void
 }
 
-export default function ClassificationControls({ isRunning, conditions, onStarted, onError, onCancelled }: Props) {
+/** Check if a GroupedFilter has any real conditions (non-empty groups with non-empty fields). */
+function hasConditions(gf: GroupedFilter): boolean {
+  return gf.groups.length > 0 && gf.groups.some(g => g.conditions.length > 0 && g.conditions.some(c => c.field !== ''))
+}
+
+export default function ClassificationControls({ isRunning, groupedFilter, onStarted, onError, onCancelled }: Props) {
   const [starting, setStarting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [confirmCount, setConfirmCount] = useState<number | null>(null)
@@ -22,7 +27,7 @@ export default function ClassificationControls({ isRunning, conditions, onStarte
     onError('')
     try {
       const count = await ipc.classification.scopeCount(
-        conditions.length > 0 ? conditions : undefined
+        hasConditions(groupedFilter) ? groupedFilter : undefined
       )
       setConfirmCount(count)
     } catch (e) {
@@ -38,7 +43,7 @@ export default function ClassificationControls({ isRunning, conditions, onStarte
     setStarting(true)
     try {
       await ipc.classification.start(
-        conditions.length > 0 ? conditions : undefined
+        hasConditions(groupedFilter) ? groupedFilter : undefined
       )
       onStarted()
     } catch (e) {

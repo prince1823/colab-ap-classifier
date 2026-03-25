@@ -66,9 +66,9 @@ export interface IPCInvokeMap {
   'transactions:markAllReviewed':   { args: []; result: number };
 
   // Classification
-  'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
+  'classification:start':      { args: [groupedFilter?: GroupedFilter]; result: void };
   'classification:cancel':     { args: []; result: void };
-  'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
+  'classification:scopeCount': { args: [groupedFilter?: GroupedFilter]; result: number };
 
   // QC
   'qc:start':     { args: [filter?: TransactionFilter]; result: void };

@@ -3,7 +3,7 @@ import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/t
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
-import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
+import type { TransactionFilter, TransactionUpdate, FilterCondition, GroupedFilter } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
@@ -71,9 +71,9 @@ export const ipc = {
 
   // ── Classification (3 channels + 1 event) ──
   classification: {
-    start: (conditions?: FilterCondition[]) => invoke('classification:start', conditions),
+    start: (groupedFilter?: GroupedFilter) => invoke('classification:start', groupedFilter),
     cancel: () => invoke('classification:cancel'),
-    scopeCount: (conditions?: FilterCondition[]) => invoke('classification:scopeCount', conditions),
+    scopeCount: (groupedFilter?: GroupedFilter) => invoke('classification:scopeCount', groupedFilter),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on('classification:progress', callback),
   },

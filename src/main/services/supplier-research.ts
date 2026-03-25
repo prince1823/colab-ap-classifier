@@ -14,7 +14,7 @@ export interface SupplierResearchResult extends SupplierInfo {
   sources: string[];
 }
 
-const CONCURRENCY = 3;
+const CONCURRENCY = 5;
 
 export class SupplierResearcher implements ISupplierResearcher {
   private isCancelled = false;

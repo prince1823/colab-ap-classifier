@@ -473,17 +473,9 @@ export default function VersionHistoryPage() {
               Clear
             </button>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] text-blue-400">
-              {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S to give feedback
-            </span>
-            <button
-              onClick={() => setFeedbackDialogOpen(true)}
-              className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
-            >
-              Give Feedback
-            </button>
-          </div>
+          <span className="text-[10px] text-blue-400">
+            {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S to give feedback
+          </span>
         </div>
       )}
 

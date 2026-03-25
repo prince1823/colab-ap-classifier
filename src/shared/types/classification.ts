@@ -11,6 +11,44 @@ export type ClassificationStatus =
 
 export type QCOutcome = 'clean' | 'consolidated' | 'flagged' | 'skipped';
 
+export interface FilterConditionQC {
+  field: string;
+  operator: 'equals' | 'not_equals' | 'greater_than' | 'less_than' | 'is_true' | 'is_false' | 'contains';
+  value?: string | number | boolean;
+}
+
+export interface QCConfig {
+  scope: FilterConditionQC[];
+  algorithmic: {
+    enabled: boolean;
+    l3Threshold: number;
+    l2Threshold: number;
+  };
+  llm: {
+    enabled: boolean;
+    gateConditions: FilterConditionQC[];
+    rules: string;
+  };
+}
+
+export interface QCResult {
+  recommendations: Array<{
+    groupNumbers: number[];
+    toClassificationPath: string;
+    reason: string;
+  }>;
+  noChangeNeeded: boolean;
+}
+
+export interface SpendByTaxonomyResult {
+  taxonomyNodeId: string;
+  fullPath: string;
+  l1: string;
+  l2: string;
+  spend: number;
+  txnCount: number;
+}
+
 export interface QCProgress {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   totalSuppliers: number;

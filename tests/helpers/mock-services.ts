@@ -8,6 +8,7 @@ import type {
   ClassificationAgent,
   ResearchAgent,
   ColumnMappingAgent,
+  QCAgent,
   ProjectStore,
   TransactionStore,
   TaxonomyStore,
@@ -108,6 +109,12 @@ export function createMockColumnMappingAgent(): ColumnMappingAgent {
   };
 }
 
+export function createMockQCAgent(): QCAgent {
+  return {
+    review: vi.fn().mockResolvedValue({ recommendations: [], noChangeNeeded: true }),
+  };
+}
+
 export function createMockProjectStore(): ProjectStore {
   return {
     createProject: vi.fn().mockResolvedValue({ filePath: '/test.c91', name: 'Test' }),
@@ -134,6 +141,8 @@ export function createMockTransactionStore(): TransactionStore {
     invalidateColumnCache: vi.fn(),
     getIdsByConditions: vi.fn().mockResolvedValue([]),
     getIdsByGroupedConditions: vi.fn().mockResolvedValue([]),
+    getSpendByTaxonomy: vi.fn().mockResolvedValue([]),
+    getTransactionsByTaxonomy: vi.fn().mockResolvedValue([]),
   };
 }
 

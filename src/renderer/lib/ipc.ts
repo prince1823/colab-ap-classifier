@@ -1,6 +1,6 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
-import type { ClassificationProgress, ResearchProgress, QCProgress } from '../../shared/types/classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, QCConfig } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
@@ -76,12 +76,15 @@ export const ipc = {
       on('classification:progress', callback),
   },
 
-  // ── QC (4 channels + 1 event) ──
+  // ── QC (7 channels + 1 event) ──
   qc: {
     count: (filter?: TransactionFilter) => invoke('qc:count', filter),
-    start: (filter?: TransactionFilter) => invoke('qc:start', filter),
+    run: (config?: QCConfig) => invoke('qc:run', config),
     stop: () => invoke('qc:stop'),
     isRunning: () => invoke('qc:isRunning'),
+    getConfig: () => invoke('qc:getConfig'),
+    setConfig: (config: QCConfig) => invoke('qc:setConfig', config),
+    getDefaults: () => invoke('qc:getDefaults'),
     onProgress: (callback: (progress: QCProgress) => void) =>
       on('qc:progress', callback),
   },

@@ -77,7 +77,7 @@ export default function ClassificationPage() {
 
   const handleConfirmQC = async () => {
     setQCPendingCount(null)
-    await ipc.qc.start({ humanReviewed: false })
+    await ipc.qc.run()
   }
 
   const handleCancelQC = () => {

@@ -30,36 +30,42 @@ export function cancelResearch(): void {
  * Returns the SupplierInfo on success, or null on failure.
  */
 export async function researchSingle(supplier: ProjectSupplierView): Promise<SupplierInfo | null> {
-  setProgress({
-    status: 'running',
-    totalSuppliers: 1,
-    processedSuppliers: 0,
-    percentage: 0,
-    currentSupplier: supplier.supplierName,
-    currentStep: 'Researching',
-  })
-  try {
-    const info = await ipc.suppliers.researchSingle(supplier.id)
+  if (!isRunning) {
     setProgress({
-      status: 'completed',
-      totalSuppliers: 1,
-      processedSuppliers: 1,
-      percentage: 100,
-      currentSupplier: supplier.supplierName,
-      currentStep: 'Done',
-    })
-    setTimeout(() => setProgress(null), 3000)
-    return info as SupplierInfo
-  } catch (e) {
-    setProgress({
-      status: 'failed',
+      status: 'running',
       totalSuppliers: 1,
       processedSuppliers: 0,
       percentage: 0,
       currentSupplier: supplier.supplierName,
-      currentStep: e instanceof Error ? e.message : 'Research failed',
+      currentStep: 'Researching',
     })
-    setTimeout(() => setProgress(null), 3000)
+  }
+  try {
+    const info = await ipc.suppliers.researchSingle(supplier.id)
+    if (!isRunning) {
+      setProgress({
+        status: 'completed',
+        totalSuppliers: 1,
+        processedSuppliers: 1,
+        percentage: 100,
+        currentSupplier: supplier.supplierName,
+        currentStep: 'Done',
+      })
+      setTimeout(() => setProgress(null), 3000)
+    }
+    return info as SupplierInfo
+  } catch (e) {
+    if (!isRunning) {
+      setProgress({
+        status: 'failed',
+        totalSuppliers: 1,
+        processedSuppliers: 0,
+        percentage: 0,
+        currentSupplier: supplier.supplierName,
+        currentStep: e instanceof Error ? e.message : 'Research failed',
+      })
+      setTimeout(() => setProgress(null), 3000)
+    }
     return null
   }
 }
@@ -82,50 +88,52 @@ export async function researchBatch(
   const results = new Map<string, SupplierInfo>()
   const total = selected.length
 
-  for (let i = 0; i < total; i++) {
-    if (abortFlag) {
+  try {
+    for (let i = 0; i < total; i++) {
+      if (abortFlag) {
+        setProgress({
+          status: 'cancelled',
+          totalSuppliers: total,
+          processedSuppliers: i,
+          percentage: Math.round((i / total) * 100),
+          currentSupplier: null,
+          currentStep: 'Cancelled',
+        })
+        setTimeout(() => setProgress(null), 3000)
+        return results
+      }
+
+      const s = selected[i]
       setProgress({
-        status: 'cancelled',
+        status: 'running',
         totalSuppliers: total,
         processedSuppliers: i,
         percentage: Math.round((i / total) * 100),
-        currentSupplier: null,
-        currentStep: 'Cancelled',
+        currentSupplier: s.supplierName,
+        currentStep: `Researching ${i + 1} of ${total}`,
       })
-      setTimeout(() => setProgress(null), 3000)
-      isRunning = false
-      return results
+
+      try {
+        const info = await ipc.suppliers.researchSingle(s.id) as SupplierInfo
+        results.set(s.id, info)
+        onEachComplete?.(s.id, info)
+      } catch {
+        // continue with next supplier
+      }
     }
 
-    const s = selected[i]
     setProgress({
-      status: 'running',
+      status: 'completed',
       totalSuppliers: total,
-      processedSuppliers: i,
-      percentage: Math.round((i / total) * 100),
-      currentSupplier: s.supplierName,
-      currentStep: `Researching ${i + 1} of ${total}`,
+      processedSuppliers: total,
+      percentage: 100,
+      currentSupplier: null,
+      currentStep: 'Done',
     })
+    setTimeout(() => setProgress(null), 3000)
 
-    try {
-      const info = await ipc.suppliers.researchSingle(s.id) as SupplierInfo
-      results.set(s.id, info)
-      onEachComplete?.(s.id, info)
-    } catch {
-      // continue with next supplier
-    }
+    return results
+  } finally {
+    isRunning = false
   }
-
-  setProgress({
-    status: 'completed',
-    totalSuppliers: total,
-    processedSuppliers: total,
-    percentage: 100,
-    currentSupplier: null,
-    currentStep: 'Done',
-  })
-  setTimeout(() => setProgress(null), 3000)
-
-  isRunning = false
-  return results
 }

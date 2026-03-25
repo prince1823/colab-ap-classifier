@@ -1,11 +1,12 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
-import { REQUIRED_CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
+import { CANONICAL_COLUMNS, REQUIRED_CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
 import { ipc } from '../../lib/ipc'
 import type { CSVPreview, DerivedMappings, MappingRow } from '../../../shared/types/column-mapping'
 
 /* ── Constants ── */
 
 const REQUIRED = new Set(REQUIRED_CANONICAL_COLUMNS as readonly string[])
+const KNOWN_CANONICALS = new Set(CANONICAL_COLUMNS.map((c) => c.name))
 const ADDRESS_HINTS = ['address', 'supplier_address', 'vendor_address', 'street', 'city', 'state', 'zip', 'postal']
 const MAX_PREVIEW_ROWS = 8
 const MERGE_ROWS_LIMIT = 5
@@ -86,11 +87,15 @@ function buildInitialState(
         locked: fromPrevious,
       }
     }
+    // Only auto-snake_case if it matches a known canonical column;
+    // otherwise keep the original CSV column name and let the user edit it.
     const snaked = toSnakeCase(col)
-    const collides = assignedCanonicals.has(snaked)
+    const isKnownCanonical = KNOWN_CANONICALS.has(snaked)
+    const defaultCanonical = isKnownCanonical ? snaked : col
+    const collides = assignedCanonicals.has(defaultCanonical)
     return {
       csvColumn: col,
-      canonical: collides ? '' : snaked,
+      canonical: collides ? '' : defaultCanonical,
       included: false,
       locked: false,
     }
@@ -142,13 +147,13 @@ function CanonicalPicker({
     return canonicalPool.filter((c) => c.toLowerCase().includes(q))
   }, [canonicalPool, search])
 
-  const searchSnaked = useMemo(() => toSnakeCase(search), [search])
-  const isNewCanonical = searchSnaked && !canonicalPool.includes(searchSnaked)
+  const searchTrimmed = search.trim()
+  const isNewCanonical = searchTrimmed && !canonicalPool.includes(searchTrimmed)
 
   const handleCreateAndSelect = () => {
     if (!isNewCanonical) return
-    onAddCanonical(searchSnaked)
-    onChange(searchSnaked)
+    onAddCanonical(searchTrimmed)
+    onChange(searchTrimmed)
     setOpen(false)
     setSearch('')
   }
@@ -558,13 +563,13 @@ export default function DataMappingStep({
   }, [])
 
   const handleAddCanonical = useCallback(() => {
-    const snaked = toSnakeCase(newCanonicalInput)
-    if (!snaked || canonicalPool.includes(snaked)) {
+    const trimmed = newCanonicalInput.trim()
+    if (!trimmed || canonicalPool.includes(trimmed)) {
       setNewCanonicalInput('')
       setShowAddInput(false)
       return
     }
-    setCanonicalPool((prev) => [...prev, snaked])
+    setCanonicalPool((prev) => [...prev, trimmed])
     setNewCanonicalInput('')
     setShowAddInput(false)
   }, [newCanonicalInput, canonicalPool])

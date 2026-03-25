@@ -151,10 +151,13 @@ function SourcesList({ sources }: { sources: string[] }) {
           return (
             <a
               key={i}
-              href={src}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 hover:underline truncate"
+              href="#"
+              onClick={(e) => {
+                e.preventDefault()
+                const url = src.startsWith('http://') || src.startsWith('https://') ? src : `https://${src}`;
+                (window as any).electronAPI.openExternal(url)
+              }}
+              className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 hover:underline truncate cursor-pointer"
               title={src}
             >
               <ExternalLink size={8} className="flex-shrink-0" />

@@ -2,7 +2,7 @@
 import { loadEnv } from './load-env';
 loadEnv();
 
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, nativeImage } from 'electron';
 import path from 'path';
 import { createContainer } from './container';
 import { registerAllHandlers } from './ipc';
@@ -35,6 +35,7 @@ function createWindow(): void {
       backgroundThrottling: false,
     },
     title: 'Colab91 Classifier',
+    icon: path.join(__dirname, '..', '..', '..', 'build', 'icon.png'),
   });
 
   const isDev = !app.isPackaged;
@@ -54,6 +55,21 @@ function createWindow(): void {
 app.whenReady().then(() => {
   const services = createContainer();
   registerAllHandlers(services);
+
+  // Open external URLs in the system default browser
+  ipcMain.handle('shell:openExternal', (_event, url: string) => {
+    return shell.openExternal(url);
+  });
+
+  // Set dock icon on macOS
+  const iconPath = path.join(__dirname, '..', '..', '..', 'build', 'icon.png');
+  if (process.platform === 'darwin' && app.dock) {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      app.dock.setIcon(icon);
+    }
+  }
+
   createWindow();
 
   // Forward EventBus events to renderer

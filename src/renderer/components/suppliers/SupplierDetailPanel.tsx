@@ -345,9 +345,10 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
                         onClick={(e) => {
                           e.preventDefault()
                           e.stopPropagation()
-                          window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
+                          const url = src.startsWith('http://') || src.startsWith('https://') ? src : `https://${src}`;
+                          (window as any).electronAPI.openExternal(url)
                         }}
-                        title={`Search Google for "${src}"`}
+                        title={src}
                       >
                         {src}
                       </a>

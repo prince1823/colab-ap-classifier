@@ -4,6 +4,7 @@ import {
   Merge, ArrowRightLeft,
 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 import type { ProjectSupplierView, SupplierParent } from '../../../shared/types/suppliers'
 import MergeModal from './MergeModal'
 import ReassignAliasModal from './ReassignAliasModal'
@@ -331,12 +332,12 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
           rawName: name, spend: 0, txnCount: 0,
         }))
         setAliasCache(c => new Map(c).set(survivorId, aliasData))
-      }).catch(() => {})
+      }).catch((e) => showError('Failed to reload supplier aliases', e))
 
       // Silently refresh spend/txn counts in background — no loading state, no collapse
       ipc.suppliers.list().then(fresh => {
         setSuppliers(fresh as ProjectSupplierView[])
-      }).catch(() => { /* non-fatal */ })
+      }).catch((e) => showError('Failed to refresh supplier list', e))
 
       onDataChange?.()
     } catch (e) {
@@ -368,7 +369,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       ]).then(([freshSuppliers, freshParents]) => {
         setSuppliers(freshSuppliers as ProjectSupplierView[])
         setParents(freshParents as SupplierParent[])
-      }).catch(() => {})
+      }).catch((e) => showError('Failed to refresh supplier data after parent merge', e))
 
       onDataChange?.()
     } catch (e) {
@@ -392,7 +393,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       // Refresh spend totals — transactions moved, so both suppliers' spend changed
       ipc.suppliers.list().then(fresh => {
         setSuppliers(fresh as ProjectSupplierView[])
-      }).catch(() => {})
+      }).catch((e) => showError('Failed to refresh supplier list after alias reassign', e))
       onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Reassign failed')

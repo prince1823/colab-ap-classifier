@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 import type { MappingRow } from '../../../shared/types/column-mapping'
 
 interface Props {
@@ -44,7 +45,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
       setLlmOrder(validSaved)
       setNonLlm(remaining)
       setLoadedFromSaved(true)
-    }).catch(() => {})
+    }).catch((e) => showError('Failed to load saved column priorities', e))
   }, [])
 
   useEffect(() => {
@@ -56,7 +57,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
       })) as TransactionPreviewRow[]
       setPreviewRows(flat)
       setTotalRows(result.total)
-    }).catch(() => {})
+    }).catch((e) => showError('Failed to load transaction preview', e))
   }, [])
 
   // Drag state for LLM rows

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 import type { ChangeLog } from '../../../shared/types/changelog'
 
 interface SystemFeedbackDialogProps {
@@ -39,8 +40,11 @@ export default function SystemFeedbackDialog({
         setEntries(result.rows)
         setLoadingEntries(false)
       }
-    }).catch(() => {
-      if (!cancelled) setLoadingEntries(false)
+    }).catch((e) => {
+      if (!cancelled) {
+        setLoadingEntries(false)
+        showError('Failed to load changelog', e)
+      }
     })
     return () => { cancelled = true }
   }, [isOpen])

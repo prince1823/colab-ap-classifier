@@ -1,6 +1,7 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
 import { existsSync, unlinkSync } from 'fs';
 import type { Database } from '../../shared/types/services';
+import { debugLog } from '../utils/debug-log';
 
 /**
  * Convert `?` placeholders to DuckDB positional `$1, $2, ...` format.
@@ -65,7 +66,7 @@ export class DuckDBDatabase implements Database {
       const walPath = filePath + '.wal';
       if (existsSync(walPath)) {
         console.warn(`[Database] Failed to open database, removing corrupted WAL file: ${walPath}`);
-        try { unlinkSync(walPath); } catch { /* ignore */ }
+        try { unlinkSync(walPath); } catch (e) { debugLog('WARN', 'Failed to remove WAL file', e); }
         this.instance = await DuckDBInstance.create(filePath);
         this.connection = await this.instance.connect();
       } else {
@@ -149,12 +150,12 @@ export class DuckDBDatabase implements Database {
     // Migrate: drop classification_reasoning column from transactions if it exists
     try {
       await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
-    } catch { /* column doesn't exist, ignore */ }
+    } catch (e) { debugLog('INFO', 'Migration: classification_reasoning column not present (expected)', e); }
 
     // Migrate: add is_reverted column to change_log
     try {
       await this.exec('ALTER TABLE change_log ADD COLUMN is_reverted BOOLEAN DEFAULT FALSE');
-    } catch { /* column already exists, ignore */ }
+    } catch (e) { debugLog('INFO', 'Migration: is_reverted column already exists (expected)', e); }
 
     // Migrate: clean up old "Reverted:" entries — mark originals as reverted and delete the revert rows
     try {
@@ -170,12 +171,12 @@ export class DuckDBDatabase implements Database {
       `);
       // Delete old "Reverted:" rows (those with description starting with 'Reverted:')
       await this.exec("DELETE FROM change_log WHERE description LIKE 'Reverted:%'");
-    } catch { /* ignore — reverted_change_id column may not exist */ }
+    } catch (e) { debugLog('INFO', 'Migration: reverted_change_id cleanup skipped (expected if column absent)', e); }
 
     // Drop old reverted_change_id column if it exists
     try {
       await this.exec('ALTER TABLE change_log DROP COLUMN reverted_change_id');
-    } catch { /* column doesn't exist, ignore */ }
+    } catch (e) { debugLog('INFO', 'Migration: reverted_change_id column not present (expected)', e); }
 
     // Migrate: ensure flagged_for_review column exists on transactions
     const frCol = await this.all<{ column_name: string }>(
@@ -196,7 +197,7 @@ export class DuckDBDatabase implements Database {
     // Migrate: ensure override_rules.name is unique
     try {
       await this.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name)');
-    } catch { /* index may already exist or constraint already enforced */ }
+    } catch (e) { debugLog('INFO', 'Migration: override_rules name index already exists (expected)', e); }
 
     // Migrate: ensure supplier_parents table exists
     const spTable = await this.all<{ table_name: string }>(
@@ -221,7 +222,7 @@ export class DuckDBDatabase implements Database {
     }
     try {
       await this.exec('ALTER TABLE project_suppliers DROP COLUMN parent_supplier_name');
-    } catch { /* column already removed, ignore */ }
+    } catch (e) { debugLog('INFO', 'Migration: parent_supplier_name column already removed (expected)', e); }
 
     // Migrate: drop flat conditions column and make grouped_conditions the sole conditions store.
     // Recreates the table if conditions column still exists (handles INTEGER priority and old schema in one pass).

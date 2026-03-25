@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { XMarkIcon, CheckCircleIcon, ExclamationCircleIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
 import { ipc } from '../lib/ipc'
+import { showWarning } from '../lib/toast-errors'
 import type { LLMConfigResponse } from '../../shared/types/ipc-contract'
 
 interface Props {
@@ -60,8 +61,8 @@ export default function SettingsDialog({ open, onClose }: Props) {
     ipc.settings.getLLMConfig().then((cfg) => {
       setConfig(cfg)
       setForm((prev) => ({ ...prev, provider: cfg.provider, model: cfg.model }))
-    }).catch(() => {/* non-fatal */})
-    ipc.supplierUniverse.getPath().then((p) => setSupplierResolvedPath(p ?? '')).catch(() => {/* non-fatal */})
+    }).catch((e) => showWarning('Settings', `Could not load LLM config: ${e instanceof Error ? e.message : String(e)}`))
+    ipc.supplierUniverse.getPath().then((p) => setSupplierResolvedPath(p ?? '')).catch((e) => showWarning('Settings', `Could not load supplier universe path: ${e instanceof Error ? e.message : String(e)}`))
   }, [open])
 
   function handleProviderChange(e: React.ChangeEvent<HTMLInputElement>): void {

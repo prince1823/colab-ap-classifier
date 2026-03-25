@@ -118,13 +118,19 @@ export default function DataView() {
 
       const result = await ipc.ingest.importCSV(activeFilePath, columnMapping)
 
-      // Only set default column_priorities if none exist yet
+      // Merge new mapped columns into column_priorities (preserving existing order)
       const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
+      const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
       if (!existingPriorities || existingPriorities.length === 0) {
-        const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
         const supplierFirst = mappedCols.filter((c) => c === 'supplier_name')
         const rest = mappedCols.filter((c) => c !== 'supplier_name')
         await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
+      } else {
+        const existingSet = new Set(existingPriorities)
+        const newCols = mappedCols.filter((c) => !existingSet.has(c))
+        if (newCols.length > 0) {
+          await ipc.project.setSetting('column_priorities', [...existingPriorities, ...newCols])
+        }
       }
 
       // Add to completed uploads

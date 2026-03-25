@@ -102,10 +102,24 @@ export default function SuppliersPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Reload supplier data when switching back from normalize tab
-  useEffect(() => {
-    if (viewMode === 'suppliers') loadData()
-  }, [viewMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Track whether normalize made changes that need a supplier refresh
+  const supplierDataStale = useRef(false)
+  const markSupplierDataStale = useCallback(() => { supplierDataStale.current = true }, [])
+
+  // Tab switch — visibility:hidden preserves scroll natively, no manual save/restore needed
+  const handleViewModeSwitch = useCallback(() => {
+    setViewMode(prev => {
+      const next = prev === 'normalize' ? 'suppliers' : 'normalize'
+      // Switching back to suppliers and data was changed in normalize → background refresh
+      if (next === 'suppliers' && supplierDataStale.current) {
+        supplierDataStale.current = false
+        // Delay loadData so it runs AFTER the visibility switch renders,
+        // keeping scroll position intact while new data streams in
+        setTimeout(() => loadData(), 0)
+      }
+      return next
+    })
+  }, [loadData])
 
   // Reload suppliers when research completes (handles case where user navigated away and back)
   useEffect(() => {
@@ -473,7 +487,7 @@ export default function SuppliersPage() {
         </div>
 
         <button
-          onClick={() => setViewMode(viewMode === 'normalize' ? 'suppliers' : 'normalize')}
+          onClick={handleViewModeSwitch}
           className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
             viewMode === 'normalize'
               ? 'border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100'
@@ -552,74 +566,96 @@ export default function SuppliersPage() {
         )}
       </div>
 
-      {/* Normalize view */}
-      {viewMode === 'normalize' && <NormalizeView />}
+      {/* Tab content wrapper — both views stay mounted, clip hidden to preserve scroll
+           Uses z-index stacking instead of visibility (which would override parent's
+           visibility:hidden in AppShell's keep-alive routing) */}
+      <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
+        {/* Normalize view — always mounted */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column',
+          zIndex: viewMode === 'normalize' ? 1 : 0,
+          pointerEvents: viewMode === 'normalize' ? 'auto' : 'none',
+          opacity: viewMode === 'normalize' ? 1 : 0,
+        }}>
+          <NormalizeView onDataChange={markSupplierDataStale} />
+        </div>
 
-      {/* Row 2: Research progress bar */}
-      {viewMode === 'suppliers' && researchProgress && researchProgress.status === 'running' && (
-        <div className="suppliers-progress">
-          <div className="flex items-center justify-between mb-1">
-            <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
-            <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
-          </div>
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+        {/* Suppliers view — always mounted */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column',
+          zIndex: viewMode === 'suppliers' ? 1 : 0,
+          pointerEvents: viewMode === 'suppliers' ? 'auto' : 'none',
+          opacity: viewMode === 'suppliers' ? 1 : 0,
+        }}>
+          {/* Research progress bar */}
+          {researchProgress && researchProgress.status === 'running' && (
+            <div className="suppliers-progress">
+              <div className="flex items-center justify-between mb-1">
+                <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+                <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {researchProgress && researchProgress.status === 'completed' && (
+            <div className="suppliers-progress">
+              <div className="flex items-center gap-2 py-1">
+                <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
+                <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''} researched)</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
+              </div>
+            </div>
+          )}
+
+          {/* Two-panel layout */}
+          <div className="suppliers-content">
+            <SupplierListPanel
+              suppliers={displayedSuppliers}
+              focusedIndex={focusedIndex}
+              selectedIds={selectedIds}
+              selectedSupplierId={selectedSupplierId}
+              searchQuery={searchQuery}
+              quickFilter={quickFilter}
+              unresearchedCount={unresearchedCount}
+              unconfirmedCount={unconfirmedCount}
+              onSearchChange={setSearchQuery}
+              onQuickFilterChange={setQuickFilter}
+              onSupplierClick={handleSupplierClick}
+              onToggleCheck={toggleCheckById}
+              onToggleSelectAll={toggleSelectAll}
+              onKeyDown={handleKeyDown}
+              allChecked={allChecked}
+              isActive={activePanel === 'list'}
+              onResearch={researchSupplier}
+              onResearchSelected={researchSelected}
+              onConfirmSelected={confirmSelected}
+            />
+            <SupplierDetailPanel
+              ref={detailPanelRef}
+              supplier={selectedSupplier}
+              onSaveField={saveField}
+              onSaveParentName={saveParentName}
+              onResearch={researchSupplier}
+              onConfirm={confirmSupplier}
+              focusedFieldIndex={detailFieldIndex}
+              onFocusedFieldChange={setDetailFieldIndex}
+              editingFieldIndex={editingFieldIndex}
+              onEditingFieldChange={setEditingFieldIndex}
+              onMoveToList={handleMoveToList}
+              isActive={activePanel === 'detail'}
             />
           </div>
         </div>
-      )}
-      {viewMode === 'suppliers' && researchProgress && researchProgress.status === 'completed' && (
-        <div className="suppliers-progress">
-          <div className="flex items-center gap-2 py-1">
-            <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
-            <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''} researched)</span>
-          </div>
-          <div className="progress-bar">
-            <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
-          </div>
-        </div>
-      )}
-
-      {/* Two-panel layout */}
-      {viewMode === 'suppliers' && <div className="suppliers-content">
-        <SupplierListPanel
-          suppliers={displayedSuppliers}
-          focusedIndex={focusedIndex}
-          selectedIds={selectedIds}
-          selectedSupplierId={selectedSupplierId}
-          searchQuery={searchQuery}
-          quickFilter={quickFilter}
-          unresearchedCount={unresearchedCount}
-          unconfirmedCount={unconfirmedCount}
-          onSearchChange={setSearchQuery}
-          onQuickFilterChange={setQuickFilter}
-          onSupplierClick={handleSupplierClick}
-          onToggleCheck={toggleCheckById}
-          onToggleSelectAll={toggleSelectAll}
-          onKeyDown={handleKeyDown}
-          allChecked={allChecked}
-          isActive={activePanel === 'list'}
-          onResearch={researchSupplier}
-          onResearchSelected={researchSelected}
-          onConfirmSelected={confirmSelected}
-        />
-        <SupplierDetailPanel
-          ref={detailPanelRef}
-          supplier={selectedSupplier}
-          onSaveField={saveField}
-          onSaveParentName={saveParentName}
-          onResearch={researchSupplier}
-          onConfirm={confirmSupplier}
-          focusedFieldIndex={detailFieldIndex}
-          onFocusedFieldChange={setDetailFieldIndex}
-          editingFieldIndex={editingFieldIndex}
-          onEditingFieldChange={setEditingFieldIndex}
-          onMoveToList={handleMoveToList}
-          isActive={activePanel === 'detail'}
-        />
-      </div>}
+      </div>
 
       {saving && <div className="supplier-saving">Saving...</div>}
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import type { ChangeLog, ChangelogFilter } from '../../shared/types/changelog'
@@ -284,17 +284,10 @@ export default function VersionHistoryPage() {
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
   const [supplierDropdownId, setSupplierDropdownId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [viewFilter, setViewFilter] = useState<'all' | 'changes' | 'feedback'>('all')
 
-  // Debounce search input (300ms)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
-    return () => clearTimeout(timer)
-  }, [searchQuery])
-
-  // Reset to page 1 when filters change
-  useEffect(() => { setPage(1) }, [debouncedSearch, viewFilter])
+  // Reset to page 1 when view filter changes
+  useEffect(() => { setPage(1) }, [viewFilter])
 
   // Close supplier dropdown when clicking outside
   useEffect(() => {
@@ -320,7 +313,6 @@ export default function VersionHistoryPage() {
       const filter: ChangelogFilter = {
         page: p,
         pageSize: PAGE_SIZE,
-        search: debouncedSearch || undefined,
         viewFilter: viewFilter === 'all' ? undefined : viewFilter,
       }
       const [result, nodes] = await Promise.all([
@@ -329,16 +321,26 @@ export default function VersionHistoryPage() {
       ])
       setEntries(result.rows)
       setTotalCount(result.totalCount)
-      setPage(result.page)
       setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load history')
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, viewFilter])
+  }, [viewFilter])
 
-  useEffect(() => { fetchPage(page) }, [fetchPage])
+  useEffect(() => { fetchPage(page) }, [fetchPage, page])
+
+  // Client-side search filter (matches supplier names, description, source)
+  const filteredEntries = useMemo(() => {
+    if (!searchQuery) return entries
+    const q = searchQuery.toLowerCase()
+    return entries.filter((entry) =>
+      entry.description?.toLowerCase().includes(q) ||
+      entry.source?.toLowerCase().includes(q) ||
+      entry.supplierNames?.some((name) => name.toLowerCase().includes(q))
+    )
+  }, [entries, searchQuery])
 
   const handleRevert = async (changeId: string) => {
     setReverting(changeId)
@@ -408,17 +410,6 @@ export default function VersionHistoryPage() {
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <svg className="h-8 w-8 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
@@ -458,13 +449,20 @@ export default function VersionHistoryPage() {
       {error && <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {successMessage && <div className="rounded-md bg-green-50 p-4 text-sm text-green-700">{successMessage}</div>}
 
-      {entries.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center p-12">
+          <svg className="h-8 w-8 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        </div>
+      ) : filteredEntries.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-          No changes recorded yet.
+          {searchQuery ? 'No matching changes found.' : 'No changes recorded yet.'}
         </div>
       ) : (
         <div className="space-y-2">
-          {entries.map((entry) => {
+          {filteredEntries.map((entry) => {
             const isExpanded = expandedId === entry.id
             const isReverted = entry.isReverted
             const changes = getChangedFields(entry.oldValues, entry.newValues, taxonomyMap)

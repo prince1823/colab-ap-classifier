@@ -363,6 +363,20 @@ export default function VersionHistoryPage() {
     })
   }, [])
 
+  // Cmd+S to open feedback dialog with selected rows
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        if (selectedIds.size > 0) {
+          setFeedbackDialogOpen(true)
+        }
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [selectedIds])
+
   const handleDialogClose = () => {
     setFeedbackDialogOpen(false)
     setSelectedIds(new Set())
@@ -455,6 +469,33 @@ export default function VersionHistoryPage() {
         </div>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-4 py-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-blue-700">
+              {selectedIds.size} change{selectedIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs text-blue-500 hover:text-blue-700 underline"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] text-blue-400">
+              {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S to give feedback
+            </span>
+            <button
+              onClick={() => setFeedbackDialogOpen(true)}
+              className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+            >
+              Give Feedback
+            </button>
+          </div>
+        </div>
+      )}
+
       {error && <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {successMessage && <div className="rounded-md bg-green-50 p-4 text-sm text-green-700">{successMessage}</div>}
 
@@ -471,12 +512,22 @@ export default function VersionHistoryPage() {
             const isTxExpanded = expandedTxId === entry.id
 
             return (
-              <div key={entry.id} className="rounded-lg border border-gray-200 bg-white">
+              <div key={entry.id} className={`rounded-lg border bg-white ${selectedIds.has(entry.id) ? 'border-blue-400 ring-1 ring-blue-200' : 'border-gray-200'}`}>
                 <div
                   className="flex cursor-pointer items-center justify-between px-4 py-3 hover:bg-gray-50"
                   onClick={() => setExpandedId(isExpanded ? null : entry.id)}
                 >
                   <div className="flex items-center gap-3 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(entry.id)}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        toggleSelect(entry.id)
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
+                    />
                     <div className={`h-2 w-2 flex-shrink-0 rounded-full ${entry.source === 'feedback' ? 'bg-purple-500' : entry.source === 'manual' ? 'bg-blue-500' : 'bg-green-500'}`} />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">

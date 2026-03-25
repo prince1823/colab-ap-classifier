@@ -152,20 +152,31 @@ export default function ClassificationPage() {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Scope</label>
-            <div className="flex flex-wrap gap-2">
-              {(Object.keys(PRESET_LABELS) as ScopePreset[]).map((key) => (
-                <button
-                  key={key}
-                  onClick={() => handlePresetChange(key)}
-                  className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-                    preset === key
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {PRESET_LABELS[key]}
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              <div className="flex flex-wrap gap-2">
+                {(Object.keys(PRESET_LABELS) as ScopePreset[]).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => handlePresetChange(key)}
+                    className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                      preset === key
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {PRESET_LABELS[key]}
+                  </button>
+                ))}
+              </div>
+              <div className="ml-auto shrink-0">
+                <ClassificationControls
+                  isRunning={isRunning}
+                  groupedFilter={activeGrouped}
+                  onStarted={handleStarted}
+                  onError={handleError}
+                  onCancelled={handleCancelled}
+                />
+              </div>
             </div>
           </div>
 
@@ -226,13 +237,15 @@ export default function ClassificationPage() {
         </div>
       )}
 
-      <ClassificationControls
-        isRunning={isRunning}
-        groupedFilter={activeGrouped}
-        onStarted={handleStarted}
-        onError={handleError}
-        onCancelled={handleCancelled}
-      />
+      {isRunning && (
+        <ClassificationControls
+          isRunning={isRunning}
+          groupedFilter={activeGrouped}
+          onStarted={handleStarted}
+          onError={handleError}
+          onCancelled={handleCancelled}
+        />
+      )}
 
       {localProgress && <ProgressDisplay progress={localProgress} />}
 

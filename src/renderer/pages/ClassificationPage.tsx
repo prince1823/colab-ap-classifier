@@ -265,7 +265,7 @@ export default function ClassificationPage() {
           </button>
           {isCompleted && !isQCRunning && qcPendingCount === null && (
             <p className="text-sm text-gray-500">
-              You can now go to the <strong>Review</strong> tab to examine the results, or to <strong>Output</strong> to export.
+              You can now go to the <strong>Review</strong> tab to examine the results.
             </p>
           )}
         </div>

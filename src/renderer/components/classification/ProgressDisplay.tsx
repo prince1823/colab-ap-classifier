@@ -6,62 +6,104 @@ interface Props {
 
 export default function ProgressDisplay({ progress }: Props) {
   const pct = Math.round(progress.percentage)
+  const isRunning = progress.status === 'running'
+  const isCompleted = progress.status === 'completed'
+  const isFailed = progress.status === 'failed'
+  const isCancelled = progress.status === 'cancelled'
+
+  const barColor = isCompleted
+    ? 'from-emerald-400 to-emerald-500'
+    : isFailed || isCancelled
+      ? 'from-red-400 to-red-500'
+      : 'from-blue-500 to-indigo-500'
+
+  const statusIcon = isCompleted
+    ? <svg className="h-4 w-4 text-emerald-500" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+    : isFailed
+      ? <svg className="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+      : isCancelled
+        ? <svg className="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+        : null
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div
-            className={`h-2.5 w-2.5 rounded-full ${
-              progress.status === 'completed'
-                ? 'bg-green-500'
-                : progress.status === 'failed' || progress.status === 'cancelled'
-                  ? 'bg-red-500'
-                  : 'animate-pulse bg-blue-500'
-            }`}
-          />
-          <span className="text-sm font-medium text-gray-700">
-            Classifying Transactions
+    <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 shadow-sm">
+      {/* Header */}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          {isRunning ? (
+            <div className="relative h-4 w-4">
+              <div className="absolute inset-0 animate-ping rounded-full bg-blue-400 opacity-30" />
+              <div className="relative h-4 w-4 rounded-full bg-blue-500" />
+            </div>
+          ) : (
+            statusIcon
+          )}
+          <span className="text-sm font-semibold text-gray-800">
+            {isCompleted ? 'Classification Complete' : isFailed ? 'Classification Failed' : isCancelled ? 'Classification Cancelled' : 'Classifying Transactions'}
           </span>
         </div>
-        <span className="text-sm text-gray-500">
-          {progress.processedSuppliers} / {progress.totalSuppliers}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-gray-500">
+            {progress.processedSuppliers} / {progress.totalSuppliers} suppliers
+          </span>
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold tabular-nums text-gray-700">
+            {pct}%
+          </span>
+        </div>
       </div>
 
-      <div className="mb-2 h-3 overflow-hidden rounded-full bg-gray-200">
+      {/* Progress bar */}
+      <div className="relative mb-2.5 h-2 overflow-hidden rounded-full bg-gray-200/80">
         <div
-          className={`h-full rounded-full transition-all duration-300 ${
-            progress.status === 'completed'
-              ? 'bg-green-500'
-              : progress.status === 'failed' || progress.status === 'cancelled'
-                ? 'bg-red-500'
-                : 'bg-blue-600'
-          }`}
+          className={`h-full rounded-full bg-gradient-to-r ${barColor} transition-all duration-500 ease-out`}
           style={{ width: `${pct}%` }}
         />
+        {isRunning && pct > 0 && (
+          <div
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{
+              width: `${pct}%`,
+              background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)',
+              animation: 'shimmer 1.5s infinite',
+            }}
+          />
+        )}
       </div>
 
-      <div className="flex items-center justify-between text-xs text-gray-500">
-        <span>{pct}% complete</span>
-        {progress.currentStep && <span className="max-w-sm truncate">{progress.currentStep}</span>}
-      </div>
+      {/* Current step */}
+      {progress.currentStep && (
+        <p className="truncate text-[11px] text-gray-400">
+          {progress.currentStep}
+        </p>
+      )}
 
-      {progress.status === 'completed' && (
-        <div className="mt-4 rounded-md bg-green-50 p-3 text-sm text-green-700">
-          Classification complete! {progress.totalSuppliers} suppliers processed.
+      {/* Status banners */}
+      {isCompleted && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          {progress.totalSuppliers} suppliers processed successfully.
         </div>
       )}
-      {progress.status === 'failed' && (
-        <div className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+      {isFailed && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
           Classification failed. Please check your settings and try again.
         </div>
       )}
-      {progress.status === 'cancelled' && (
-        <div className="mt-4 rounded-md bg-yellow-50 p-3 text-sm text-yellow-700">
+      {isCancelled && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
           Classification was cancelled.
         </div>
       )}
+
+      {/* Shimmer keyframe */}
+      <style>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(200%); }
+        }
+      `}</style>
     </div>
   )
 }

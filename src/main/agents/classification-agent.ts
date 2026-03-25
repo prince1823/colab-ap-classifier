@@ -620,11 +620,43 @@ export class LLMClassificationAgent implements ClassificationAgent {
     const userPrompt = buildCategorySelectionUserPrompt(input);
 
     const start = Date.now();
-    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
-      temperature: 0,
-      maxTokens: 4096,
-    });
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 4096,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-category',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     const elapsedMs = Date.now() - start;
+
+    let result: Map<number, string>;
+    try {
+      result = parseCategorySelectionResponse(responseText);
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-category',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
 
     traceLog({
       timestamp: new Date().toISOString(),
@@ -635,8 +667,6 @@ export class LLMClassificationAgent implements ClassificationAgent {
       response: responseText,
       elapsedMs,
     });
-
-    const result = parseCategorySelectionResponse(responseText);
 
     // Validate each path against taxonomy
     const validated = new Map<number, string>();
@@ -681,11 +711,45 @@ export class LLMClassificationAgent implements ClassificationAgent {
     const userPrompt = buildL3ClassificationUserPrompt(input);
 
     const start = Date.now();
-    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
-      temperature: 0,
-      maxTokens: 16384,
-    });
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 16384,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-l3',
+        supplier: input.supplierName,
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     const elapsedMs = Date.now() - start;
+
+    let rawResult: ClassificationResult;
+    try {
+      rawResult = parseResponse(responseText);
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-l3',
+        supplier: input.supplierName,
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
 
     traceLog({
       timestamp: new Date().toISOString(),
@@ -698,7 +762,6 @@ export class LLMClassificationAgent implements ClassificationAgent {
       elapsedMs,
     });
 
-    const rawResult = parseResponse(responseText);
     return validateClassification(rawResult, input.l3Taxonomy);
   }
 
@@ -760,11 +823,43 @@ export class LLMClassificationAgent implements ClassificationAgent {
     const userPrompt = buildUserPrompt(input);
 
     const start = Date.now();
-    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
-      temperature: 0,
-      maxTokens: 16384,
-    });
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 16384,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-l3',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     const elapsedMs = Date.now() - start;
+
+    let rawResult: ClassificationResult;
+    try {
+      rawResult = parseResponse(responseText);
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-l3',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
 
     traceLog({
       timestamp: new Date().toISOString(),
@@ -776,7 +871,6 @@ export class LLMClassificationAgent implements ClassificationAgent {
       elapsedMs,
     });
 
-    const rawResult = parseResponse(responseText);
     return validateClassification(rawResult, input.taxonomy);
   }
 }

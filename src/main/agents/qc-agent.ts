@@ -93,11 +93,43 @@ export class LLMQCAgent implements QCAgent {
     const userPrompt = buildQCUserPrompt(input.supplierSummary, input.rules);
 
     const start = Date.now();
-    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
-      temperature: 0,
-      maxTokens: 4096,
-    });
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 4096,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'qc',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     const elapsedMs = Date.now() - start;
+
+    let result: QCResult;
+    try {
+      result = parseQCResponse(responseText);
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'qc',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
 
     traceLog({
       timestamp: new Date().toISOString(),
@@ -109,6 +141,6 @@ export class LLMQCAgent implements QCAgent {
       elapsedMs,
     });
 
-    return parseQCResponse(responseText);
+    return result;
   }
 }

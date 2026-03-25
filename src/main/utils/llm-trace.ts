@@ -18,6 +18,7 @@ export interface TraceEntry {
   response: string;
   elapsedMs: number;
   tokenEstimate?: { input: number; output: number };
+  error?: string;
 }
 
 const TRACE_FILE = process.env.LLM_TRACE_FILE ?? null;

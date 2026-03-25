@@ -292,11 +292,45 @@ export class LLMResearchAgent implements ResearchAgent {
     );
 
     const start = Date.now();
-    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
-      temperature: 0,
-      maxTokens: 1024,
-    });
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 1024,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'research',
+        supplier: supplierName,
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     const elapsedMs = Date.now() - start;
+
+    let result: SupplierInfo;
+    try {
+      result = parseResponse(responseText).result;
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'research',
+        supplier: supplierName,
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
 
     traceLog({
       timestamp: new Date().toISOString(),
@@ -309,7 +343,6 @@ export class LLMResearchAgent implements ResearchAgent {
       elapsedMs,
     });
 
-    const { result } = parseResponse(responseText);
     return result;
   }
 }

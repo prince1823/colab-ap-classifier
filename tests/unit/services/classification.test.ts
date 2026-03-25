@@ -126,7 +126,7 @@ describe('ClassificationRunner', () => {
       });
 
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'Acme' };
+        if (sql.includes('supplier_parents')) return { supplier_name: 'Acme', parent_name: null };
         if (sql.includes('COUNT')) return { cnt: 1 };
         return undefined;
       });
@@ -177,7 +177,7 @@ describe('ClassificationRunner', () => {
       });
 
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'Acme' };
+        if (sql.includes('supplier_parents')) return { supplier_name: 'Acme', parent_name: null };
         if (sql.includes('COUNT')) return { cnt: 2 };
         return undefined;
       });
@@ -286,7 +286,7 @@ describe('ClassificationRunner', () => {
       });
 
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'Acme' };
+        if (sql.includes('supplier_parents')) return { supplier_name: 'Acme', parent_name: null };
         if (sql.includes('COUNT')) return { cnt: 1 };
         return undefined;
       });
@@ -334,7 +334,7 @@ describe('ClassificationRunner', () => {
       });
 
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'MultiCo' };
+        if (sql.includes('supplier_parents')) return { supplier_name: 'MultiCo', parent_name: null };
         if (sql.includes('COUNT')) return { cnt: 2 };
         return undefined;
       });
@@ -389,7 +389,7 @@ describe('ClassificationRunner', () => {
       });
 
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'RetryCo' };
+        if (sql.includes('supplier_parents')) return { supplier_name: 'RetryCo', parent_name: null };
         if (sql.includes('COUNT')) return { cnt: 1 };
         return undefined;
       });
@@ -449,7 +449,7 @@ describe('ClassificationRunner', () => {
       });
 
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'FailCo' };
+        if (sql.includes('supplier_parents')) return { supplier_name: 'FailCo', parent_name: null };
         if (sql.includes('COUNT')) return { cnt: 0 };
         return undefined;
       });
@@ -506,7 +506,7 @@ describe('ClassificationRunner', () => {
       });
 
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'Acme' };
+        if (sql.includes('supplier_parents')) return { supplier_name: 'Acme', parent_name: null };
         if (sql.includes('COUNT')) return { cnt: 1 };
         return undefined;
       });
@@ -551,7 +551,7 @@ describe('ClassificationRunner', () => {
         return [];
       });
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return supplierName ? { supplier_name: supplierName } : undefined;
+        if (sql.includes('supplier_parents')) return supplierName ? { supplier_name: supplierName, parent_name: null } : undefined;
         if (sql.includes('COUNT')) return { cnt: txns.length };
         return undefined;
       });
@@ -647,6 +647,77 @@ describe('ClassificationRunner', () => {
       expect(agentArgs.transactions).toHaveLength(2);
       expect(agentArgs.transactions[0]).toHaveProperty('gl_description', 'Software');
       expect(agentArgs.transactions[1]).toHaveProperty('gl_description', 'Hardware');
+    });
+  });
+
+  describe('parent name injection', () => {
+    const taxonomyNode = {
+      id: 'tid1', fullPath: 'Indirect|IT|Software',
+      l1: 'Indirect', l2: 'IT', l3: 'Software',
+      depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
+    };
+
+    function setupParentTest(parentName: string | null, universeParent: string | null) {
+      vi.mocked(db.all).mockImplementation(async (sql: string) => {
+        if (sql.includes('DISTINCT')) return [{ id: 'sup1', supplier_name: 'SubCo' }];
+        if (sql.includes('FROM transactions')) return [{
+          id: 'tx1', project_supplier_id: 'sup1', spend_amount: 1000,
+          classification_status: 'unclassified',
+        }];
+        return [];
+      });
+      vi.mocked(db.get).mockImplementation(async (sql: string) => {
+        if (sql.includes('supplier_parents')) return { supplier_name: 'SubCo', parent_name: parentName };
+        if (sql.includes('COUNT')) return { cnt: 1 };
+        return undefined;
+      });
+      vi.mocked(taxonomy.getNodes).mockResolvedValue([taxonomyNode]);
+      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
+        if (key === 'company_context') return { industry: 'Tech' };
+        if (key === 'column_priorities') return ['spend_amount'];
+        return null;
+      });
+      vi.mocked(transactions.getColumns).mockResolvedValue(['id', 'spend_amount', 'classification_status']);
+      vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(
+        universeParent ? { parentCompanyName: universeParent } : null
+      );
+      vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
+        classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
+        assignments: { '1': [1] },
+      });
+    }
+
+    it('should resolve parent name from supplier_parents table', async () => {
+      setupParentTest('ParentCorp', null);
+      await runner.classifyAll();
+
+      const agentArgs = vi.mocked(classificationAgent.classifyInvoiceGroup).mock.calls[0][0];
+      expect(agentArgs.parentName).toBe('ParentCorp');
+    });
+
+    it('should fall back to supplierResearch.parentCompanyName when project parent is null', async () => {
+      setupParentTest(null, 'UniverseParent');
+      await runner.classifyAll();
+
+      const agentArgs = vi.mocked(classificationAgent.classifyInvoiceGroup).mock.calls[0][0];
+      expect(agentArgs.parentName).toBe('UniverseParent');
+    });
+
+    it('should return null when neither source has a parent', async () => {
+      setupParentTest(null, null);
+      await runner.classifyAll();
+
+      const agentArgs = vi.mocked(classificationAgent.classifyInvoiceGroup).mock.calls[0][0];
+      expect(agentArgs.parentName).toBeNull();
+    });
+
+    it('should prefer project-level parent over universe parent', async () => {
+      setupParentTest('ProjectParent', 'UniverseParent');
+      await runner.classifyAll();
+
+      const agentArgs = vi.mocked(classificationAgent.classifyInvoiceGroup).mock.calls[0][0];
+      expect(agentArgs.parentName).toBe('ProjectParent');
     });
   });
 

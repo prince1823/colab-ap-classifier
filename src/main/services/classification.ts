@@ -318,19 +318,28 @@ export class ClassificationRunner implements IClassificationRunner {
     const unmatchedTxns = txnRows.filter((r) => !matchedTxnIds.has(String(r.id)));
     if (unmatchedTxns.length === 0) return;
 
-    // Get canonical supplier name from project_suppliers
-    const supplierRow = await this.db.get<{ supplier_name: string }>(
-      'SELECT supplier_name FROM project_suppliers WHERE id = ?',
+    // Get canonical supplier name and parent from project_suppliers + supplier_parents
+    const supplierInfo = await this.db.get<{
+      supplier_name: string;
+      parent_name: string | null;
+    }>(
+      `SELECT ps.supplier_name, sp.name AS parent_name
+       FROM project_suppliers ps
+       LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
+       WHERE ps.id = ?`,
       projectSupplierId
     );
-    const supplierName = supplierRow?.supplier_name;
+    const supplierName = supplierInfo?.supplier_name;
 
     // Get supplier research from universe
     let supplierResearch = null;
-    let parentName: string | null = null;
     if (supplierName) {
       supplierResearch = await this.supplierUniverse.getSupplier(supplierName);
     }
+    // Fallback chain: project-level parent → universe parentCompanyName → null
+    const parentName: string | null = supplierInfo?.parent_name
+      ?? supplierResearch?.parentCompanyName
+      ?? null;
 
     // Clean descriptions and inject canonical supplier_name, overriding the raw CSV alias
     const cleanedTxns = unmatchedTxns.map((txn) => {

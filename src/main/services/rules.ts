@@ -375,7 +375,7 @@ export class RuleStore implements IRuleStore {
   }
 
   async createGroup(input: RuleGroupCreate): Promise<{ id: string }> {
-    if (input.priority < 1) {
+    if (input.priority == null || input.priority < 1) {
       throw new Error('Group priority must be >= 1');
     }
     const existing = await this.db.get<{ id: string }>(

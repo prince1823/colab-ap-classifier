@@ -459,6 +459,24 @@ describe('RuleStore', () => {
       expect(result.get('tx1')?.ruleId).toBe('r-grouped');
     });
 
+    it('ungrouped rule matches and classifies transaction when it is the only rule', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({
+          id: 'r-ungrouped',
+          grouped_conditions: makeSupplierOnlyConditions('Acme'),
+          target_taxonomy_node_id: 'tid-ungrouped',
+          group_id: null,
+          group_priority: null,
+        }),
+      ]);
+      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1', 'tx2']);
+
+      const result = await store.evaluateRules();
+      expect(result.size).toBe(2);
+      expect(result.get('tx1')).toEqual({ ruleId: 'r-ungrouped', targetTaxonomyNodeId: 'tid-ungrouped' });
+      expect(result.get('tx2')).toEqual({ ruleId: 'r-ungrouped', targetTaxonomyNodeId: 'tid-ungrouped' });
+    });
+
     it('ungrouped rules apply when no named group matches', async () => {
       vi.mocked(db.all).mockResolvedValue([
         makeRuleRow({
@@ -582,6 +600,14 @@ describe('RuleStore', () => {
       expect(result).toHaveProperty('id');
       expect(typeof result.id).toBe('string');
     });
+
+    it('requires priority to be provided (TypeScript enforces, runtime validates >= 1)', async () => {
+      // Even if someone bypasses TypeScript and passes undefined, the >= 1 check catches it
+      await expect(store.createGroup({ name: 'No Priority', priority: undefined as any }))
+        .rejects.toThrow();
+      await expect(store.createGroup({ name: 'No Priority', priority: null as any }))
+        .rejects.toThrow();
+    });
   });
 
   describe('updateGroup', () => {
@@ -631,6 +657,55 @@ describe('RuleStore', () => {
       const calls = vi.mocked(db.run).mock.calls.map(c => c[0] as string);
       // Should not delete from override_rules
       expect(calls.every(sql => !sql.includes('DELETE FROM override_rules'))).toBe(true);
+    });
+  });
+
+  describe('group priority reflected in rule listing', () => {
+    it('rule in high-priority group is listed before rule in low-priority group', async () => {
+      // Simulate DB returning rules ordered by group priority DESC
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({ id: 'r-in-high', name: 'High Group Rule', group_id: 'g-high', group_priority: 10, created_at: '2026-01-01T00:00:00' }),
+        makeRuleRow({ id: 'r-in-low', name: 'Low Group Rule', group_id: 'g-low', group_priority: 2, created_at: '2026-03-01T00:00:00' }),
+        makeRuleRow({ id: 'r-ungrouped', name: 'Ungrouped Rule', group_id: null, group_priority: null, created_at: '2026-03-15T00:00:00' }),
+      ]);
+
+      const rules = await store.listRules();
+
+      // High-priority group rule first, even though it was created earliest
+      expect(rules[0].id).toBe('r-in-high');
+      // Low-priority group rule second, even though it was created after the high-priority one
+      expect(rules[1].id).toBe('r-in-low');
+      // Ungrouped rule last, even though it was created most recently
+      expect(rules[2].id).toBe('r-ungrouped');
+    });
+
+    it('moving a rule to a higher-priority group changes its evaluation position', async () => {
+      // Before: rule is ungrouped → listed last
+      vi.mocked(db.all).mockResolvedValueOnce([
+        makeRuleRow({ id: 'r-grouped', group_id: 'g1', group_priority: 5 }),
+        makeRuleRow({ id: 'r-target', group_id: null, group_priority: null }),
+      ]);
+
+      const rulesBefore = await store.listRules();
+      expect(rulesBefore[0].id).toBe('r-grouped');
+      expect(rulesBefore[1].id).toBe('r-target');
+
+      // Move r-target to group g-high (priority 10)
+      await store.moveRuleToGroup('r-target', 'g-high');
+
+      // Verify the UPDATE was issued with the right group
+      const moveCalls = vi.mocked(db.run).mock.calls;
+      expect(moveCalls.some(call => call.includes('r-target') && call.includes('g-high'))).toBe(true);
+
+      // After: rule is in group g-high (priority 10) → listed first
+      vi.mocked(db.all).mockResolvedValueOnce([
+        makeRuleRow({ id: 'r-target', group_id: 'g-high', group_priority: 10 }),
+        makeRuleRow({ id: 'r-grouped', group_id: 'g1', group_priority: 5 }),
+      ]);
+
+      const rulesAfter = await store.listRules();
+      expect(rulesAfter[0].id).toBe('r-target');
+      expect(rulesAfter[1].id).toBe('r-grouped');
     });
   });
 

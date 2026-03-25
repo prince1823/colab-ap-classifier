@@ -647,6 +647,53 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     }
   }, [flatRows, focusedRowIndex, focusedColIndex, focusedAliasIndex, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleSelect, startEdit, startEditParent, suppliers, focusOuter, expandedAliases, selectedAlias])
 
+  // Global Cmd+key shortcuts — work even when focus is on search input
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (showMergeModal || reassigningAlias || parentTypeahead) return
+
+      const row = flatRows[focusedRowIndex]
+      if (!row) return
+
+      if (e.key === 'm') {
+        e.preventDefault()
+        if (selectedSupplierIds.size >= 2) {
+          if (selectedColIndex === 0) {
+            const uniqueParentIds = new Set<string>()
+            for (const sid of selectedSupplierIds) {
+              const sup = suppliers.find(s => s.id === sid)
+              if (sup?.parentSupplierId) uniqueParentIds.add(sup.parentSupplierId)
+            }
+            if (uniqueParentIds.size >= 2) {
+              setMergeMode('parent')
+              setShowMergeModal(true)
+            }
+          } else {
+            setMergeMode('supplier')
+            setShowMergeModal(true)
+          }
+        }
+      }
+
+      if (e.key === 'p') {
+        e.preventDefault()
+        if (row.normalized) {
+          const el = tableRef.current?.querySelector(`[data-row-index="${focusedRowIndex}"]`)
+          if (el) {
+            const rect = el.getBoundingClientRect()
+            setParentTypeahead({
+              supplierId: row.normalized.supplier.id,
+              anchor: { top: rect.bottom + 4, left: rect.left + 100 },
+            })
+          }
+        }
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [flatRows, focusedRowIndex, selectedSupplierIds, selectedColIndex, showMergeModal, reassigningAlias, parentTypeahead, suppliers])
+
   // Scroll focused row into view
   useEffect(() => {
     const el = tableRef.current?.querySelector(`[data-row-index="${focusedRowIndex}"]`)

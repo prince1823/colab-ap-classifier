@@ -211,6 +211,11 @@ export const ipc = {
     createNew: () => invoke('supplier-universe:createNew'),
   },
 
+  // ── Shell ──
+  shell: {
+    openExternal: (url: string) => invoke('shell:openExternal', url),
+  },
+
   // ── License (3 channels + 1 event) ──
   license: {
     activate: (key: string) => invoke('license:activate', key),

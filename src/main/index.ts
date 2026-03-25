@@ -2,7 +2,7 @@
 import { loadEnv } from './load-env';
 loadEnv();
 
-import { app, BrowserWindow, shell, ipcMain, nativeImage } from 'electron';
+import { app, BrowserWindow, nativeImage } from 'electron';
 import path from 'path';
 import { createContainer } from './container';
 import { registerAllHandlers } from './ipc';
@@ -55,11 +55,6 @@ function createWindow(): void {
 app.whenReady().then(() => {
   const services = createContainer();
   registerAllHandlers(services);
-
-  // Open external URLs in the system default browser
-  ipcMain.handle('shell:openExternal', (_event, url: string) => {
-    return shell.openExternal(url);
-  });
 
   // Set dock icon on macOS
   const iconPath = path.join(__dirname, '..', '..', '..', 'build', 'icon.png');

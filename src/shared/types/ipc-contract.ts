@@ -147,6 +147,9 @@ export interface IPCInvokeMap {
   'license:activate':  { args: [licenseKey: string]; result: LicenseActivationResult };
   'license:getStatus': { args: []; result: LicenseStatus };
   'license:checkNow':  { args: []; result: LicenseStatus };
+
+  // Shell
+  'shell:openExternal': { args: [url: string]; result: void };
 }
 
 export interface IPCEventMap {

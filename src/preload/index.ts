@@ -18,7 +18,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeAllListeners: (channel: string): void => {
     ipcRenderer.removeAllListeners(channel);
   },
-  openExternal: (url: string): Promise<void> => {
-    return ipcRenderer.invoke('shell:openExternal', url);
-  },
 });

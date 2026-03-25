@@ -8,6 +8,7 @@ import type {
   ClassificationAgent,
   ResearchAgent,
   ColumnMappingAgent,
+  QCAgent,
   ProjectStore,
   TransactionStore,
   TaxonomyStore,
@@ -42,6 +43,8 @@ export function createMockSupplierUniverse(): SupplierUniverse {
     open: vi.fn(),
     close: vi.fn(),
     isOpen: vi.fn().mockReturnValue(true),
+    configure: vi.fn(),
+    getConfiguredPath: vi.fn().mockReturnValue(null),
     getSupplier: vi.fn().mockResolvedValue(null),
     getSuppliersByNames: vi.fn().mockResolvedValue(new Map()),
     upsertSupplier: vi.fn(),
@@ -72,7 +75,12 @@ export function createMockWebSearch(): WebSearch {
 
 export function createMockClassificationAgent(): ClassificationAgent {
   return {
-    classifyInvoiceGroup: vi.fn().mockResolvedValue({
+    selectCategories: vi.fn().mockResolvedValue(new Map([[1, 'L1|L2']])),
+    classifyL3: vi.fn().mockResolvedValue({
+      classifications: [{ id: 1, classificationPath: 'L1|L2|L3' }],
+      assignments: { '1': [1] },
+    }),
+    classifyTransactionGroup: vi.fn().mockResolvedValue({
       classifications: [{ id: 1, classificationPath: 'L1|L2|L3' }],
       assignments: { '1': [1] },
     }),
@@ -98,6 +106,12 @@ export function createMockColumnMappingAgent(): ColumnMappingAgent {
       unmappedCanonicalColumns: [],
       reasoning: 'test',
     }),
+  };
+}
+
+export function createMockQCAgent(): QCAgent {
+  return {
+    review: vi.fn().mockResolvedValue({ recommendations: [], noChangeNeeded: true }),
   };
 }
 
@@ -128,6 +142,8 @@ export function createMockTransactionStore(): TransactionStore {
     getIdsByConditions: vi.fn().mockResolvedValue([]),
     getIdsByGroupedConditions: vi.fn().mockResolvedValue([]),
     applyRule: vi.fn().mockResolvedValue(0),
+    getSpendByTaxonomy: vi.fn().mockResolvedValue([]),
+    getTransactionsByTaxonomy: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -209,8 +225,9 @@ export function createMockSupplierResearcher(): SupplierResearcher {
 export function createMockClassificationRunner(): ClassificationRunner {
   return {
     classifyAll: vi.fn(),
-    classifySupplier: vi.fn(),
+    classifySupplierTransactions: vi.fn(),
+    getScopeCount: vi.fn().mockResolvedValue(0),
     getIsRunning: vi.fn().mockReturnValue(false),
-    cancel: vi.fn(),
+    stop: vi.fn(),
   };
 }

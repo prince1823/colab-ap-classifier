@@ -166,6 +166,7 @@ import { ExaWebSearch } from '../src/main/services/exa-search';
 import { LLMClassificationAgent } from '../src/main/agents/classification-agent';
 import { LLMResearchAgent } from '../src/main/agents/research-agent';
 import { LLMColumnMappingAgent } from '../src/main/agents/column-mapping-agent';
+import { LLMQCAgent } from '../src/main/agents/qc-agent';
 import { ChangelogStore } from '../src/main/services/changelog';
 import { TransactionStore } from '../src/main/services/transactions';
 import { ProjectStore } from '../src/main/services/project';
@@ -301,6 +302,7 @@ async function main() {
   const classificationAgent = new LLMClassificationAgent(llm);
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
+  const qcAgent = new LLMQCAgent(llm);
 
   const changelog = new ChangelogStore(db);
   const transactions = new TransactionStore(db, changelog);
@@ -314,7 +316,7 @@ async function main() {
     db, taxonomy, project, rules,
     transactions, changelog, classificationAgent, eventBus as any, supplierUniverse
   );
-  const qc = new QCRunner(db, transactions, eventBus as any);
+  const qc = new QCRunner(db, transactions, eventBus as any, qcAgent, supplierUniverse, project, taxonomy);
 
   try {
     // ─── Phase 1: Create project ──────────────────────────────────────────

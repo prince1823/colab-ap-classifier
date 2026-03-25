@@ -103,33 +103,56 @@ function tempPath(suffix: string): string {
 function createMockClassificationAgentFromFixture(
   db: DuckDBDatabase
 ): ClassificationAgent {
-  return {
-    classifyInvoiceGroup: vi.fn().mockImplementation(async (invoiceGroup) => {
-      // Look up supplier name from the first transaction in the group
-      const txId = invoiceGroup.transactions?.[0]?.id;
-      let supplierKey = '_default';
-      if (txId) {
-        const row = await db.get<{ original_supplier_name: string }>(
-          'SELECT original_supplier_name FROM transactions WHERE id = ?',
-          txId
-        );
-        if (row?.original_supplier_name) {
-          supplierKey = row.original_supplier_name.toLowerCase();
-        }
+  const selectCategories = vi.fn().mockImplementation(async (input: any) => {
+    const result = new Map<number, string>();
+    for (let i = 0; i < input.suppliers.length; i++) {
+      const name = input.suppliers[i].name.toLowerCase();
+      const match = mockClassifications[name] || mockClassifications['_default'];
+      const parts = match.classificationPath.split('|');
+      result.set(i + 1, `${parts[0]}|${parts[1]}`);
+    }
+    return result;
+  });
+
+  const classifyL3 = vi.fn().mockImplementation(async (input: any) => {
+    // Determine supplier from input
+    const supplierName = (input.supplierName || '').toLowerCase();
+    const match = mockClassifications[supplierName] || mockClassifications['_default'];
+
+    const { groupCount } = buildDedupGroups(input.transactions, input.columnPriorities ?? []);
+    const allGroups = Array.from({ length: groupCount }, (_, i) => i + 1);
+
+    return {
+      classifications: [{ id: 1, classificationPath: match.classificationPath }],
+      assignments: { '1': allGroups },
+    };
+  });
+
+  const classifyTransactionGroup = vi.fn().mockImplementation(async (invoiceGroup: any) => {
+    const txId = invoiceGroup.transactions?.[0]?.id;
+    let supplierKey = '_default';
+    if (txId) {
+      const row = await db.get<{ original_supplier_name: string }>(
+        'SELECT original_supplier_name FROM transactions WHERE id = ?',
+        txId
+      );
+      if (row?.original_supplier_name) {
+        supplierKey = row.original_supplier_name.toLowerCase();
       }
-      const match = mockClassifications[supplierKey] || mockClassifications['_default'];
+    }
+    const match = mockClassifications[supplierKey] || mockClassifications['_default'];
 
-      // Compute group count from dedup groups so assignments cover all groups
-      const columnPriorities = invoiceGroup.columnPriorities ?? [];
-      const { groupCount } = buildDedupGroups(invoiceGroup.transactions, columnPriorities);
-      const allGroups = Array.from({ length: groupCount }, (_, i) => i + 1);
+    const columnPriorities = invoiceGroup.columnPriorities ?? [];
+    const { groupCount } = buildDedupGroups(invoiceGroup.transactions, columnPriorities);
+    const allGroups = Array.from({ length: groupCount }, (_, i) => i + 1);
 
-      return {
-        classifications: [{ id: 1, classificationPath: match.classificationPath }],
-        assignments: { '1': allGroups },
-      };
-    }),
-  } as unknown as ClassificationAgent;
+    return {
+      classifications: [{ id: 1, classificationPath: match.classificationPath }],
+      assignments: { '1': allGroups },
+    };
+  });
+
+  return { selectCategories, classifyL3, classifyTransactionGroup } as unknown as ClassificationAgent;
 }
 
 function createMockResearchAgentFromFixture(): ResearchAgent {

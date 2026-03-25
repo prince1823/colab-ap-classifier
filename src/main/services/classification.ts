@@ -14,13 +14,18 @@ import type { TaxonomyNode } from '../../shared/types';
 import type { CompanyContext } from '../../shared/types/project';
 import type { ClassificationProgress, ClassificationResult } from '../../shared/types/classification';
 import type { FilterCondition } from '../../shared/types/transactions';
+import type { SupplierInfo } from '../../shared/types/suppliers';
 import { cleanDescription } from '../utils/text';
 import { buildDedupGroups, batchDedupGroups, extractSubBatch } from '../utils/dedup-groups';
+import { runPool } from '../utils/concurrency-pool';
 import { debugLog } from '../utils/debug-log';
+
+const DEFAULT_CONCURRENCY = 5;
+const CALL1_BATCH_SIZE = 10;
 
 export class ClassificationRunner implements IClassificationRunner {
   private isRunningFlag = false;
-  private isCancelled = false;
+  private isStopped = false;
 
   constructor(
     private db: Database,
@@ -42,22 +47,18 @@ export class ClassificationRunner implements IClassificationRunner {
     return this.isRunningFlag;
   }
 
-  async cancel(): Promise<void> {
-    this.isCancelled = true;
+  async stop(): Promise<void> {
+    this.isStopped = true;
     this.emitProgress({
-      status: 'cancelled',
+      status: 'stopped',
       totalSuppliers: 0,
       processedSuppliers: 0,
       percentage: 0,
       currentSupplier: null,
-      currentStep: 'Cancelled',
+      currentStep: 'Stopped',
     });
   }
 
-  /**
-   * Resolve filter conditions to a set of matching transaction IDs.
-   * Returns null when no conditions are provided (meaning: use default behavior).
-   */
   private async resolveScopedIds(conditions?: FilterCondition[]): Promise<Set<string> | null> {
     if (!conditions || conditions.length === 0) return null;
     const ids = await this.transactions.getIdsByConditions(conditions);
@@ -66,7 +67,6 @@ export class ClassificationRunner implements IClassificationRunner {
 
   async getScopeCount(conditions?: FilterCondition[]): Promise<number> {
     if (!conditions || conditions.length === 0) {
-      // Default: count all unclassified
       const result = await this.db.get<{ cnt: number | bigint }>(
         `SELECT COUNT(*) as cnt FROM transactions WHERE classification_status = 'unclassified'`
       );
@@ -82,7 +82,7 @@ export class ClassificationRunner implements IClassificationRunner {
     }
 
     this.isRunningFlag = true;
-    this.isCancelled = false;
+    this.isStopped = false;
 
     try {
       const scopedIds = await this.resolveScopedIds(conditions);
@@ -103,7 +103,6 @@ export class ClassificationRunner implements IClassificationRunner {
           return;
         }
 
-        // Get suppliers that have transactions in the scoped set
         const placeholders = Array.from(scopedIds).map(() => '?').join(',');
         supplierRows = await this.db.all<{ id: string; supplier_name: string }>(
           `SELECT DISTINCT ps.id, ps.supplier_name
@@ -114,7 +113,6 @@ export class ClassificationRunner implements IClassificationRunner {
           ...Array.from(scopedIds)
         );
       } else {
-        // Default: all suppliers with unclassified transactions
         supplierRows = await this.db.all<{ id: string; supplier_name: string }>(
           `SELECT DISTINCT ps.id, ps.supplier_name
            FROM project_suppliers ps
@@ -157,7 +155,6 @@ export class ClassificationRunner implements IClassificationRunner {
         companyContext = { industry: 'Unknown' };
       }
 
-      // Load and validate column priorities
       const columnPriorities = await this.project.getSetting('column_priorities') as string[] | null;
       if (!columnPriorities || columnPriorities.length === 0) {
         throw new Error('Column priorities must be configured before classification. Set column_priorities in project settings.');
@@ -171,51 +168,213 @@ export class ClassificationRunner implements IClassificationRunner {
         );
       }
 
+      // ── Phase 1: Apply override rules per supplier ──
+      // First pass: apply rules and collect suppliers that still have unclassified txns
+      const suppliersNeedingClassification: Array<{
+        id: string;
+        supplier_name: string;
+        research: SupplierInfo | null;
+        parentName: string | null;
+      }> = [];
+
       for (const supplier of supplierRows) {
-        if (this.isCancelled) break;
+        if (this.isStopped) break;
+
+        // Get transactions for this supplier
+        const txnRows = await this.getSupplierTransactions(supplier.id, scopedIds);
+        if (txnRows.length === 0) {
+          processedSuppliers++;
+          continue;
+        }
+
+        // Apply override rules
+        const txnIds = txnRows.map((r) => String(r.id));
+        const ruleMatches = await this.rules.evaluateRules(txnIds);
+
+        const txnsByRuleAndNode = new Map<string, { ruleId: string; targetNodeId: string; ids: string[] }>();
+        const matchedTxnIds = new Set<string>();
+
+        for (const [txnId, match] of ruleMatches.entries()) {
+          const key = `${match.ruleId}::${match.targetTaxonomyNodeId}`;
+          let entry = txnsByRuleAndNode.get(key);
+          if (!entry) {
+            entry = { ruleId: match.ruleId, targetNodeId: match.targetTaxonomyNodeId, ids: [] };
+            txnsByRuleAndNode.set(key, entry);
+          }
+          entry.ids.push(txnId);
+          matchedTxnIds.add(txnId);
+        }
+
+        for (const { ruleId, targetNodeId, ids } of txnsByRuleAndNode.values()) {
+          await this.transactions.updateTransactions(
+            { ids, taxonomyNodeId: targetNodeId, classificationStatus: 'classified_by_rule', appliedRuleId: ruleId },
+            'rule'
+          );
+        }
+
+        // Check if any unmatched transactions remain
+        const unmatchedCount = txnIds.length - matchedTxnIds.size;
+        if (unmatchedCount === 0) {
+          processedSuppliers++;
+          continue;
+        }
+
+        // Resolve supplier info for Call 1
+        const supplierInfo = await this.db.get<{ supplier_name: string; parent_name: string | null }>(
+          `SELECT ps.supplier_name, sp.name AS parent_name
+           FROM project_suppliers ps
+           LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
+           WHERE ps.id = ?`,
+          supplier.id
+        );
+        const supplierName = supplierInfo?.supplier_name ?? supplier.supplier_name;
+
+        let research: SupplierInfo | null = null;
+        if (supplierName) {
+          research = await this.supplierUniverse.getSupplier(supplierName);
+        }
+        const parentName = supplierInfo?.parent_name ?? research?.parentCompanyName ?? null;
+
+        suppliersNeedingClassification.push({
+          id: supplier.id,
+          supplier_name: supplierName,
+          research,
+          parentName,
+        });
+      }
+
+      if (this.isStopped) return;
+
+      // ── Phase 2: Batched Call 1 (category selection) ──
+      const concurrency = Number(process.env.CLASSIFIER_CONCURRENCY) || DEFAULT_CONCURRENCY;
+      const categoryMap = new Map<string, string>(); // supplierId → categoryPath
+
+      if (suppliersNeedingClassification.length > 0) {
+        this.emitProgress({
+          status: 'running',
+          totalSuppliers,
+          processedSuppliers,
+          percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
+          currentSupplier: null,
+          currentStep: 'Selecting categories for suppliers',
+        });
+
+        // Chunk into batches of CALL1_BATCH_SIZE
+        const batches: typeof suppliersNeedingClassification[] = [];
+        for (let i = 0; i < suppliersNeedingClassification.length; i += CALL1_BATCH_SIZE) {
+          batches.push(suppliersNeedingClassification.slice(i, i + CALL1_BATCH_SIZE));
+        }
+
+        const batchTasks = batches.map((batch, batchIdx) => async () => {
+          if (this.isStopped) return;
+
+          try {
+            const result = await this.classificationAgent.selectCategories({
+              suppliers: batch.map((s) => ({
+                name: s.supplier_name,
+                research: s.research,
+                parentName: s.parentName,
+              })),
+              taxonomy: taxonomyNodes,
+              companyContext,
+            });
+
+            // Map results back to supplier IDs
+            const missingIndices: number[] = [];
+            for (let i = 0; i < batch.length; i++) {
+              const categoryPath = result.get(i + 1);
+              if (categoryPath) {
+                categoryMap.set(batch[i].id, categoryPath);
+              } else {
+                missingIndices.push(i);
+              }
+            }
+
+            // Retry missing suppliers individually
+            for (const idx of missingIndices) {
+              if (this.isStopped) break;
+              const supplier = batch[idx];
+              try {
+                const singleResult = await this.classificationAgent.selectCategories({
+                  suppliers: [{ name: supplier.supplier_name, research: supplier.research, parentName: supplier.parentName }],
+                  taxonomy: taxonomyNodes,
+                  companyContext,
+                });
+                const path = singleResult.get(1);
+                if (path) {
+                  categoryMap.set(supplier.id, path);
+                } else {
+                  debugLog('WARN', `Category selection retry returned no result for "${supplier.supplier_name}"`);
+                }
+              } catch (err) {
+                debugLog('ERROR', `Category selection retry failed for "${supplier.supplier_name}"`, {
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
+          } catch (err) {
+            debugLog('ERROR', `Batch ${batchIdx} category selection failed, retrying individually`, {
+              error: err instanceof Error ? err.message : String(err),
+            });
+            // Retry each supplier individually
+            for (const supplier of batch) {
+              if (this.isStopped) break;
+              try {
+                const result = await this.classificationAgent.selectCategories({
+                  suppliers: [{ name: supplier.supplier_name, research: supplier.research, parentName: supplier.parentName }],
+                  taxonomy: taxonomyNodes,
+                  companyContext,
+                });
+                const path = result.get(1);
+                if (path) categoryMap.set(supplier.id, path);
+              } catch {
+                debugLog('ERROR', `Individual category selection also failed for "${supplier.supplier_name}"`);
+              }
+            }
+          }
+        });
+
+        await runPool(batchTasks, concurrency, () => this.isStopped);
+      }
+
+      if (this.isStopped) return;
+
+      // ── Phase 3: Concurrent Call 2 (L3 classification) ──
+      const call2Tasks = suppliersNeedingClassification.map((supplier) => async () => {
+        if (this.isStopped) return;
+
+        const categoryPath = categoryMap.get(supplier.id);
 
         this.emitProgress({
           status: 'running',
           totalSuppliers,
           processedSuppliers,
-          percentage: totalSuppliers > 0 ? Math.round((processedSuppliers / totalSuppliers) * 100) : 0,
+          percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
           currentSupplier: supplier.supplier_name,
           currentStep: `Classifying: ${supplier.supplier_name}`,
         });
 
         try {
-          await this.classifySupplier(supplier.id, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined);
+          if (!categoryPath) {
+            // No category from Call 1 — mark as error
+            await this.markSupplierError(supplier.id, scopedIds);
+          } else {
+            await this.classifySupplierTransactions(
+              supplier.id, categoryPath, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined
+            );
+          }
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           debugLog('ERROR', `Classification failed for supplier "${supplier.supplier_name}"`, { error: errMsg });
-          // Mark failed transactions — scope to scoped IDs if provided
-          let failedQuery = `SELECT id FROM transactions WHERE project_supplier_id = ?`;
-          const failedParams: unknown[] = [supplier.id];
-
-          if (scopedIds) {
-            const supplierScopedIds = Array.from(scopedIds);
-            failedQuery += ` AND id IN (${supplierScopedIds.map(() => '?').join(',')})`;
-            failedParams.push(...supplierScopedIds);
-          } else {
-            failedQuery += ` AND classification_status = 'unclassified'`;
-          }
-
-          const failedTxns = await this.db.all<{ id: string }>(failedQuery, ...failedParams);
-          if (failedTxns.length > 0) {
-            await this.transactions.updateTransactions(
-              {
-                ids: failedTxns.map((t) => t.id),
-                classificationStatus: 'classification_error',
-              },
-              'pipeline'
-            );
-          }
+          await this.markSupplierError(supplier.id, scopedIds);
         }
 
         processedSuppliers++;
-      }
+      });
 
-      if (this.isCancelled) return;
+      await runPool(call2Tasks, concurrency, () => this.isStopped);
+
+      if (this.isStopped) return;
 
       // Log to changelog
       const classifiedCount = await this.db.get<{ cnt: number | bigint }>(
@@ -240,7 +399,7 @@ export class ClassificationRunner implements IClassificationRunner {
         currentStep: 'Completed',
       });
     } catch (err) {
-      if (!this.isCancelled) {
+      if (!this.isStopped) {
         this.emitProgress({
           status: 'failed',
           totalSuppliers: 0,
@@ -253,104 +412,65 @@ export class ClassificationRunner implements IClassificationRunner {
       throw err;
     } finally {
       this.isRunningFlag = false;
-      this.isCancelled = false;
+      this.isStopped = false;
     }
   }
 
-  async classifySupplier(
+  /**
+   * Call 2 only: classify a supplier's transactions into L3 under the given categoryPath.
+   */
+  async classifySupplierTransactions(
     projectSupplierId: string,
+    categoryPath: string,
     taxonomy: TaxonomyNode[],
     companyContext: CompanyContext,
     columnPriorities: string[],
     scopedTxnIds?: Set<string>
   ): Promise<void> {
-    // Step 1: Get transactions for this supplier (scoped or default unclassified)
-    let txnRows: Record<string, unknown>[];
-
-    if (scopedTxnIds) {
-      // Get all transactions for this supplier, then filter to scoped IDs
-      const allTxns = await this.db.all<Record<string, unknown>>(
-        `SELECT * FROM transactions WHERE project_supplier_id = ?`,
-        projectSupplierId
-      );
-      txnRows = allTxns.filter((r) => scopedTxnIds.has(String(r.id)));
-    } else {
-      txnRows = await this.db.all<Record<string, unknown>>(
-        `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-        projectSupplierId
-      );
-    }
-
+    // Get unmatched transactions (after rules)
+    const txnRows = await this.getUnmatchedTransactions(projectSupplierId, scopedTxnIds);
     if (txnRows.length === 0) return;
 
-    const txnIds = txnRows.map((r) => String(r.id));
-
-    // Step 2: Apply override rules
-    const ruleMatches = await this.rules.evaluateRules(txnIds);
-
-    const txnsByRuleAndNode = new Map<string, { ruleId: string; targetNodeId: string; ids: string[] }>();
-    const matchedTxnIds = new Set<string>();
-
-    for (const [txnId, match] of ruleMatches.entries()) {
-      const key = `${match.ruleId}::${match.targetTaxonomyNodeId}`;
-      let entry = txnsByRuleAndNode.get(key);
-      if (!entry) {
-        entry = { ruleId: match.ruleId, targetNodeId: match.targetTaxonomyNodeId, ids: [] };
-        txnsByRuleAndNode.set(key, entry);
-      }
-      entry.ids.push(txnId);
-      matchedTxnIds.add(txnId);
-    }
-
-    for (const { ruleId, targetNodeId, ids } of txnsByRuleAndNode.values()) {
-      await this.transactions.updateTransactions(
-        {
-          ids,
-          taxonomyNodeId: targetNodeId,
-          classificationStatus: 'classified_by_rule',
-          appliedRuleId: ruleId,
-        },
-        'rule'
-      );
-    }
-
-    // Step 3: AI classify unmatched transactions
-    const unmatchedTxns = txnRows.filter((r) => !matchedTxnIds.has(String(r.id)));
-    if (unmatchedTxns.length === 0) return;
-
-    // Get supplier name for research lookup
-    const supplierRow = await this.db.get<{ supplier_name: string }>(
-      'SELECT supplier_name FROM project_suppliers WHERE id = ?',
+    // Resolve supplier info
+    const supplierInfo = await this.db.get<{ supplier_name: string; parent_name: string | null }>(
+      `SELECT ps.supplier_name, sp.name AS parent_name
+       FROM project_suppliers ps
+       LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
+       WHERE ps.id = ?`,
       projectSupplierId
     );
-    const supplierName = supplierRow?.supplier_name;
+    const supplierName = supplierInfo?.supplier_name ?? '';
 
-    // Get supplier research from universe
-    let supplierResearch = null;
-    let parentName: string | null = null;
+    let supplierResearch: SupplierInfo | null = null;
     if (supplierName) {
       supplierResearch = await this.supplierUniverse.getSupplier(supplierName);
     }
 
-    // Clean descriptions
-    const cleanedTxns = unmatchedTxns.map((txn) => {
+    // Clean descriptions and inject canonical supplier_name
+    const cleanedTxns = txnRows.map((txn) => {
       const cleaned = { ...txn };
       if (typeof cleaned.gl_description === 'string') {
         cleaned.gl_description = cleanDescription(cleaned.gl_description);
       }
+      if (supplierName) cleaned.supplier_name = supplierName;
       return cleaned;
     });
+
+    // Filter taxonomy to L3 nodes under the chosen L1|L2
+    const [l1, l2] = categoryPath.split('|');
+    const l3Taxonomy = taxonomy.filter(
+      (n) => n.depth === 3 && n.l1 === l1 && n.l2 === l2
+    );
 
     // Build dedup groups and split into batches
     const dedupResult = buildDedupGroups(cleanedTxns, columnPriorities);
     const batches = batchDedupGroups(dedupResult);
 
-    debugLog('INFO', `Supplier ${supplierName ?? projectSupplierId}: ${dedupResult.groupCount} groups in ${batches.length} batch(es)`);
+    debugLog('INFO', `Supplier ${supplierName || projectSupplierId}: ${dedupResult.groupCount} groups in ${batches.length} batch(es), category: ${categoryPath}`);
 
     for (const batch of batches) {
-      if (this.isCancelled) return;
+      if (this.isStopped) return;
 
-      // Collect all transaction IDs in this batch for fallback error marking
       const allBatchTxnIds = new Set<string>();
       for (const ids of batch.groupToTransactionIds.values()) {
         for (const id of ids) allBatchTxnIds.add(id);
@@ -360,9 +480,8 @@ export class ClassificationRunner implements IClassificationRunner {
       let remainingBatch = batch;
 
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        if (this.isCancelled) return;
+        if (this.isStopped) return;
 
-        // Build transaction list for current (possibly narrowed) batch
         const currentTxnIds = new Set<string>();
         for (const ids of remainingBatch.groupToTransactionIds.values()) {
           for (const id of ids) currentTxnIds.add(id);
@@ -370,40 +489,36 @@ export class ClassificationRunner implements IClassificationRunner {
         const currentTxns = cleanedTxns.filter((t) => currentTxnIds.has(String(t.id)));
 
         try {
-          const result = await this.classificationAgent.classifyInvoiceGroup({
+          const result = await this.classificationAgent.classifyL3({
+            categoryPath,
+            l3Taxonomy,
             transactions: currentTxns,
-            taxonomy,
-            companyContext,
-            supplierResearch,
-            parentName,
             columnPriorities,
+            companyContext,
+            supplierName,
+            supplierType: supplierResearch?.supplierType ?? null,
           });
 
           const { validResult, missedGroups } = this.extractValidAssignments(result, remainingBatch.groupCount);
 
-          // Apply whatever succeeded
           if (Object.keys(validResult.assignments).length > 0) {
             await this.applyMultiClassification(validResult, remainingBatch.groupToTransactionIds, taxonomy);
           }
 
-          if (missedGroups.length === 0) {
-            break; // fully classified
-          }
+          if (missedGroups.length === 0) break;
 
-          debugLog('WARN', `Supplier ${supplierName ?? projectSupplierId}: ${missedGroups.length} groups missed on attempt ${attempt}/${MAX_ATTEMPTS}, retrying missed groups`);
+          debugLog('WARN', `Supplier ${supplierName || projectSupplierId}: ${missedGroups.length} groups missed on attempt ${attempt}/${MAX_ATTEMPTS}`);
 
           if (attempt < MAX_ATTEMPTS) {
-            // Narrow to only missed groups for next attempt
             remainingBatch = extractSubBatch(remainingBatch, missedGroups);
           } else {
-            // Final attempt exhausted — mark remaining transactions as error
             const failedTxnIds: string[] = [];
             for (const g of missedGroups) {
               const ids = remainingBatch.groupToTransactionIds.get(g);
               if (ids) failedTxnIds.push(...ids);
             }
             if (failedTxnIds.length > 0) {
-              debugLog('ERROR', `All ${MAX_ATTEMPTS} attempts exhausted for supplier ${supplierName ?? projectSupplierId}: ${failedTxnIds.length} transactions unclassified`);
+              debugLog('ERROR', `All ${MAX_ATTEMPTS} attempts exhausted for supplier ${supplierName || projectSupplierId}`);
               await this.transactions.updateTransactions({
                 ids: failedTxnIds,
                 classificationStatus: 'classification_error',
@@ -411,11 +526,10 @@ export class ClassificationRunner implements IClassificationRunner {
             }
           }
         } catch (err) {
-          // Total parse/LLM failure — no partial results possible
           const errMsg = err instanceof Error ? err.message : String(err);
-          debugLog('WARN', `Classification attempt ${attempt}/${MAX_ATTEMPTS} failed for supplier ${supplierName ?? projectSupplierId}`, { error: errMsg });
+          debugLog('WARN', `Classification attempt ${attempt}/${MAX_ATTEMPTS} failed for supplier ${supplierName || projectSupplierId}`, { error: errMsg });
           if (attempt === MAX_ATTEMPTS) {
-            debugLog('ERROR', `All ${MAX_ATTEMPTS} classification attempts failed for supplier ${supplierName ?? projectSupplierId}`, { error: errMsg });
+            debugLog('ERROR', `All ${MAX_ATTEMPTS} classification attempts failed for supplier ${supplierName || projectSupplierId}`);
             const failedIds = Array.from(allBatchTxnIds);
             await this.transactions.updateTransactions({
               ids: failedIds,
@@ -427,9 +541,64 @@ export class ClassificationRunner implements IClassificationRunner {
     }
   }
 
+  private async getSupplierTransactions(
+    projectSupplierId: string,
+    scopedTxnIds: Set<string> | null
+  ): Promise<Record<string, unknown>[]> {
+    if (scopedTxnIds) {
+      const allTxns = await this.db.all<Record<string, unknown>>(
+        `SELECT * FROM transactions WHERE project_supplier_id = ?`,
+        projectSupplierId
+      );
+      return allTxns.filter((r) => scopedTxnIds.has(String(r.id)));
+    }
+    return this.db.all<Record<string, unknown>>(
+      `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
+      projectSupplierId
+    );
+  }
+
+  private async getUnmatchedTransactions(
+    projectSupplierId: string,
+    scopedTxnIds?: Set<string>
+  ): Promise<Record<string, unknown>[]> {
+    // Get transactions that are still unclassified (after rules have been applied)
+    if (scopedTxnIds) {
+      const allTxns = await this.db.all<Record<string, unknown>>(
+        `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
+        projectSupplierId
+      );
+      return allTxns.filter((r) => scopedTxnIds.has(String(r.id)));
+    }
+    return this.db.all<Record<string, unknown>>(
+      `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
+      projectSupplierId
+    );
+  }
+
+  private async markSupplierError(projectSupplierId: string, scopedIds: Set<string> | null): Promise<void> {
+    let failedQuery = `SELECT id FROM transactions WHERE project_supplier_id = ?`;
+    const failedParams: unknown[] = [projectSupplierId];
+
+    if (scopedIds) {
+      const supplierScopedIds = Array.from(scopedIds);
+      failedQuery += ` AND id IN (${supplierScopedIds.map(() => '?').join(',')})`;
+      failedParams.push(...supplierScopedIds);
+    } else {
+      failedQuery += ` AND classification_status = 'unclassified'`;
+    }
+
+    const failedTxns = await this.db.all<{ id: string }>(failedQuery, ...failedParams);
+    if (failedTxns.length > 0) {
+      await this.transactions.updateTransactions(
+        { ids: failedTxns.map((t) => t.id), classificationStatus: 'classification_error' },
+        'pipeline'
+      );
+    }
+  }
+
   /**
    * Extract valid assignments from a classification result, skipping invalid entries.
-   * Returns the cleaned assignments and any group numbers that were not assigned.
    */
   private extractValidAssignments(
     result: ClassificationResult,
@@ -441,12 +610,12 @@ export class ClassificationRunner implements IClassificationRunner {
 
     for (const [classIdStr, groupNumbers] of Object.entries(result.assignments)) {
       const classId = Number(classIdStr);
-      if (!classificationIds.has(classId)) continue; // skip unknown classification IDs
+      if (!classificationIds.has(classId)) continue;
 
       const validGroups: number[] = [];
       for (const g of groupNumbers) {
-        if (g < 1 || g > groupCount) continue; // skip out-of-range
-        if (assignedGroups.has(g)) continue; // skip duplicates
+        if (g < 1 || g > groupCount) continue;
+        if (assignedGroups.has(g)) continue;
         assignedGroups.add(g);
         validGroups.push(g);
       }
@@ -455,13 +624,11 @@ export class ClassificationRunner implements IClassificationRunner {
       }
     }
 
-    // Find unassigned groups
     const missedGroups: number[] = [];
     for (let g = 1; g <= groupCount; g++) {
       if (!assignedGroups.has(g)) missedGroups.push(g);
     }
 
-    // Filter classifications to only those that have assignments
     const usedClassIds = new Set(Object.keys(cleanedAssignments).map(Number));
     const validClassifications = result.classifications.filter((c) => usedClassIds.has(c.id));
 
@@ -480,7 +647,6 @@ export class ClassificationRunner implements IClassificationRunner {
       const assignedGroups = result.assignments[String(classification.id)];
       if (!assignedGroups || assignedGroups.length === 0) continue;
 
-      // Collect all transaction IDs for this classification
       const txnIds: string[] = [];
       for (const groupNum of assignedGroups) {
         const ids = groupToTransactionIds.get(groupNum);

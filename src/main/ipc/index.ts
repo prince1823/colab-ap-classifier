@@ -38,5 +38,5 @@ export function registerAllHandlers(services: ServiceContainer): void {
     services.feedbackAgent, services.changelog, services.taxonomy,
     services.project, services.suppliers, services.rules,
   );
-  registerQCHandlers(services.qc, services.eventBus);
+  registerQCHandlers(services.qc, services.eventBus, services.project);
 }

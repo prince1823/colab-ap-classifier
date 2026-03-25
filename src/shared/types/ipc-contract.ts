@@ -21,7 +21,7 @@ import type {
   PivotAggregationResult,
   GroupedFilter,
 } from './transactions';
-import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress } from './classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
@@ -67,14 +67,17 @@ export interface IPCInvokeMap {
 
   // Classification
   'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
-  'classification:cancel':     { args: []; result: void };
+  'classification:stop':       { args: []; result: void };
   'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
 
   // QC
-  'qc:start':     { args: [filter?: TransactionFilter]; result: void };
-  'qc:count':     { args: [filter?: TransactionFilter]; result: number };
-  'qc:cancel':    { args: []; result: void };
-  'qc:isRunning': { args: []; result: boolean };
+  'qc:run':        { args: [config?: QCConfig]; result: void };
+  'qc:count':      { args: [filter?: TransactionFilter]; result: number };
+  'qc:stop':       { args: []; result: void };
+  'qc:isRunning':  { args: []; result: boolean };
+  'qc:getConfig':  { args: []; result: QCConfig };
+  'qc:setConfig':  { args: [config: QCConfig]; result: void };
+  'qc:getDefaults': { args: []; result: QCConfig };
 
   // Taxonomy
   'taxonomy:getNodeCount':   { args: []; result: number };

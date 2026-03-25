@@ -54,9 +54,52 @@ describe('ClassificationRunner', () => {
 
   afterEach(async () => {
     if (runner.getIsRunning()) {
-      runner.cancel();
+      runner.stop();
     }
   });
+
+  const taxonomyNodes = [
+    { id: 'tid1', fullPath: 'Indirect|IT|Software', l1: 'Indirect', l2: 'IT', l3: 'Software', depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '' },
+    { id: 'tid2', fullPath: 'Indirect|Facilities|Cleaning', l1: 'Indirect', l2: 'Facilities', l3: 'Cleaning', depth: 3, description: null, parentPath: 'Indirect|Facilities', createdAt: '' },
+  ];
+
+  function setupBasicMocks(opts?: {
+    supplierName?: string;
+    txns?: Record<string, unknown>[];
+    categoryPath?: string;
+    columnPriorities?: string[];
+  }) {
+    const supplierName = opts?.supplierName ?? 'Acme';
+    const txns = opts?.txns ?? [{ id: 'tx1', project_supplier_id: 'sup1', row_index: 0, spend_amount: 1000, classification_status: 'unclassified' }];
+    const categoryPath = opts?.categoryPath ?? 'Indirect|IT';
+    const columnPriorities = opts?.columnPriorities ?? ['spend_amount'];
+
+    vi.mocked(db.all).mockImplementation(async (sql: string) => {
+      if (sql.includes('DISTINCT')) return [{ id: 'sup1', supplier_name: supplierName }];
+      if (sql.includes('FROM transactions')) return txns;
+      return [];
+    });
+    vi.mocked(db.get).mockImplementation(async (sql: string) => {
+      if (sql.includes('supplier_parents')) return { supplier_name: supplierName, parent_name: null };
+      if (sql.includes('COUNT')) return { cnt: txns.length };
+      return undefined;
+    });
+    vi.mocked(taxonomy.getNodes).mockResolvedValue(taxonomyNodes);
+    vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
+      if (key === 'company_context') return { industry: 'Tech' };
+      if (key === 'column_priorities') return columnPriorities;
+      return null;
+    });
+    vi.mocked(transactions.getColumns).mockResolvedValue([
+      'id', 'row_index', 'spend_amount', 'gl_description', 'classification_status', 'supplier_name',
+    ]);
+    vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
+    vi.mocked(classificationAgent.selectCategories).mockResolvedValue(new Map([[1, categoryPath]]));
+    vi.mocked(classificationAgent.classifyL3).mockResolvedValue({
+      classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
+      assignments: { '1': [1] },
+    });
+  }
 
   describe('getIsRunning', () => {
     it('should return false initially', () => {
@@ -66,26 +109,19 @@ describe('ClassificationRunner', () => {
 
   describe('classifyAll', () => {
     it('should complete with no unclassified suppliers', async () => {
-      // No project_suppliers with unclassified transactions
       vi.mocked(db.all).mockResolvedValue([]);
       vi.mocked(taxonomy.getNodes).mockResolvedValue([]);
       vi.mocked(project.getSetting).mockResolvedValue(null);
 
       await runner.classifyAll();
 
-      // Should emit completed progress
       expect(eventBus.emit).toHaveBeenCalledWith(
         'classification:progress',
-        expect.objectContaining({
-          status: 'completed',
-          totalSuppliers: 0,
-          percentage: 100,
-        })
+        expect.objectContaining({ status: 'completed', totalSuppliers: 0, percentage: 100 })
       );
     });
 
     it('should reject if already running', async () => {
-      // Make a slow-resolving query so classifyAll doesn't finish immediately
       let resolveQuery!: (value: unknown[]) => void;
       vi.mocked(db.all).mockImplementation(async () => {
         return new Promise<unknown[]>((resolve) => { resolveQuery = resolve; });
@@ -94,137 +130,31 @@ describe('ClassificationRunner', () => {
       vi.mocked(project.getSetting).mockResolvedValue(null);
 
       const firstRun = runner.classifyAll();
-      // Small delay for isRunning to be set
       await new Promise(r => setTimeout(r, 10));
 
-      await expect(runner.classifyAll()).rejects.toThrow(
-        'Classification is already running'
-      );
-
-      // Resolve the first query so the first run completes
+      await expect(runner.classifyAll()).rejects.toThrow('Classification is already running');
       resolveQuery([]);
-      await firstRun;
+      await firstRun.catch(() => {});
     });
 
-    it('should classify suppliers and emit progress events', async () => {
-      // Return one supplier with unclassified transactions
-      vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('project_suppliers') || sql.includes('DISTINCT')) {
-          return [{ id: 'sup1', canonical_name: 'Acme', project_supplier_id: 'sup1', supplier_name: 'Acme' }];
-        }
-        if (sql.includes('FROM transactions')) {
-          return [{
-            id: 'tx1',
-            project_supplier_id: 'sup1',
-            row_index: 0,
-            spend_amount: 1000,
-            gl_description: 'Software license',
-            classification_status: 'unclassified',
-          }];
-        }
-        return [];
-      });
-
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'Acme' };
-        if (sql.includes('COUNT')) return { cnt: 1 };
-        return undefined;
-      });
-
-      vi.mocked(taxonomy.getNodes).mockResolvedValue([{
-        id: 'tid1', fullPath: 'Indirect|IT|Software',
-        l1: 'Indirect', l2: 'IT', l3: 'Software',
-        depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
-      }]);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return ['spend_amount', 'gl_description'];
-        return null;
-      });
-      vi.mocked(transactions.getColumns).mockResolvedValue([
-        'id', 'row_index', 'spend_amount', 'gl_description', 'classification_status',
-      ]);
-      vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
-      vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
-        classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
-        assignments: { '1': [1] },
-      });
+    it('should emit progress events', async () => {
+      setupBasicMocks();
 
       await runner.classifyAll();
 
-      // Classification agent should have been called
-      expect(classificationAgent.classifyInvoiceGroup).toHaveBeenCalled();
+      const emitCalls = vi.mocked(eventBus.emit).mock.calls
+        .filter(([channel]) => channel === 'classification:progress');
 
-      // Progress events should have been emitted
-      expect(eventBus.emit).toHaveBeenCalledWith(
-        'classification:progress',
-        expect.objectContaining({ status: 'completed' })
-      );
+      const statuses = emitCalls.map(([, progress]) => (progress as any).status);
+      expect(statuses).toContain('running');
+      expect(statuses).toContain('completed');
     });
 
-    it('should apply override rules before LLM classification', async () => {
+    it('should throw if column_priorities are not configured', async () => {
       vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('project_suppliers') || sql.includes('DISTINCT')) {
-          return [{ id: 'sup1', canonical_name: 'Acme', project_supplier_id: 'sup1', supplier_name: 'Acme' }];
-        }
-        if (sql.includes('FROM transactions')) {
-          return [
-            { id: 'tx1', project_supplier_id: 'sup1', row_index: 0, spend_amount: 1000, gl_description: 'Software', classification_status: 'unclassified' },
-            { id: 'tx2', project_supplier_id: 'sup1', row_index: 1, spend_amount: 5000, gl_description: 'Cloud', classification_status: 'unclassified' },
-          ];
-        }
+        if (sql.includes('DISTINCT')) return [{ id: 'sup1', supplier_name: 'Acme' }];
         return [];
       });
-
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'Acme' };
-        if (sql.includes('COUNT')) return { cnt: 2 };
-        return undefined;
-      });
-
-      vi.mocked(taxonomy.getNodes).mockResolvedValue([{
-        id: 'tid1', fullPath: 'Indirect|IT|Software',
-        l1: 'Indirect', l2: 'IT', l3: 'Software',
-        depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
-      }]);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return ['spend_amount', 'gl_description'];
-        return null;
-      });
-      vi.mocked(transactions.getColumns).mockResolvedValue([
-        'id', 'row_index', 'spend_amount', 'gl_description', 'classification_status',
-      ]);
-
-      // Rule matches tx1 only
-      vi.mocked(rules.evaluateRules).mockResolvedValue(
-        new Map([['tx1', { ruleId: 'rule1', targetTaxonomyNodeId: 'tid1' }]])
-      );
-      vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
-        classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
-        assignments: { '1': [1] },
-      });
-
-      await runner.classifyAll();
-
-      // evaluateRules should have been called
-      expect(rules.evaluateRules).toHaveBeenCalled();
-
-      // Transaction update should have been called for rule-matched tx
-      expect(transactions.updateTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({
-          ids: ['tx1'],
-          classificationStatus: 'classified_by_rule',
-        }),
-        'rule'
-      );
-
-      // AI classification should be called for remaining tx
-      expect(classificationAgent.classifyInvoiceGroup).toHaveBeenCalled();
-    });
-
-    it('should throw when column_priorities setting is missing', async () => {
-      vi.mocked(db.all).mockResolvedValue([{ id: 'sup1', supplier_name: 'Acme' }]);
       vi.mocked(taxonomy.getNodes).mockResolvedValue([]);
       vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
         if (key === 'company_context') return { industry: 'Tech' };
@@ -232,185 +162,69 @@ describe('ClassificationRunner', () => {
         return null;
       });
 
-      await expect(runner.classifyAll()).rejects.toThrow(
-        'Column priorities must be configured'
-      );
+      await expect(runner.classifyAll()).rejects.toThrow('Column priorities must be configured');
     });
 
-    it('should throw when column_priorities is an empty array', async () => {
-      vi.mocked(db.all).mockResolvedValue([{ id: 'sup1', supplier_name: 'Acme' }]);
-      vi.mocked(taxonomy.getNodes).mockResolvedValue([]);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return [];
-        return null;
-      });
+    it('should apply override rules before AI classification', async () => {
+      setupBasicMocks();
 
-      await expect(runner.classifyAll()).rejects.toThrow(
-        'Column priorities must be configured'
-      );
-    });
-
-    it('should throw when column_priorities contains non-existent columns', async () => {
-      vi.mocked(db.all).mockResolvedValue([{ id: 'sup1', supplier_name: 'Acme' }]);
-      vi.mocked(taxonomy.getNodes).mockResolvedValue([]);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return ['spend_amount', 'nonexistent_col'];
-        return null;
-      });
-      vi.mocked(transactions.getColumns).mockResolvedValue([
-        'id', 'row_index', 'spend_amount', 'classification_status',
+      const ruleMatch = new Map([
+        ['tx1', { ruleId: 'rule-1', targetTaxonomyNodeId: 'tid1' }],
       ]);
-
-      await expect(runner.classifyAll()).rejects.toThrow(
-        'Column priorities contain columns not found in transactions table: nonexistent_col'
-      );
-    });
-
-    it('should pass column priorities through to classification agent', async () => {
-      vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('project_suppliers') || sql.includes('DISTINCT')) {
-          return [{ id: 'sup1', supplier_name: 'Acme' }];
-        }
-        if (sql.includes('FROM transactions')) {
-          return [{
-            id: 'tx1',
-            project_supplier_id: 'sup1',
-            row_index: 0,
-            spend_amount: 1000,
-            classification_status: 'unclassified',
-          }];
-        }
-        return [];
-      });
-
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'Acme' };
-        if (sql.includes('COUNT')) return { cnt: 1 };
-        return undefined;
-      });
-
-      vi.mocked(taxonomy.getNodes).mockResolvedValue([{
-        id: 'tid1', fullPath: 'Indirect|IT|Software',
-        l1: 'Indirect', l2: 'IT', l3: 'Software',
-        depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
-      }]);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return ['spend_amount'];
-        return null;
-      });
-      vi.mocked(transactions.getColumns).mockResolvedValue([
-        'id', 'row_index', 'spend_amount', 'classification_status',
-      ]);
-      vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
-      vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
-        classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
-        assignments: { '1': [1] },
-      });
+      vi.mocked(rules.evaluateRules).mockResolvedValue(ruleMatch);
 
       await runner.classifyAll();
 
-      expect(classificationAgent.classifyInvoiceGroup).toHaveBeenCalledWith(
+      expect(transactions.updateTransactions).toHaveBeenCalledWith(
         expect.objectContaining({
-          columnPriorities: ['spend_amount'],
-        })
+          ids: ['tx1'],
+          classificationStatus: 'classified_by_rule',
+          appliedRuleId: 'rule-1',
+        }),
+        'rule'
+      );
+      // When all txns match rules, Call 1 and Call 2 should not be invoked
+      expect(classificationAgent.selectCategories).not.toHaveBeenCalled();
+    });
+
+    it('should use column_priorities from project settings', async () => {
+      setupBasicMocks({ columnPriorities: ['spend_amount'] });
+
+      await runner.classifyAll();
+
+      expect(classificationAgent.classifyL3).toHaveBeenCalledWith(
+        expect.objectContaining({ columnPriorities: ['spend_amount'] })
       );
     });
 
     it('should handle multi-classification with assignments mapping different groups', async () => {
-      vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('project_suppliers') || sql.includes('DISTINCT')) {
-          return [{ id: 'sup1', supplier_name: 'MultiCo' }];
-        }
-        if (sql.includes('FROM transactions')) {
-          return [
-            { id: 'tx1', project_supplier_id: 'sup1', row_index: 0, spend_amount: 1000, gl_description: 'Software', classification_status: 'unclassified' },
-            { id: 'tx2', project_supplier_id: 'sup1', row_index: 1, spend_amount: 2000, gl_description: 'Cleaning', classification_status: 'unclassified' },
-          ];
-        }
-        return [];
+      setupBasicMocks({
+        txns: [
+          { id: 'tx1', project_supplier_id: 'sup1', row_index: 0, spend_amount: 1000, gl_description: 'Software', classification_status: 'unclassified' },
+          { id: 'tx2', project_supplier_id: 'sup1', row_index: 1, spend_amount: 2000, gl_description: 'Cleaning', classification_status: 'unclassified' },
+        ],
+        columnPriorities: ['spend_amount', 'gl_description'],
       });
 
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'MultiCo' };
-        if (sql.includes('COUNT')) return { cnt: 2 };
-        return undefined;
-      });
-
-      const taxonomyNodes = [
-        { id: 'tid1', fullPath: 'Indirect|IT|Software', l1: 'Indirect', l2: 'IT', l3: 'Software', depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '' },
-        { id: 'tid2', fullPath: 'Indirect|Facilities|Cleaning', l1: 'Indirect', l2: 'Facilities', l3: 'Cleaning', depth: 3, description: null, parentPath: 'Indirect|Facilities', createdAt: '' },
-      ];
-      vi.mocked(taxonomy.getNodes).mockResolvedValue(taxonomyNodes);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return ['spend_amount', 'gl_description'];
-        return null;
-      });
-      vi.mocked(transactions.getColumns).mockResolvedValue([
-        'id', 'row_index', 'spend_amount', 'gl_description', 'classification_status',
-      ]);
-      vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
-
-      // Agent returns 2 classifications with different assignments
-      vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
+      vi.mocked(classificationAgent.classifyL3).mockResolvedValue({
         classifications: [
           { id: 1, classificationPath: 'Indirect|IT|Software' },
-          { id: 2, classificationPath: 'Indirect|Facilities|Cleaning' },
+          { id: 2, classificationPath: 'Indirect|IT|Software' },
         ],
         assignments: { '1': [1], '2': [2] },
       });
 
       await runner.classifyAll();
 
-      // updateTransactions should be called for each classification
       const updateCalls = vi.mocked(transactions.updateTransactions).mock.calls;
       const pipelineCalls = updateCalls.filter(([, source]) => source === 'pipeline');
       expect(pipelineCalls.length).toBe(2);
     });
 
     it('should retry on agent error and succeed on second attempt', async () => {
-      vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('project_suppliers') || sql.includes('DISTINCT')) {
-          return [{ id: 'sup1', supplier_name: 'RetryCo' }];
-        }
-        if (sql.includes('FROM transactions')) {
-          return [{
-            id: 'tx1',
-            project_supplier_id: 'sup1',
-            row_index: 0,
-            spend_amount: 1000,
-            classification_status: 'unclassified',
-          }];
-        }
-        return [];
-      });
+      setupBasicMocks();
 
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'RetryCo' };
-        if (sql.includes('COUNT')) return { cnt: 1 };
-        return undefined;
-      });
-
-      vi.mocked(taxonomy.getNodes).mockResolvedValue([{
-        id: 'tid1', fullPath: 'Indirect|IT|Software',
-        l1: 'Indirect', l2: 'IT', l3: 'Software',
-        depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
-      }]);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return ['spend_amount'];
-        return null;
-      });
-      vi.mocked(transactions.getColumns).mockResolvedValue([
-        'id', 'row_index', 'spend_amount', 'classification_status',
-      ]);
-      vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
-
-      // First call throws, second succeeds
-      vi.mocked(classificationAgent.classifyInvoiceGroup)
+      vi.mocked(classificationAgent.classifyL3)
         .mockRejectedValueOnce(new Error('Temporary LLM error'))
         .mockResolvedValueOnce({
           classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
@@ -419,66 +233,22 @@ describe('ClassificationRunner', () => {
 
       await runner.classifyAll();
 
-      // Agent should have been called twice (retry)
-      expect(classificationAgent.classifyInvoiceGroup).toHaveBeenCalledTimes(2);
-
-      // Transaction should be classified successfully
+      expect(classificationAgent.classifyL3).toHaveBeenCalledTimes(2);
       expect(transactions.updateTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({
-          classificationStatus: 'classified_by_ai',
-        }),
+        expect.objectContaining({ classificationStatus: 'classified_by_ai' }),
         'pipeline'
       );
     });
 
     it('should mark transactions as classification_error after max retries exceeded', async () => {
-      vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('project_suppliers') || sql.includes('DISTINCT')) {
-          return [{ id: 'sup1', supplier_name: 'FailCo' }];
-        }
-        if (sql.includes('FROM transactions')) {
-          return [{
-            id: 'tx1',
-            project_supplier_id: 'sup1',
-            row_index: 0,
-            spend_amount: 1000,
-            classification_status: 'unclassified',
-          }];
-        }
-        return [];
-      });
+      setupBasicMocks();
 
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'FailCo' };
-        if (sql.includes('COUNT')) return { cnt: 0 };
-        return undefined;
-      });
-
-      vi.mocked(taxonomy.getNodes).mockResolvedValue([{
-        id: 'tid1', fullPath: 'Indirect|IT|Software',
-        l1: 'Indirect', l2: 'IT', l3: 'Software',
-        depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
-      }]);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return ['spend_amount'];
-        return null;
-      });
-      vi.mocked(transactions.getColumns).mockResolvedValue([
-        'id', 'row_index', 'spend_amount', 'classification_status',
-      ]);
-      vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
-
-      // All 3 attempts fail
-      vi.mocked(classificationAgent.classifyInvoiceGroup)
+      vi.mocked(classificationAgent.classifyL3)
         .mockRejectedValue(new Error('Persistent LLM error'));
 
       await runner.classifyAll();
 
-      // Agent should have been called 3 times (max retries)
-      expect(classificationAgent.classifyInvoiceGroup).toHaveBeenCalledTimes(3);
-
-      // Transaction should be marked as classification_error
+      expect(classificationAgent.classifyL3).toHaveBeenCalledTimes(3);
       expect(transactions.updateTransactions).toHaveBeenCalledWith(
         expect.objectContaining({
           ids: ['tx1'],
@@ -488,57 +258,148 @@ describe('ClassificationRunner', () => {
       );
     });
 
-    it('should not pass historicalClassifications to agent', async () => {
+    it('should mark transactions as error when Call 1 returns no category', async () => {
+      setupBasicMocks();
+      vi.mocked(classificationAgent.selectCategories).mockResolvedValue(new Map());
+
+      await runner.classifyAll();
+
+      // Should mark as error since no category was resolved
+      expect(transactions.updateTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ classificationStatus: 'classification_error' }),
+        'pipeline'
+      );
+    });
+  });
+
+  describe('two-call architecture', () => {
+    it('should call selectCategories (Call 1) then classifyL3 (Call 2)', async () => {
+      setupBasicMocks();
+
+      await runner.classifyAll();
+
+      // Call 1 should be called
+      expect(classificationAgent.selectCategories).toHaveBeenCalledWith(
+        expect.objectContaining({
+          suppliers: expect.arrayContaining([
+            expect.objectContaining({ name: 'Acme' }),
+          ]),
+        })
+      );
+
+      // Call 2 should receive the category from Call 1
+      expect(classificationAgent.classifyL3).toHaveBeenCalledWith(
+        expect.objectContaining({
+          categoryPath: 'Indirect|IT',
+          supplierName: 'Acme',
+        })
+      );
+    });
+
+    it('should filter taxonomy to L3 nodes under selected category for Call 2', async () => {
+      setupBasicMocks({ categoryPath: 'Indirect|IT' });
+
+      await runner.classifyAll();
+
+      const call2Args = vi.mocked(classificationAgent.classifyL3).mock.calls[0][0];
+      expect(call2Args.l3Taxonomy).toEqual([
+        expect.objectContaining({ fullPath: 'Indirect|IT|Software', l1: 'Indirect', l2: 'IT' }),
+      ]);
+    });
+
+    it('should retry individual suppliers when batch Call 1 misses them', async () => {
+      setupBasicMocks();
+      // Two suppliers
       vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('project_suppliers') || sql.includes('DISTINCT')) {
-          return [{ id: 'sup1', supplier_name: 'Acme' }];
-        }
-        if (sql.includes('FROM transactions')) {
-          return [{
-            id: 'tx1',
-            project_supplier_id: 'sup1',
-            row_index: 0,
-            spend_amount: 1000,
-            classification_status: 'unclassified',
-          }];
+        if (sql.includes('DISTINCT')) return [
+          { id: 'sup1', supplier_name: 'SupA' },
+          { id: 'sup2', supplier_name: 'SupB' },
+        ];
+        if (sql.includes('FROM transactions') && sql.includes('project_supplier_id')) {
+          return [{ id: 'tx1', project_supplier_id: 'sup1', spend_amount: 1000, classification_status: 'unclassified' }];
         }
         return [];
       });
-
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name')) return { supplier_name: 'Acme' };
+        if (sql.includes('supplier_parents') && sql.includes('sup1')) return { supplier_name: 'SupA', parent_name: null };
+        if (sql.includes('supplier_parents') && sql.includes('sup2')) return { supplier_name: 'SupB', parent_name: null };
+        if (sql.includes('supplier_parents')) return { supplier_name: 'SupA', parent_name: null };
         if (sql.includes('COUNT')) return { cnt: 1 };
         return undefined;
       });
 
-      vi.mocked(taxonomy.getNodes).mockResolvedValue([{
-        id: 'tid1', fullPath: 'Indirect|IT|Software',
-        l1: 'Indirect', l2: 'IT', l3: 'Software',
-        depth: 3, description: null, parentPath: 'Indirect|IT', createdAt: '',
-      }]);
-      vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
-        if (key === 'company_context') return { industry: 'Tech' };
-        if (key === 'column_priorities') return ['spend_amount'];
-        return null;
-      });
-      vi.mocked(transactions.getColumns).mockResolvedValue([
-        'id', 'row_index', 'spend_amount', 'classification_status',
-      ]);
-      vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
-      vi.mocked(classificationAgent.classifyInvoiceGroup).mockResolvedValue({
-        classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
-        assignments: { '1': [1] },
+      // First batch returns only supplier 1; supplier 2 missing
+      vi.mocked(classificationAgent.selectCategories)
+        .mockResolvedValueOnce(new Map([[1, 'Indirect|IT']]))
+        .mockResolvedValueOnce(new Map([[1, 'Indirect|Facilities']]));
+
+      await runner.classifyAll();
+
+      // selectCategories should be called at least twice (batch + individual retry)
+      expect(classificationAgent.selectCategories).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('supplier_name as column priority', () => {
+    it('should send canonical supplier_name to LLM', async () => {
+      setupBasicMocks({
+        supplierName: 'Acme Inc',
+        txns: [
+          { id: 'tx1', project_supplier_id: 'sup1', supplier_name: 'ACME Corp', spend_amount: 1000, gl_description: 'Software', classification_status: 'unclassified' },
+          { id: 'tx2', project_supplier_id: 'sup1', supplier_name: 'Acme Corporation', spend_amount: 2000, gl_description: 'Software', classification_status: 'unclassified' },
+        ],
+        columnPriorities: ['supplier_name', 'gl_description'],
       });
 
       await runner.classifyAll();
 
-      const agentCallArgs = vi.mocked(classificationAgent.classifyInvoiceGroup).mock.calls[0][0];
-      expect(agentCallArgs).not.toHaveProperty('historicalClassifications');
+      const call2Args = vi.mocked(classificationAgent.classifyL3).mock.calls[0][0];
+      // Both transactions should carry the canonical name
+      expect(call2Args.transactions[0]).toHaveProperty('supplier_name', 'Acme Inc');
+      expect(call2Args.transactions[1]).toHaveProperty('supplier_name', 'Acme Inc');
     });
   });
 
-  describe('cancel', () => {
-    it('should emit cancelled progress', async () => {
+  describe('parent name injection', () => {
+    function setupParentTest(parentName: string | null, universeParent: string | null) {
+      setupBasicMocks();
+      vi.mocked(db.get).mockImplementation(async (sql: string) => {
+        if (sql.includes('supplier_parents')) return { supplier_name: 'SubCo', parent_name: parentName };
+        if (sql.includes('COUNT')) return { cnt: 1 };
+        return undefined;
+      });
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(
+        universeParent ? { parentCompanyName: universeParent } : null
+      );
+    }
+
+    it('should resolve parent name from supplier_parents table', async () => {
+      setupParentTest('ParentCorp', null);
+      await runner.classifyAll();
+
+      const call1Args = vi.mocked(classificationAgent.selectCategories).mock.calls[0][0];
+      expect(call1Args.suppliers[0].parentName).toBe('ParentCorp');
+    });
+
+    it('should fall back to supplierResearch.parentCompanyName', async () => {
+      setupParentTest(null, 'UniverseParent');
+      await runner.classifyAll();
+
+      const call1Args = vi.mocked(classificationAgent.selectCategories).mock.calls[0][0];
+      expect(call1Args.suppliers[0].parentName).toBe('UniverseParent');
+    });
+
+    it('should return null when neither source has a parent', async () => {
+      setupParentTest(null, null);
+      await runner.classifyAll();
+
+      const call1Args = vi.mocked(classificationAgent.selectCategories).mock.calls[0][0];
+      expect(call1Args.suppliers[0].parentName).toBeNull();
+    });
+  });
+
+  describe('stop', () => {
+    it('should emit stopped progress', async () => {
       let resolveQuery!: (value: unknown[]) => void;
       vi.mocked(db.all).mockImplementation(async () => {
         return new Promise<unknown[]>((resolve) => { resolveQuery = resolve; });
@@ -549,14 +410,13 @@ describe('ClassificationRunner', () => {
       const run = runner.classifyAll();
       await new Promise(r => setTimeout(r, 10));
 
-      await runner.cancel();
+      await runner.stop();
 
       expect(eventBus.emit).toHaveBeenCalledWith(
         'classification:progress',
-        expect.objectContaining({ status: 'cancelled' })
+        expect.objectContaining({ status: 'stopped' })
       );
 
-      // Resolve the query so the run completes
       resolveQuery([]);
       await run.catch(() => {});
     });

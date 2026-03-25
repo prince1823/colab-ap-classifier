@@ -5,6 +5,7 @@ import type {
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import type { ColumnMappingAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
+import { traceLog } from '../utils/llm-trace';
 
 const MAX_SAMPLE_ROWS = 5;
 
@@ -261,11 +262,55 @@ export class LLMColumnMappingAgent implements ColumnMappingAgent {
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt(columns, sampleRows);
 
-    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
-      temperature: 0,
-      maxTokens: 1024,
+    const start = Date.now();
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 1024,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'column-mapping',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    const elapsedMs = Date.now() - start;
+
+    let parsed: import('../../shared/types/column-mapping').ColumnMappingResult;
+    try {
+      parsed = parseResponse(responseText);
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'column-mapping',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
+
+    traceLog({
+      timestamp: new Date().toISOString(),
+      agent: 'column-mapping',
+      model: 'default',
+      systemPrompt,
+      userPrompt,
+      response: responseText,
+      elapsedMs,
     });
 
-    return parseResponse(responseText);
+    return parsed;
   }
 }

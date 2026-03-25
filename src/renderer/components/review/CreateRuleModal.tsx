@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Check } from 'lucide-react'
-import { makeEmptyGroup, groupedToConditions } from '../FilterConditionBuilder'
+import { makeEmptyGroup } from '../FilterConditionBuilder'
 import AdvancedFilterModal from './AdvancedFilterModal'
 import { ipc } from '../../lib/ipc'
 import type { GroupedFilter, ConditionGroup, FilterCondition } from '../../../shared/types/transactions'
@@ -176,29 +176,15 @@ export default function CreateRuleModal({
     setSaving(true)
     setError(null)
     try {
-      const { id: ruleId } = await ipc.rules.create({
+      const { matchedCount } = await ipc.rules.createAndApply({
         name: name.trim(),
         groupedConditions: grouped,
         targetTaxonomyNodeId: targetNodeId,
         priorityScore: priority,
       })
 
-      // Reclassify matching transactions to the target taxonomy
-      const flatConditions = groupedToConditions(grouped).filter(c => c.field)
-      if (flatConditions.length > 0) {
-        const ids = await ipc.transactions.getIdsByConditions(flatConditions)
-        if (ids.length > 0) {
-          await ipc.transactions.update({
-            ids,
-            taxonomyNodeId: targetNodeId,
-            classificationStatus: 'classified_by_rule',
-            appliedRuleId: ruleId,
-          })
-        }
-      }
-
       onCreated?.()
-      setSuccessMessage(`Rule "${name.trim()}" created and ${flatConditions.length > 0 ? 'applied' : 'saved'}!`)
+      setSuccessMessage(`Rule "${name.trim()}" created and applied to ${matchedCount} transaction${matchedCount !== 1 ? 's' : ''}.`)
       setSaving(false)
       closeTimerRef.current = setTimeout(() => {
         setSuccessMessage(null)

@@ -179,6 +179,47 @@ describe('RuleStore', () => {
     });
   });
 
+  describe('createAndApplyRule', () => {
+    const input = {
+      name: 'Acme Rule',
+      groupedConditions: {
+        groupConnector: 'AND' as const,
+        groups: [{ connector: 'AND' as const, conditions: [{ field: 'supplier_name', operator: 'equals' as const, value: 'Acme' }] }],
+      },
+      targetTaxonomyNodeId: 'node-1',
+    };
+
+    it('creates the rule and returns matched transaction count', async () => {
+      vi.mocked(db.get).mockResolvedValueOnce({ max_priority: 0 }); // priority lookup in createRule
+      vi.mocked(transactions.applyRule).mockResolvedValueOnce(5);
+
+      const result = await store.createAndApplyRule(input);
+
+      expect(result.id).toBeDefined();
+      expect(result.matchedCount).toBe(5);
+      expect(transactions.applyRule).toHaveBeenCalledWith(
+        result.id,
+        input.groupedConditions,
+        input.targetTaxonomyNodeId
+      );
+    });
+
+    it('returns matchedCount of 0 when no transactions match', async () => {
+      vi.mocked(db.get).mockResolvedValueOnce({ max_priority: 0 });
+      vi.mocked(transactions.applyRule).mockResolvedValueOnce(0);
+
+      const result = await store.createAndApplyRule(input);
+      expect(result.matchedCount).toBe(0);
+    });
+
+    it('propagates error if applyRule throws (e.g. rule not found race condition)', async () => {
+      vi.mocked(db.get).mockResolvedValueOnce({ max_priority: 0 });
+      vi.mocked(transactions.applyRule).mockRejectedValueOnce(new Error('Rule not found: abc'));
+
+      await expect(store.createAndApplyRule(input)).rejects.toThrow('Rule not found');
+    });
+  });
+
   describe('evaluateRules', () => {
     it('should match transactions with first-match-wins', async () => {
       vi.mocked(db.all).mockResolvedValue([

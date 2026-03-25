@@ -151,6 +151,7 @@ export interface TransactionStore {
   getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;
   getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
   markAllReviewed(): Promise<number>;
+  applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
 }
 
 export interface TaxonomyStore {
@@ -195,6 +196,7 @@ export interface SupplierService {
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
+  createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
   evaluateRules(transactionIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;

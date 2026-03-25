@@ -108,11 +108,12 @@ export interface IPCInvokeMap {
   'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
 
   // Rules
-  'rules:list':     { args: []; result: OverrideRule[] };
-  'rules:create':   { args: [input: OverrideRuleCreate]; result: { id: string } };
-  'rules:update':   { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
-  'rules:delete':   { args: [ruleId: string]; result: void };
-  'rules:generate': { args: []; result: GenerateRulesResult };
+  'rules:list':           { args: []; result: OverrideRule[] };
+  'rules:create':         { args: [input: OverrideRuleCreate]; result: { id: string } };
+  'rules:createAndApply': { args: [input: OverrideRuleCreate]; result: { id: string; matchedCount: number } };
+  'rules:update':         { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
+  'rules:delete':         { args: [ruleId: string]; result: void };
+  'rules:generate':       { args: []; result: GenerateRulesResult };
 
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };

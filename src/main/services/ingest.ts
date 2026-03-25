@@ -320,6 +320,27 @@ export class IngestService implements IIngestService {
     });
 
     const mapping = columnMapping || {};
+
+    // Validate required canonicals are present
+    for (const required of REQUIRED_CANONICAL_COLUMNS) {
+      if (!mapping[required]) {
+        throw new Error(`Required canonical column "${required}" is missing from the mapping`);
+      }
+    }
+
+    // Validate no two canonical columns reference the same CSV column
+    const csvColsSeen = new Set<string>();
+    for (const [canonical, csvCol] of Object.entries(mapping)) {
+      if (csvColsSeen.has(csvCol)) {
+        throw new Error(`CSV column "${csvCol}" is assigned to multiple canonical columns (duplicate at "${canonical}")`);
+      }
+      csvColsSeen.add(csvCol);
+    }
+
+    // supplier_name maps to the original_supplier_name DB column (audit trail).
+    // The canonical supplier_name is resolved via JOIN to project_suppliers after normalization.
+    // We remap at the SQL level only — the mapping object stays unmutated so it's
+    // stored correctly in the uploads table for reuse.
     const dbColumn = (canonical: string) =>
       canonical === 'supplier_name' ? 'original_supplier_name' : canonical;
 

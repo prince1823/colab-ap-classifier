@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import DataUploadStep from './data-steps/DataUploadStep'
-import DataMappingStep from './data-steps/DataMappingStep'
+import DataMappingStep, { type ColumnState } from './data-steps/DataMappingStep'
 import DataPriorityStep from './data-steps/DataPriorityStep'
 import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
+import { REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns'
 import type {
   CSVPreview,
   ColumnMapping,
@@ -14,13 +15,12 @@ import type {
   DeriveMappingsSource,
   CompletedUpload,
 } from '../../shared/types/column-mapping'
-import type { IngestProgress } from '../../shared/types/classification'
 
 type Step = 'upload' | 'mapping' | 'priority'
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'upload', label: 'Upload CSV' },
-  { key: 'mapping', label: 'Column Mapping' },
+  { key: 'mapping', label: 'Review Column Mapping' },
   { key: 'priority', label: 'Column Priority' },
 ]
 
@@ -40,10 +40,8 @@ export default function DataView() {
   const [importing, setImporting] = useState(false)
   const [derivingMappings, setDerivingMappings] = useState(false)
   const [mappingFromPrevious, setMappingFromPrevious] = useState(false)
-  const [importProgress, setImportProgress] = useState<IngestProgress | null>(null)
-
-  // Ref to hold pending mapping rows so the progress callback can access them
-  const pendingMappingsRef = useRef<MappingRow[]>([])
+  // Preserved column states so going back from priority doesn't lose edits
+  const [preservedColumnStates, setPreservedColumnStates] = useState<ColumnState[] | null>(null)
 
   // Load existing uploads on mount
   useEffect(() => {
@@ -57,52 +55,13 @@ export default function DataView() {
             canonical,
             csvColumn,
           })),
+          createdAt: u.createdAt,
         }))
       )
     }).catch(() => {
       // No uploads yet — that's fine
     })
   }, [])
-
-  // Listen for import progress events
-  useEffect(() => {
-    const unsubscribe = ipc.ingest.onProgress((progress: IngestProgress) => {
-      setImportProgress(progress)
-
-      if (progress.status === 'completed' && progress.result) {
-        const result = progress.result
-        const rows = pendingMappingsRef.current
-
-        setCompletedUploads((prev) => [
-          ...prev,
-          {
-            uploadId: result.uploadId,
-            fileName: activeFilePath?.split('/').pop() ?? 'unknown',
-            rowCount: result.rowsInserted,
-            mappings: rows,
-          },
-        ])
-
-        // Clear active state, return to upload step
-        setActiveFilePath(null)
-        setActivePreview(null)
-        setActiveDerivedMappings(null)
-        setImporting(false)
-        setImportProgress(null)
-        setStep('upload')
-        pendingMappingsRef.current = []
-
-        refreshGateState()
-      } else if (progress.status === 'failed') {
-        setError(progress.error || 'Import failed')
-        setImporting(false)
-        setImportProgress(null)
-        pendingMappingsRef.current = []
-      }
-    })
-
-    return unsubscribe
-  }, [activeFilePath, refreshGateState])
 
   const handleFileReady = async (
     path: string,
@@ -121,7 +80,10 @@ export default function DataView() {
         source
       )
       setActiveDerivedMappings(derived)
-      setStep('mapping')
+      // LLM source: go directly to mapping step; previous upload: stay and show preview modal
+      if (source === 'llm') {
+        setStep('mapping')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to derive mappings')
     } finally {
@@ -129,26 +91,33 @@ export default function DataView() {
     }
   }
 
-  const handleMappingsApplied = async (rows: MappingRow[]) => {
+  // Called from DataMappingStep when user clicks "Import & Continue"
+  const handleImport = async (rows: MappingRow[], columnStates?: ColumnState[]) => {
     if (!activeFilePath) return
+    if (columnStates) setPreservedColumnStates(columnStates)
     setImporting(true)
     setError(null)
-    setImportProgress(null)
-
-    // Store rows for the progress callback to use on completion
-    pendingMappingsRef.current = rows
-
     try {
-      // Build simple ColumnMapping from mapping rows
+      // Build simple ColumnMapping from mapping rows (skip empty canonicals)
       const columnMapping: ColumnMapping = {}
       for (const row of rows) {
-        if (row.csvColumn) {
+        if (row.csvColumn && row.canonical) {
           columnMapping[row.canonical] = row.csvColumn
         }
       }
 
-      // Save column_priorities BEFORE firing import — invariant 5.
-      // The mapping is finalized here; do NOT move this into the progress 'completed' handler.
+      // Validate required canonicals before calling backend
+      const missingRequired = REQUIRED_CANONICAL_COLUMNS.filter((r) => !columnMapping[r])
+      if (missingRequired.length > 0) {
+        const names = missingRequired.map((n) => `"${n}"`).join(', ')
+        throw new Error(
+          `Missing required column${missingRequired.length > 1 ? 's' : ''}: ${names}. Please assign a CSV column to ${missingRequired.length > 1 ? 'each' : 'it'} before importing.`
+        )
+      }
+
+      const result = await ipc.ingest.importCSV(activeFilePath, columnMapping)
+
+      // Only set default column_priorities if none exist yet
       const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
       if (!existingPriorities || existingPriorities.length === 0) {
         const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
@@ -157,13 +126,30 @@ export default function DataView() {
         await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
       }
 
-      // Fire-and-forget — completion handled by ingest:progress event listener
-      await ipc.ingest.importCSV(activeFilePath, columnMapping)
+      // Add to completed uploads
+      setCompletedUploads((prev) => [
+        ...prev,
+        {
+          uploadId: result.uploadId,
+          fileName: activeFilePath.split('/').pop() ?? activeFilePath,
+          rowCount: result.rowsInserted,
+          mappings: rows,
+          createdAt: new Date().toISOString(),
+        },
+      ])
+
+      await refreshGateState()
+
+      // Clear active cycle state and move to priority
+      setActiveFilePath(null)
+      setActivePreview(null)
+      setActiveDerivedMappings(null)
+      setPreservedColumnStates(null)
+      setStep('priority')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
+    } finally {
       setImporting(false)
-      setImportProgress(null)
-      pendingMappingsRef.current = []
     }
   }
 
@@ -246,17 +232,22 @@ export default function DataView() {
             onFileReady={handleFileReady}
             onProceedToPriority={() => setStep('priority')}
             derivingMappings={derivingMappings}
+            derivedMappings={activeDerivedMappings}
+            preview={activePreview}
+            onConfirmMapping={() => setStep('mapping')}
+            onCancelPreview={() => { setActiveDerivedMappings(null) }}
           />
         )}
         {step === 'mapping' && activePreview && activeDerivedMappings && (
           <DataMappingStep
             preview={activePreview}
             derivedMappings={activeDerivedMappings}
-            onApply={handleMappingsApplied}
-            onBack={() => setStep('upload')}
-            importing={importing}
+            onApply={handleImport}
+            onBack={() => { setActiveDerivedMappings(null); setStep('upload') }}
             fromPreviousMapping={mappingFromPrevious}
-            importProgress={importProgress}
+            preservedColumnStates={preservedColumnStates}
+            importing={importing}
+            isFirstUpload={completedUploads.length === 0}
           />
         )}
         {step === 'priority' && (

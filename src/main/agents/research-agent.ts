@@ -4,6 +4,7 @@ import type { SupplierInfo } from '../../shared/types/suppliers';
 import type { ExaSearchResult } from '../services/exa-search';
 import type { ResearchAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
+import { traceLog } from '../utils/llm-trace';
 
 export interface SupplierResearchResult extends SupplierInfo {
   confidence: 'high' | 'medium' | 'low';
@@ -290,9 +291,22 @@ export class LLMResearchAgent implements ResearchAgent {
       searchResults as ExaSearchResult[] | undefined
     );
 
+    const start = Date.now();
     const responseText = await this.llm.chat(systemPrompt, userPrompt, {
       temperature: 0,
       maxTokens: 1024,
+    });
+    const elapsedMs = Date.now() - start;
+
+    traceLog({
+      timestamp: new Date().toISOString(),
+      agent: 'research',
+      supplier: supplierName,
+      model: 'default',
+      systemPrompt,
+      userPrompt,
+      response: responseText,
+      elapsedMs,
     });
 
     const { result } = parseResponse(responseText);

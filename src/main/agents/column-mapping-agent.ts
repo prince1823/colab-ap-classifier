@@ -5,6 +5,7 @@ import type {
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import type { ColumnMappingAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
+import { traceLog } from '../utils/llm-trace';
 
 const MAX_SAMPLE_ROWS = 5;
 
@@ -261,9 +262,21 @@ export class LLMColumnMappingAgent implements ColumnMappingAgent {
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt(columns, sampleRows);
 
+    const start = Date.now();
     const responseText = await this.llm.chat(systemPrompt, userPrompt, {
       temperature: 0,
       maxTokens: 1024,
+    });
+    const elapsedMs = Date.now() - start;
+
+    traceLog({
+      timestamp: new Date().toISOString(),
+      agent: 'column-mapping',
+      model: 'default',
+      systemPrompt,
+      userPrompt,
+      response: responseText,
+      elapsedMs,
     });
 
     return parseResponse(responseText);

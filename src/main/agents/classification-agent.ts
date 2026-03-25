@@ -3,6 +3,7 @@ import type { SupplierInfo } from '../../shared/types/suppliers';
 import type { ClassificationInput, ClassificationResult, ClassificationEntry } from '../../shared/types/classification';
 import type { ClassificationAgent, LLMClient } from '../../shared/types/services';
 import { extractFields, buildDedupGroups } from '../utils/dedup-groups';
+import { traceLog } from '../utils/llm-trace';
 
 /**
  * Build the system prompt for the classification agent.
@@ -451,9 +452,21 @@ export class LLMClassificationAgent implements ClassificationAgent {
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt(input);
 
+    const start = Date.now();
     const responseText = await this.llm.chat(systemPrompt, userPrompt, {
       temperature: 0,
       maxTokens: 16384,
+    });
+    const elapsedMs = Date.now() - start;
+
+    traceLog({
+      timestamp: new Date().toISOString(),
+      agent: 'classification-l3',
+      model: 'default',
+      systemPrompt,
+      userPrompt,
+      response: responseText,
+      elapsedMs,
     });
 
     const rawResult = parseResponse(responseText);

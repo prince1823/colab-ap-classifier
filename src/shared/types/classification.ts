@@ -42,6 +42,16 @@ export interface ClassificationProgress {
   currentStep: string;
 }
 
+export interface IngestProgress {
+  status: 'running' | 'completed' | 'failed';
+  totalRows: number;
+  processedRows: number;
+  percentage: number;
+  currentStep: string;
+  result?: { rowsInserted: number; uploadId: string };
+  error?: string;
+}
+
 export interface ClassificationInput {
   transactions: Array<Record<string, unknown>>;
   taxonomy: TaxonomyNode[];

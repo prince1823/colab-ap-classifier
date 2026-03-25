@@ -21,7 +21,7 @@ import type {
   PivotAggregationResult,
   GroupedFilter,
 } from './transactions';
-import type { ClassificationProgress, ResearchProgress, QCProgress } from './classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
@@ -46,7 +46,7 @@ export interface IPCInvokeMap {
   'ingest:selectFile':       { args: []; result: string | null };
   'ingest:parseCSV':         { args: [filePath: string]; result: CSVPreview };
   'ingest:suggestMappings':  { args: [columns: string[], sampleRows: Record<string, string>[]]; result: ColumnMappingResult };
-  'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: { rowsInserted: number; uploadId: string } };
+  'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: void };
   'ingest:getUpload':              { args: []; result: { id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null };
   'ingest:getUploadHistory':       { args: []; result: UploadRecord[] };
   'ingest:deriveMappings':         { args: [columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource]; result: DerivedMappings };
@@ -153,6 +153,7 @@ export interface IPCEventMap {
   'classification:progress':     ClassificationProgress;
   'suppliers:research:progress': ResearchProgress;
   'qc:progress':                 QCProgress;
+  'ingest:progress':             IngestProgress;
   'license:statusChanged':       LicenseStatus;
 }
 

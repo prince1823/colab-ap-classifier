@@ -1,6 +1,6 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
-import type { ClassificationProgress, ResearchProgress, QCProgress } from '../../shared/types/classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
@@ -65,6 +65,8 @@ export const ipc = {
     deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
       invoke('ingest:deriveMappings', columns, sampleRows, source),
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
+    onProgress: (callback: (progress: IngestProgress) => void) =>
+      on('ingest:progress', callback),
   },
 
   // ── Classification (3 channels + 1 event) ──

@@ -1,19 +1,20 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { ipc } from '../lib/ipc'
-import { makeEmptyGroup, OPERATOR_LABELS, GroupedFilterBuilder } from '../components/FilterConditionBuilder'
+import { makeEmptyGroup, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
-import type { OverrideRule } from '../../shared/types/rules'
-import type { RuleBucket } from '../../shared/types/rules'
+import type { OverrideRule, RuleGroup } from '../../shared/types/rules'
 import type { FieldDefinition, GroupedFilter } from '../../shared/types/transactions'
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
 
-// ─── Drag type constants ────────────────────────────────────────────────────
+// ─── Drag type constants ─────────────────────────────────────────────────────
 const DRAG_TYPE_RULE = 'application/x-rule-drag'
-const DRAG_TYPE_BUCKET = 'application/x-bucket-drag'
+const DRAG_TYPE_GROUP = 'application/x-group-drag'
+
+const UNGROUPED_ID = '__ungrouped__'
 
 export default function OverrideRulesPage() {
   const [rules, setRules] = useState<OverrideRule[]>([])
-  const [buckets, setBuckets] = useState<RuleBucket[]>([])
+  const [groups, setGroups] = useState<RuleGroup[]>([])
   const [taxonomyNodes, setTaxonomyNodes] = useState<TaxonomyNode[]>([])
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
   const [loading, setLoading] = useState(true)
@@ -25,7 +26,7 @@ export default function OverrideRulesPage() {
   const [name, setName] = useState('')
   const [grouped, setGrouped] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
   const [targetNodeId, setTargetNodeId] = useState('')
-  const [editorBucketId, setEditorBucketId] = useState('')
+  const [editorGroupId, setEditorGroupId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [taxonomySearch, setTaxonomySearch] = useState('')
   const [ruleSearch, setRuleSearch] = useState('')
@@ -34,46 +35,39 @@ export default function OverrideRulesPage() {
   const [taxonomyDropdownOpen, setTaxonomyDropdownOpen] = useState(false)
   const taxonomyDropdownRef = useRef<HTMLDivElement>(null)
 
-  // Bucket UI state
-  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set())
-  const [editingBucketId, setEditingBucketId] = useState<string | null>(null)
-  const [editingBucketName, setEditingBucketName] = useState('')
-  const [showNewBucketInput, setShowNewBucketInput] = useState(false)
-  const [newBucketName, setNewBucketName] = useState('')
-  const [newBucketConditions, setNewBucketConditions] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
-  const [deletingBucketId, setDeletingBucketId] = useState<string | null>(null)
+  // Group UI state
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
+  const [editingGroupName, setEditingGroupName] = useState('')
+  const [showNewGroupInput, setShowNewGroupInput] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [newGroupPriority, setNewGroupPriority] = useState('')
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null)
 
-  // Conditions modals
+  // Conditions modal
   const [conditionsModalOpen, setConditionsModalOpen] = useState(false)
-  // For editing existing bucket conditions
-  const [editingBucketConditionsId, setEditingBucketConditionsId] = useState<string | null>(null)
-  const [editingBucketConditionsData, setEditingBucketConditionsData] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
-
-  // No-match popup for auto-assign
-  const [showNoBucketMatch, setShowNoBucketMatch] = useState(false)
-  const [pendingRuleConditions, setPendingRuleConditions] = useState<GroupedFilter | null>(null)
 
   // Expanded conditions per rule
   const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set())
 
-  // Drag-and-drop refs — no React state during drag for performance
-  const dragTypeRef = useRef<'rule' | 'bucket' | null>(null)
+  // Drag-and-drop refs
+  const dragTypeRef = useRef<'rule' | 'group' | null>(null)
   const dragIdRef = useRef<string | null>(null)
-  const dragSourceBucketRef = useRef<string | null>(null)
+  const dragSourceGroupRef = useRef<string | null>(null)
   const prevOverRow = useRef<HTMLElement | null>(null)
 
   const loadData = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [r, b, n, fields] = await Promise.all([
+      const [r, g, n, fields] = await Promise.all([
         ipc.rules.list(),
-        ipc.rules.listBuckets(),
+        ipc.rules.listGroups(),
         ipc.taxonomy.getNodes(),
         ipc.transactions.getFilterFields(),
       ])
       setRules(r ?? [])
-      setBuckets(b ?? [])
+      setGroups(g ?? [])
       setTaxonomyNodes(n ?? [])
       setFilterFields(fields ?? [])
     } catch (e) {
@@ -85,16 +79,12 @@ export default function OverrideRulesPage() {
 
   useEffect(() => { loadData() }, [])
 
-  const defaultBucketId = useMemo(() => {
-    return buckets.find(b => b.isDefault)?.id ?? buckets[0]?.id ?? ''
-  }, [buckets])
-
-  const openCreate = (bucketId?: string) => {
+  const openCreate = (groupId?: string | null) => {
     setEditingRule(null)
     setName('')
     setGrouped({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
     setTargetNodeId(taxonomyNodes[0]?.id || '')
-    setEditorBucketId(bucketId ?? defaultBucketId)
+    setEditorGroupId(groupId ?? null)
     setTaxonomySearch('')
     setTaxonomyDropdownOpen(false)
     setShowEditor(true)
@@ -105,7 +95,7 @@ export default function OverrideRulesPage() {
     setName(rule.name)
     setGrouped(rule.groupedConditions?.groups?.length > 0 ? rule.groupedConditions : { groupConnector: 'AND', groups: [makeEmptyGroup()] })
     setTargetNodeId(rule.targetTaxonomyNodeId)
-    setEditorBucketId(rule.bucketId)
+    setEditorGroupId(rule.groupId)
     setTaxonomySearch('')
     setTaxonomyDropdownOpen(false)
     setShowEditor(true)
@@ -115,52 +105,18 @@ export default function OverrideRulesPage() {
     setSaving(true)
     setError(null)
     try {
-      // Find a matching bucket by auto-filter conditions
-      let matchedBucketId: string | null = null
-      for (const bucket of buckets) {
-        if (bucket.groupedConditions) {
-          // Build a temporary rule-like object to check
-          const tempRule = { groupedConditions: grouped } as OverrideRule
-          if (ruleMatchesBucketFilter(tempRule, bucket.groupedConditions)) {
-            matchedBucketId = bucket.id
-            break
-          }
-        }
-      }
-
-      const targetBucketId = matchedBucketId ?? defaultBucketId
-
       if (editingRule) {
-        await ipc.rules.update(editingRule.id, { name, groupedConditions: grouped, targetTaxonomyNodeId: targetNodeId })
-        // Move to matched bucket (or keep in default)
-        if (matchedBucketId && matchedBucketId !== editingRule.bucketId) {
-          await ipc.rules.moveRule(editingRule.id, matchedBucketId)
-        }
+        await ipc.rules.update(editingRule.id, { name, groupedConditions: grouped, targetTaxonomyNodeId: targetNodeId, groupId: editorGroupId })
       } else {
-        await ipc.rules.create({ name, groupedConditions: grouped, targetTaxonomyNodeId: targetNodeId, bucketId: targetBucketId })
+        await ipc.rules.create({ name, groupedConditions: grouped, targetTaxonomyNodeId: targetNodeId, groupId: editorGroupId })
       }
-
       setShowEditor(false)
       await loadData()
-
-      // If no bucket matched, prompt user to create one
-      if (!matchedBucketId) {
-        setPendingRuleConditions(grouped)
-        setShowNoBucketMatch(true)
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save rule')
     } finally {
       setSaving(false)
     }
-  }
-
-  const handleCreateBucketFromPrompt = () => {
-    setShowNoBucketMatch(false)
-    setNewBucketName('')
-    setNewBucketConditions(pendingRuleConditions ?? { groupConnector: 'AND', groups: [makeEmptyGroup()] })
-    setPendingRuleConditions(null)
-    setShowNewBucketInput(true)
   }
 
   const handleDelete = async (ruleId: string) => {
@@ -182,84 +138,66 @@ export default function OverrideRulesPage() {
     }
   }
 
-  // ─── Bucket CRUD ──────────────────────────────────────────────────────────
+  // ─── Group CRUD ──────────────────────────────────────────────────────────
 
-  const handleCreateBucket = async () => {
-    if (!newBucketName.trim()) return
+  const handleCreateGroup = async () => {
+    if (!newGroupName.trim()) return
+    const priority = parseInt(newGroupPriority, 10)
+    if (!newGroupPriority.trim() || isNaN(priority) || priority < 1) {
+      setError('Priority must be an integer >= 1')
+      return
+    }
     try {
-      // Check if conditions have any real content
-      const hasConditions = newBucketConditions.groups.some(g => g.conditions.some(c => c.field))
-      await ipc.rules.createBucket({
-        name: newBucketName.trim(),
-        groupedConditions: hasConditions ? newBucketConditions : undefined,
-      })
-      setNewBucketName('')
-      setNewBucketConditions({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
-      setShowNewBucketInput(false)
+      await ipc.rules.createGroup({ name: newGroupName.trim(), priority })
+      setNewGroupName('')
+      setNewGroupPriority('')
+      setShowNewGroupInput(false)
       await loadData()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create bucket')
+      setError(e instanceof Error ? e.message : 'Failed to create group')
     }
   }
 
-  const handleUpdateBucketConditions = async (bucketId: string, conditions: GroupedFilter | null) => {
+  const handleRenameGroup = async (groupId: string) => {
+    if (!editingGroupName.trim()) { setEditingGroupId(null); return }
     try {
-      const hasConditions = conditions && conditions.groups.some(g => g.conditions.some(c => c.field))
-      await ipc.rules.updateBucket(bucketId, { groupedConditions: hasConditions ? conditions : null })
-      setEditingBucketConditionsId(null)
+      await ipc.rules.updateGroup(groupId, { name: editingGroupName.trim() })
+      setEditingGroupId(null)
       await loadData()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update bucket conditions')
+      setError(e instanceof Error ? e.message : 'Failed to rename group')
     }
   }
 
-  const handleRenameBucket = async (bucketId: string) => {
-    if (!editingBucketName.trim()) { setEditingBucketId(null); return }
+  const handleDeleteGroup = async (groupId: string) => {
     try {
-      await ipc.rules.updateBucket(bucketId, { name: editingBucketName.trim() })
-      setEditingBucketId(null)
+      await ipc.rules.deleteGroup(groupId)
+      setDeletingGroupId(null)
       await loadData()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to rename bucket')
+      setError(e instanceof Error ? e.message : 'Failed to delete group')
     }
   }
 
-  const handleDeleteBucket = async (bucketId: string) => {
-    try {
-      await ipc.rules.deleteBucket(bucketId)
-      setDeletingBucketId(null)
-      await loadData()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete bucket')
-    }
-  }
+  // ─── Drag-and-drop: Rule move across groups ───────────────────────────────
 
-  // ─── Drag-and-drop: Rule reorder / cross-bucket move ─────────────────────
-
-  const handleRuleDragStart = useCallback((e: React.DragEvent, ruleId: string, bucketId: string) => {
+  const handleRuleDragStart = useCallback((e: React.DragEvent, ruleId: string, sourceGroupId: string | null) => {
     dragTypeRef.current = 'rule'
     dragIdRef.current = ruleId
-    dragSourceBucketRef.current = bucketId
+    dragSourceGroupRef.current = sourceGroupId
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData(DRAG_TYPE_RULE, ruleId)
     requestAnimationFrame(() => {
-      if (e.currentTarget instanceof HTMLElement) {
-        e.currentTarget.style.opacity = '0.4'
-      }
+      if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = '0.4'
     })
   }, [])
 
   const handleRuleDragEnd = useCallback((e: React.DragEvent) => {
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '1'
-    }
-    if (prevOverRow.current) {
-      prevOverRow.current.style.borderTop = ''
-      prevOverRow.current = null
-    }
+    if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = '1'
+    if (prevOverRow.current) { prevOverRow.current.style.borderTop = ''; prevOverRow.current = null }
     dragTypeRef.current = null
     dragIdRef.current = null
-    dragSourceBucketRef.current = null
+    dragSourceGroupRef.current = null
   }, [])
 
   const handleRuleDragOver = useCallback((e: React.DragEvent) => {
@@ -274,48 +212,15 @@ export default function OverrideRulesPage() {
     }
   }, [])
 
-  const handleRuleDropOnRule = useCallback(async (e: React.DragEvent, targetRule: OverrideRule, bucketRuleIds: string[]) => {
+  const handleRuleDropOnGroup = useCallback(async (e: React.DragEvent, targetGroupId: string | null) => {
     e.preventDefault()
-    if (prevOverRow.current) {
-      prevOverRow.current.style.borderTop = ''
-      prevOverRow.current = null
-    }
-    const draggedId = dragIdRef.current
-    const sourceBucket = dragSourceBucketRef.current
-    if (!draggedId || draggedId === targetRule.id) return
-
-    try {
-      if (sourceBucket === targetRule.bucketId) {
-        // Intra-bucket reorder
-        const newOrder = bucketRuleIds.filter(id => id !== draggedId)
-        const targetIdx = newOrder.indexOf(targetRule.id)
-        newOrder.splice(targetIdx, 0, draggedId)
-        await ipc.rules.reorderInBucket(targetRule.bucketId, newOrder)
-      } else {
-        // Cross-bucket move
-        const targetIdx = bucketRuleIds.indexOf(targetRule.id)
-        await ipc.rules.moveRule(draggedId, targetRule.bucketId, targetIdx)
-      }
-      await loadData()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to reorder rule')
-      await loadData()
-    }
-  }, [])
-
-  // Drop rule onto bucket header (move to end of bucket)
-  const handleRuleDropOnBucket = useCallback(async (e: React.DragEvent, targetBucketId: string) => {
-    e.preventDefault()
-    if (prevOverRow.current) {
-      prevOverRow.current.style.borderTop = ''
-      prevOverRow.current = null
-    }
+    if (prevOverRow.current) { prevOverRow.current.style.borderTop = ''; prevOverRow.current = null }
     const draggedId = dragIdRef.current
     if (!draggedId || dragTypeRef.current !== 'rule') return
-    if (dragSourceBucketRef.current === targetBucketId) return
+    if (dragSourceGroupRef.current === targetGroupId) return
 
     try {
-      await ipc.rules.moveRule(draggedId, targetBucketId)
+      await ipc.rules.moveRule(draggedId, targetGroupId)
       await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to move rule')
@@ -323,34 +228,27 @@ export default function OverrideRulesPage() {
     }
   }, [])
 
-  // ─── Drag-and-drop: Bucket reorder ────────────────────────────────────────
+  // ─── Drag-and-drop: Group reorder ─────────────────────────────────────────
 
-  const handleBucketDragStart = useCallback((e: React.DragEvent, bucketId: string) => {
-    dragTypeRef.current = 'bucket'
-    dragIdRef.current = bucketId
+  const handleGroupDragStart = useCallback((e: React.DragEvent, groupId: string) => {
+    dragTypeRef.current = 'group'
+    dragIdRef.current = groupId
     e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData(DRAG_TYPE_BUCKET, bucketId)
+    e.dataTransfer.setData(DRAG_TYPE_GROUP, groupId)
     requestAnimationFrame(() => {
-      if (e.currentTarget instanceof HTMLElement) {
-        e.currentTarget.style.opacity = '0.5'
-      }
+      if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = '0.5'
     })
   }, [])
 
-  const handleBucketDragEnd = useCallback((e: React.DragEvent) => {
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '1'
-    }
-    if (prevOverRow.current) {
-      prevOverRow.current.style.borderTop = ''
-      prevOverRow.current = null
-    }
+  const handleGroupDragEnd = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = '1'
+    if (prevOverRow.current) { prevOverRow.current.style.borderTop = ''; prevOverRow.current = null }
     dragTypeRef.current = null
     dragIdRef.current = null
   }, [])
 
-  const handleBucketDragOver = useCallback((e: React.DragEvent) => {
-    if (dragTypeRef.current === 'bucket') {
+  const handleGroupDragOver = useCallback((e: React.DragEvent) => {
+    if (dragTypeRef.current === 'group') {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
       const el = e.currentTarget as HTMLElement
@@ -360,7 +258,6 @@ export default function OverrideRulesPage() {
         prevOverRow.current = el
       }
     } else if (dragTypeRef.current === 'rule') {
-      // Also accept rule drops on bucket headers
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
       const el = e.currentTarget as HTMLElement
@@ -372,32 +269,28 @@ export default function OverrideRulesPage() {
     }
   }, [])
 
-  const handleBucketDrop = useCallback(async (e: React.DragEvent, targetBucketId: string) => {
+  const handleGroupDrop = useCallback(async (e: React.DragEvent, targetGroupId: string) => {
     e.preventDefault()
-    if (prevOverRow.current) {
-      prevOverRow.current.style.borderTop = ''
-      prevOverRow.current = null
-    }
+    if (prevOverRow.current) { prevOverRow.current.style.borderTop = ''; prevOverRow.current = null }
 
-    if (dragTypeRef.current === 'bucket') {
+    if (dragTypeRef.current === 'group') {
       const draggedId = dragIdRef.current
-      if (!draggedId || draggedId === targetBucketId) return
-      // Reorder buckets
-      const currentOrder = buckets.map(b => b.id)
+      if (!draggedId || draggedId === targetGroupId) return
+      const currentOrder = groups.map(g => g.id)
       const newOrder = currentOrder.filter(id => id !== draggedId)
-      const targetIdx = newOrder.indexOf(targetBucketId)
+      const targetIdx = newOrder.indexOf(targetGroupId)
       newOrder.splice(targetIdx, 0, draggedId)
       try {
-        await ipc.rules.reorderBuckets(newOrder)
+        await ipc.rules.reorderGroups(newOrder)
         await loadData()
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to reorder buckets')
+        setError(e instanceof Error ? e.message : 'Failed to reorder groups')
         await loadData()
       }
     } else if (dragTypeRef.current === 'rule') {
-      await handleRuleDropOnBucket(e, targetBucketId)
+      await handleRuleDropOnGroup(e, targetGroupId)
     }
-  }, [buckets, handleRuleDropOnBucket])
+  }, [groups, handleRuleDropOnGroup])
 
   // ─── Taxonomy dropdown ────────────────────────────────────────────────────
 
@@ -454,11 +347,8 @@ export default function OverrideRulesPage() {
 
   const filteredRules = useMemo(() => {
     let result = rules
-    if (sourceFilter === 'manual') {
-      result = result.filter(r => r.source !== 'auto_generated')
-    } else if (sourceFilter === 'auto') {
-      result = result.filter(r => r.source === 'auto_generated')
-    }
+    if (sourceFilter === 'manual') result = result.filter(r => r.source !== 'auto_generated')
+    else if (sourceFilter === 'auto') result = result.filter(r => r.source === 'auto_generated')
     if (ruleSearch.trim()) {
       const q = ruleSearch.toLowerCase()
       result = result.filter(r => {
@@ -466,82 +356,31 @@ export default function OverrideRulesPage() {
         const conditions = formatConditionSummary(r).toLowerCase()
         const source = r.source === 'auto_generated' ? 'auto' : 'manual'
         const status = r.isActive ? 'active' : 'inactive'
-        return (
-          r.name.toLowerCase().includes(q) ||
-          target.includes(q) ||
-          conditions.includes(q) ||
-          source.includes(q) ||
-          status.includes(q)
-        )
+        return r.name.toLowerCase().includes(q) || target.includes(q) || conditions.includes(q) || source.includes(q) || status.includes(q)
       })
     }
     return result
   }, [rules, ruleSearch, taxonomyNodes, sourceFilter])
 
-  // Check if a rule's conditions match a bucket's auto-filter conditions
-  const ruleMatchesBucketFilter = useCallback((rule: OverrideRule, bucketFilter: GroupedFilter): boolean => {
-    // Field-only matching: for each field used in the bucket filter,
-    // check if the rule has ANY condition on the same field (regardless of operator/value)
-    const bucketFields = new Set<string>()
-    for (const bucketGroup of bucketFilter.groups) {
-      for (const bucketCond of bucketGroup.conditions) {
-        if (bucketCond.field) bucketFields.add(bucketCond.field)
-      }
-    }
-    if (bucketFields.size === 0) return false
-
-    const ruleFields = new Set<string>()
-    for (const ruleGroup of (rule.groupedConditions?.groups ?? [])) {
-      for (const ruleCond of ruleGroup.conditions) {
-        if (ruleCond.field) ruleFields.add(ruleCond.field)
-      }
-    }
-
-    // Every field in the bucket filter must appear in the rule's conditions
-    for (const field of bucketFields) {
-      if (!ruleFields.has(field)) return false
-    }
-    return true
-  }, [])
-
-  const rulesByBucket = useMemo(() => {
+  // Group rules by groupId; ungrouped → UNGROUPED_ID
+  const rulesByGroup = useMemo(() => {
     const map = new Map<string, OverrideRule[]>()
-    const assigned = new Set<string>() // track rules already placed by auto-filter
-
-    for (const bucket of buckets) {
-      map.set(bucket.id, [])
-    }
-
-    // First pass: auto-filter buckets claim matching rules
-    for (const bucket of buckets) {
-      if (!bucket.groupedConditions) continue
-      for (const rule of filteredRules) {
-        if (ruleMatchesBucketFilter(rule, bucket.groupedConditions)) {
-          map.get(bucket.id)!.push(rule)
-          assigned.add(rule.id)
-        }
-      }
-    }
-
-    // Second pass: remaining rules go to their manually assigned bucket
+    for (const group of groups) map.set(group.id, [])
+    map.set(UNGROUPED_ID, [])
     for (const rule of filteredRules) {
-      if (assigned.has(rule.id)) continue
-      const list = map.get(rule.bucketId) ?? map.get(defaultBucketId)
-      if (list) list.push(rule)
-    }
-
-    // Sort each list by priorityScore
-    for (const list of map.values()) {
-      list.sort((a, b) => a.priorityScore - b.priorityScore)
+      const key = rule.groupId ?? UNGROUPED_ID
+      const list = map.get(key) ?? map.get(UNGROUPED_ID)!
+      if (!map.has(key)) map.set(UNGROUPED_ID, [...(map.get(UNGROUPED_ID) ?? []), rule])
+      else list.push(rule)
     }
     return map
-  }, [filteredRules, buckets, defaultBucketId, ruleMatchesBucketFilter])
+  }, [filteredRules, groups])
 
-  const toggleBucket = (bucketId: string) => {
-    setCollapsedBuckets(prev => {
+  const toggleGroup = (groupId: string) => {
+    setCollapsedGroups(prev => {
       const next = new Set(prev)
-      if (next.has(bucketId)) next.delete(bucketId)
-      else next.add(bucketId)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
       return next
     })
   }
@@ -559,13 +398,17 @@ export default function OverrideRulesPage() {
     )
   }
 
+  // Groups displayed highest priority first (already sorted by listGroups DESC)
+  // Ungrouped column is always last
+  const allColumnIds: string[] = [...groups.map(g => g.id), UNGROUPED_ID]
+
   return (
     <div className="space-y-4 p-6">
       {/* Header toolbar */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Override Rules</h2>
-          <p className="mt-1 text-sm text-gray-500">{rules.length} rules in {buckets.length} bucket{buckets.length !== 1 ? 's' : ''}</p>
+          <p className="mt-1 text-sm text-gray-500">{rules.length} rules in {groups.length} group{groups.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -586,17 +429,14 @@ export default function OverrideRulesPage() {
           {/* Collapse / Expand all */}
           <button
             onClick={() => {
-              const allCollapsed = collapsedBuckets.size === buckets.length
-              if (allCollapsed) {
-                setCollapsedBuckets(new Set())
-              } else {
-                setCollapsedBuckets(new Set(buckets.map(b => b.id)))
-              }
+              const allCollapsed = collapsedGroups.size === allColumnIds.length
+              if (allCollapsed) setCollapsedGroups(new Set())
+              else setCollapsedGroups(new Set(allColumnIds))
             }}
-            title={collapsedBuckets.size === buckets.length ? 'Expand all' : 'Collapse all'}
+            title={collapsedGroups.size === allColumnIds.length ? 'Expand all' : 'Collapse all'}
             className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
           >
-            {collapsedBuckets.size === buckets.length ? (
+            {collapsedGroups.size === allColumnIds.length ? (
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>
             ) : (
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 9L3.75 3.75M9 9H3.75M9 9V3.75m6 11.25l5.25 5.25M15 15h5.25M15 15v5.25" /></svg>
@@ -615,10 +455,10 @@ export default function OverrideRulesPage() {
             />
           </div>
           <button
-            onClick={() => setShowNewBucketInput(true)}
+            onClick={() => setShowNewGroupInput(true)}
             className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            + Bucket
+            + Group
           </button>
           <button onClick={() => openCreate()} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
             Add Rule
@@ -656,60 +496,68 @@ export default function OverrideRulesPage() {
               subtitle="Define when this override rule applies"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Name</label>
               <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Bucket</label>
-              <p className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                Auto-assigned based on conditions</p>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Group</label>
+              <select
+                value={editorGroupId ?? ''}
+                onChange={(e) => setEditorGroupId(e.target.value || null)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="">Ungrouped</option>
+                {groups.map(g => (
+                  <option key={g.id} value={g.id}>{g.name} (priority {g.priority})</option>
+                ))}
+              </select>
             </div>
-          </div>
-          <div ref={taxonomyDropdownRef} className="relative">
-            <label className="mb-1 block text-xs font-medium text-gray-600">Target Classification</label>
-            <button
-              type="button"
-              onClick={() => setTaxonomyDropdownOpen(!taxonomyDropdownOpen)}
-              className="flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm hover:border-gray-400"
-            >
-              <span className={targetNodeId ? 'text-gray-900 truncate' : 'text-gray-400'}>
-                {targetNodeId ? getNodePath(targetNodeId) : 'Select classification...'}
-              </span>
-              <svg className={`ml-2 h-4 w-4 shrink-0 text-gray-400 transition-transform ${taxonomyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
-            </button>
-            {taxonomyDropdownOpen && (
-              <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg">
-                <div className="border-b border-gray-100 p-2">
-                  <input
-                    value={taxonomySearch}
-                    onChange={(e) => setTaxonomySearch(e.target.value)}
-                    placeholder="Search taxonomy..."
-                    autoFocus
-                    className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  />
+            <div ref={taxonomyDropdownRef} className="relative">
+              <label className="mb-1 block text-xs font-medium text-gray-600">Target Classification</label>
+              <button
+                type="button"
+                onClick={() => setTaxonomyDropdownOpen(!taxonomyDropdownOpen)}
+                className="flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm hover:border-gray-400"
+              >
+                <span className={targetNodeId ? 'text-gray-900 truncate' : 'text-gray-400'}>
+                  {targetNodeId ? getNodePath(targetNodeId) : 'Select classification...'}
+                </span>
+                <svg className={`ml-2 h-4 w-4 shrink-0 text-gray-400 transition-transform ${taxonomyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+              </button>
+              {taxonomyDropdownOpen && (
+                <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg">
+                  <div className="border-b border-gray-100 p-2">
+                    <input
+                      value={taxonomySearch}
+                      onChange={(e) => setTaxonomySearch(e.target.value)}
+                      placeholder="Search taxonomy..."
+                      autoFocus
+                      className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </div>
+                  <ul className="max-h-48 overflow-y-auto py-1">
+                    {filteredTaxonomyNodes.length === 0 && (
+                      <li className="px-3 py-2 text-xs text-gray-400">No matches</li>
+                    )}
+                    {filteredTaxonomyNodes.map((n) => (
+                      <li
+                        key={n.id}
+                        onMouseDown={(e) => { e.preventDefault(); selectTaxonomyNode(n.id) }}
+                        className={`cursor-pointer px-3 py-1.5 text-xs leading-snug ${
+                          n.id === targetNodeId
+                            ? 'bg-blue-50 font-medium text-blue-700'
+                            : 'text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        {n.fullPath}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <ul className="max-h-48 overflow-y-auto py-1">
-                  {filteredTaxonomyNodes.length === 0 && (
-                    <li className="px-3 py-2 text-xs text-gray-400">No matches</li>
-                  )}
-                  {filteredTaxonomyNodes.map((n) => (
-                    <li
-                      key={n.id}
-                      onMouseDown={(e) => { e.preventDefault(); selectTaxonomyNode(n.id) }}
-                      className={`cursor-pointer px-3 py-1.5 text-xs leading-snug ${
-                        n.id === targetNodeId
-                          ? 'bg-blue-50 font-medium text-blue-700'
-                          : 'text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      {n.fullPath}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              )}
+            </div>
           </div>
           <div className="flex gap-2">
             <button onClick={handleSave} disabled={saving} className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
@@ -720,269 +568,296 @@ export default function OverrideRulesPage() {
         </div>
       )}
 
-      {/* Delete bucket confirmation */}
-      {deletingBucketId && (() => {
-        const bucket = buckets.find(b => b.id === deletingBucketId)
-        const ruleCount = rulesByBucket.get(deletingBucketId)?.length ?? 0
+      {/* Delete group confirmation */}
+      {deletingGroupId && (() => {
+        const group = groups.find(g => g.id === deletingGroupId)
+        const ruleCount = rulesByGroup.get(deletingGroupId)?.length ?? 0
         return (
           <div className="rounded-md border border-red-200 bg-red-50 p-4">
             <p className="text-sm text-red-700">
-              Delete bucket &ldquo;{bucket?.name}&rdquo;? {ruleCount > 0 ? `Its ${ruleCount} rule${ruleCount !== 1 ? 's' : ''} will be moved to the default bucket.` : ''}
+              Delete group &ldquo;{group?.name}&rdquo;? {ruleCount > 0 ? `Its ${ruleCount} rule${ruleCount !== 1 ? 's' : ''} will become ungrouped.` : ''}
             </p>
             <div className="mt-2 flex gap-2">
-              <button onClick={() => handleDeleteBucket(deletingBucketId)} className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700">Delete</button>
-              <button onClick={() => setDeletingBucketId(null)} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
+              <button onClick={() => handleDeleteGroup(deletingGroupId)} className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700">Delete</button>
+              <button onClick={() => setDeletingGroupId(null)} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
             </div>
           </div>
         )
       })()}
 
-      {/* No bucket match prompt */}
-      {showNoBucketMatch && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm text-amber-800">
-            No existing bucket's auto-filter matches this rule's conditions. Would you like to create a new bucket for it?
-          </p>
-          <div className="mt-2 flex gap-2">
-            <button onClick={handleCreateBucketFromPrompt} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Create Bucket</button>
-            <button onClick={() => { setShowNoBucketMatch(false); setPendingRuleConditions(null); }} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">Skip</button>
-          </div>
-        </div>
-      )}
-
       {/* Kanban board */}
       <div className="flex gap-4 overflow-x-auto pb-4" style={{ minHeight: 'calc(100vh - 280px)' }}>
-        {buckets.map((bucket, bucketIndex) => {
-          const bucketRules = rulesByBucket.get(bucket.id) ?? []
-          // Hide empty buckets when searching
-          if (ruleSearch.trim() && bucketRules.length === 0) return null
+        {/* Named groups (sorted by priority DESC, highest first) */}
+        {groups.map((group) => {
+          const groupRules = rulesByGroup.get(group.id) ?? []
+          if (ruleSearch.trim() && groupRules.length === 0) return null
 
           return (
             <div
-              key={bucket.id}
+              key={group.id}
               className="flex w-80 min-w-[320px] shrink-0 flex-col rounded-xl border border-gray-200 bg-gray-50"
             >
               {/* Column header */}
               <div
                 draggable
-                onDragStart={(e) => handleBucketDragStart(e, bucket.id)}
-                onDragEnd={handleBucketDragEnd}
-                onDragOver={handleBucketDragOver}
-                onDrop={(e) => handleBucketDrop(e, bucket.id)}
-                className="flex flex-col gap-1.5 rounded-t-xl bg-white px-3 py-3 border-b border-gray-200 cursor-grab active:cursor-grabbing select-none"
+                onDragStart={(e) => handleGroupDragStart(e, group.id)}
+                onDragEnd={handleGroupDragEnd}
+                onDragOver={handleGroupDragOver}
+                onDrop={(e) => handleGroupDrop(e, group.id)}
+                className="flex flex-col gap-1 rounded-t-xl bg-white px-3 py-3 border-b border-gray-200 cursor-grab active:cursor-grabbing select-none"
               >
                 <div className="flex items-center gap-2">
-                  {/* Drag handle */}
                   <svg className="h-3.5 w-3.5 text-gray-300 hover:text-gray-500 shrink-0" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
 
-                  {/* Bucket name */}
-                  {editingBucketId === bucket.id ? (
+                  {editingGroupId === group.id ? (
                     <input
                       autoFocus
-                      value={editingBucketName}
-                      onChange={(e) => setEditingBucketName(e.target.value)}
-                      onBlur={() => handleRenameBucket(bucket.id)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleRenameBucket(bucket.id); if (e.key === 'Escape') setEditingBucketId(null); }}
+                      value={editingGroupName}
+                      onChange={(e) => setEditingGroupName(e.target.value)}
+                      onBlur={() => handleRenameGroup(group.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleRenameGroup(group.id); if (e.key === 'Escape') setEditingGroupId(null); }}
                       className="min-w-0 flex-1 rounded border border-blue-300 px-1.5 py-0.5 text-xs font-semibold text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-400"
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : (
                     <span
                       className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-800"
-                      onDoubleClick={() => { setEditingBucketId(bucket.id); setEditingBucketName(bucket.name); }}
-                      title={bucket.name}
+                      onDoubleClick={() => { setEditingGroupId(group.id); setEditingGroupName(group.name); }}
+                      title={group.name}
                     >
-                      {bucket.name}
+                      {group.name}
                     </span>
                   )}
 
-                  {/* Count + priority */}
                   <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-[9px] font-medium text-gray-600 shrink-0">
-                    {bucketRules.length}
+                    {groupRules.length}
                   </span>
-                  <span className="text-[9px] text-gray-400 shrink-0" title="Evaluation order">#{bucketIndex + 1}</span>
+                  <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-medium text-indigo-600 shrink-0" title="Priority — higher = evaluated first">
+                    P{group.priority}
+                  </span>
                 </div>
-
-                {/* Auto-filter + actions row */}
-                <div className="flex items-center gap-1">
-                  {bucket.groupedConditions && (
-                    <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-medium text-indigo-600 truncate max-w-[160px]" title={formatGroupedFilter(bucket.groupedConditions)}>
-                      {formatGroupedFilter(bucket.groupedConditions)}
-                    </span>
-                  )}
-                  <div className="flex-1" />
+                <div className="flex items-center justify-end gap-1">
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setEditingBucketConditionsId(bucket.id)
-                      setEditingBucketConditionsData(bucket.groupedConditions ?? { groupConnector: 'AND', groups: [makeEmptyGroup()] })
-                    }}
-                    className={`rounded p-0.5 ${bucket.groupedConditions ? 'text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
-                    title={bucket.groupedConditions ? 'Edit auto-filter' : 'Add auto-filter'}
+                    onClick={() => openCreate(group.id)}
+                    className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    title="Add rule to this group"
                   >
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z" /></svg>
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                   </button>
                   <button
-                    onClick={() => { setEditingBucketId(bucket.id); setEditingBucketName(bucket.name); }}
+                    onClick={() => { setEditingGroupId(group.id); setEditingGroupName(group.name); }}
                     className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                     title="Rename"
                   >
                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
                   </button>
-                  {!bucket.isDefault && (
-                    <button
-                      onClick={() => setDeletingBucketId(bucket.id)}
-                      className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                      title="Delete"
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setDeletingGroupId(group.id)}
+                    className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    title="Delete group"
+                  >
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                  </button>
                 </div>
               </div>
-
-              {/* Inline bucket conditions editor */}
-              {editingBucketConditionsId === bucket.id && (
-                <div className="border-b border-gray-200 bg-white px-2 py-2 space-y-1.5">
-                  <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Auto-filter conditions</p>
-                  <GroupedFilterBuilder
-                    value={editingBucketConditionsData}
-                    onChange={setEditingBucketConditionsData}
-                    availableFields={filterFields}
-                  />
-                  <div className="flex gap-1.5 pt-1">
-                    <button
-                      onClick={() => handleUpdateBucketConditions(bucket.id, editingBucketConditionsData)}
-                      className="rounded-md bg-blue-600 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-blue-700"
-                    >Save</button>
-                    <button
-                      onClick={() => handleUpdateBucketConditions(bucket.id, null)}
-                      className="rounded-md border border-gray-300 px-2.5 py-1 text-[10px] text-gray-600 hover:bg-gray-50"
-                    >Clear</button>
-                    <button
-                      onClick={() => setEditingBucketConditionsId(null)}
-                      className="rounded-md border border-gray-300 px-2.5 py-1 text-[10px] text-gray-600 hover:bg-gray-50"
-                    >Cancel</button>
-                  </div>
-                </div>
-              )}
 
               {/* Card list */}
-              <div
-                className="flex-1 space-y-2 overflow-y-auto p-2"
-                style={{ maxHeight: 'calc(100vh - 340px)' }}
-                onDragOver={(e) => { if (dragTypeRef.current === 'rule') { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
-                onDrop={(e) => handleRuleDropOnBucket(e, bucket.id)}
-              >
-                {bucketRules.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-gray-300 px-3 py-8 text-center text-[11px] text-gray-400">
-                    Drop rules here
-                  </div>
-                )}
-                {bucketRules.map((rule) => (
-                  <div
-                    key={rule.id}
-                    draggable
-                    onDragStart={(e) => handleRuleDragStart(e, rule.id, bucket.id)}
-                    onDragEnd={handleRuleDragEnd}
-                    onDragOver={handleRuleDragOver}
-                    onDrop={(e) => handleRuleDropOnRule(e, rule, bucketRules.map(r => r.id))}
-                    className="group cursor-grab rounded-lg border border-gray-200 bg-white p-2.5 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
-                  >
-                    {/* Card header: name + actions */}
-                    <div className="flex items-start gap-1.5">
-                      <svg className="mt-0.5 h-3 w-3 shrink-0 text-gray-300 group-hover:text-gray-400" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
-                      <span className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-900" title={rule.name}>
-                        {rule.name}
-                      </span>
-                      <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => openEdit(rule)} className="rounded p-0.5 text-blue-500 hover:bg-blue-50" title="Edit">
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
-                        </button>
-                        <button onClick={() => handleDelete(rule.id)} className="rounded p-0.5 text-red-400 hover:bg-red-50" title="Delete">
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                        </button>
-                      </div>
+              {!collapsedGroups.has(group.id) && (
+                <div
+                  className="flex-1 space-y-2 overflow-y-auto p-2"
+                  style={{ maxHeight: 'calc(100vh - 340px)' }}
+                  onDragOver={(e) => { if (dragTypeRef.current === 'rule') { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
+                  onDrop={(e) => handleRuleDropOnGroup(e, group.id)}
+                >
+                  {groupRules.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-gray-300 px-3 py-8 text-center text-[11px] text-gray-400">
+                      Drop rules here
                     </div>
-
-                    {/* Conditions summary */}
-                    <p className="mt-1 text-[10px] leading-tight text-gray-500 line-clamp-2">
-                      {formatConditionSummary(rule)}
-                    </p>
-
-                    {/* Target + badges */}
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                      <span className="truncate rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-medium text-blue-700 max-w-[200px]" title={getNodePath(rule.targetTaxonomyNodeId)}>
-                        {getNodePath(rule.targetTaxonomyNodeId)}
-                      </span>
-                      <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                        rule.source === 'auto_generated'
-                          ? 'bg-purple-50 text-purple-600'
-                          : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {rule.source === 'auto_generated' ? 'Auto' : 'Manual'}
-                      </span>
-                      <button
-                        onClick={() => handleToggle(rule)}
-                        className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                          rule.isActive
-                            ? 'bg-green-50 text-green-600'
-                            : 'bg-gray-100 text-gray-400'
-                        }`}
-                      >
-                        {rule.isActive ? 'Active' : 'Inactive'}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  )}
+                  {groupRules.map((rule) => (
+                    <RuleCard
+                      key={rule.id}
+                      rule={rule}
+                      getNodePath={getNodePath}
+                      formatConditionSummary={formatConditionSummary}
+                      onEdit={openEdit}
+                      onDelete={handleDelete}
+                      onToggle={handleToggle}
+                      onDragStart={(e) => handleRuleDragStart(e, rule.id, group.id)}
+                      onDragEnd={handleRuleDragEnd}
+                      onDragOver={handleRuleDragOver}
+                      expandedConditions={expandedConditions}
+                      setExpandedConditions={setExpandedConditions}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )
         })}
 
-        {/* Add bucket column */}
-        {showNewBucketInput ? (
+        {/* Ungrouped column — always last, not draggable */}
+        {(() => {
+          const ungroupedRules = rulesByGroup.get(UNGROUPED_ID) ?? []
+          if (ruleSearch.trim() && ungroupedRules.length === 0) return null
+          return (
+            <div className="flex w-80 min-w-[320px] shrink-0 flex-col rounded-xl border border-dashed border-gray-300 bg-gray-50/60">
+              <div
+                className="flex items-center gap-2 rounded-t-xl bg-white/80 px-3 py-3 border-b border-gray-200 select-none"
+                onDragOver={(e) => { if (dragTypeRef.current === 'rule') { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
+                onDrop={(e) => handleRuleDropOnGroup(e, null)}
+              >
+                <span className="min-w-0 flex-1 text-xs font-semibold text-gray-400">Ungrouped</span>
+                <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-[9px] font-medium text-gray-500 shrink-0">
+                  {ungroupedRules.length}
+                </span>
+                <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 shrink-0" title="Ungrouped rules are evaluated last">
+                  last
+                </span>
+              </div>
+              {!collapsedGroups.has(UNGROUPED_ID) && (
+                <div
+                  className="flex-1 space-y-2 overflow-y-auto p-2"
+                  style={{ maxHeight: 'calc(100vh - 340px)' }}
+                  onDragOver={(e) => { if (dragTypeRef.current === 'rule') { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
+                  onDrop={(e) => handleRuleDropOnGroup(e, null)}
+                >
+                  {ungroupedRules.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-gray-200 px-3 py-8 text-center text-[11px] text-gray-400">
+                      Drop rules here to ungroup
+                    </div>
+                  )}
+                  {ungroupedRules.map((rule) => (
+                    <RuleCard
+                      key={rule.id}
+                      rule={rule}
+                      getNodePath={getNodePath}
+                      formatConditionSummary={formatConditionSummary}
+                      onEdit={openEdit}
+                      onDelete={handleDelete}
+                      onToggle={handleToggle}
+                      onDragStart={(e) => handleRuleDragStart(e, rule.id, null)}
+                      onDragEnd={handleRuleDragEnd}
+                      onDragOver={handleRuleDragOver}
+                      expandedConditions={expandedConditions}
+                      setExpandedConditions={setExpandedConditions}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
+        {/* Add group column */}
+        {showNewGroupInput ? (
           <div className="flex w-80 min-w-[320px] shrink-0 flex-col rounded-xl border border-dashed border-gray-300 bg-gray-50 overflow-hidden">
             <div className="border-b border-gray-200 bg-white px-3 py-2.5 space-y-2">
               <input
                 autoFocus
-                value={newBucketName}
-                onChange={(e) => setNewBucketName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && newBucketName.trim()) handleCreateBucket(); if (e.key === 'Escape') { setShowNewBucketInput(false); setNewBucketName(''); } }}
-                placeholder="Bucket name..."
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setShowNewGroupInput(false); setNewGroupName(''); setNewGroupPriority('') } }}
+                placeholder="Group name..."
+                className="w-full rounded border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              <input
+                value={newGroupPriority}
+                onChange={(e) => setNewGroupPriority(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && newGroupName.trim()) handleCreateGroup() }}
+                placeholder="Priority (integer ≥ 1, higher = applied first)..."
+                type="number"
+                min={1}
                 className="w-full rounded border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
               />
               <div className="flex gap-1.5">
-                <button onClick={handleCreateBucket} className="flex-1 rounded-md bg-blue-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Create</button>
-                <button onClick={() => { setShowNewBucketInput(false); setNewBucketName(''); setNewBucketConditions({ groupConnector: 'AND', groups: [makeEmptyGroup()] }); }} className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
+                <button onClick={handleCreateGroup} className="flex-1 rounded-md bg-blue-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Create</button>
+                <button onClick={() => { setShowNewGroupInput(false); setNewGroupName(''); setNewGroupPriority('') }} className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
               </div>
-            </div>
-            {/* Inline condition builder */}
-            <div className="flex-1 overflow-y-auto p-2">
-              <p className="mb-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide">Auto-filter conditions</p>
-              <GroupedFilterBuilder
-                value={newBucketConditions}
-                onChange={setNewBucketConditions}
-                availableFields={filterFields}
-              />
             </div>
           </div>
         ) : (
           <button
-            onClick={() => setShowNewBucketInput(true)}
+            onClick={() => setShowNewGroupInput(true)}
             className="flex w-16 min-w-[64px] shrink-0 items-center justify-center rounded-xl border border-dashed border-gray-300 text-gray-400 hover:border-gray-400 hover:text-gray-500 hover:bg-gray-50 transition-colors"
-            title="Add bucket"
+            title="Add group"
           >
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
           </button>
         )}
       </div>
 
-      {rules.length === 0 && buckets.length <= 1 && (
+      {rules.length === 0 && groups.length === 0 && (
         <div className="text-center py-8 text-gray-500 text-sm">
-          No override rules yet. Create buckets to organize your rules, then add rules to classify vendors.
+          No override rules yet. Create groups to organize your rules, then add rules to classify vendors.
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── RuleCard component ───────────────────────────────────────────────────────
+
+interface RuleCardProps {
+  rule: OverrideRule
+  getNodePath: (id: string) => string
+  formatConditionSummary: (rule: OverrideRule) => string
+  onEdit: (rule: OverrideRule) => void
+  onDelete: (id: string) => void
+  onToggle: (rule: OverrideRule) => void
+  onDragStart: (e: React.DragEvent) => void
+  onDragEnd: (e: React.DragEvent) => void
+  onDragOver: (e: React.DragEvent) => void
+  expandedConditions: Set<string>
+  setExpandedConditions: React.Dispatch<React.SetStateAction<Set<string>>>
+}
+
+function RuleCard({ rule, getNodePath, formatConditionSummary, onEdit, onDelete, onToggle, onDragStart, onDragEnd, onDragOver, expandedConditions, setExpandedConditions }: RuleCardProps) {
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      className="group cursor-grab rounded-lg border border-gray-200 bg-white p-2.5 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
+    >
+      <div className="flex items-start gap-1.5">
+        <svg className="mt-0.5 h-3 w-3 shrink-0 text-gray-300 group-hover:text-gray-400" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-900" title={rule.name}>
+          {rule.name}
+        </span>
+        <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={() => onEdit(rule)} className="rounded p-0.5 text-blue-500 hover:bg-blue-50" title="Edit">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
+          </button>
+          <button onClick={() => onDelete(rule.id)} className="rounded p-0.5 text-red-400 hover:bg-red-50" title="Delete">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+          </button>
+        </div>
+      </div>
+
+      <p className="mt-1 text-[10px] leading-tight text-gray-500 line-clamp-2">
+        {formatConditionSummary(rule)}
+      </p>
+
+      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        <span className="truncate rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-medium text-blue-700 max-w-[200px]" title={getNodePath(rule.targetTaxonomyNodeId)}>
+          {getNodePath(rule.targetTaxonomyNodeId)}
+        </span>
+        <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${
+          rule.source === 'auto_generated' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-500'
+        }`}>
+          {rule.source === 'auto_generated' ? 'Auto' : 'Manual'}
+        </span>
+        <button
+          onClick={() => onToggle(rule)}
+          className={`rounded px-1 py-0.5 text-[9px] font-medium ${
+            rule.isActive ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'
+          }`}
+        >
+          {rule.isActive ? 'Active' : 'Inactive'}
+        </button>
+      </div>
     </div>
   )
 }

@@ -36,7 +36,7 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents', 'rule_buckets'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents', 'rule_groups'];
 
 export { convertPlaceholders };
 
@@ -284,59 +284,74 @@ export class DuckDBDatabase implements Database {
       await this.exec("ALTER TABLE override_rules ADD COLUMN source VARCHAR DEFAULT 'manual'");
     }
 
-    // Migrate: create rule_buckets table and add bucket_id to override_rules
-    const ruleBucketsExists = await this.all<{ table_name: string }>(
-      "SELECT table_name FROM information_schema.tables WHERE table_name = 'rule_buckets'"
+    // Migrate: create rule_groups table (replaces rule_buckets)
+    const ruleGroupsExists = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_name = 'rule_groups'"
     );
-    if (ruleBucketsExists.length === 0) {
+    if (ruleGroupsExists.length === 0) {
       await this.exec(`
-        CREATE TABLE rule_buckets (
+        CREATE TABLE rule_groups (
           id VARCHAR PRIMARY KEY,
           name VARCHAR NOT NULL,
-          sort_order INTEGER NOT NULL,
-          is_default BOOLEAN DEFAULT FALSE,
-          grouped_conditions JSON,
+          priority INTEGER NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE UNIQUE INDEX idx_rule_groups_priority ON rule_groups(priority);
+      `);
+
+      // Migrate non-default buckets from rule_buckets if that table exists
+      const ruleBucketsExists = await this.all<{ table_name: string }>(
+        "SELECT table_name FROM information_schema.tables WHERE table_name = 'rule_buckets'"
+      );
+      if (ruleBucketsExists.length > 0) {
+        // seed priority from sort_order + 1 to ensure >= 1
+        await this.exec(`
+          INSERT INTO rule_groups (id, name, priority, created_at)
+          SELECT id, name, sort_order + 1, created_at
+          FROM rule_buckets
+          WHERE is_default = FALSE
+        `);
+      }
+    }
+
+    // Migrate: replace bucket_id + priority columns on override_rules with group_id
+    const overrideRuleCols = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules'"
+    );
+    const colNames = overrideRuleCols.map((r) => r.column_name);
+    const hasBucketId = colNames.includes('bucket_id');
+    const hasPriority = colNames.includes('priority');
+
+    if (hasBucketId || hasPriority) {
+      // Recreate table with new schema; all rules migrate to group_id = NULL (ungrouped)
+      const hasGroupedCond = colNames.includes('grouped_conditions');
+      const gcSelect = hasGroupedCond ? 'grouped_conditions' : "'{}'";
+      await this.exec(`
+        CREATE TABLE override_rules_groups_migration (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL,
+          grouped_conditions JSON NOT NULL,
+          target_taxonomy_node_id VARCHAR NOT NULL,
+          group_id VARCHAR,
+          is_active BOOLEAN DEFAULT TRUE,
+          source VARCHAR DEFAULT 'manual',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO override_rules_groups_migration
+          SELECT id, name, ${gcSelect}, target_taxonomy_node_id, NULL AS group_id,
+                 is_active, COALESCE(source, 'manual'), created_at
+          FROM override_rules;
+        DROP TABLE override_rules;
+        ALTER TABLE override_rules_groups_migration RENAME TO override_rules;
       `);
     }
 
-    // Ensure a default bucket exists
-    const defaultBucket = await this.all<{ id: string }>(
-      "SELECT id FROM rule_buckets WHERE is_default = TRUE"
-    );
-    let defaultBucketId: string;
-    if (defaultBucket.length === 0) {
-      const { v4: uuidv4 } = await import('uuid');
-      defaultBucketId = uuidv4();
-      await this.run(
-        "INSERT INTO rule_buckets (id, name, sort_order, is_default) VALUES (?, 'General Rules', 0, TRUE)",
-        defaultBucketId
-      );
-    } else {
-      defaultBucketId = defaultBucket[0].id;
-    }
-
-    // Migrate: add bucket_id column to override_rules if missing
-    const bucketIdCol = await this.all<{ column_name: string }>(
-      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'bucket_id'"
-    );
-    if (bucketIdCol.length === 0) {
-      await this.exec("ALTER TABLE override_rules ADD COLUMN bucket_id VARCHAR");
-    }
-
-    // Assign all rules without a bucket to the default bucket
-    await this.run(
-      "UPDATE override_rules SET bucket_id = ? WHERE bucket_id IS NULL",
-      defaultBucketId
-    );
-
-    // Migrate: add grouped_conditions column to rule_buckets if missing
-    const bucketConditionsCol = await this.all<{ column_name: string }>(
-      "SELECT column_name FROM information_schema.columns WHERE table_name = 'rule_buckets' AND column_name = 'grouped_conditions'"
-    );
-    if (bucketConditionsCol.length === 0) {
-      await this.exec("ALTER TABLE rule_buckets ADD COLUMN grouped_conditions JSON");
+    // Ensure group_id column exists (handles projects created after bucket removal but before this migration)
+    const hasGroupId = (await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'group_id'"
+    )).length > 0;
+    if (!hasGroupId) {
+      await this.exec('ALTER TABLE override_rules ADD COLUMN group_id VARCHAR');
     }
   }
 
@@ -443,22 +458,21 @@ export class DuckDBDatabase implements Database {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      CREATE TABLE IF NOT EXISTS rule_buckets (
+      CREATE TABLE IF NOT EXISTS rule_groups (
         id VARCHAR PRIMARY KEY,
         name VARCHAR NOT NULL,
-        sort_order INTEGER NOT NULL,
-        is_default BOOLEAN DEFAULT FALSE,
-        grouped_conditions JSON,
+        priority INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_groups_priority ON rule_groups(priority);
 
       CREATE TABLE IF NOT EXISTS override_rules (
         id VARCHAR PRIMARY KEY,
         name VARCHAR NOT NULL,
         grouped_conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
-        priority INTEGER NOT NULL,
-        bucket_id VARCHAR,
+        group_id VARCHAR,
         is_active BOOLEAN DEFAULT TRUE,
         source VARCHAR DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

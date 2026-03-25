@@ -7,8 +7,7 @@ export interface OverrideRule {
   name: string;
   groupedConditions: GroupedFilter;
   targetTaxonomyNodeId: string;
-  priorityScore: number;
-  bucketId: string;
+  groupId: string | null;
   isActive: boolean;
   source: RuleSource;
   createdAt: string;
@@ -18,8 +17,7 @@ export interface OverrideRuleCreate {
   name: string;
   groupedConditions: GroupedFilter;
   targetTaxonomyNodeId: string;
-  priorityScore?: number;
-  bucketId?: string;
+  groupId?: string | null;
   source?: RuleSource;
 }
 
@@ -27,8 +25,7 @@ export interface OverrideRuleUpdate {
   name?: string;
   groupedConditions?: GroupedFilter;
   targetTaxonomyNodeId?: string;
-  priorityScore?: number;
-  bucketId?: string;
+  groupId?: string | null;
   isActive?: boolean;
 }
 
@@ -37,25 +34,22 @@ export interface GenerateRulesResult {
   suppliersProcessed: number;
 }
 
-// ─── Rule Buckets ────────────────────────────────────────────────────────────
+// ─── Rule Groups ─────────────────────────────────────────────────────────────
 
-export interface RuleBucket {
+export interface RuleGroup {
   id: string;
   name: string;
-  sortOrder: number;
-  isDefault: boolean;
-  groupedConditions: GroupedFilter | null;
+  priority: number;       // >= 1; higher = evaluated first
   createdAt: string;
+  ruleCount: number;
 }
 
-export interface RuleBucketCreate {
+export interface RuleGroupCreate {
   name: string;
-  sortOrder?: number;
-  groupedConditions?: GroupedFilter;
+  priority: number;
 }
 
-export interface RuleBucketUpdate {
+export interface RuleGroupUpdate {
   name?: string;
-  sortOrder?: number;
-  groupedConditions?: GroupedFilter | null;
+  priority?: number;
 }

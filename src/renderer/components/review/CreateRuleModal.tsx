@@ -64,7 +64,6 @@ export default function CreateRuleModal({
   onCreated,
 }: CreateRuleModalProps) {
   const [name, setName] = useState('')
-  const [priority, setPriority] = useState(100)
   const [targetNodeId, setTargetNodeId] = useState('')
   const [grouped, setGrouped] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
   const [saving, setSaving] = useState(false)
@@ -87,7 +86,6 @@ export default function CreateRuleModal({
 
   // Refs for keyboard navigation
   const nameInputRef = useRef<HTMLInputElement>(null)
-  const priorityInputRef = useRef<HTMLInputElement>(null)
   const taxonomyBtnRef = useRef<HTMLButtonElement>(null)
   const taxonomySearchRef = useRef<HTMLInputElement>(null)
   const editConditionsBtnRef = useRef<HTMLButtonElement>(null)
@@ -117,7 +115,6 @@ export default function CreateRuleModal({
     prevOpenRef.current = isOpen
     if (!justOpened) return
     setName('')
-    setPriority(100)
     setTargetNodeId('')
     setError(null)
     setSaving(false)
@@ -180,7 +177,6 @@ export default function CreateRuleModal({
         name: name.trim(),
         groupedConditions: grouped,
         targetTaxonomyNodeId: targetNodeId,
-        priorityScore: priority,
       })
       onCreated?.()
       setSuccessMessage(`Rule "${name.trim()}" created successfully!`)
@@ -193,7 +189,7 @@ export default function CreateRuleModal({
       setError(e instanceof Error ? e.message : 'Failed to create rule')
       setSaving(false)
     }
-  }, [conditionCount, name, targetNodeId, grouped, priority, onCreated, onClose])
+  }, [conditionCount, name, targetNodeId, grouped, onCreated, onClose])
 
   // Taxonomy dropdown keyboard handling
   const handleTaxonomySearchKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -321,30 +317,17 @@ export default function CreateRuleModal({
           {/* Divider */}
           <div className="border-t border-gray-100" />
 
-          {/* Rule Name + Priority — same row */}
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label htmlFor="rule-name" className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
-              <input
-                id="rule-name"
-                ref={nameInputRef}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. IT Software suppliers"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
-            <div style={{ width: 100 }}>
-              <label htmlFor="rule-priority" className="mb-1 block text-xs font-medium text-gray-600">Priority</label>
-              <input
-                id="rule-priority"
-                ref={priorityInputRef}
-                type="number"
-                value={priority}
-                onChange={(e) => setPriority(Number(e.target.value))}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
+          {/* Rule Name */}
+          <div>
+            <label htmlFor="rule-name" className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
+            <input
+              id="rule-name"
+              ref={nameInputRef}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. IT Software suppliers"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
           </div>
 
           {/* Target Classification */}

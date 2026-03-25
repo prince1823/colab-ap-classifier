@@ -6,7 +6,7 @@ import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSour
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
-import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
+import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress, CategorySelectionInput, L3ClassificationInput } from './classification';
 import type { FeedbackAgentInput, FeedbackRecommendation } from './feedback';
 
 // ─── LLM Config ──────────────────────────────────────────────────────────────
@@ -104,7 +104,10 @@ export interface WebSearch {
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 export interface ClassificationAgent {
-  classifyInvoiceGroup(input: ClassificationInput): Promise<ClassificationResult>;
+  selectCategories(input: CategorySelectionInput): Promise<Map<number, string>>;
+  classifyL3(input: L3ClassificationInput): Promise<ClassificationResult>;
+  /** Backward compat wrapper — calls selectCategories + classifyL3 */
+  classifyTransactionGroup(input: ClassificationInput): Promise<ClassificationResult>;
 }
 
 export interface ResearchAgent {
@@ -236,16 +239,16 @@ export interface SupplierResearcher {
 export interface ClassificationRunner {
   classifyAll(conditions?: FilterCondition[]): Promise<void>;
   getScopeCount(conditions?: FilterCondition[]): Promise<number>;
-  classifySupplier(projectSupplierId: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], scopedTxnIds?: Set<string>): Promise<void>;
+  classifySupplierTransactions(projectSupplierId: string, categoryPath: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], scopedTxnIds?: Set<string>): Promise<void>;
   getIsRunning(): boolean;
-  cancel(): Promise<void>;
+  stop(): Promise<void>;
 }
 
 export interface QCRunner {
   runQC(filter?: TransactionFilter): Promise<void>;
   getSupplierCount(filter?: TransactionFilter): Promise<number>;
   getIsRunning(): boolean;
-  cancel(): void;
+  stop(): void;
 }
 
 // ─── Upload Record ───────────────────────────────────────────────────────────

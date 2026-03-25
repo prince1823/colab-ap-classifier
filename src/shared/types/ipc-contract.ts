@@ -67,13 +67,13 @@ export interface IPCInvokeMap {
 
   // Classification
   'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
-  'classification:cancel':     { args: []; result: void };
+  'classification:stop':       { args: []; result: void };
   'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
 
   // QC
   'qc:start':     { args: [filter?: TransactionFilter]; result: void };
   'qc:count':     { args: [filter?: TransactionFilter]; result: number };
-  'qc:cancel':    { args: []; result: void };
+  'qc:stop':      { args: []; result: void };
   'qc:isRunning': { args: []; result: boolean };
 
   // Taxonomy

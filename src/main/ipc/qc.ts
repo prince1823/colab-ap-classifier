@@ -22,8 +22,8 @@ export function registerQCHandlers(qc: QCRunner, eventBus: EventBus): void {
     });
   });
 
-  registerHandler('qc:cancel', async () => {
-    qc.cancel();
+  registerHandler('qc:stop', async () => {
+    qc.stop();
   });
 
   registerHandler('qc:isRunning', async () => {

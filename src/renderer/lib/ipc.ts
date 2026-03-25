@@ -70,7 +70,7 @@ export const ipc = {
   // ── Classification (3 channels + 1 event) ──
   classification: {
     start: (conditions?: FilterCondition[]) => invoke('classification:start', conditions),
-    cancel: () => invoke('classification:cancel'),
+    stop: () => invoke('classification:stop'),
     scopeCount: (conditions?: FilterCondition[]) => invoke('classification:scopeCount', conditions),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on('classification:progress', callback),
@@ -80,7 +80,7 @@ export const ipc = {
   qc: {
     count: (filter?: TransactionFilter) => invoke('qc:count', filter),
     start: (filter?: TransactionFilter) => invoke('qc:start', filter),
-    cancel: () => invoke('qc:cancel'),
+    stop: () => invoke('qc:stop'),
     isRunning: () => invoke('qc:isRunning'),
     onProgress: (callback: (progress: QCProgress) => void) =>
       on('qc:progress', callback),

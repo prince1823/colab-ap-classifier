@@ -34,12 +34,28 @@ export interface ResearchProgress {
 }
 
 export interface ClassificationProgress {
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'stopped';
   totalSuppliers: number;
   processedSuppliers: number;
   percentage: number;
   currentSupplier: string | null;
   currentStep: string;
+}
+
+export interface CategorySelectionInput {
+  suppliers: Array<{ name: string; research: SupplierInfo | null; parentName: string | null }>;
+  taxonomy: TaxonomyNode[];
+  companyContext: CompanyContext;
+}
+
+export interface L3ClassificationInput {
+  categoryPath: string;
+  l3Taxonomy: TaxonomyNode[];
+  transactions: Array<Record<string, unknown>>;
+  columnPriorities: string[];
+  companyContext: CompanyContext;
+  supplierName: string;
+  supplierType: string | null;
 }
 
 export interface ClassificationInput {

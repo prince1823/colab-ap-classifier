@@ -20,8 +20,8 @@ export function registerClassificationHandlers(classifier: ClassificationRunner,
     });
   });
 
-  registerHandler('classification:cancel', async () => {
-    await classifier.cancel();
+  registerHandler('classification:stop', async () => {
+    await classifier.stop();
   });
 
   registerHandler('classification:scopeCount', async (_event, ...args: unknown[]) => {

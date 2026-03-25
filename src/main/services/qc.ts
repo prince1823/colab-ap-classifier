@@ -34,7 +34,7 @@ export class QCRunner implements IQCRunner {
     return this.isRunningFlag;
   }
 
-  cancel(): void {
+  stop(): void {
     this.isCancelled = true;
   }
 

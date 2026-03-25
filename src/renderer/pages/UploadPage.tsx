@@ -89,15 +89,17 @@ export default function UploadPage() {
     setError(null)
     setImportProgress(null)
     try {
-      // Fire-and-forget — completion handled by ingest:progress event listener
-      await ipc.ingest.importCSV(filePath, toSimpleMapping(mapping))
-      // Derive and save column_priorities so classification can run
+      // Save column_priorities BEFORE firing import — invariant 5.
+      // The mapping is finalized here; do NOT move this into the progress 'completed' handler.
       const required = REQUIRED_COLS.filter((col) => mapping[col]?.csvColumn)
       const optional = Object.entries(mapping)
         .filter(([name, e]) => !REQUIRED_COLS.includes(name) && e.classificationPriority && e.classificationPriority > 0)
         .sort(([, a], [, b]) => (a.classificationPriority ?? 99) - (b.classificationPriority ?? 99))
         .map(([name]) => name)
       await ipc.project.setSetting('column_priorities', [...required, ...optional])
+
+      // Fire-and-forget — completion handled by ingest:progress event listener
+      await ipc.ingest.importCSV(filePath, toSimpleMapping(mapping))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
       setImporting(false)

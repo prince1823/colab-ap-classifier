@@ -110,9 +110,9 @@ export class SupplierService implements ISupplierService {
       nameToSupplierId.set(row.original_supplier_name, supplierId);
     }
 
-    // Bulk UPDATE using a temp table instead of one UPDATE per supplier name
-    await this.db.exec('CREATE TEMP TABLE IF NOT EXISTS _norm_map (original_name VARCHAR, supplier_id VARCHAR)');
-    await this.db.exec('DELETE FROM _norm_map');
+    // Bulk UPDATE using a per-call temp table to avoid collisions if imports overlap
+    const tmpTable = `_norm_map_${uuidv4().replace(/-/g, '')}`;
+    await this.db.exec(`CREATE TEMP TABLE ${tmpTable} (original_name VARCHAR, supplier_id VARCHAR)`);
 
     try {
       // Insert mappings into temp table in chunks
@@ -124,19 +124,19 @@ export class SupplierService implements ISupplierService {
         const valueRows = chunk.map(([name, sid]) =>
           `('${name.replace(/'/g, "''")}', '${sid.replace(/'/g, "''")}')`
         ).join(',\n');
-        await this.db.exec(`INSERT INTO _norm_map (original_name, supplier_id) VALUES ${valueRows}`);
+        await this.db.exec(`INSERT INTO ${tmpTable} (original_name, supplier_id) VALUES ${valueRows}`);
       }
 
       // Single bulk UPDATE from temp table
       await this.db.exec(`
         UPDATE transactions
         SET project_supplier_id = m.supplier_id
-        FROM _norm_map m
+        FROM ${tmpTable} m
         WHERE transactions.original_supplier_name = m.original_name
           AND transactions.project_supplier_id IS NULL
       `);
     } finally {
-      try { await this.db.exec('DROP TABLE IF EXISTS _norm_map'); } catch { /* ignore cleanup error */ }
+      try { await this.db.exec(`DROP TABLE IF EXISTS ${tmpTable}`); } catch { /* ignore cleanup error */ }
     }
   }
 

@@ -147,10 +147,8 @@ export default function DataView() {
         }
       }
 
-      // Fire-and-forget — completion handled by ingest:progress event listener
-      await ipc.ingest.importCSV(activeFilePath, columnMapping)
-
-      // Only set default column_priorities if none exist yet
+      // Save column_priorities BEFORE firing import — invariant 5.
+      // The mapping is finalized here; do NOT move this into the progress 'completed' handler.
       const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
       if (!existingPriorities || existingPriorities.length === 0) {
         const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
@@ -158,6 +156,9 @@ export default function DataView() {
         const rest = mappedCols.filter((c) => c !== 'supplier_name')
         await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
       }
+
+      // Fire-and-forget — completion handled by ingest:progress event listener
+      await ipc.ingest.importCSV(activeFilePath, columnMapping)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
       setImporting(false)

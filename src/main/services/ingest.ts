@@ -299,7 +299,7 @@ export class IngestService implements IIngestService {
     filePath: string,
     columnMapping: ColumnMapping,
     uploadId?: string
-  ): Promise<{ rowsInserted: number; uploadId: string }> {
+  ): Promise<void> {
     if (!filePath || !fs.existsSync(filePath)) {
       throw new Error(`CSV file not found: ${filePath}`);
     }
@@ -510,7 +510,6 @@ export class IngestService implements IIngestService {
       result,
     });
 
-    return result;
   }
 
   async getUploadHistory(): Promise<UploadRecord[]> {

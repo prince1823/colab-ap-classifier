@@ -213,7 +213,7 @@ export interface IngestService {
   selectFile(): Promise<string | null>;
   parseCSVPreview(filePath: string): Promise<CSVPreview>;
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
-  importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
+  importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<void>;
   getUploadHistory(): Promise<UploadRecord[]>;
   deriveMappings(columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource): Promise<DerivedMappings>;
   getExistingCanonicals(): Promise<string[]>;

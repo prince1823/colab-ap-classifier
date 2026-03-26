@@ -1,6 +1,7 @@
 import { registerHandler } from './register';
 import type { RuleStore } from '../../shared/types/services';
 import type { OverrideRuleCreate, OverrideRuleUpdate, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types';
+import type { GroupedFilter } from '../../shared/types/transactions';
 
 export function registerRulesHandlers(rules: RuleStore): void {
   registerHandler('rules:list', async () => {
@@ -54,5 +55,9 @@ export function registerRulesHandlers(rules: RuleStore): void {
 
   registerHandler('rules:assignToGroup', async (_event, ruleIds: unknown, groupId: unknown) => {
     return rules.assignToGroup(ruleIds as string[], (groupId as string | null) ?? null);
+  });
+
+  registerHandler('rules:filterAssign', async (_event, filter: unknown, targetGroupId: unknown) => {
+    return rules.filterAndAssignToGroup(filter as GroupedFilter, (targetGroupId as string | null) ?? null);
   });
 }

@@ -173,6 +173,7 @@ export const ipc = {
     reorderGroups: (orderedIds: string[]) => invoke('rules:reorderGroups', orderedIds),
     moveRule: (ruleId: string, targetGroupId: string | null) => invoke('rules:moveRule', ruleId, targetGroupId),
     assignToGroup: (ruleIds: string[], groupId: string | null) => invoke('rules:assignToGroup', ruleIds, groupId),
+    filterAssign: (filter: import('../../shared/types/transactions').GroupedFilter, targetGroupId: string | null) => invoke('rules:filterAssign', filter, targetGroupId),
   },
 
   // ── Changelog (2 channels) ──

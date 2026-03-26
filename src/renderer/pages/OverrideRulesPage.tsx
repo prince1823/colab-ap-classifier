@@ -396,19 +396,12 @@ export default function OverrideRulesPage() {
   // ─── Filter-based group assignment ─────────────────────────────────────
 
   const handleFilterAssign = async () => {
-    // Find rules matching the filter conditions (check both grouped and ungrouped)
-    const matchingRuleIds: string[] = []
-    for (const rule of [...rules, ...ungroupedRulesState]) {
-      if (matchesFilter(rule, filterAssignGrouped)) {
-        matchingRuleIds.push(rule.id)
-      }
-    }
-    if (matchingRuleIds.length === 0) {
-      setError('No rules match the specified conditions')
-      return
-    }
     try {
-      await ipc.rules.assignToGroup(matchingRuleIds, filterAssignTargetGroupId)
+      const result = await ipc.rules.filterAssign(filterAssignGrouped, filterAssignTargetGroupId)
+      if (result.matched === 0) {
+        setError('No rules match the specified conditions')
+        return
+      }
       setShowFilterAssign(false)
       setFilterAssignGrouped({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
       setFilterAssignTargetGroupId(null)
@@ -417,75 +410,6 @@ export default function OverrideRulesPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to assign rules')
     }
-  }
-
-  // Match filter conditions against the rule's actual groupedConditions fields
-  const matchesFilter = (rule: OverrideRule, filter: GroupedFilter): boolean => {
-    if (!filter.groups.length) return false
-
-    // Extract all condition values from the rule's groupedConditions, keyed by field name
-    const ruleConditionsByField = new Map<string, string[]>()
-    for (const g of rule.groupedConditions?.groups ?? []) {
-      for (const c of g.conditions) {
-        if (!c.field) continue
-        const existing = ruleConditionsByField.get(c.field) ?? []
-        existing.push(String(c.value ?? '').toLowerCase())
-        ruleConditionsByField.set(c.field, existing)
-      }
-    }
-
-    const matchCondition = (field: string, operator: string, value: unknown): boolean => {
-      const val = String(value ?? '').toLowerCase()
-      const ruleValues = ruleConditionsByField.get(field)
-
-      // If the rule has no condition on this field, it doesn't match
-      if (!ruleValues || ruleValues.length === 0) {
-        return operator === 'not_contains' || operator === 'not_equals' || operator === 'is_null'
-      }
-
-      switch (operator) {
-        case 'equals':
-          return ruleValues.some(rv => rv === val)
-        case 'not_equals':
-          return ruleValues.every(rv => rv !== val)
-        case 'contains':
-          return ruleValues.some(rv => rv.includes(val))
-        case 'not_contains':
-          return ruleValues.every(rv => !rv.includes(val))
-        case 'starts_with':
-          return ruleValues.some(rv => rv.startsWith(val))
-        case 'ends_with':
-          return ruleValues.some(rv => rv.endsWith(val))
-        case 'regex':
-          try { const re = new RegExp(val, 'i'); return ruleValues.some(rv => re.test(rv)) }
-          catch { return false }
-        default:
-          return false
-      }
-    }
-
-    // Evaluate each group's conditions using per-condition connectors (c.connector), falling back to g.connector
-    const groupResults = filter.groups.map(g => {
-      const conditions = g.conditions.filter(c => c.field && (c.value != null || ['is_null', 'is_true', 'is_false'].includes(c.operator)))
-      if (conditions.length === 0) return true
-      let groupResult = matchCondition(conditions[0].field, conditions[0].operator, conditions[0].value)
-      for (let i = 1; i < conditions.length; i++) {
-        const connector = conditions[i - 1].connector || g.connector
-        const condResult = matchCondition(conditions[i].field, conditions[i].operator, conditions[i].value)
-        if (connector === 'OR') groupResult = groupResult || condResult
-        else groupResult = groupResult && condResult
-      }
-      return groupResult
-    })
-    // Combine groups: each group can override the top-level connector via its own groupConnector
-    if (groupResults.length <= 1) return groupResults[0] ?? false
-    let result = groupResults[0]
-    for (let i = 1; i < groupResults.length; i++) {
-      const connector = filter.groups[i].groupConnector || filter.groupConnector
-      if (connector === 'OR') result = result || groupResults[i]
-      else result = result && groupResults[i]
-    }
-    return result
   }
 
   // ─── Taxonomy dropdown ────────────────────────────────────────────────────

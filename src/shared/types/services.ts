@@ -208,6 +208,7 @@ export interface RuleStore {
   reorderGroups(orderedIds: string[]): Promise<void>;
   moveRuleToGroup(ruleId: string, targetGroupId: string | null): Promise<void>;
   assignToGroup(ruleIds: string[], groupId: string | null): Promise<void>;
+  filterAndAssignToGroup(filter: import('./transactions').GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }>;
 }
 
 export interface ChangelogStore {

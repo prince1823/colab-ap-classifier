@@ -6,6 +6,8 @@ import type {
   ClassificationEntry,
   CategorySelectionInput,
   L3ClassificationInput,
+  TailSpendCategorySelectionInput,
+  TailSpendL3Input,
 } from '../../shared/types/classification';
 import type { ClassificationAgent, LLMClient } from '../../shared/types/services';
 import type { CompanyContext } from '../../shared/types/project';
@@ -185,6 +187,166 @@ Transaction fields are listed in order of classification priority (most importan
 ${formatTransactions(transactions, columnPriorities)}
 
 Classify the above transactions into the L3 categories. Respond with JSON only.`;
+}
+
+// ─── Tail Spend: Category Selection ─────────────────────────────────────────
+
+/**
+ * Build the system prompt for tail spend category selection.
+ * Same response format as selectCategories but uses transaction groups instead of supplier research.
+ */
+export function buildTailSpendCategorySelectionSystemPrompt(): string {
+  return `You are a supplier category classifier. Given tail spend suppliers and their transaction groups, determine which L1|L2 spend category each supplier belongs to.
+
+Rules:
+- Return exactly one L1|L2 path per supplier
+- Use the transaction groups (GL descriptions, account codes, etc.) as the primary classification signal
+- Company context helps interpret domain-specific suppliers
+- Prefer specific categories over generic ones
+
+Response format (JSON only, no markdown fencing):
+{"categories": [
+  {"supplierIndex": 1, "categoryPath": "L1|L2"},
+  {"supplierIndex": 2, "categoryPath": "L1|L2"}
+]}`;
+}
+
+/**
+ * Build the user prompt for tail spend category selection.
+ */
+export function buildTailSpendCategorySelectionUserPrompt(input: TailSpendCategorySelectionInput): string {
+  const { suppliers, taxonomy, companyContext } = input;
+
+  const l1l2Taxonomy = formatL1L2Taxonomy(taxonomy);
+
+  const contextParts: string[] = [];
+  contextParts.push(`Industry: ${companyContext.industry}`);
+  if (companyContext.description) contextParts.push(`Description: ${companyContext.description}`);
+  if (companyContext.sisterCompanies) contextParts.push(`Sister Companies: ${companyContext.sisterCompanies}`);
+  if (companyContext.additionalDetails) contextParts.push(`Additional Details: ${companyContext.additionalDetails}`);
+
+  const supplierSections = suppliers.map((s, i) => {
+    const parts: string[] = [`Supplier ${i + 1}: ${s.name}`];
+    for (const [gIdx, group] of s.groups.entries()) {
+      const label = group.count === 1 ? '1 row' : `${group.count} rows`;
+      parts.push(`  Group ${gIdx + 1} (${label}):`);
+      for (const [k, v] of group.fields) {
+        parts.push(`    ${k}: ${v}`);
+      }
+    }
+    return parts.join('\n');
+  });
+
+  return `## L1|L2 Taxonomy
+${l1l2Taxonomy}
+
+## Company Context
+${contextParts.join('\n')}
+
+## Suppliers
+${supplierSections.join('\n\n')}
+
+For each supplier, select the single best L1|L2 category based on their transaction groups. Respond with JSON only.`;
+}
+
+// ─── Tail Spend: L3 Classification ──────────────────────────────────────────
+
+/**
+ * Build the system prompt for tail spend L3 classification.
+ * Returns one L3 path per supplier (not per transaction group).
+ */
+export function buildTailSpendL3SystemPrompt(): string {
+  return `You are a transaction classifier. Classify tail spend suppliers into L3 categories within the provided taxonomy branch.
+
+Rules:
+- Must return exactly L1|L2|L3 (3 levels) per supplier
+- Each supplier gets ONE best-fit L3 based on all their transaction groups
+- Transaction fields are in priority order (most important first)
+- Prefer specific categories over "Other"
+
+Response format (JSON only, no markdown fencing):
+{"assignments": [
+  {"supplierIndex": 1, "classificationPath": "L1|L2|L3"},
+  {"supplierIndex": 2, "classificationPath": "L1|L2|L3"}
+]}`;
+}
+
+/**
+ * Build the user prompt for tail spend L3 classification.
+ */
+export function buildTailSpendL3UserPrompt(input: TailSpendL3Input): string {
+  const { categoryPath, l3Taxonomy, suppliers, companyContext } = input;
+
+  const contextParts: string[] = [];
+  contextParts.push(`Industry: ${companyContext.industry}`);
+  if (companyContext.description) contextParts.push(`Description: ${companyContext.description}`);
+  if (companyContext.sisterCompanies) contextParts.push(`Sister Companies: ${companyContext.sisterCompanies}`);
+  if (companyContext.additionalDetails) contextParts.push(`Additional Details: ${companyContext.additionalDetails}`);
+
+  const taxonomyLines = l3Taxonomy.map((n) => {
+    const desc = n.description ? ` - ${n.description}` : '';
+    return `  ${n.fullPath}${desc}`;
+  });
+
+  const supplierSections = suppliers.map((s, i) => {
+    const parts: string[] = [`Supplier ${i + 1}: ${s.name}`];
+    for (const [gIdx, group] of s.groups.entries()) {
+      const label = group.count === 1 ? '1 row' : `${group.count} rows`;
+      parts.push(`  Group ${gIdx + 1} (${label}):`);
+      for (const [k, v] of group.fields) {
+        parts.push(`    ${k}: ${v}`);
+      }
+    }
+    return parts.join('\n');
+  });
+
+  return `## Category Branch: ${categoryPath}
+
+## Available L3 Categories
+${taxonomyLines.join('\n')}
+
+## Company Context
+${contextParts.join('\n')}
+
+## Suppliers
+${supplierSections.join('\n\n')}
+
+For each supplier, select the single best L3 category based on their transaction groups. Respond with JSON only.`;
+}
+
+/**
+ * Parse the tail spend L3 response into a Map of supplierIndex → classificationPath.
+ */
+export function parseTailSpendL3Response(responseText: string): Map<number, string> {
+  let cleaned = responseText.trim();
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) cleaned = fenceMatch[1].trim();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error(`Failed to parse tail spend L3 response: ${cleaned.slice(0, 200)}`);
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  if (!Array.isArray(obj.assignments)) {
+    throw new Error(`Expected "assignments" array in response`);
+  }
+
+  const result = new Map<number, string>();
+  for (const entry of obj.assignments) {
+    if (!entry || typeof entry !== 'object') continue;
+    const idx = Number(entry.supplierIndex);
+    let path = entry.classificationPath;
+    if (Array.isArray(path) && path.length === 1) path = path[0];
+    if (typeof path === 'string' && path && !isNaN(idx)) {
+      result.set(idx, path);
+    }
+  }
+
+  return result;
 }
 
 // ─── Shared Utilities (exported for tests) ──────────────────────────────────
@@ -763,6 +925,174 @@ export class LLMClassificationAgent implements ClassificationAgent {
     });
 
     return validateClassification(rawResult, input.l3Taxonomy);
+  }
+
+  /**
+   * Select L1|L2 categories for tail spend suppliers using their transaction groups.
+   */
+  async selectCategoriesForTailSpend(input: TailSpendCategorySelectionInput): Promise<Map<number, string>> {
+    const systemPrompt = buildTailSpendCategorySelectionSystemPrompt();
+    const userPrompt = buildTailSpendCategorySelectionUserPrompt(input);
+
+    const start = Date.now();
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 4096,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-tailspend-category',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    const elapsedMs = Date.now() - start;
+
+    let result: Map<number, string>;
+    try {
+      result = parseCategorySelectionResponse(responseText);
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-tailspend-category',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
+
+    traceLog({
+      timestamp: new Date().toISOString(),
+      agent: 'classification-tailspend-category',
+      model: 'default',
+      systemPrompt,
+      userPrompt,
+      response: responseText,
+      elapsedMs,
+    });
+
+    // Validate each path against taxonomy
+    const validated = new Map<number, string>();
+    for (const [idx, path] of result) {
+      const match = validateCategoryPath(path, input.taxonomy);
+      if (match) {
+        validated.set(idx, match);
+      } else {
+        const parts = path.split('|');
+        if (parts.length >= 2) {
+          const fuzzy = findClosestTaxonomyMatch(`${parts[0]}|${parts[1]}|_`, input.taxonomy);
+          const fuzzyParts = fuzzy.split('|');
+          if (fuzzyParts.length >= 2) {
+            const l1l2 = `${fuzzyParts[0]}|${fuzzyParts[1]}`;
+            const recheck = validateCategoryPath(l1l2, input.taxonomy);
+            if (recheck) validated.set(idx, recheck);
+          }
+        }
+      }
+    }
+
+    return validated;
+  }
+
+  /**
+   * Classify tail spend suppliers into L3 within a shared L2 branch.
+   * Returns Map of 1-based supplier index (from original input) → L3 classification path.
+   * Retries up to 3 times, re-sending only missing suppliers.
+   */
+  async classifyL3ForTailSpend(input: TailSpendL3Input): Promise<Map<number, string>> {
+    if (input.l3Taxonomy.length === 0) {
+      throw new Error(`No L3 nodes found under category path "${input.categoryPath}"`);
+    }
+
+    const MAX_ATTEMPTS = 3;
+    const allResult = new Map<number, string>();
+    // Track remaining suppliers with their original 1-based indices
+    let remaining: Array<{ originalIndex: number; supplier: typeof input.suppliers[number] }> =
+      input.suppliers.map((s, i) => ({ originalIndex: i + 1, supplier: s }));
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (remaining.length === 0) break;
+
+      const currentInput: TailSpendL3Input = {
+        ...input,
+        suppliers: remaining.map((r) => r.supplier),
+      };
+
+      const systemPrompt = buildTailSpendL3SystemPrompt();
+      const userPrompt = buildTailSpendL3UserPrompt(currentInput);
+
+      const start = Date.now();
+      let responseText: string;
+      try {
+        responseText = await this.llm.chat(systemPrompt, userPrompt, {
+          temperature: 0,
+          maxTokens: 8192,
+        });
+      } catch (err) {
+        traceLog({
+          timestamp: new Date().toISOString(),
+          agent: 'classification-tailspend-l3',
+          model: 'default',
+          systemPrompt, userPrompt, response: '',
+          elapsedMs: Date.now() - start,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        if (attempt === MAX_ATTEMPTS) break;
+        continue;
+      }
+      const elapsedMs = Date.now() - start;
+
+      let parsed: Map<number, string>;
+      try {
+        parsed = parseTailSpendL3Response(responseText);
+      } catch (err) {
+        traceLog({
+          timestamp: new Date().toISOString(),
+          agent: 'classification-tailspend-l3',
+          model: 'default',
+          systemPrompt, userPrompt, response: responseText, elapsedMs,
+          error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        if (attempt === MAX_ATTEMPTS) break;
+        continue;
+      }
+
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'classification-tailspend-l3',
+        model: 'default',
+        systemPrompt, userPrompt, response: responseText, elapsedMs,
+      });
+
+      // Collect valid results and identify misses
+      const missed: typeof remaining = [];
+      for (let i = 0; i < remaining.length; i++) {
+        const path = parsed.get(i + 1);
+        if (path) {
+          const validated = findClosestTaxonomyMatch(path, input.l3Taxonomy);
+          allResult.set(remaining[i].originalIndex, validated);
+        } else {
+          missed.push(remaining[i]);
+        }
+      }
+
+      remaining = missed;
+      if (remaining.length === 0) break;
+    }
+
+    return allResult;
   }
 
   /**

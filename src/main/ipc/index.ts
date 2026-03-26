@@ -26,7 +26,7 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerTaxonomyHandlers(services.taxonomy);
   registerIngestHandlers(services.ingest, services.eventBus);
   registerSuppliersHandlers(services.suppliers, services.researcher);
-  registerSupplierResearchHandlers(services.researcher, services.suppliers);
+  registerSupplierResearchHandlers(services.researcher, services.suppliers, services.taxonomy, services.project);
   registerClassificationHandlers(services.classifier, services.eventBus);
   registerRulesHandlers(services.rules);
   registerTransactionsHandlers(services.transactions);

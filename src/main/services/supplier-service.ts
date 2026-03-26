@@ -246,6 +246,10 @@ export class SupplierService implements ISupplierService {
       setClauses.push('mapped_taxonomy_paths = ?');
       params.push(JSON.stringify(updates.mappedTaxonomyPaths));
     }
+    if (updates.l1L2Path !== undefined) {
+      setClauses.push('l1_l2_path = ?');
+      params.push(updates.l1L2Path);
+    }
 
     if (updates.markResearched) {
       setClauses.push('is_researched = TRUE');
@@ -378,7 +382,7 @@ export class SupplierService implements ISupplierService {
     const innerSQL = `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
         ps.parent_supplier_id, sp.name AS parent_name,
         ps.data_source, ps.universe_match, ps.is_researched,
-        ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at,
+        ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at, ps.updated_at,
         COUNT(t.id) as transaction_count,
         ${spendExpr} as total_spend
       FROM project_suppliers ps
@@ -407,6 +411,7 @@ export class SupplierService implements ISupplierService {
       is_researched: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
+      l1_l2_path: string | null;
       created_at: string;
       transaction_count: number | bigint;
       total_spend: number | bigint;
@@ -435,6 +440,7 @@ export class SupplierService implements ISupplierService {
       parentName: row.parent_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
+      l1L2Path: row.l1_l2_path ?? null,
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
       createdAt: String(row.created_at),
@@ -456,12 +462,13 @@ export class SupplierService implements ISupplierService {
       is_researched: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
+      l1_l2_path: string | null;
       created_at: string;
     }>(
       `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
               ps.parent_supplier_id, sp.name AS parent_name,
               ps.universe_match, ps.is_researched,
-              ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at
+              ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at
        FROM project_suppliers ps
        LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
        WHERE ps.id = ?`,
@@ -479,6 +486,7 @@ export class SupplierService implements ISupplierService {
       parentName: row.parent_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
+      l1L2Path: row.l1_l2_path ?? null,
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
       createdAt: String(row.created_at),

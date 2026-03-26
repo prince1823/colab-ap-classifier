@@ -3,6 +3,8 @@ import { appendFileSync } from 'fs';
 export type TraceAgentType =
   | 'classification-category'
   | 'classification-l3'
+  | 'classification-tailspend-category'
+  | 'classification-tailspend-l3'
   | 'research'
   | 'column-mapping'
   | 'qc';

@@ -146,6 +146,14 @@ export class DuckDBDatabase implements Database {
       `);
     }
 
+    // Migrate: ensure l1_l2_path column exists on project_suppliers
+    const l1l2Col = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'l1_l2_path'"
+    );
+    if (l1l2Col.length === 0) {
+      await this.exec('ALTER TABLE project_suppliers ADD COLUMN l1_l2_path VARCHAR');
+    }
+
     // Migrate: drop classification_reasoning column from transactions if it exists
     try {
       await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
@@ -419,6 +427,7 @@ export class DuckDBDatabase implements Database {
         is_researched BOOLEAN DEFAULT FALSE,
         supplier_info JSON,
         mapped_taxonomy_paths JSON,
+        l1_l2_path VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );

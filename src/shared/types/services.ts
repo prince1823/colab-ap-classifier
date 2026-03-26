@@ -6,7 +6,7 @@ import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSour
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
-import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress, CategorySelectionInput, L3ClassificationInput, QCConfig, QCResult, SpendByTaxonomyResult, FilterConditionQC } from './classification';
+import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress, CategorySelectionInput, L3ClassificationInput, TailSpendCategorySelectionInput, TailSpendL3Input, QCConfig, QCResult, SpendByTaxonomyResult, FilterConditionQC } from './classification';
 import type { FeedbackAgentInput, FeedbackRecommendation } from './feedback';
 
 // ─── LLM Config ──────────────────────────────────────────────────────────────
@@ -105,7 +105,9 @@ export interface WebSearch {
 
 export interface ClassificationAgent {
   selectCategories(input: CategorySelectionInput): Promise<Map<number, string>>;
+  selectCategoriesForTailSpend(input: TailSpendCategorySelectionInput): Promise<Map<number, string>>;
   classifyL3(input: L3ClassificationInput): Promise<ClassificationResult>;
+  classifyL3ForTailSpend(input: TailSpendL3Input): Promise<Map<number, string>>;
   /** Backward compat wrapper — calls selectCategories + classifyL3 */
   classifyTransactionGroup(input: ClassificationInput): Promise<ClassificationResult>;
 }
@@ -241,6 +243,8 @@ export type ResearchProgressCallback = (progress: ResearchProgress) => void;
 export interface SupplierResearcher {
   researchSingle(supplierName: string): Promise<SupplierInfo>;
   researchAll(supplierIds?: string[]): Promise<void>;
+  categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void>;
+  categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[]): Promise<void>;
   cancel(): void;
 }
 

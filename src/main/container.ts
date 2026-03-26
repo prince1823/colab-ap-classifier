@@ -105,7 +105,8 @@ export function createContainer(): ServiceContainer {
 
   // Orchestrators
   const researcher = new SupplierResearcher(
-    supplierUniverse, webSearch, researchAgent, eventBus, suppliers
+    supplierUniverse, webSearch, researchAgent, eventBus, suppliers,
+    classificationAgent, db
   );
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,

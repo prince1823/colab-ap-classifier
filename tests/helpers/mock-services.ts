@@ -76,10 +76,12 @@ export function createMockWebSearch(): WebSearch {
 export function createMockClassificationAgent(): ClassificationAgent {
   return {
     selectCategories: vi.fn().mockResolvedValue(new Map([[1, 'L1|L2']])),
+    selectCategoriesForTailSpend: vi.fn().mockResolvedValue(new Map([[1, 'L1|L2']])),
     classifyL3: vi.fn().mockResolvedValue({
       classifications: [{ id: 1, classificationPath: 'L1|L2|L3' }],
       assignments: { '1': [1] },
     }),
+    classifyL3ForTailSpend: vi.fn().mockResolvedValue(new Map([[1, 'L1|L2|L3']])),
     classifyTransactionGroup: vi.fn().mockResolvedValue({
       classifications: [{ id: 1, classificationPath: 'L1|L2|L3' }],
       assignments: { '1': [1] },
@@ -164,18 +166,27 @@ export function createMockSupplierService(): SupplierService {
   return {
     normalizeSupplierName: vi.fn().mockResolvedValue('supplier-id'),
     normalizeAllTransactions: vi.fn(),
-    addAlias: vi.fn(),
-    getAliases: vi.fn().mockResolvedValue([]),
+    assignAlias: vi.fn(),
+    getProjectAliases: vi.fn().mockResolvedValue([]),
     renameSupplier: vi.fn(),
+    mergeSuppliers: vi.fn(),
+    deleteSupplier: vi.fn(),
     updateSupplier: vi.fn(),
     listProjectSuppliers: vi.fn().mockResolvedValue([]),
     getProjectSupplier: vi.fn().mockResolvedValue(null),
     confirmSupplier: vi.fn(),
-    assignParent: vi.fn(),
     filterTailSpend: vi.fn().mockResolvedValue([]),
     isTailSpend: vi.fn().mockResolvedValue(false),
     markResearched: vi.fn(),
     getFilterFields: vi.fn().mockReturnValue([]),
+    queryDistinctValues: vi.fn().mockResolvedValue([]),
+    listParents: vi.fn().mockResolvedValue([]),
+    addParent: vi.fn().mockResolvedValue({ id: 'parent-1', name: 'Parent', createdAt: '' }),
+    findParentByName: vi.fn().mockResolvedValue(null),
+    assignParent: vi.fn(),
+    renameParent: vi.fn(),
+    deleteParent: vi.fn(),
+    mergeParents: vi.fn(),
   };
 }
 
@@ -183,9 +194,11 @@ export function createMockRuleStore(): RuleStore {
   return {
     listRules: vi.fn().mockResolvedValue([]),
     createRule: vi.fn().mockResolvedValue({ id: 'rule-1' }),
+    createAndApplyRule: vi.fn().mockResolvedValue({ id: 'rule-1', matchedCount: 0 }),
     updateRule: vi.fn(),
     deleteRule: vi.fn(),
     evaluateRules: vi.fn().mockResolvedValue(new Map()),
+    generate_rules_preview: vi.fn().mockResolvedValue({ rules: [] }),
   };
 }
 
@@ -218,6 +231,8 @@ export function createMockSupplierResearcher(): SupplierResearcher {
   return {
     researchSingle: vi.fn().mockResolvedValue({ supplierType: 'Corporation' }),
     researchAll: vi.fn(),
+    categorizeWithSupplierInfo: vi.fn(),
+    categorizeTailSpend: vi.fn(),
     cancel: vi.fn(),
   };
 }

@@ -71,12 +71,14 @@ describe('ClassificationRunner', () => {
   function setupBasicMocks(opts?: {
     supplierName?: string;
     txns?: Record<string, unknown>[];
-    categoryPath?: string;
+    l1L2Path?: string | null;
+    isTailSpend?: boolean;
     columnPriorities?: string[];
   }) {
     const supplierName = opts?.supplierName ?? 'Acme';
     const txns = opts?.txns ?? [{ id: 'tx1', project_supplier_id: 'sup1', row_index: 0, spend_amount: 1000, classification_status: 'unclassified' }];
-    const categoryPath = opts?.categoryPath ?? 'Indirect|IT';
+    const l1L2Path = opts?.l1L2Path !== undefined ? opts.l1L2Path : 'Indirect|IT';
+    const isTailSpend = opts?.isTailSpend ?? false;
     const columnPriorities = opts?.columnPriorities ?? ['spend_amount'];
 
     vi.mocked(db.all).mockImplementation(async (sql: string) => {
@@ -85,7 +87,12 @@ describe('ClassificationRunner', () => {
       return [];
     });
     vi.mocked(db.get).mockImplementation(async (sql: string) => {
-      if (sql.includes('supplier_parents')) return { supplier_name: supplierName, parent_name: null };
+      if (sql.includes('supplier_name, is_tail_spend, l1_l2_path')) {
+        return { supplier_name: supplierName, is_tail_spend: isTailSpend, l1_l2_path: l1L2Path };
+      }
+      if (sql.includes('supplier_parents') || sql.includes('supplier_name')) {
+        return { supplier_name: supplierName, parent_name: null };
+      }
       if (sql.includes('COUNT')) return { cnt: txns.length };
       return undefined;
     });
@@ -99,7 +106,6 @@ describe('ClassificationRunner', () => {
       'id', 'row_index', 'spend_amount', 'gl_description', 'classification_status', 'supplier_name',
     ]);
     vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
-    vi.mocked(classificationAgent.selectCategories).mockResolvedValue(new Map([[1, categoryPath]]));
     vi.mocked(classificationAgent.classifyL3).mockResolvedValue({
       classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
       assignments: { '1': [1] },
@@ -188,8 +194,8 @@ describe('ClassificationRunner', () => {
         }),
         'rule'
       );
-      // When all txns match rules, Call 1 and Call 2 should not be invoked
-      expect(classificationAgent.selectCategories).not.toHaveBeenCalled();
+      // When all txns match rules, classifyL3 should not be invoked
+      expect(classificationAgent.classifyL3).not.toHaveBeenCalled();
     });
 
     it('should use column_priorities from project settings', async () => {
@@ -263,36 +269,31 @@ describe('ClassificationRunner', () => {
       );
     });
 
-    it('should mark transactions as error when Call 1 returns no category', async () => {
-      setupBasicMocks();
-      vi.mocked(classificationAgent.selectCategories).mockResolvedValue(new Map());
+    it('should mark transactions as error when l1_l2_path is null', async () => {
+      setupBasicMocks({ l1L2Path: null });
 
       await runner.classifyAll();
 
-      // Should mark as error since no category was resolved
+      // Should mark as error since l1_l2_path is null
       expect(transactions.updateTransactions).toHaveBeenCalledWith(
         expect.objectContaining({ classificationStatus: 'classification_error' }),
         'pipeline'
       );
+      // classifyL3 should not be called
+      expect(classificationAgent.classifyL3).not.toHaveBeenCalled();
     });
   });
 
-  describe('two-call architecture', () => {
-    it('should call selectCategories (Call 1) then classifyL3 (Call 2)', async () => {
-      setupBasicMocks();
+  describe('l1_l2_path-based classification', () => {
+    it('should read l1_l2_path from project_suppliers and pass to classifyL3', async () => {
+      setupBasicMocks({ l1L2Path: 'Indirect|IT' });
 
       await runner.classifyAll();
 
-      // Call 1 should be called
-      expect(classificationAgent.selectCategories).toHaveBeenCalledWith(
-        expect.objectContaining({
-          suppliers: expect.arrayContaining([
-            expect.objectContaining({ name: 'Acme' }),
-          ]),
-        })
-      );
+      // selectCategories should NOT be called (removed)
+      expect(classificationAgent.selectCategories).not.toHaveBeenCalled();
 
-      // Call 2 should receive the category from Call 1
+      // classifyL3 should receive the stored l1_l2_path
       expect(classificationAgent.classifyL3).toHaveBeenCalledWith(
         expect.objectContaining({
           categoryPath: 'Indirect|IT',
@@ -301,8 +302,8 @@ describe('ClassificationRunner', () => {
       );
     });
 
-    it('should filter taxonomy to L3 nodes under selected category for Call 2', async () => {
-      setupBasicMocks({ categoryPath: 'Indirect|IT' });
+    it('should filter taxonomy to L3 nodes under stored l1_l2_path', async () => {
+      setupBasicMocks({ l1L2Path: 'Indirect|IT' });
 
       await runner.classifyAll();
 
@@ -312,36 +313,48 @@ describe('ClassificationRunner', () => {
       ]);
     });
 
-    it('should retry individual suppliers when batch Call 1 misses them', async () => {
-      setupBasicMocks();
-      // Two suppliers
-      vi.mocked(db.all).mockImplementation(async (sql: string) => {
-        if (sql.includes('DISTINCT')) return [
-          { id: 'sup1', supplier_name: 'SupA' },
-          { id: 'sup2', supplier_name: 'SupB' },
-        ];
-        if (sql.includes('FROM transactions') && sql.includes('project_supplier_id')) {
-          return [{ id: 'tx1', project_supplier_id: 'sup1', spend_amount: 1000, classification_status: 'unclassified' }];
-        }
-        return [];
-      });
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_parents') && sql.includes('sup1')) return { supplier_name: 'SupA', parent_name: null };
-        if (sql.includes('supplier_parents') && sql.includes('sup2')) return { supplier_name: 'SupB', parent_name: null };
-        if (sql.includes('supplier_parents')) return { supplier_name: 'SupA', parent_name: null };
-        if (sql.includes('COUNT')) return { cnt: 1 };
-        return undefined;
-      });
-
-      // First batch returns only supplier 1; supplier 2 missing
-      vi.mocked(classificationAgent.selectCategories)
-        .mockResolvedValueOnce(new Map([[1, 'Indirect|IT']]))
-        .mockResolvedValueOnce(new Map([[1, 'Indirect|Facilities']]));
+    it('should mark supplier as error when l1_l2_path is null and log warning', async () => {
+      setupBasicMocks({ l1L2Path: null });
 
       await runner.classifyAll();
 
-      // selectCategories should be called at least twice (batch + individual retry)
-      expect(classificationAgent.selectCategories).toHaveBeenCalledTimes(2);
+      expect(classificationAgent.classifyL3).not.toHaveBeenCalled();
+      expect(transactions.updateTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ classificationStatus: 'classification_error' }),
+        'pipeline'
+      );
+      expect(debugLog).toHaveBeenCalledWith(
+        'WARN',
+        expect.stringContaining('l1_l2_path missing')
+      );
+    });
+
+    it('should handle tail spend suppliers with l1_l2_path via classifyL3ForTailSpend', async () => {
+      setupBasicMocks({ isTailSpend: true, l1L2Path: 'Indirect|IT' });
+      vi.mocked(classificationAgent.classifyL3ForTailSpend).mockResolvedValue(
+        new Map([[1, 'Indirect|IT|Software']])
+      );
+
+      await runner.classifyAll();
+
+      // Should use tail spend path, not regular classifyL3
+      expect(classificationAgent.classifyL3).not.toHaveBeenCalled();
+      expect(classificationAgent.classifyL3ForTailSpend).toHaveBeenCalled();
+    });
+
+    it('should mark tail spend as error when l1_l2_path is null', async () => {
+      setupBasicMocks({ isTailSpend: true, l1L2Path: null });
+
+      await runner.classifyAll();
+
+      expect(transactions.updateTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ classificationStatus: 'classification_error' }),
+        'pipeline'
+      );
+      expect(debugLog).toHaveBeenCalledWith(
+        'WARN',
+        expect.stringContaining('l1_l2_path missing')
+      );
     });
   });
 
@@ -365,77 +378,31 @@ describe('ClassificationRunner', () => {
     });
   });
 
-  describe('parent name injection', () => {
-    function setupParentTest(parentName: string | null, universeParent: string | null) {
+  describe('supplier research in Call 2', () => {
+    it('should pass supplier research to classifyL3 when available', async () => {
       setupBasicMocks();
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_parents')) return { supplier_name: 'SubCo', parent_name: parentName };
-        if (sql.includes('COUNT')) return { cnt: 1 };
-        return undefined;
-      });
-      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(
-        universeParent ? { parentCompanyName: universeParent } : null
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue({ supplierType: 'company', industry: 'Tech' });
+
+      await runner.classifyAll();
+
+      expect(classificationAgent.classifyL3).toHaveBeenCalledWith(
+        expect.objectContaining({
+          supplierType: 'company',
+        })
       );
-    }
-
-    it('should resolve parent name from supplier_parents table', async () => {
-      setupParentTest('ParentCorp', null);
-      await runner.classifyAll();
-
-      const call1Args = vi.mocked(classificationAgent.selectCategories).mock.calls[0][0];
-      expect(call1Args.suppliers[0].parentName).toBe('ParentCorp');
     });
 
-    it('should fall back to supplierResearch.parentCompanyName', async () => {
-      setupParentTest(null, 'UniverseParent');
-      await runner.classifyAll();
-
-      const call1Args = vi.mocked(classificationAgent.selectCategories).mock.calls[0][0];
-      expect(call1Args.suppliers[0].parentName).toBe('UniverseParent');
-    });
-
-    it('should return null when neither source has a parent', async () => {
-      setupParentTest(null, null);
-      await runner.classifyAll();
-
-      const call1Args = vi.mocked(classificationAgent.selectCategories).mock.calls[0][0];
-      expect(call1Args.suppliers[0].parentName).toBeNull();
-    });
-  });
-
-  describe('research warning', () => {
-    it('should log warning when supplier is_researched but no universe data found', async () => {
+    it('should pass null supplierType when no universe data exists', async () => {
       setupBasicMocks();
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_parents')) return { supplier_name: 'Acme', parent_name: null, is_researched: true };
-        if (sql.includes('COUNT')) return { cnt: 1 };
-        return undefined;
-      });
       // supplierUniverse.getSupplier returns null by default
 
       await runner.classifyAll();
 
-      expect(debugLog).toHaveBeenCalledWith(
-        'WARN',
-        expect.stringContaining('marked as researched')
+      expect(classificationAgent.classifyL3).toHaveBeenCalledWith(
+        expect.objectContaining({
+          supplierType: null,
+        })
       );
-    });
-
-    it('should NOT log research warning when universe data exists', async () => {
-      setupBasicMocks();
-      vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_parents')) return { supplier_name: 'Acme', parent_name: null, is_researched: true };
-        if (sql.includes('COUNT')) return { cnt: 1 };
-        return undefined;
-      });
-      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue({ supplierType: 'IT Services' });
-
-      await runner.classifyAll();
-
-      const warnCalls = vi.mocked(debugLog).mock.calls.filter(
-        ([level, msg]) => level === 'WARN' && typeof msg === 'string' && msg.includes('marked as researched')
-      );
-      expect(warnCalls).toHaveLength(0);
     });
   });
 

@@ -18,6 +18,11 @@ import {
   buildL3ClassificationUserPrompt,
   formatL1L2Taxonomy,
   validateCategoryPath,
+  buildTailSpendCategorySelectionSystemPrompt,
+  buildTailSpendCategorySelectionUserPrompt,
+  buildTailSpendL3SystemPrompt,
+  buildTailSpendL3UserPrompt,
+  parseTailSpendL3Response,
   LLMClassificationAgent,
 } from '../../../src/main/agents/classification-agent';
 import type {
@@ -1093,5 +1098,145 @@ describe('buildL3ClassificationUserPrompt', () => {
     expect(prompt).toContain('Cloud Hosting');
     expect(prompt).toContain('TechSoft Inc (company)');
     expect(prompt).not.toContain('Raw Materials');
+  });
+});
+
+// --- Tail Spend: Category Selection ---
+
+describe('buildTailSpendCategorySelectionSystemPrompt', () => {
+  it('should mention tail spend and transaction groups', () => {
+    const prompt = buildTailSpendCategorySelectionSystemPrompt();
+    expect(prompt).toContain('tail spend');
+    expect(prompt).toContain('transaction groups');
+    expect(prompt).toContain('L1|L2');
+  });
+
+  it('should specify expected response format', () => {
+    const prompt = buildTailSpendCategorySelectionSystemPrompt();
+    expect(prompt).toContain('"categories"');
+    expect(prompt).toContain('"supplierIndex"');
+    expect(prompt).toContain('"categoryPath"');
+  });
+});
+
+describe('buildTailSpendCategorySelectionUserPrompt', () => {
+  it('should include supplier groups in prompt', () => {
+    const prompt = buildTailSpendCategorySelectionUserPrompt({
+      suppliers: [
+        {
+          name: 'Acme Cleaning',
+          groups: [
+            { fields: [['gl_description', 'Janitorial services']], count: 4 },
+            { fields: [['gl_description', 'Cleaning supplies']], count: 1 },
+          ],
+        },
+      ],
+      taxonomy: SAMPLE_TAXONOMY,
+      companyContext: SAMPLE_COMPANY_CONTEXT,
+    });
+    expect(prompt).toContain('Supplier 1: Acme Cleaning');
+    expect(prompt).toContain('Group 1 (4 rows)');
+    expect(prompt).toContain('gl_description: Janitorial services');
+    expect(prompt).toContain('Group 2 (1 row)');
+    expect(prompt).toContain('gl_description: Cleaning supplies');
+  });
+
+  it('should include taxonomy and company context', () => {
+    const prompt = buildTailSpendCategorySelectionUserPrompt({
+      suppliers: [{ name: 'Test', groups: [] }],
+      taxonomy: SAMPLE_TAXONOMY,
+      companyContext: SAMPLE_COMPANY_CONTEXT,
+    });
+    expect(prompt).toContain('## L1|L2 Taxonomy');
+    expect(prompt).toContain('## Company Context');
+    expect(prompt).toContain('Manufacturing');
+  });
+});
+
+// --- Tail Spend: L3 Classification ---
+
+describe('buildTailSpendL3SystemPrompt', () => {
+  it('should return one L3 per supplier', () => {
+    const prompt = buildTailSpendL3SystemPrompt();
+    expect(prompt).toContain('ONE best-fit L3');
+    expect(prompt).toContain('L1|L2|L3');
+  });
+
+  it('should specify assignments response format', () => {
+    const prompt = buildTailSpendL3SystemPrompt();
+    expect(prompt).toContain('"assignments"');
+    expect(prompt).toContain('"supplierIndex"');
+    expect(prompt).toContain('"classificationPath"');
+  });
+});
+
+describe('buildTailSpendL3UserPrompt', () => {
+  it('should include category branch and L3 taxonomy', () => {
+    const l3Nodes = SAMPLE_TAXONOMY.filter((n) => n.depth === 3 && n.l1 === 'Indirect' && n.l2 === 'Facilities');
+    const prompt = buildTailSpendL3UserPrompt({
+      categoryPath: 'Indirect|Facilities',
+      l3Taxonomy: l3Nodes,
+      suppliers: [
+        {
+          name: 'City Water Dept',
+          groups: [{ fields: [['gl_description', 'Water utility']], count: 2 }],
+        },
+      ],
+      companyContext: SAMPLE_COMPANY_CONTEXT,
+    });
+    expect(prompt).toContain('Category Branch: Indirect|Facilities');
+    expect(prompt).toContain('Cleaning');
+    expect(prompt).toContain('Supplier 1: City Water Dept');
+    expect(prompt).toContain('gl_description: Water utility');
+  });
+});
+
+describe('parseTailSpendL3Response', () => {
+  it('should parse valid response', () => {
+    const response = JSON.stringify({
+      assignments: [
+        { supplierIndex: 1, classificationPath: 'Indirect|Facilities|Cleaning' },
+        { supplierIndex: 2, classificationPath: 'Indirect|Facilities|Cleaning' },
+      ],
+    });
+    const result = parseTailSpendL3Response(response);
+    expect(result.size).toBe(2);
+    expect(result.get(1)).toBe('Indirect|Facilities|Cleaning');
+    expect(result.get(2)).toBe('Indirect|Facilities|Cleaning');
+  });
+
+  it('should handle markdown fencing', () => {
+    const response = '```json\n{"assignments": [{"supplierIndex": 1, "classificationPath": "L1|L2|L3"}]}\n```';
+    const result = parseTailSpendL3Response(response);
+    expect(result.size).toBe(1);
+    expect(result.get(1)).toBe('L1|L2|L3');
+  });
+
+  it('should skip entries with missing path', () => {
+    const response = JSON.stringify({
+      assignments: [
+        { supplierIndex: 1, classificationPath: 'L1|L2|L3' },
+        { supplierIndex: 2 },
+      ],
+    });
+    const result = parseTailSpendL3Response(response);
+    expect(result.size).toBe(1);
+    expect(result.has(2)).toBe(false);
+  });
+
+  it('should unwrap single-element array paths', () => {
+    const response = JSON.stringify({
+      assignments: [{ supplierIndex: 1, classificationPath: ['L1|L2|L3'] }],
+    });
+    const result = parseTailSpendL3Response(response);
+    expect(result.get(1)).toBe('L1|L2|L3');
+  });
+
+  it('should throw on invalid JSON', () => {
+    expect(() => parseTailSpendL3Response('not json')).toThrow();
+  });
+
+  it('should throw on missing assignments array', () => {
+    expect(() => parseTailSpendL3Response('{"categories": []}')).toThrow('Expected "assignments" array');
   });
 });

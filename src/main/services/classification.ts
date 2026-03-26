@@ -16,12 +16,13 @@ import type { ClassificationProgress, ClassificationResult } from '../../shared/
 import type { FilterCondition } from '../../shared/types/transactions';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import { cleanDescription } from '../utils/text';
-import { buildDedupGroups, batchDedupGroups, extractSubBatch } from '../utils/dedup-groups';
+import { buildDedupGroups, batchDedupGroups, extractSubBatch, extractFields } from '../utils/dedup-groups';
 import { runPool } from '../utils/concurrency-pool';
 import { debugLog } from '../utils/debug-log';
 
 const DEFAULT_CONCURRENCY = 5;
-const CALL1_BATCH_SIZE = 10;
+const TAIL_SPEND_BATCH_SUPPLIERS = 10;
+const TAIL_SPEND_BATCH_GROUPS = 300;
 
 export class ClassificationRunner implements IClassificationRunner {
   private isRunningFlag = false;
@@ -169,13 +170,9 @@ export class ClassificationRunner implements IClassificationRunner {
       }
 
       // ── Phase 1: Apply override rules per supplier ──
-      // First pass: apply rules and collect suppliers that still have unclassified txns
-      const suppliersNeedingClassification: Array<{
-        id: string;
-        supplier_name: string;
-        research: SupplierInfo | null;
-        parentName: string | null;
-      }> = [];
+      // First pass: apply rules and collect non-tail-spend suppliers that still have unclassified txns
+      const nonTailSpendSuppliers: Array<{ id: string; supplier_name: string; l1_l2_path: string | null }> = [];
+      const tailSpendSuppliers: Array<{ id: string; supplier_name: string; l1_l2_path: string | null }> = [];
 
       for (const supplier of supplierRows) {
         if (this.isStopped) break;
@@ -219,166 +216,230 @@ export class ClassificationRunner implements IClassificationRunner {
           continue;
         }
 
-        // Resolve supplier info for Call 1
-        const supplierInfo = await this.db.get<{ supplier_name: string; is_researched: boolean; parent_name: string | null }>(
-          `SELECT ps.supplier_name, ps.is_researched, sp.name AS parent_name
-           FROM project_suppliers ps
-           LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
-           WHERE ps.id = ?`,
+        // Read l1_l2_path and is_tail_spend from project_suppliers
+        const supplierRow = await this.db.get<{
+          supplier_name: string;
+          is_tail_spend: boolean;
+          l1_l2_path: string | null;
+        }>(
+          'SELECT supplier_name, is_tail_spend, l1_l2_path FROM project_suppliers WHERE id = ?',
           supplier.id
         );
-        const supplierName = supplierInfo?.supplier_name ?? supplier.supplier_name;
+        const supplierName = supplierRow?.supplier_name ?? supplier.supplier_name;
+        const isTailSpend = Boolean(supplierRow?.is_tail_spend);
+        const l1L2Path = supplierRow?.l1_l2_path ?? null;
 
-        let research: SupplierInfo | null = null;
-        if (supplierName) {
-          research = await this.supplierUniverse.getSupplier(supplierName);
+        if (isTailSpend) {
+          tailSpendSuppliers.push({ id: supplier.id, supplier_name: supplierName, l1_l2_path: l1L2Path });
+        } else {
+          nonTailSpendSuppliers.push({ id: supplier.id, supplier_name: supplierName, l1_l2_path: l1L2Path });
         }
-        if (supplierInfo?.is_researched && !research) {
-          debugLog('WARN', `Supplier "${supplierName}" is marked as researched but no research data found in supplier universe`);
-        }
-        const parentName = supplierInfo?.parent_name ?? research?.parentCompanyName ?? null;
-
-        suppliersNeedingClassification.push({
-          id: supplier.id,
-          supplier_name: supplierName,
-          research,
-          parentName,
-        });
       }
 
       if (this.isStopped) return;
 
-      // ── Phase 2: Chunked pipeline — Call 1 (category selection) then Call 2 (L3) per batch ──
+      // ── Phase 2: Non-tail-spend L3 classification (Call 2 only, l1_l2_path pre-populated) ──
       const concurrency = Number(process.env.CLASSIFIER_CONCURRENCY) || DEFAULT_CONCURRENCY;
 
-      if (suppliersNeedingClassification.length > 0) {
-        // Chunk into batches of CALL1_BATCH_SIZE
-        const batches: typeof suppliersNeedingClassification[] = [];
-        for (let i = 0; i < suppliersNeedingClassification.length; i += CALL1_BATCH_SIZE) {
-          batches.push(suppliersNeedingClassification.slice(i, i + CALL1_BATCH_SIZE));
+      if (nonTailSpendSuppliers.length > 0) {
+        const call2Tasks = nonTailSpendSuppliers.map((supplier) => async () => {
+          if (this.isStopped) return;
+
+          this.emitProgress({
+            status: 'running',
+            totalSuppliers,
+            processedSuppliers,
+            percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
+            currentSupplier: supplier.supplier_name,
+            currentStep: `Classifying: ${supplier.supplier_name}`,
+          });
+
+          try {
+            if (!supplier.l1_l2_path) {
+              debugLog('WARN', `[Classification] l1_l2_path missing for "${supplier.supplier_name}" — marking as error`);
+              await this.markSupplierError(supplier.id, scopedIds);
+            } else {
+              await this.classifySupplierTransactions(
+                supplier.id, supplier.l1_l2_path, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined
+              );
+            }
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            debugLog('ERROR', `Classification failed for supplier "${supplier.supplier_name}"`, { error: errMsg });
+            try {
+              await this.markSupplierError(supplier.id, scopedIds);
+            } catch (markErr) {
+              debugLog('ERROR', `Failed to mark supplier "${supplier.supplier_name}" as error`, {
+                error: markErr instanceof Error ? markErr.message : String(markErr),
+              });
+            }
+          } finally {
+            processedSuppliers++;
+          }
+        });
+
+        await runPool(call2Tasks, concurrency, () => this.isStopped);
+      }
+
+      if (this.isStopped) return;
+
+      // ── Phase 3: Tail spend L3 classification (grouped by L2) ──
+      if (tailSpendSuppliers.length > 0) {
+        // Mark suppliers with no l1_l2_path as error
+        const validTailSpend = tailSpendSuppliers.filter((s) => {
+          if (!s.l1_l2_path) {
+            debugLog('WARN', `[Classification] l1_l2_path missing for tail spend "${s.supplier_name}" — marking as error`);
+            return false;
+          }
+          return true;
+        });
+
+        // Mark invalid ones as errors
+        for (const supplier of tailSpendSuppliers.filter((s) => !s.l1_l2_path)) {
+          await this.markSupplierError(supplier.id, scopedIds);
+          processedSuppliers++;
         }
 
-        for (const [batchIdx, batch] of batches.entries()) {
-          if (this.isStopped) break;
+        if (validTailSpend.length > 0) {
+          // Group by L2 (the full l1_l2_path, which is L1|L2)
+          const byL2 = new Map<string, typeof validTailSpend>();
+          for (const supplier of validTailSpend) {
+            const l2Key = supplier.l1_l2_path!;
+            const group = byL2.get(l2Key) ?? [];
+            group.push(supplier);
+            byL2.set(l2Key, group);
+          }
 
-          // ── Call 1: category selection for this batch ──
           this.emitProgress({
             status: 'running',
             totalSuppliers,
             processedSuppliers,
             percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
             currentSupplier: null,
-            currentStep: `Selecting categories (batch ${batchIdx + 1}/${batches.length})`,
+            currentStep: 'Classifying tail spend suppliers...',
           });
 
-          const batchCategoryMap = new Map<string, string>(); // supplierId → categoryPath (batch-scoped)
+          for (const [l2Path, l2Suppliers] of byL2) {
+            if (this.isStopped) break;
 
-          try {
-            const result = await this.classificationAgent.selectCategories({
-              suppliers: batch.map((s) => ({
-                name: s.supplier_name,
-                research: s.research,
-                parentName: s.parentName,
-              })),
-              taxonomy: taxonomyNodes,
-              companyContext,
-            });
+            const [l1, l2] = l2Path.split('|');
+            const l3Taxonomy = taxonomyNodes.filter(
+              (n) => n.depth === 3 && n.l1 === l1 && n.l2 === l2
+            );
 
-            // Map results back to supplier IDs
-            const missingIndices: number[] = [];
-            for (let i = 0; i < batch.length; i++) {
-              const categoryPath = result.get(i + 1);
-              if (categoryPath) {
-                batchCategoryMap.set(batch[i].id, categoryPath);
-              } else {
-                missingIndices.push(i);
+            // Build groups per supplier
+            const supplierGroupData: Array<{
+              supplier: typeof l2Suppliers[number];
+              groups: Array<{ fields: Array<[string, string]>; count: number }>;
+              groupCount: number;
+            }> = [];
+
+            for (const supplier of l2Suppliers) {
+              const txns = await this.getUnmatchedTransactions(supplier.id, scopedIds ?? undefined);
+              if (txns.length === 0) {
+                processedSuppliers++;
+                continue;
               }
+
+              const cleanedTxns = txns.map((txn) => {
+                const cleaned = { ...txn };
+                if (typeof cleaned.gl_description === 'string') {
+                  cleaned.gl_description = cleanDescription(cleaned.gl_description);
+                }
+                cleaned.supplier_name = supplier.supplier_name;
+                return cleaned;
+              });
+
+              const dedupResult = buildDedupGroups(cleanedTxns, columnPriorities);
+              const groups: Array<{ fields: Array<[string, string]>; count: number }> = [];
+
+              for (let g = 1; g <= dedupResult.groupCount; g++) {
+                const ids = dedupResult.groupToTransactionIds.get(g);
+                if (!ids) continue;
+                const firstTxn = cleanedTxns.find((t) => String(t.id) === ids[0]);
+                if (!firstTxn) continue;
+                const fields = extractFields(firstTxn, columnPriorities);
+                groups.push({ fields, count: ids.length });
+              }
+
+              supplierGroupData.push({ supplier, groups, groupCount: groups.length });
             }
 
-            // Retry missing suppliers individually
-            for (const idx of missingIndices) {
+            // Batch: max 10 suppliers, max 300 groups per call
+            const batches: typeof supplierGroupData[] = [];
+            let currentBatch: typeof supplierGroupData = [];
+            let currentGroupCount = 0;
+
+            for (const entry of supplierGroupData) {
+              if (entry.groupCount > TAIL_SPEND_BATCH_GROUPS) {
+                if (currentBatch.length > 0) {
+                  batches.push(currentBatch);
+                  currentBatch = [];
+                  currentGroupCount = 0;
+                }
+                batches.push([entry]);
+                continue;
+              }
+
+              if (
+                currentBatch.length >= TAIL_SPEND_BATCH_SUPPLIERS ||
+                currentGroupCount + entry.groupCount > TAIL_SPEND_BATCH_GROUPS
+              ) {
+                batches.push(currentBatch);
+                currentBatch = [];
+                currentGroupCount = 0;
+              }
+
+              currentBatch.push(entry);
+              currentGroupCount += entry.groupCount;
+            }
+            if (currentBatch.length > 0) batches.push(currentBatch);
+
+            // Process each batch
+            for (const batch of batches) {
               if (this.isStopped) break;
-              const supplier = batch[idx];
+
               try {
-                const singleResult = await this.classificationAgent.selectCategories({
-                  suppliers: [{ name: supplier.supplier_name, research: supplier.research, parentName: supplier.parentName }],
-                  taxonomy: taxonomyNodes,
+                const result = await this.classificationAgent.classifyL3ForTailSpend({
+                  categoryPath: l2Path,
+                  l3Taxonomy,
+                  suppliers: batch.map((e) => ({
+                    name: e.supplier.supplier_name,
+                    groups: e.groups,
+                  })),
                   companyContext,
                 });
-                const path = singleResult.get(1);
-                if (path) {
-                  batchCategoryMap.set(supplier.id, path);
-                } else {
-                  debugLog('WARN', `Category selection retry returned no result for "${supplier.supplier_name}"`);
+
+                // Apply results: one L3 path per supplier → all their transactions
+                for (let i = 0; i < batch.length; i++) {
+                  const classificationPath = result.get(i + 1);
+                  if (classificationPath) {
+                    const taxonomyNode = taxonomyNodes.find((n) => n.fullPath === classificationPath);
+                    const txns = await this.getUnmatchedTransactions(batch[i].supplier.id, scopedIds ?? undefined);
+                    if (txns.length > 0) {
+                      await this.transactions.updateTransactions({
+                        ids: txns.map((t) => String(t.id)),
+                        taxonomyNodeId: taxonomyNode?.id ?? undefined,
+                        classificationStatus: 'classified_by_ai',
+                      }, 'pipeline');
+                    }
+                  } else {
+                    debugLog('WARN', `No L3 result for tail spend supplier "${batch[i].supplier.supplier_name}"`);
+                  }
+                  processedSuppliers++;
                 }
               } catch (err) {
-                debugLog('ERROR', `Category selection retry failed for "${supplier.supplier_name}"`, {
+                debugLog('ERROR', `Tail spend L3 classification failed for L2 group "${l2Path}"`, {
                   error: err instanceof Error ? err.message : String(err),
                 });
-              }
-            }
-          } catch (err) {
-            debugLog('ERROR', `Batch ${batchIdx} category selection failed, retrying individually`, {
-              error: err instanceof Error ? err.message : String(err),
-            });
-            // Retry each supplier individually
-            for (const supplier of batch) {
-              if (this.isStopped) break;
-              try {
-                const result = await this.classificationAgent.selectCategories({
-                  suppliers: [{ name: supplier.supplier_name, research: supplier.research, parentName: supplier.parentName }],
-                  taxonomy: taxonomyNodes,
-                  companyContext,
-                });
-                const path = result.get(1);
-                if (path) batchCategoryMap.set(supplier.id, path);
-              } catch {
-                debugLog('ERROR', `Individual category selection also failed for "${supplier.supplier_name}"`);
+                // Mark all suppliers in batch as error
+                for (const entry of batch) {
+                  await this.markSupplierError(entry.supplier.id, scopedIds);
+                  processedSuppliers++;
+                }
               }
             }
           }
-
-          if (this.isStopped) break;
-
-          // ── Call 2: L3 classification for this batch's suppliers ──
-          const call2Tasks = batch.map((supplier) => async () => {
-            if (this.isStopped) return;
-
-            const categoryPath = batchCategoryMap.get(supplier.id);
-
-            this.emitProgress({
-              status: 'running',
-              totalSuppliers,
-              processedSuppliers,
-              percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
-              currentSupplier: supplier.supplier_name,
-              currentStep: `Classifying: ${supplier.supplier_name}`,
-            });
-
-            try {
-              if (!categoryPath) {
-                await this.markSupplierError(supplier.id, scopedIds);
-              } else {
-                await this.classifySupplierTransactions(
-                  supplier.id, categoryPath, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined
-                );
-              }
-            } catch (err) {
-              const errMsg = err instanceof Error ? err.message : String(err);
-              debugLog('ERROR', `Classification failed for supplier "${supplier.supplier_name}"`, { error: errMsg });
-              try {
-                await this.markSupplierError(supplier.id, scopedIds);
-              } catch (markErr) {
-                debugLog('ERROR', `Failed to mark supplier "${supplier.supplier_name}" as error`, {
-                  error: markErr instanceof Error ? markErr.message : String(markErr),
-                });
-              }
-            } finally {
-              processedSuppliers++;
-            }
-          });
-
-          await runPool(call2Tasks, concurrency, () => this.isStopped);
         }
       }
 

@@ -106,6 +106,25 @@ export interface L3ClassificationInput {
   supplierType: string | null;
 }
 
+export interface TailSpendCategorySelectionInput {
+  suppliers: Array<{
+    name: string;
+    groups: Array<{ fields: Array<[string, string]>; count: number }>;
+  }>;
+  taxonomy: TaxonomyNode[];
+  companyContext: CompanyContext;
+}
+
+export interface TailSpendL3Input {
+  categoryPath: string;
+  l3Taxonomy: TaxonomyNode[];
+  suppliers: Array<{
+    name: string;
+    groups: Array<{ fields: Array<[string, string]>; count: number }>;
+  }>;
+  companyContext: CompanyContext;
+}
+
 export interface ClassificationInput {
   transactions: Array<Record<string, unknown>>;
   taxonomy: TaxonomyNode[];

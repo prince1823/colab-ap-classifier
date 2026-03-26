@@ -1,16 +1,34 @@
 import { registerHandler } from './register';
-import type { SupplierResearcher, SupplierService } from '../../shared/types/services';
+import type { SupplierResearcher, SupplierService, TaxonomyStore, ProjectStore } from '../../shared/types/services';
 
 export function registerSupplierResearchHandlers(
   researcher: SupplierResearcher,
-  suppliers: SupplierService
+  suppliers: SupplierService,
+  taxonomy: TaxonomyStore,
+  project: ProjectStore
 ): void {
   registerHandler('suppliers:researchAll', async (_event, supplierIds?: unknown) => {
     const ids = Array.isArray(supplierIds) ? (supplierIds as string[]) : undefined;
-    // Fire-and-forget — progress is streamed via EventBus
-    researcher.researchAll(ids).catch((err) => {
-      console.error('[IPC] Supplier research failed:', err);
-    });
+
+    const taxonomyNodes = await taxonomy.getNodes();
+    let context;
+    try {
+      context = (await project.getSetting('company_context') as { industry: string }) ?? { industry: 'Unknown' };
+    } catch {
+      context = { industry: 'Unknown' };
+    }
+    const columnPriorities = (await project.getSetting('column_priorities') as string[] | null) ?? [];
+
+    // categorizeTailSpend is independent of researchAll — run in parallel
+    if (columnPriorities.length > 0) {
+      researcher.categorizeTailSpend(taxonomyNodes, context, columnPriorities)
+        .catch((err) => console.error('[IPC] Tail spend categorization failed:', err));
+    }
+
+    // categorizeWithSupplierInfo depends on researchAll completing first
+    researcher.researchAll(ids)
+      .then(() => researcher.categorizeWithSupplierInfo(taxonomyNodes, context))
+      .catch((err) => console.error('[IPC] Research/categorization failed:', err));
   });
 
   registerHandler('suppliers:cancelResearch', async () => {

@@ -164,6 +164,21 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
+  /** Save l1L2Path directly on project_suppliers */
+  const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
+    setSaving(true)
+    try {
+      await ipc.suppliers.update(supplier.id, { l1L2Path: newValue || undefined })
+      updateSuppliers(prev => prev.map(s =>
+        s.id === supplier.id ? { ...s, l1L2Path: newValue || null } : s
+      ))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update')
+    } finally {
+      setSaving(false)
+    }
+  }, [updateSuppliers])
+
   /** Research a single supplier */
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
     const info = await researchSingle(supplier)
@@ -610,6 +625,7 @@ export default function SuppliersPage() {
           supplier={selectedSupplier}
           onSaveField={saveField}
           onSaveParentName={saveParentName}
+          onSaveL1L2Path={saveL1L2Path}
           onResearch={researchSupplier}
           onConfirm={confirmSupplier}
           focusedFieldIndex={detailFieldIndex}

@@ -247,6 +247,10 @@ export class SupplierService implements ISupplierService {
       params.push(JSON.stringify(updates.mappedTaxonomyPaths));
     }
 
+    if (updates.markResearched) {
+      setClauses.push('is_researched = TRUE');
+    }
+
     if (setClauses.length === 0) return;
 
     setClauses.push('updated_at = CURRENT_TIMESTAMP');

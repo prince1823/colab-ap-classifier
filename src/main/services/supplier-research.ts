@@ -27,9 +27,11 @@ export class SupplierResearcher implements ISupplierResearcher {
     private supplierService: SupplierService
   ) {}
 
-  async researchSingle(supplierName: string): Promise<SupplierInfo> {
+  async researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>): Promise<SupplierInfo> {
     // Check if already researched with substantive info
-    const existing = await this.supplierUniverse.getSupplier(supplierName);
+    const existing = universeCache
+      ? (universeCache.get(supplierName) ?? null)
+      : await this.supplierUniverse.getSupplier(supplierName);
     if (existing) {
       const hasSubstantiveInfo = !!(existing.industry || existing.description);
       if (hasSubstantiveInfo) {
@@ -112,6 +114,11 @@ export class SupplierResearcher implements ISupplierResearcher {
 
     emit(0, total, 'Starting research');
 
+    // Pre-fetch all universe entries in one batch query — avoids N round-trips during concurrent phase
+    const universeCache = await this.supplierUniverse.getSuppliersByNames(
+      candidates.map((c) => c.supplierName)
+    );
+
     let completed = 0;
     const queue = [...candidates];
 
@@ -122,16 +129,21 @@ export class SupplierResearcher implements ISupplierResearcher {
         if (!supplier) break;
 
         try {
-          const info = await this.researchSingle(supplier.supplierName);
+          const info = await this.researchSingle(supplier.supplierName, universeCache);
 
-          if (info.parentCompanyName) {
-            const existing = await this.supplierService.findParentByName(info.parentCompanyName);
-            const parent = existing ?? (await this.supplierService.addParent(info.parentCompanyName));
-            await this.supplierService.assignParent([supplier.id], parent.id);
+          try {
+            if (info.parentCompanyName) {
+              const existing = await this.supplierService.findParentByName(info.parentCompanyName);
+              const parent = existing ?? (await this.supplierService.addParent(info.parentCompanyName));
+              await this.supplierService.assignParent([supplier.id], parent.id);
+            }
+            // Merge supplierInfo write + markResearched into a single UPDATE
+            await this.supplierService.updateSupplier(supplier.id, { supplierInfo: info, markResearched: true });
+          } catch (updateErr) {
+            console.error(`[Research] Failed to persist info for "${supplier.supplierName}":`, updateErr);
+            // Still mark researched even if info write failed
+            await this.supplierService.markResearched(supplier.id);
           }
-
-          await this.supplierService.updateSupplier(supplier.id, { supplierInfo: info });
-          await this.supplierService.markResearched(supplier.id);
         } catch (err) {
           console.error(`[Research] Failed for "${supplier.supplierName}":`, err);
         }

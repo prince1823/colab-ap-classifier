@@ -68,4 +68,5 @@ export interface SupplierUpdateInput {
   supplierInfo?: SupplierInfo;
   aliases?: string[] | null;
   mappedTaxonomyPaths?: string[] | null;
+  markResearched?: boolean;
 }

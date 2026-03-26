@@ -147,11 +147,7 @@ export default function DataView() {
 
       await refreshGateState()
 
-      // Clear active cycle state and move to priority
-      setActiveFilePath(null)
-      setActivePreview(null)
-      setActiveDerivedMappings(null)
-      setPreservedColumnStates(null)
+      // Move to priority — keep preview/mappings so Back can return to mapping step
       setStep('priority')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
@@ -168,7 +164,13 @@ export default function DataView() {
       await ipc.project.setSetting('column_priorities_saved', llmOrder)
       await refreshMetadata()
       await refreshGateState()
-      navigate('/suppliers')
+
+      // Clear active cycle state and return to upload for additional files
+      setActiveFilePath(null)
+      setActivePreview(null)
+      setActiveDerivedMappings(null)
+      setPreservedColumnStates(null)
+      setStep('upload')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save priorities')
     }
@@ -261,7 +263,7 @@ export default function DataView() {
           <DataPriorityStep
             allMappings={allMappings}
             onSave={handleSavePriorities}
-            onBack={() => setStep('upload')}
+            onBack={() => setStep('mapping')}
           />
         )}
       </div>

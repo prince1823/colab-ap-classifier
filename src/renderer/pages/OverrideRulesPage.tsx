@@ -254,14 +254,19 @@ export default function OverrideRulesPage() {
     setDragOverGroupId(null)
     if (dragSourceGroupRef.current === targetGroupId) return
 
+    // Optimistic update — move rule locally before server round-trip
+    const previousRules = rules
+    setRules(prev => prev.map(r =>
+      r.id === draggedId ? { ...r, groupId: targetGroupId ?? undefined } : r
+    ))
+
     try {
       await ipc.rules.moveRule(draggedId, targetGroupId)
-      await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to move rule')
-      await loadData()
+      setRules(previousRules)
     }
-  }, [])
+  }, [rules])
 
   // ─── Drag-and-drop: Group reorder ──────────────────────────────────────────
 
@@ -309,12 +314,21 @@ export default function OverrideRulesPage() {
     newOrder.splice(fromIndex, 1)
     newOrder.splice(toIndex, 0, draggedGroupId)
 
+    // Optimistic update — reorder groups locally with updated priorities
+    const previousGroups = groupsRef.current
+    const reorderedGroups = newOrder
+      .map((id, i) => {
+        const g = previousGroups.find(g => g.id === id)
+        return g ? { ...g, priority: newOrder.length - i } : null
+      })
+      .filter(Boolean) as RuleGroup[]
+    setGroups(reorderedGroups)
+
     try {
       await ipc.rules.reorderGroups(newOrder)
-      await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to reorder groups')
-      await loadData()
+      setGroups(previousGroups)
     }
   }, [])
 
@@ -875,14 +889,14 @@ export default function OverrideRulesPage() {
 
       {/* ═══ Groups as collapsible table sections ═══ */}
       <div className="overflow-auto rounded-lg border border-gray-300">
-        <table className="w-full border-collapse text-xs">
+        <table className="w-full table-fixed border-collapse text-xs">
           {/* Sticky column headers */}
           <thead className="sticky top-0 z-10">
             <tr className="bg-gray-50">
               <th className="w-8 px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300"></th>
-              <th className="w-[15%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Rule Name</th>
-              <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Condition</th>
-              <th className="w-[20%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Target Classification</th>
+              <th className="w-[14%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Rule Name</th>
+              <th className="w-[30%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Condition</th>
+              <th className="w-[28%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Target Classification</th>
               <th className="w-[7%] px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Source</th>
               <th className="w-[7%] px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Status</th>
               <th className="w-20 px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Actions</th>
@@ -1280,7 +1294,7 @@ function RuleRow({
           {rule.name}
         </span>
         <div className="mt-1">
-          <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[9px] text-gray-400 font-normal">
+          <span className="inline-block rounded bg-blue-50 px-1.5 py-0.5 text-[9px] text-blue-500 font-medium">
             {new Date(rule.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}{' '}
             {new Date(rule.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
           </span>

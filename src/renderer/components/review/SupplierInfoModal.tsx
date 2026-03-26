@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { X, ExternalLink, ArrowRight } from 'lucide-react'
 import type { SupplierInfo } from '../../../shared/types/suppliers'
+import { ipc } from '../../lib/ipc'
 
 interface SupplierEntry {
   name: string
@@ -151,10 +152,13 @@ function SourcesList({ sources }: { sources: string[] }) {
           return (
             <a
               key={i}
-              href={src}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 hover:underline truncate"
+              href="#"
+              onClick={(e) => {
+                e.preventDefault()
+                const url = src.startsWith('http://') || src.startsWith('https://') ? src : `https://${src}`;
+                ipc.shell.openExternal(url)
+              }}
+              className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 hover:underline truncate cursor-pointer"
               title={src}
             >
               <ExternalLink size={8} className="flex-shrink-0" />

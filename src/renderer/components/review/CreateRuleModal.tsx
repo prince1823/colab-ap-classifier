@@ -4,6 +4,7 @@ import { X, Check } from 'lucide-react'
 import { makeEmptyGroup } from '../FilterConditionBuilder'
 import AdvancedFilterModal from './AdvancedFilterModal'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 import type { GroupedFilter, ConditionGroup, FilterCondition } from '../../../shared/types/transactions'
 import type { FieldDefinition } from '../FilterConditionBuilder'
 import type { TaxonomyNode } from '../../../shared/types/taxonomy'
@@ -107,7 +108,7 @@ export default function CreateRuleModal({
       // Only show leaf nodes with full L1|L2|L3 path
       setTaxonomyNodes(nodes.filter((n: TaxonomyNode) => n.l3 !== null))
       setFilterFields(fields)
-    }).catch(() => {})
+    }).catch((e) => showError('Failed to load rule form data', e))
   }, [isOpen])
 
   // Reset form only when modal first opens

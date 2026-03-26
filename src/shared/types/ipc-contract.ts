@@ -46,7 +46,7 @@ export interface IPCInvokeMap {
   'ingest:selectFile':       { args: []; result: string | null };
   'ingest:parseCSV':         { args: [filePath: string]; result: CSVPreview };
   'ingest:suggestMappings':  { args: [columns: string[], sampleRows: Record<string, string>[]]; result: ColumnMappingResult };
-  'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: void };
+  'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: { rowsInserted: number; uploadId: string } };
   'ingest:getUpload':              { args: []; result: { id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null };
   'ingest:getUploadHistory':       { args: []; result: UploadRecord[] };
   'ingest:deriveMappings':         { args: [columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource]; result: DerivedMappings };
@@ -66,9 +66,9 @@ export interface IPCInvokeMap {
   'transactions:markAllReviewed':   { args: []; result: number };
 
   // Classification
-  'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
+  'classification:start':      { args: [groupedFilter?: GroupedFilter]; result: void };
   'classification:cancel':     { args: []; result: void };
-  'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
+  'classification:scopeCount': { args: [groupedFilter?: GroupedFilter]; result: number };
 
   // QC
   'qc:start':     { args: [filter?: TransactionFilter]; result: void };
@@ -147,6 +147,9 @@ export interface IPCInvokeMap {
   'license:activate':  { args: [licenseKey: string]; result: LicenseActivationResult };
   'license:getStatus': { args: []; result: LicenseStatus };
   'license:checkNow':  { args: []; result: LicenseStatus };
+
+  // Shell
+  'shell:openExternal': { args: [url: string]; result: void };
 }
 
 export interface IPCEventMap {

@@ -215,7 +215,7 @@ export interface IngestService {
   selectFile(): Promise<string | null>;
   parseCSVPreview(filePath: string): Promise<CSVPreview>;
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
-  importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<void>;
+  importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
   getUploadHistory(): Promise<UploadRecord[]>;
   deriveMappings(columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource): Promise<DerivedMappings>;
   getExistingCanonicals(): Promise<string[]>;
@@ -236,8 +236,8 @@ export interface SupplierResearcher {
 }
 
 export interface ClassificationRunner {
-  classifyAll(conditions?: FilterCondition[]): Promise<void>;
-  getScopeCount(conditions?: FilterCondition[]): Promise<number>;
+  classifyAll(groupedFilter?: import('./transactions').GroupedFilter): Promise<void>;
+  getScopeCount(groupedFilter?: import('./transactions').GroupedFilter): Promise<number>;
   classifySupplier(projectSupplierId: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], scopedTxnIds?: Set<string>): Promise<void>;
   getIsRunning(): boolean;
   cancel(): Promise<void>;

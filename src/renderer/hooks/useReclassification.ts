@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import { useUndoRedo } from './useUndoRedo'
 import type { FlattenedPivotRow, PathSegment } from '../types/pivot'
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
@@ -85,7 +86,7 @@ export function useReclassification({ filterState, onSuccess }: UseReclassificat
     setSearch('')
     setFocusedIdx(0)
     setError(null)
-    ipc.taxonomy.getNodes().then(setTaxonomyNodes).catch(() => {})
+    ipc.taxonomy.getNodes().then(setTaxonomyNodes).catch((e) => showError('Failed to load taxonomy', e))
     setTimeout(() => searchRef.current?.focus(), 50)
   }, [isOpen])
 

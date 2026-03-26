@@ -288,29 +288,68 @@ export default function OverrideRulesPage() {
     }
   }
 
-  // Simple client-side rule matching against filter conditions
+  // Match filter conditions against the rule's actual groupedConditions fields
   const matchesFilter = (rule: OverrideRule, filter: GroupedFilter): boolean => {
     if (!filter.groups.length) return false
-    const ruleText = [
-      rule.name,
-      getNodePath(rule.targetTaxonomyNodeId),
-      formatConditionSummary(rule),
-      rule.source === 'auto_generated' ? 'auto' : 'manual',
-      rule.isActive ? 'active' : 'inactive',
-    ].join(' ').toLowerCase()
 
+    // Extract all condition values from the rule's groupedConditions, keyed by field name
+    const ruleConditionsByField = new Map<string, string[]>()
+    for (const g of rule.groupedConditions?.groups ?? []) {
+      for (const c of g.conditions) {
+        if (!c.field) continue
+        const existing = ruleConditionsByField.get(c.field) ?? []
+        existing.push(String(c.value ?? '').toLowerCase())
+        ruleConditionsByField.set(c.field, existing)
+      }
+    }
+
+    const matchCondition = (field: string, operator: string, value: unknown): boolean => {
+      const val = String(value ?? '').toLowerCase()
+      const ruleValues = ruleConditionsByField.get(field)
+
+      // If the rule has no condition on this field, it doesn't match
+      if (!ruleValues || ruleValues.length === 0) {
+        return operator === 'not_contains' || operator === 'not_equals' || operator === 'is_null'
+      }
+
+      switch (operator) {
+        case 'equals':
+          return ruleValues.some(rv => rv === val)
+        case 'not_equals':
+          return ruleValues.every(rv => rv !== val)
+        case 'contains':
+          return ruleValues.some(rv => rv.includes(val))
+        case 'not_contains':
+          return ruleValues.every(rv => !rv.includes(val))
+        case 'starts_with':
+          return ruleValues.some(rv => rv.startsWith(val))
+        case 'ends_with':
+          return ruleValues.some(rv => rv.endsWith(val))
+        case 'regex':
+          try { const re = new RegExp(val, 'i'); return ruleValues.some(rv => re.test(rv)) }
+          catch { return false }
+        default:
+          return false
+      }
+    }
+
+    // Evaluate each group's conditions, then combine groups using per-group or top-level connector
     const groupResults = filter.groups.map(g => {
       const conditionResults = g.conditions.map(c => {
-        if (!c.field || !c.value) return true
-        const val = String(c.value).toLowerCase()
-        if (c.operator === 'contains') return ruleText.includes(val)
-        if (c.operator === 'equals') return ruleText.includes(val)
-        if (c.operator === 'not_contains') return !ruleText.includes(val)
-        return true
+        if (!c.field || (c.value == null && !['is_null', 'is_true', 'is_false'].includes(c.operator))) return true
+        return matchCondition(c.field, c.operator, c.value)
       })
       return g.connector === 'OR' ? conditionResults.some(Boolean) : conditionResults.every(Boolean)
     })
-    return filter.groupConnector === 'OR' ? groupResults.some(Boolean) : groupResults.every(Boolean)
+    // Combine groups: each group can override the top-level connector via its own groupConnector
+    if (groupResults.length <= 1) return groupResults[0] ?? false
+    let result = groupResults[0]
+    for (let i = 1; i < groupResults.length; i++) {
+      const connector = filter.groups[i].groupConnector || filter.groupConnector
+      if (connector === 'OR') result = result || groupResults[i]
+      else result = result && groupResults[i]
+    }
+    return result
   }
 
   // ─── Taxonomy dropdown ────────────────────────────────────────────────────

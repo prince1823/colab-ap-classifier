@@ -446,13 +446,20 @@ export class RuleStore implements IRuleStore {
   }
 
   async reorderGroups(orderedIds: string[]): Promise<void> {
-    // Assign sequential priorities: first in list gets highest priority
-    const total = orderedIds.length;
-    for (let i = 0; i < total; i++) {
-      await this.db.run(
-        'UPDATE rule_groups SET priority = ? WHERE id = ?',
-        total - i, orderedIds[i]
-      );
+    // Drop unique index to avoid constraint violations during bulk reassignment
+    await this.db.exec('DROP INDEX IF EXISTS idx_rule_groups_priority');
+    try {
+      // Assign sequential priorities: first in list gets highest priority
+      const total = orderedIds.length;
+      for (let i = 0; i < total; i++) {
+        await this.db.run(
+          'UPDATE rule_groups SET priority = ? WHERE id = ?',
+          total - i, orderedIds[i]
+        );
+      }
+    } finally {
+      // Always recreate the unique index
+      await this.db.exec('CREATE UNIQUE INDEX idx_rule_groups_priority ON rule_groups(priority)');
     }
   }
 

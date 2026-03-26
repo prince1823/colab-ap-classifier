@@ -63,10 +63,14 @@ export default function OverrideRulesPage() {
   const [filterAssignConditionsOpen, setFilterAssignConditionsOpen] = useState(false)
   const [filterAssignTargetGroupId, setFilterAssignTargetGroupId] = useState<string | null>(null)
 
-  // Drag state
+  // Drag state — rules
   const dragRuleIdRef = useRef<string | null>(null)
   const dragSourceGroupRef = useRef<string | null>(null)
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null)
+
+  // Drag state — group reorder
+  const dragGroupIdRef = useRef<string | null>(null)
+  const [dragOverGroupReorderId, setDragOverGroupReorderId] = useState<string | null>(null)
 
   const loadData = async () => {
     setLoading(true)
@@ -244,10 +248,10 @@ export default function OverrideRulesPage() {
   }, [])
 
   const handleGroupDrop = useCallback(async (e: React.DragEvent, targetGroupId: string | null) => {
+    const draggedId = dragRuleIdRef.current
+    if (!draggedId) return // Not a rule drag — let group reorder handle it
     e.preventDefault()
     setDragOverGroupId(null)
-    const draggedId = dragRuleIdRef.current
-    if (!draggedId) return
     if (dragSourceGroupRef.current === targetGroupId) return
 
     try {
@@ -255,6 +259,61 @@ export default function OverrideRulesPage() {
       await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to move rule')
+      await loadData()
+    }
+  }, [])
+
+  // ─── Drag-and-drop: Group reorder ──────────────────────────────────────────
+
+  const handleGroupDragStart = useCallback((e: React.DragEvent, groupId: string) => {
+    dragGroupIdRef.current = groupId
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('application/x-group-reorder', groupId)
+    requestAnimationFrame(() => {
+      if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = '0.4'
+    })
+  }, [])
+
+  const handleGroupDragEnd = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = '1'
+    dragGroupIdRef.current = null
+    setDragOverGroupReorderId(null)
+  }, [])
+
+  const handleGroupReorderDragOver = useCallback((e: React.DragEvent, targetGroupId: string) => {
+    // Only handle group reorder drags, not rule drags
+    if (!dragGroupIdRef.current) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverGroupReorderId(targetGroupId)
+  }, [])
+
+  const groupsRef = useRef(groups)
+  groupsRef.current = groups
+
+  const handleGroupReorderDrop = useCallback(async (e: React.DragEvent, targetGroupId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOverGroupReorderId(null)
+    const draggedGroupId = dragGroupIdRef.current
+    dragGroupIdRef.current = null
+    if (!draggedGroupId || draggedGroupId === targetGroupId) return
+
+    // Reorder: move dragged group to target's position
+    const currentOrder = groupsRef.current.map(g => g.id)
+    const fromIndex = currentOrder.indexOf(draggedGroupId)
+    const toIndex = currentOrder.indexOf(targetGroupId)
+    if (fromIndex === -1 || toIndex === -1) return
+
+    const newOrder = [...currentOrder]
+    newOrder.splice(fromIndex, 1)
+    newOrder.splice(toIndex, 0, draggedGroupId)
+
+    try {
+      await ipc.rules.reorderGroups(newOrder)
+      await loadData()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to reorder groups')
       await loadData()
     }
   }, [])
@@ -869,6 +928,12 @@ export default function OverrideRulesPage() {
                   handleRuleDragEnd={handleRuleDragEnd}
                   expandedConditions={expandedConditions}
                   setExpandedConditions={setExpandedConditions}
+                  handleGroupDragStart={handleGroupDragStart}
+                  handleGroupDragEnd={handleGroupDragEnd}
+                  handleGroupReorderDragOver={handleGroupReorderDragOver}
+                  handleGroupReorderDrop={handleGroupReorderDrop}
+                  setDragOverGroupReorderId={setDragOverGroupReorderId}
+                  isDragOverReorder={dragOverGroupReorderId === group.id}
                 />
               )
             })}
@@ -1003,6 +1068,12 @@ interface GroupSectionProps {
   handleRuleDragEnd: (e: React.DragEvent) => void
   expandedConditions: Set<string>
   setExpandedConditions: React.Dispatch<React.SetStateAction<Set<string>>>
+  handleGroupDragStart: (e: React.DragEvent, groupId: string) => void
+  handleGroupDragEnd: (e: React.DragEvent) => void
+  handleGroupReorderDragOver: (e: React.DragEvent, targetGroupId: string) => void
+  handleGroupReorderDrop: (e: React.DragEvent, targetGroupId: string) => void
+  setDragOverGroupReorderId: (id: string | null) => void
+  isDragOverReorder: boolean
 }
 
 function GroupSection({
@@ -1013,21 +1084,37 @@ function GroupSection({
   handleGroupDragOver, setDragOverGroupId, handleGroupDrop,
   getNodePath, formatConditionSummary, openEdit, handleDelete, handleToggle,
   handleRuleDragStart, handleRuleDragEnd, expandedConditions, setExpandedConditions,
+  handleGroupDragStart, handleGroupDragEnd, handleGroupReorderDragOver, handleGroupReorderDrop, setDragOverGroupReorderId, isDragOverReorder,
 }: GroupSectionProps) {
   return (
     <>
       {/* Group header row */}
       <tr
+        draggable
         className={`cursor-pointer select-none transition-colors ${
-          isDragOver ? 'bg-blue-50' : 'bg-gray-50 hover:bg-gray-100'
+          isDragOverReorder ? 'bg-indigo-50 border-t-2 border-t-indigo-400' : isDragOver ? 'bg-blue-50' : 'bg-gray-50 hover:bg-gray-100'
         }`}
         onClick={() => toggleGroup(group.id)}
-        onDragOver={(e) => handleGroupDragOver(e, group.id)}
-        onDragLeave={() => setDragOverGroupId(null)}
-        onDrop={(e) => handleGroupDrop(e, group.id)}
+        onDragStart={(e) => handleGroupDragStart(e, group.id)}
+        onDragEnd={handleGroupDragEnd}
+        onDragOver={(e) => {
+          handleGroupDragOver(e, group.id)
+          handleGroupReorderDragOver(e, group.id)
+        }}
+        onDragLeave={() => { setDragOverGroupId(null); setDragOverGroupReorderId(null) }}
+        onDrop={(e) => {
+          handleGroupReorderDrop(e, group.id)
+          handleGroupDrop(e, group.id)
+        }}
       >
-        <td colSpan={7} className={`px-3 py-2.5 border border-gray-300 ${isDragOver ? 'ring-2 ring-inset ring-blue-300' : ''}`}>
+        <td colSpan={7} className={`px-3 py-2.5 border border-gray-300 ${isDragOver ? 'ring-2 ring-inset ring-blue-300' : ''} ${isDragOverReorder ? 'ring-2 ring-inset ring-indigo-300' : ''}`}>
           <div className="flex items-center gap-2">
+            {/* Group drag handle */}
+            <svg className="h-4 w-4 shrink-0 text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing transition-colors" fill="currentColor" viewBox="0 0 24 24" onClick={(e) => e.stopPropagation()}>
+              <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
+              <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+              <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
+            </svg>
             <svg className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>

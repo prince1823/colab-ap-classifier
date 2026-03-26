@@ -1,12 +1,11 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
-import { CANONICAL_COLUMNS, REQUIRED_CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
+import { REQUIRED_CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
 import { ipc } from '../../lib/ipc'
 import type { CSVPreview, DerivedMappings, MappingRow } from '../../../shared/types/column-mapping'
 
 /* ── Constants ── */
 
 const REQUIRED = new Set(REQUIRED_CANONICAL_COLUMNS as readonly string[])
-const KNOWN_CANONICALS = new Set(CANONICAL_COLUMNS.map((c) => c.name))
 const ADDRESS_HINTS = ['address', 'supplier_address', 'vendor_address', 'street', 'city', 'state', 'zip', 'postal']
 const MAX_PREVIEW_ROWS = 8
 const MERGE_ROWS_LIMIT = 5
@@ -87,11 +86,9 @@ function buildInitialState(
         locked: fromPrevious,
       }
     }
-    // Only auto-snake_case if it matches a known canonical column;
-    // otherwise keep the original CSV column name and let the user edit it.
+    // Always snake_case the canonical name — the backend rejects names with spaces
     const snaked = toSnakeCase(col)
-    const isKnownCanonical = KNOWN_CANONICALS.has(snaked)
-    const defaultCanonical = isKnownCanonical ? snaked : col
+    const defaultCanonical = snaked
     const collides = assignedCanonicals.has(defaultCanonical)
     return {
       csvColumn: col,
@@ -152,8 +149,10 @@ function CanonicalPicker({
 
   const handleCreateAndSelect = () => {
     if (!isNewCanonical) return
-    onAddCanonical(searchTrimmed)
-    onChange(searchTrimmed)
+    const snaked = toSnakeCase(searchTrimmed)
+    if (!snaked) return
+    onAddCanonical(snaked)
+    onChange(snaked)
     setOpen(false)
     setSearch('')
   }
@@ -254,7 +253,7 @@ function CanonicalPicker({
                 className="w-full text-left px-3 py-1.5 text-[11px] font-mono text-blue-600 hover:bg-blue-50 border-t border-gray-100 flex items-center gap-1.5"
               >
                 <span className="flex-shrink-0">+</span>
-                <span>Create &quot;{searchTrimmed}&quot;</span>
+                <span>Create &quot;{toSnakeCase(searchTrimmed)}&quot;</span>
                 <span className="text-[9px] text-gray-400 ml-auto">Enter</span>
               </button>
             )}

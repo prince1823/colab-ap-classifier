@@ -333,13 +333,18 @@ export default function OverrideRulesPage() {
       }
     }
 
-    // Evaluate each group's conditions, then combine groups using per-group or top-level connector
+    // Evaluate each group's conditions using per-condition connectors (c.connector), falling back to g.connector
     const groupResults = filter.groups.map(g => {
-      const conditionResults = g.conditions.map(c => {
-        if (!c.field || (c.value == null && !['is_null', 'is_true', 'is_false'].includes(c.operator))) return true
-        return matchCondition(c.field, c.operator, c.value)
-      })
-      return g.connector === 'OR' ? conditionResults.some(Boolean) : conditionResults.every(Boolean)
+      const conditions = g.conditions.filter(c => c.field && (c.value != null || ['is_null', 'is_true', 'is_false'].includes(c.operator)))
+      if (conditions.length === 0) return true
+      let groupResult = matchCondition(conditions[0].field, conditions[0].operator, conditions[0].value)
+      for (let i = 1; i < conditions.length; i++) {
+        const connector = conditions[i - 1].connector || g.connector
+        const condResult = matchCondition(conditions[i].field, conditions[i].operator, conditions[i].value)
+        if (connector === 'OR') groupResult = groupResult || condResult
+        else groupResult = groupResult && condResult
+      }
+      return groupResult
     })
     // Combine groups: each group can override the top-level connector via its own groupConnector
     if (groupResults.length <= 1) return groupResults[0] ?? false

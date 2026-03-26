@@ -46,7 +46,7 @@ export interface IPCInvokeMap {
   'ingest:selectFile':       { args: []; result: string | null };
   'ingest:parseCSV':         { args: [filePath: string]; result: CSVPreview };
   'ingest:suggestMappings':  { args: [columns: string[], sampleRows: Record<string, string>[]]; result: ColumnMappingResult };
-  'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: void };
+  'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: { rowsInserted: number; uploadId: string } };
   'ingest:getUpload':              { args: []; result: { id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null };
   'ingest:getUploadHistory':       { args: []; result: UploadRecord[] };
   'ingest:deriveMappings':         { args: [columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource]; result: DerivedMappings };

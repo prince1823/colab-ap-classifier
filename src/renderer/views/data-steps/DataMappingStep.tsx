@@ -254,7 +254,7 @@ function CanonicalPicker({
                 className="w-full text-left px-3 py-1.5 text-[11px] font-mono text-blue-600 hover:bg-blue-50 border-t border-gray-100 flex items-center gap-1.5"
               >
                 <span className="flex-shrink-0">+</span>
-                <span>Create &quot;{searchSnaked}&quot;</span>
+                <span>Create &quot;{searchTrimmed}&quot;</span>
                 <span className="text-[9px] text-gray-400 ml-auto">Enter</span>
               </button>
             )}

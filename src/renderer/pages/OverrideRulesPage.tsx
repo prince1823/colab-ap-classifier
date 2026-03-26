@@ -1235,6 +1235,69 @@ function GroupSection({
 // ─── RuleRow component ───────────────────────────────────────────────────────
 
 const CONDITION_TRUNCATE_LENGTH = 50
+const MAX_VISIBLE_CONDITIONS = 3
+
+function ConditionBadges({ rule, expanded, onToggle }: {
+  rule: OverrideRule
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const { groupedConditions } = rule
+  if (!groupedConditions?.groups?.length) return <span className="text-gray-400 italic text-[10px]">No conditions</span>
+
+  const allConditions: { field: string; operator: string; value: string; connector?: string }[] = []
+  const groupConnectors: string[] = []
+
+  groupedConditions.groups.forEach((g, gi) => {
+    if (gi > 0) groupConnectors.push(g.groupConnector || groupedConditions.groupConnector)
+    g.conditions.filter(c => c.field).forEach((c, ci, arr) => {
+      allConditions.push({
+        field: c.field,
+        operator: OPERATOR_LABELS[c.operator] || c.operator,
+        value: String(c.value),
+        connector: ci < arr.length - 1 ? (c.connector || g.connector) : (gi < groupedConditions.groups.length - 1 ? (groupedConditions.groups[gi + 1]?.groupConnector || groupedConditions.groupConnector) : undefined),
+      })
+    })
+  })
+
+  if (allConditions.length === 0) return <span className="text-gray-400 italic text-[10px]">No conditions configured</span>
+
+  const visible = expanded ? allConditions : allConditions.slice(0, MAX_VISIBLE_CONDITIONS)
+  const hiddenCount = allConditions.length - MAX_VISIBLE_CONDITIONS
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {visible.map((c, i) => (
+        <span key={i} className="inline-flex items-center gap-0.5">
+          <span className="inline-flex items-center gap-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[10px]">
+            <span className="font-medium text-gray-700">{c.field}</span>
+            <span className="text-orange-600 font-medium">{c.operator}</span>
+            <span className="text-emerald-700 font-medium">&quot;{c.value}&quot;</span>
+          </span>
+          {c.connector && i < visible.length - 1 && (
+            <span className="text-[9px] font-bold text-blue-500 uppercase px-0.5">{c.connector}</span>
+          )}
+        </span>
+      ))}
+      {!expanded && hiddenCount > 0 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggle() }}
+          className="text-[10px] text-blue-600 hover:text-blue-800 font-medium px-1"
+        >
+          +{hiddenCount} more
+        </button>
+      )}
+      {expanded && allConditions.length > MAX_VISIBLE_CONDITIONS && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggle() }}
+          className="text-[10px] text-blue-600 hover:text-blue-800 font-medium px-1"
+        >
+          show less
+        </button>
+      )}
+    </div>
+  )
+}
 
 interface RuleRowProps {
   rule: OverrideRule
@@ -1310,37 +1373,18 @@ function RuleRow({
 
       {/* Condition */}
       <td className="px-3 py-2 border border-gray-300 align-top">
-        <div className="text-gray-600">
-          {isLong && !isExpanded ? (
-            <>
-              <span>{conditionText.slice(0, CONDITION_TRUNCATE_LENGTH)}...</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setExpandedConditions(prev => { const n = new Set(prev); n.add(rule.id); return n })
-                }}
-                className="ml-1 text-blue-600 hover:text-blue-800 font-medium"
-              >
-                read more
-              </button>
-            </>
-          ) : isLong && isExpanded ? (
-            <>
-              <span>{conditionText}</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setExpandedConditions(prev => { const n = new Set(prev); n.delete(rule.id); return n })
-                }}
-                className="ml-1 text-blue-600 hover:text-blue-800 font-medium"
-              >
-                show less
-              </button>
-            </>
-          ) : (
-            <span>{conditionText}</span>
-          )}
-        </div>
+        <ConditionBadges
+          rule={rule}
+          expanded={isExpanded}
+          onToggle={() => {
+            setExpandedConditions(prev => {
+              const n = new Set(prev)
+              if (n.has(rule.id)) n.delete(rule.id)
+              else n.add(rule.id)
+              return n
+            })
+          }}
+        />
       </td>
 
       {/* Target Classification */}

@@ -597,7 +597,7 @@
     <h2>Classification Pipeline</h2>
 
     <div class="info-box">
-      <strong>What changed:</strong> The original single-call approach (full taxonomy per supplier) was split into two sequential LLM calls per supplier — a <span class="badge call1">Call 1</span> supplier-level category selection (batched at 10) and a <span class="badge call2">Call 2</span> transaction-level L3 classification. This reduces taxonomy tokens per supplier and focuses each LLM call on one concern.
+      <strong>What changed:</strong> The original single-call approach (full taxonomy per supplier) was split into two sequential LLM calls — a <span class="badge call1">Call 1</span> supplier-level category selection (batched at 10) and a <span class="badge call2">Call 2</span> transaction-level L3 classification. These run as a <strong>chunked pipeline</strong>: each batch of 10 suppliers completes Call 1 → Call 2 before the next batch starts. No global in-memory map — crash at supplier 5,000 means the first 4,990 are already classified in the DB.
     </div>
 
     <div style="margin-top: 24px;">
@@ -638,6 +638,7 @@
                   <li>Matched transactions: <code>classification_status = 'classified_by_rule'</code> + <code>appliedRuleId</code></li>
                   <li>Remaining suppliers (still have unclassified txns) proceed to Phase 2</li>
                   <li>Supplier info (name, parent, research) is resolved here for Call 1</li>
+                  <li><strong>Research warning:</strong> If <code>is_researched = true</code> but <code>supplierUniverse.getSupplier()</code> returns null, logs a <code>WARN</code> so operators can diagnose stale/mismatched universe data</li>
                 </ul>
                 <div class="highlight" style="margin-top:10px;">
                   <strong>Deviation from spec:</strong> The spec implied rules + Call 2 happen together in <code>classifySupplierTransactions</code>. Actual implementation moves rules to Phase 1 so Call 1 only includes suppliers that still need classification.
@@ -647,16 +648,45 @@
           </div>
         </div>
 
-        <!-- Phase 2: Call 1 -->
+        <!-- Phase 2: Chunked Pipeline (Call 1 → Call 2 per batch) -->
         <div class="flow-step">
           <div class="flow-line"></div>
           <div class="flow-dot c1">2</div>
           <div class="flow-content">
-            <div class="flow-title">Phase 2 — Batched Call 1: Category Selection</div>
-            <div class="flow-desc">Chunk remaining suppliers into batches of 10. One LLM call per batch returns an L1|L2 path for each supplier. Runs concurrently via pool.</div>
+            <div class="flow-title">Phase 2 — Chunked Pipeline: Call 1 → Call 2 per batch</div>
+            <div class="flow-desc">Suppliers are chunked into batches of 10. Each batch flows through <span class="badge call1">Call 1</span> (category selection) then immediately into <span class="badge call2">Call 2</span> (L3 classification) before the next batch starts. No global in-memory map — results are consumed within the same batch iteration.</div>
 
-            <div class="card call1" style="margin-top:10px;">
-              <div class="card-title"><span class="badge call1">CALL 1</span> selectCategories()</div>
+            <div class="highlight" style="margin-top:10px;">
+              <strong>Why chunked, not two-phase:</strong> The original design ran ALL Call 1 into a global <code>categoryMap</code> before starting ANY Call 2. At 10K suppliers, this meant 1,000 LLM calls before a single transaction got classified. A crash between phases lost everything. The chunked pipeline gives incremental persistence — crash at supplier 5,000, the first 4,990 are already in the DB.
+            </div>
+
+            <h3 style="margin-top:16px;">Per-batch flow</h3>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0;">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+                <div class="batch-vis">
+                  <div class="batch-chip s1">S1</div><div class="batch-chip s1">S2</div><div class="batch-chip s1">...</div><div class="batch-chip s1">S10</div>
+                </div>
+                <div class="batch-label"><span class="badge call1">Call 1</span> batch</div>
+              </div>
+              <div style="color:var(--text-dim);font-size:18px;">→</div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+                <div class="batch-vis">
+                  <div class="batch-chip s2">S1</div><div class="batch-chip s2">S2</div><div class="batch-chip s2">...</div><div class="batch-chip s2">S10</div>
+                </div>
+                <div class="batch-label"><span class="badge call2">Call 2</span> concurrent</div>
+              </div>
+              <div style="color:var(--text-dim);font-size:18px;">→</div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+                <div class="batch-vis">
+                  <div class="batch-chip s1">S11</div><div class="batch-chip s1">S12</div><div class="batch-chip s1">...</div><div class="batch-chip s1">S20</div>
+                </div>
+                <div class="batch-label"><span class="badge call1">Call 1</span> next batch</div>
+              </div>
+              <div style="color:var(--text-dim);font-size:18px;">→ ...</div>
+            </div>
+
+            <div class="card call1" style="margin-top:16px;">
+              <div class="card-title"><span class="badge call1">CALL 1</span> selectCategories() — per batch</div>
               <div class="io-grid">
                 <div class="io-box">
                   <h4>Input (per batch)</h4>
@@ -686,40 +716,31 @@
 
             <div class="expandable" style="margin-top:8px;">
               <div class="expand-header">
-                <div class="expand-label">Validation &amp; retry logic</div>
+                <div class="expand-label">Call 1 validation &amp; retry logic</div>
                 <div class="expand-arrow">▼</div>
               </div>
               <div class="expand-body">
                 <ul class="plain">
                   <li>Fuzzy-match returned L1|L2 paths against taxonomy (<code>normalizePath</code> + <code>findClosestTaxonomyMatch</code>)</li>
                   <li>Any supplier missing from batch response → individual Call 1 retry</li>
-                  <li>Still no match after retry → <code>classification_error</code></li>
-                  <li>Result collected into <code>Map&lt;supplierId, categoryPath&gt;</code></li>
+                  <li>Entire batch fails → retry each supplier individually</li>
+                  <li>Still no match after retry → supplier proceeds to Call 2 with no categoryPath → marked as <code>classification_error</code></li>
+                  <li>Results stored in batch-scoped <code>batchCategoryMap</code> (not global)</li>
                 </ul>
                 <div class="file-ref-line" style="margin-top:8px;">
                   <code class="file-ref">classification-agent.ts: selectCategories()</code>
-                  <code class="file-ref">classification.ts:~248–338</code>
+                  <code class="file-ref">classification.ts:~261–339</code>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
 
-        <!-- Phase 3: Call 2 -->
-        <div class="flow-step">
-          <div class="flow-line"></div>
-          <div class="flow-dot c2">3</div>
-          <div class="flow-content">
-            <div class="flow-title">Phase 3 — Per-Supplier Call 2: L3 Classification</div>
-            <div class="flow-desc">For each supplier, call <strong>classifySupplierTransactions()</strong> using the L1|L2 from Phase 2. Runs concurrently via the same pool.</div>
-
-            <div class="card call2" style="margin-top:10px;">
-              <div class="card-title"><span class="badge call2">CALL 2</span> classifyL3() via classifySupplierTransactions()</div>
+            <div class="card call2" style="margin-top:16px;">
+              <div class="card-title"><span class="badge call2">CALL 2</span> classifyL3() via classifySupplierTransactions() — per supplier</div>
               <div class="io-grid">
                 <div class="io-box">
                   <h4>Input (per supplier)</h4>
                   <ul>
-                    <li>categoryPath (L1|L2 from Call 1)</li>
+                    <li>categoryPath (L1|L2 from this batch's Call 1)</li>
                     <li>L3 taxonomy nodes filtered to that branch</li>
                     <li>Transaction dedup groups (by column priorities)</li>
                     <li>Supplier name + type (brief context only)</li>
@@ -767,10 +788,32 @@
                 </div>
               </div>
             </div>
+
+            <div class="expandable" style="margin-top:8px;">
+              <div class="expand-header">
+                <div class="expand-label"><span class="badge new">NEW</span> Call 2 error resilience</div>
+                <div class="expand-arrow">▼</div>
+              </div>
+              <div class="expand-body">
+                <ul class="plain">
+                  <li><code>processedSuppliers++</code> is in a <code>finally</code> block — always increments, even if both classification AND <code>markSupplierError</code> fail</li>
+                  <li><code>markSupplierError</code> failures are caught with a nested try/catch and logged — they don't propagate to the outer handler</li>
+                  <li>Pipeline always moves to the next supplier in the batch, never stalls</li>
+                </ul>
+                <pre style="margin-top:8px;">try {
+  // classifySupplierTransactions or markSupplierError
+} catch (err) {
+  try { await markSupplierError(...); }
+  catch (markErr) { debugLog('ERROR', ...); }
+} finally {
+  processedSuppliers++;  // always runs
+}</pre>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Phase 4: Apply -->
+        <!-- Phase 3: Results -->
         <div class="flow-step">
           <div class="flow-dot save">✓</div>
           <div class="flow-content">
@@ -808,7 +851,7 @@
         <hr class="divider" style="margin:10px 0;" />
         <table>
           <tr><th>Where</th><td><code>LLMClassificationAgent.selectCategories()</code></td></tr>
-          <tr><th>Called from</th><td><code>classification.ts</code> Phase 2 (~lines 248–338)</td></tr>
+          <tr><th>Called from</th><td><code>classification.ts</code> Phase 2 chunked loop (~lines 261–339)</td></tr>
           <tr><th>Batch size</th><td>10 suppliers per call</td></tr>
           <tr><th>Taxonomy sent</th><td>L1|L2 only (~300–536 tokens fixed)</td></tr>
           <tr><th>Per-supplier tokens</th><td>~207 median, ~300 at p90</td></tr>
@@ -823,7 +866,7 @@
         <hr class="divider" style="margin:10px 0;" />
         <table>
           <tr><th>Where</th><td><code>LLMClassificationAgent.classifyL3()</code></td></tr>
-          <tr><th>Called from</th><td><code>classifySupplierTransactions()</code> Phase 3 (~lines 422–542)</td></tr>
+          <tr><th>Called from</th><td><code>classifySupplierTransactions()</code> Phase 2 Call 2 (~lines 344–382)</td></tr>
           <tr><th>Batch size</th><td>1 supplier per call (cannot batch — group numbering collisions)</td></tr>
           <tr><th>Taxonomy sent</th><td>Filtered L3 nodes only (~500–1500 tokens)</td></tr>
           <tr><th>Per-supplier tokens</th><td>+ transaction dedup groups</td></tr>
@@ -1002,7 +1045,7 @@ Response format: same {classifications, assignments} as today</pre>
           <tr>
             <td><code>classifySupplierTransactions()</code></td>
             <td>classification.ts</td>
-            <td>Renamed from <code>classifySupplier()</code> — Call 2 only, receives categoryPath</td>
+            <td>Renamed from <code>classifySupplier()</code> — Call 2 only, receives categoryPath. Called within chunked pipeline per batch.</td>
           </tr>
         </tbody>
       </table>
@@ -1123,46 +1166,52 @@ interface TraceEntry {
 
     <hr class="divider" />
 
-    <h3>Call 1 batching — how it works</h3>
-    <p>10 suppliers are grouped into a single LLM call. The L1|L2 taxonomy and company context are sent once (fixed overhead). Only the per-supplier name + research varies.</p>
+    <h3>Chunked pipeline — how it works</h3>
+    <p>Suppliers are chunked into batches of 10. Each batch completes Call 1 → Call 2 before the next batch starts. Call 2 tasks within a batch run concurrently via <code>runPool</code>.</p>
 
     <div style="margin:16px 0;">
-      <p style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Example: 23 suppliers → 3 Call 1 batches</p>
-      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Example: 23 suppliers → 3 chunks, each flows Call 1 → Call 2</p>
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
         <div class="batch-group">
           <div class="batch-vis">
-            <div class="batch-chip s1">S1</div><div class="batch-chip s1">S2</div><div class="batch-chip s1">S3</div>
-            <div class="batch-chip s1">S4</div><div class="batch-chip s1">S5</div><div class="batch-chip s1">S6</div>
-            <div class="batch-chip s1">S7</div><div class="batch-chip s1">S8</div><div class="batch-chip s1">S9</div>
-            <div class="batch-chip s1">S10</div>
+            <div class="batch-chip s1">S1</div><div class="batch-chip s1">S2</div><div class="batch-chip s1">...</div><div class="batch-chip s1">S10</div>
           </div>
-          <div class="batch-label">Call 1 Batch 1</div>
+          <div class="batch-label"><span class="badge call1">Call 1</span> Batch 1</div>
         </div>
-        <div style="padding-top:10px;color:var(--text-dim);font-size:18px;">+</div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
         <div class="batch-group">
           <div class="batch-vis">
-            <div class="batch-chip s1">S11</div><div class="batch-chip s1">S12</div><div class="batch-chip s1">S13</div>
-            <div class="batch-chip s1">S14</div><div class="batch-chip s1">S15</div><div class="batch-chip s1">S16</div>
-            <div class="batch-chip s1">S17</div><div class="batch-chip s1">S18</div><div class="batch-chip s1">S19</div>
-            <div class="batch-chip s1">S20</div>
+            <div class="batch-chip s2">S1</div><div class="batch-chip s2">S2</div><div class="batch-chip s2">...</div><div class="batch-chip s2">S10</div>
           </div>
-          <div class="batch-label">Call 1 Batch 2</div>
+          <div class="batch-label"><span class="badge call2">Call 2</span> Batch 1</div>
         </div>
-        <div style="padding-top:10px;color:var(--text-dim);font-size:18px;">+</div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
+        <div class="batch-group">
+          <div class="batch-vis">
+            <div class="batch-chip s1">S11</div><div class="batch-chip s1">S12</div><div class="batch-chip s1">...</div><div class="batch-chip s1">S20</div>
+          </div>
+          <div class="batch-label"><span class="badge call1">Call 1</span> Batch 2</div>
+        </div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
+        <div class="batch-group">
+          <div class="batch-vis">
+            <div class="batch-chip s2">S11</div><div class="batch-chip s2">S12</div><div class="batch-chip s2">...</div><div class="batch-chip s2">S20</div>
+          </div>
+          <div class="batch-label"><span class="badge call2">Call 2</span> Batch 2</div>
+        </div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
         <div class="batch-group">
           <div class="batch-vis">
             <div class="batch-chip s1">S21</div><div class="batch-chip s1">S22</div><div class="batch-chip s1">S23</div>
           </div>
-          <div class="batch-label">Call 1 Batch 3</div>
+          <div class="batch-label"><span class="badge call1">Call 1</span> Batch 3</div>
         </div>
-        <div style="padding-top:10px;color:var(--text-dim);">→</div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
         <div class="batch-group">
           <div class="batch-vis">
-            <div class="batch-chip s2">S1</div><div class="batch-chip s2">S2</div><div class="batch-chip s2">S3</div>
-            <div class="batch-chip gap">...</div>
-            <div class="batch-chip s2">S23</div>
+            <div class="batch-chip s2">S21</div><div class="batch-chip s2">S22</div><div class="batch-chip s2">S23</div>
           </div>
-          <div class="batch-label">23× Call 2 (concurrent)</div>
+          <div class="batch-label"><span class="badge call2">Call 2</span> Batch 3</div>
         </div>
       </div>
     </div>
@@ -1210,17 +1259,22 @@ interface TraceEntry {
 
     <h3>Orchestration order</h3>
     <pre>classifyAll():
-  1. Chunk suppliers into batches of 10
-  2. Run all Call 1 batches concurrently (pool of 5)
-     → collect Map&lt;supplierId, categoryPath&gt;
-  3. Run all Call 2s concurrently (pool of 5)
-     each reads its supplierId's categoryPath from the map
+  1. Phase 1: Override rules for all suppliers → collect suppliersNeedingClassification
+  2. Phase 2: For each batch of CALL1_BATCH_SIZE (10) suppliers:
+       a. Call 1 — one LLM call for the batch → batchCategoryMap
+       b. Call 2 — runPool(concurrent per supplier) → classify L3, write to DB
+       c. processedSuppliers incremented per supplier (in finally block)
+     Batches processed sequentially; Call 2 tasks within each batch run concurrently.
 
-  Stop check: isStopped flag checked before each phase.
-  In-flight calls complete; results discarded if stopped.</pre>
+  Stop check: isStopped checked before each batch and before each Call 2 task.
+  In-flight calls complete; results are written to DB as they finish.</pre>
 
     <div class="highlight">
-      Call 1 batches are fully resolved before any Call 2 starts. This prevents Call 2 slots from blocking on category selection and keeps the two phases cleanly separated for logging and retry logic.
+      <strong>Progress bar improvement:</strong> The old two-phase design stalled on "Selecting categories" for the entire Call 1 phase. Now <code>processedSuppliers</code> increments after each supplier's Call 2 completes, and Call 2 starts after every batch of 10. The progress bar moves steadily from the start.
+    </div>
+
+    <div class="info-box" style="margin-top:10px;">
+      <strong>Crash resilience:</strong> Each batch's Call 2 writes results to the DB immediately. If the process crashes at supplier 5,000, the first ~4,990 are already classified. On re-run, Phase 1 skips rule-matched suppliers, and <code>classifySupplierTransactions</code> only queries <code>classification_status = 'unclassified'</code> — already-classified suppliers are effectively skipped.
     </div>
   </div>
 
@@ -1708,12 +1762,13 @@ getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string,
       <div class="expand-body">
         <p><strong>Problem:</strong> Single call per supplier sends full taxonomy (~4000–5000 tokens). LLM must simultaneously reason about supplier identity, category selection, and transaction-level L3 matching.</p>
         <p><strong>Solution:</strong> Two sequential calls. Call 1 is supplier-level + batched at 10. Call 2 is transaction-level + per-supplier with filtered taxonomy.</p>
-        <p><strong>Replaces:</strong> The original multi-supplier batching approach from #221. Full-taxonomy batching remains off the table (cross-supplier context mixing).</p>
+        <p><strong>Revision:</strong> Originally implemented as two-phase (all Call 1 → all Call 2 via global <code>categoryMap</code>). Revised to <strong>chunked pipeline</strong> — each batch of 10 flows through Call 1 → Call 2 before the next batch starts. Eliminates global in-memory map, gives incremental persistence and steady progress bar.</p>
         <p><strong>Key deviations from spec:</strong></p>
         <ul class="plain">
           <li>Override rules moved to Phase 1 pre-pass (not inside <code>classifySupplierTransactions</code>)</li>
           <li>Supplier info fetched twice: Phase 1 (for Call 1 batch) + <code>classifySupplierTransactions</code> (for Call 2 context injection). Keeps Call 2 self-contained.</li>
           <li>Legacy fallback in <code>classifyTransactionGroup()</code> wrapper when Call 1 returns no valid category</li>
+          <li>Chunked pipeline replaces two-phase: <code>batchCategoryMap</code> (batch-scoped) instead of global <code>categoryMap</code></li>
         </ul>
         <p><strong>Status:</strong> <span class="badge new">DONE</span></p>
       </div>
@@ -1762,6 +1817,56 @@ getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string,
       </div>
     </div>
 
+    <!-- Task 5 -->
+    <div class="expandable open" style="margin-bottom:12px;">
+      <div class="expand-header">
+        <div class="expand-label">
+          <span class="badge p1">P1</span>
+          <strong>Task 5 — Research Warning Logging</strong>
+          <span style="font-size:12px;color:var(--text-dim);">Size XS</span>
+        </div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <p><strong>Problem:</strong> If a supplier is marked <code>is_researched = true</code> in <code>project_suppliers</code> but <code>supplierUniverse.getSupplier()</code> returns null, classification silently proceeds without research data. This indicates stale or mismatched universe data that should be surfaced.</p>
+        <p><strong>Solution:</strong> Added <code>is_researched</code> to the Phase 1 supplier info query. After the universe lookup, if <code>is_researched && !research</code>, log a <code>WARN</code> via <code>debugLog</code>.</p>
+        <pre>if (supplierInfo?.is_researched && !research) {
+  debugLog('WARN', `Supplier "${supplierName}" is marked as researched but no research data found in supplier universe`);
+}</pre>
+        <p><strong>Status:</strong> <span class="badge new">DONE</span></p>
+      </div>
+    </div>
+
+    <!-- Task 6 -->
+    <div class="expandable open" style="margin-bottom:12px;">
+      <div class="expand-header">
+        <div class="expand-label">
+          <span class="badge p1">P1</span>
+          <strong>Task 6 — Call 2 Error Resilience</strong>
+          <span style="font-size:12px;color:var(--text-dim);">Size XS</span>
+        </div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <p><strong>Problem:</strong> If <code>classifySupplierTransactions</code> threw AND <code>markSupplierError</code> also threw (e.g., DB failure), the error escaped and <code>processedSuppliers++</code> never ran. The pipeline would stall or report incorrect progress.</p>
+        <p><strong>Solution:</strong> Two changes:</p>
+        <ul class="plain">
+          <li>Moved <code>processedSuppliers++</code> into a <code>finally</code> block — always increments regardless of success/failure</li>
+          <li>Wrapped <code>markSupplierError</code> in its own try/catch inside the outer catch — double failures are logged but don't propagate</li>
+        </ul>
+        <pre>try {
+  // classification or markSupplierError (no categoryPath)
+} catch (err) {
+  debugLog('ERROR', ...);
+  try { await this.markSupplierError(...); }
+  catch (markErr) { debugLog('ERROR', ...); }
+} finally {
+  processedSuppliers++;  // always runs
+}</pre>
+        <p><strong>Status:</strong> <span class="badge new">DONE</span></p>
+      </div>
+    </div>
+
     <hr class="divider" />
 
     <h3>Design principles</h3>
@@ -1780,7 +1885,7 @@ getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string,
       </div>
       <div class="card">
         <div class="card-title">Rules handle returning suppliers</div>
-        <p style="font-size:13px;">Generate Rules captures reviewed classifications as override rules. Returning suppliers hit rules before LLM is invoked — Call 1 results don't need persistence.</p>
+        <p style="font-size:13px;">Generate Rules captures reviewed classifications as override rules. Returning suppliers hit rules before LLM is invoked. The chunked pipeline gives crash resilience — Call 1 results don't need DB persistence because Call 2 writes to DB immediately after each batch.</p>
       </div>
     </div>
   </div>

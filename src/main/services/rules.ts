@@ -378,12 +378,8 @@ export class RuleStore implements IRuleStore {
     if (input.priority == null || input.priority < 1) {
       throw new Error('Group priority must be >= 1');
     }
-    const existing = await this.db.get<{ id: string }>(
-      'SELECT id FROM rule_groups WHERE priority = ?', input.priority
-    );
-    if (existing) {
-      throw new Error(`Priority ${input.priority} is already taken by another group`);
-    }
+    // Cascade: if requested priority is already taken, bump existing groups at that priority and above upward
+    await this.cascadePriorities(input.priority);
 
     const id = uuidv4();
     await this.db.run(
@@ -393,6 +389,34 @@ export class RuleStore implements IRuleStore {
     return { id };
   }
 
+  private async cascadePriorities(targetPriority: number, excludeGroupId?: string): Promise<void> {
+    // Find all groups at or above the target priority, ordered by priority ASC
+    const condition = excludeGroupId
+      ? 'WHERE priority >= ? AND id != ?'
+      : 'WHERE priority >= ?';
+    const params = excludeGroupId
+      ? [targetPriority, excludeGroupId]
+      : [targetPriority];
+    const conflicts = await this.db.all<{ id: string; priority: number }>(
+      `SELECT id, priority FROM rule_groups ${condition} ORDER BY priority ASC`, ...params
+    );
+    if (conflicts.length === 0) return;
+    // Only cascade if the exact target priority is occupied
+    if (conflicts[0].priority !== targetPriority) return;
+    // Bump each consecutive group up by 1 (work top-down to avoid unique constraint violations)
+    let nextExpected = targetPriority;
+    const toBump: { id: string; newPriority: number }[] = [];
+    for (const g of conflicts) {
+      if (g.priority !== nextExpected) break; // gap found, no more cascading needed
+      toBump.push({ id: g.id, newPriority: g.priority + 1 });
+      nextExpected = g.priority + 1;
+    }
+    // Apply in reverse order (highest first) to avoid unique constraint violations
+    for (let i = toBump.length - 1; i >= 0; i--) {
+      await this.db.run('UPDATE rule_groups SET priority = ? WHERE id = ?', toBump[i].newPriority, toBump[i].id);
+    }
+  }
+
   async updateGroup(groupId: string, updates: RuleGroupUpdate): Promise<void> {
     const setClauses: string[] = [];
     const params: unknown[] = [];
@@ -400,10 +424,8 @@ export class RuleStore implements IRuleStore {
     if (updates.name !== undefined) { setClauses.push('name = ?'); params.push(updates.name); }
     if (updates.priority !== undefined) {
       if (updates.priority < 1) throw new Error('Group priority must be >= 1');
-      const existing = await this.db.get<{ id: string }>(
-        'SELECT id FROM rule_groups WHERE priority = ? AND id != ?', updates.priority, groupId
-      );
-      if (existing) throw new Error(`Priority ${updates.priority} is already taken by another group`);
+      // Cascade: bump existing groups at the target priority upward
+      await this.cascadePriorities(updates.priority, groupId);
       setClauses.push('priority = ?');
       params.push(updates.priority);
     }

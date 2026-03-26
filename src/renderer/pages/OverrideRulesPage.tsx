@@ -1110,12 +1110,12 @@ function RuleRow({
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className="group cursor-grab transition-colors hover:bg-slate-50 active:cursor-grabbing"
+      className="group transition-colors hover:bg-slate-50"
     >
       {/* Drag handle + optional checkbox */}
-      <td className="px-3 py-2 border border-gray-300 align-top">
+      <td className="px-3 py-2 border border-gray-300 align-top cursor-grab active:cursor-grabbing">
         <div className="flex items-center gap-1.5">
-          <svg className="h-3.5 w-3.5 shrink-0 text-gray-300 group-hover:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+          <svg className="h-3.5 w-3.5 shrink-0 text-transparent group-hover:text-gray-400 transition-colors" fill="currentColor" viewBox="0 0 24 24">
             <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
             <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
             <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
@@ -1137,6 +1137,12 @@ function RuleRow({
         <span className="font-medium text-gray-900" title={rule.name}>
           {rule.name}
         </span>
+        <div className="mt-1">
+          <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[9px] text-gray-400 font-normal">
+            {new Date(rule.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}{' '}
+            {new Date(rule.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
       </td>
 
       {/* Condition */}
@@ -1204,7 +1210,7 @@ function RuleRow({
 
       {/* Actions */}
       <td className="px-3 py-2 border border-gray-300 align-top text-center">
-        <div className="flex items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center justify-center gap-0.5">
           <button onClick={(e) => { e.stopPropagation(); onEdit(rule) }} className="rounded p-1 text-blue-500 hover:bg-blue-50" title="Edit">
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
           </button>

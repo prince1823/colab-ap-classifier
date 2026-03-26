@@ -40,10 +40,6 @@ export default function OverrideRulesPage() {
   const [newGroupPriority, setNewGroupPriority] = useState('')
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null)
 
-  // Priority editing
-  const [editingPriorityGroupId, setEditingPriorityGroupId] = useState<string | null>(null)
-  const [editingPriorityValue, setEditingPriorityValue] = useState('')
-
   // Conditions modal
   const [conditionsModalOpen, setConditionsModalOpen] = useState(false)
 
@@ -186,21 +182,6 @@ export default function OverrideRulesPage() {
       await loadData()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to rename group')
-    }
-  }
-
-  const handleUpdatePriority = async (groupId: string) => {
-    const priority = parseInt(editingPriorityValue, 10)
-    if (isNaN(priority) || priority < 1) {
-      setEditingPriorityGroupId(null)
-      return
-    }
-    try {
-      await ipc.rules.updateGroup(groupId, { priority })
-      setEditingPriorityGroupId(null)
-      await loadData()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update priority')
     }
   }
 
@@ -923,11 +904,6 @@ export default function OverrideRulesPage() {
                   setEditingGroupName={setEditingGroupName}
                   handleRenameGroup={handleRenameGroup}
                   setEditingGroupId={setEditingGroupId}
-                  editingPriorityGroupId={editingPriorityGroupId}
-                  editingPriorityValue={editingPriorityValue}
-                  setEditingPriorityValue={setEditingPriorityValue}
-                  handleUpdatePriority={handleUpdatePriority}
-                  setEditingPriorityGroupId={setEditingPriorityGroupId}
                   openCreate={openCreate}
                   setDeletingGroupId={setDeletingGroupId}
                   handleGroupDragOver={handleGroupDragOver}
@@ -1063,11 +1039,6 @@ interface GroupSectionProps {
   setEditingGroupName: (v: string) => void
   handleRenameGroup: (id: string) => void
   setEditingGroupId: (id: string | null) => void
-  editingPriorityGroupId: string | null
-  editingPriorityValue: string
-  setEditingPriorityValue: (v: string) => void
-  handleUpdatePriority: (id: string) => void
-  setEditingPriorityGroupId: (id: string | null) => void
   openCreate: (groupId?: string | null) => void
   setDeletingGroupId: (id: string | null) => void
   handleGroupDragOver: (e: React.DragEvent, groupId: string | null) => void
@@ -1093,7 +1064,6 @@ interface GroupSectionProps {
 function GroupSection({
   group, groupRules, isCollapsed, isDragOver, toggleGroup,
   editingGroupId, editingGroupName, setEditingGroupName, handleRenameGroup, setEditingGroupId,
-  editingPriorityGroupId, editingPriorityValue, setEditingPriorityValue, handleUpdatePriority, setEditingPriorityGroupId,
   openCreate, setDeletingGroupId,
   handleGroupDragOver, setDragOverGroupId, handleGroupDrop,
   getNodePath, formatConditionSummary, openEdit, handleDelete, handleToggle,
@@ -1153,34 +1123,12 @@ function GroupSection({
               {groupRules.length} rule{groupRules.length !== 1 ? 's' : ''}
             </span>
 
-            {editingPriorityGroupId === group.id ? (
-              <input
-                autoFocus
-                type="number"
-                min={1}
-                value={editingPriorityValue}
-                onChange={(e) => setEditingPriorityValue(e.target.value)}
-                onBlur={() => handleUpdatePriority(group.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleUpdatePriority(group.id)
-                  if (e.key === 'Escape') setEditingPriorityGroupId(null)
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="w-16 rounded border border-indigo-300 px-1.5 py-0.5 text-xs font-medium text-indigo-700 text-center focus:outline-none focus:ring-1 focus:ring-indigo-400"
-              />
-            ) : (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setEditingPriorityGroupId(group.id)
-                  setEditingPriorityValue(String(group.priority))
-                }}
-                className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-100 transition-colors"
-                title="Click to change priority (higher = evaluated first). Duplicate priorities cascade upward."
-              >
-                Priority {group.priority}
-              </button>
-            )}
+            <span
+              className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600"
+              title="Drag groups to change priority order"
+            >
+              Priority {group.priority}
+            </span>
 
             <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
               <button onClick={() => openCreate(group.id)} className="rounded p-1 text-gray-400 hover:bg-white hover:text-gray-600" title="Add rule to this group">

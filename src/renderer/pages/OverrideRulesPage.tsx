@@ -1263,13 +1263,15 @@ function RuleRow({
 
   return (
     <tr
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       className="group transition-colors hover:bg-slate-50"
     >
       {/* Drag handle + optional checkbox */}
-      <td className="px-3 py-2 border border-gray-300 align-top cursor-grab active:cursor-grabbing">
+      <td
+        draggable
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        className="px-3 py-2 border border-gray-300 align-top cursor-grab active:cursor-grabbing"
+      >
         <div className="flex items-center gap-1.5">
           <svg className="h-3.5 w-3.5 shrink-0 text-transparent group-hover:text-gray-400 transition-colors" fill="currentColor" viewBox="0 0 24 24">
             <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
@@ -1289,7 +1291,12 @@ function RuleRow({
       </td>
 
       {/* Rule Name */}
-      <td className="px-3 py-2 border border-gray-300 align-top">
+      <td
+        draggable
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        className="px-3 py-2 border border-gray-300 align-top cursor-grab active:cursor-grabbing"
+      >
         <span className="font-medium text-gray-900" title={rule.name}>
           {rule.name}
         </span>

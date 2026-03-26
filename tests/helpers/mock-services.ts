@@ -141,6 +141,7 @@ export function createMockTransactionStore(): TransactionStore {
     invalidateColumnCache: vi.fn(),
     getIdsByConditions: vi.fn().mockResolvedValue([]),
     getIdsByGroupedConditions: vi.fn().mockResolvedValue([]),
+    applyRule: vi.fn().mockResolvedValue(0),
     getSpendByTaxonomy: vi.fn().mockResolvedValue([]),
     getTransactionsByTaxonomy: vi.fn().mockResolvedValue([]),
   };

@@ -210,6 +210,12 @@ export class RuleStore implements IRuleStore {
     return { id };
   }
 
+  async createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }> {
+    const { id } = await this.createRule(input);
+    const matchedCount = await this.transactions.applyRule(id, input.groupedConditions, input.targetTaxonomyNodeId);
+    return { id, matchedCount };
+  }
+
   async updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void> {
     const setClauses: string[] = [];
     const params: unknown[] = [];

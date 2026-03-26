@@ -1,6 +1,6 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
-import type { ClassificationProgress, ResearchProgress, QCProgress, QCConfig, FilterConditionQC } from '../../shared/types/classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
@@ -65,6 +65,8 @@ export const ipc = {
     deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
       invoke('ingest:deriveMappings', columns, sampleRows, source),
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
+    onProgress: (callback: (progress: IngestProgress) => void) =>
+      on('ingest:progress', callback),
   },
 
   // ── Classification (3 channels + 1 event) ──
@@ -136,7 +138,8 @@ export const ipc = {
       invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
-    researchAll: () => invoke('suppliers:researchAll'),
+    researchAll: (supplierIds?: string[]) => invoke('suppliers:researchAll', supplierIds),
+    cancelResearch: () => invoke('suppliers:cancelResearch'),
     researchSingle: (supplierId: string) =>
       invoke('suppliers:researchSingle', supplierId),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
@@ -158,11 +161,13 @@ export const ipc = {
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
   },
 
-  // ── Rules (5 channels) ──
+  // ── Rules (6 channels) ──
   rules: {
     list: () => invoke('rules:list'),
     create: (input: OverrideRuleCreate) =>
       invoke('rules:create', input),
+    createAndApply: (input: OverrideRuleCreate) =>
+      invoke('rules:createAndApply', input),
     update: (ruleId: string, updates: OverrideRuleUpdate) =>
       invoke('rules:update', ruleId, updates),
     delete: (ruleId: string) => invoke('rules:delete', ruleId),

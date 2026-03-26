@@ -158,6 +158,7 @@ export interface TransactionStore {
   getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;
   getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
   markAllReviewed(): Promise<number>;
+  applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
   getSpendByTaxonomy(supplierId: string): Promise<SpendByTaxonomyResult[]>;
   getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string, columnPriorities: string[]): Promise<Array<Record<string, unknown>>>;
 }
@@ -204,6 +205,7 @@ export interface SupplierService {
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
+  createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
   evaluateRules(transactionIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
@@ -220,9 +222,9 @@ export interface ChangelogStore {
 
 export interface IngestService {
   selectFile(): Promise<string | null>;
-  parseCSVPreview(filePath: string): CSVPreview;
+  parseCSVPreview(filePath: string): Promise<CSVPreview>;
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
-  importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
+  importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<void>;
   getUploadHistory(): Promise<UploadRecord[]>;
   deriveMappings(columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource): Promise<DerivedMappings>;
   getExistingCanonicals(): Promise<string[]>;
@@ -238,7 +240,7 @@ export type ResearchProgressCallback = (progress: ResearchProgress) => void;
 
 export interface SupplierResearcher {
   researchSingle(supplierName: string): Promise<SupplierInfo>;
-  researchAll(onProgress?: ResearchProgressCallback): Promise<void>;
+  researchAll(supplierIds?: string[]): Promise<void>;
   cancel(): void;
 }
 

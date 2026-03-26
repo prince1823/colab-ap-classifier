@@ -80,6 +80,16 @@ export interface ClassificationProgress {
   currentStep: string;
 }
 
+export interface IngestProgress {
+  status: 'running' | 'completed' | 'failed';
+  totalRows: number;
+  processedRows: number;
+  percentage: number;
+  currentStep: string;
+  result?: { rowsInserted: number; uploadId: string };
+  error?: string;
+}
+
 export interface CategorySelectionInput {
   suppliers: Array<{ name: string; research: SupplierInfo | null; parentName: string | null }>;
   taxonomy: TaxonomyNode[];

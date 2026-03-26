@@ -719,9 +719,9 @@ export default function HierarchicalPivotView({
               <button onClick={clearSelection} className="hover:text-indigo-800">
                 <X size={8} />
               </button>
-              <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘K</kbd>
-              <span className="text-gray-400">filter</span>
               <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘F</kbd>
+              <span className="text-gray-400">filter</span>
+              <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘K</kbd>
               <span className="text-gray-400">classify</span>
               <kbd className="text-[8px] bg-gray-100 border border-gray-300 rounded px-0.5">⌘L</kbd>
               <span className="text-gray-400">rule</span>

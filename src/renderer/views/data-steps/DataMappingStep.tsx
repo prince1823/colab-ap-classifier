@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { REQUIRED_CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
 import type { CSVPreview, DerivedMappings, MappingRow } from '../../../shared/types/column-mapping'
+import type { IngestProgress } from '../../../shared/types/classification'
 
 interface Props {
   preview: CSVPreview
@@ -9,6 +10,7 @@ interface Props {
   onBack: () => void
   importing: boolean
   fromPreviousMapping?: boolean
+  importProgress?: IngestProgress | null
 }
 
 const REQUIRED = new Set(REQUIRED_CANONICAL_COLUMNS as readonly string[])
@@ -46,7 +48,7 @@ function buildInitialState(preview: CSVPreview, derivedMappings: DerivedMappings
   }))
 }
 
-export default function DataMappingStep({ preview, derivedMappings, onApply, onBack, importing, fromPreviousMapping = false }: Props) {
+export default function DataMappingStep({ preview, derivedMappings, onApply, onBack, importing, fromPreviousMapping = false, importProgress }: Props) {
   const [columns, setColumns] = useState<ColumnState[]>(() =>
     buildInitialState(preview, derivedMappings, fromPreviousMapping)
   )
@@ -284,7 +286,9 @@ export default function DataMappingStep({ preview, derivedMappings, onApply, onB
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Importing...
+                {importProgress
+                  ? `Importing... ${importProgress.percentage}%`
+                  : 'Starting import...'}
               </>
             ) : (
               'Apply & Import \u2192'

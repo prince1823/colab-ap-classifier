@@ -7,6 +7,7 @@ import { ipc } from '../lib/ipc'
 import { useWorkflowStore } from '../stores/workflowStore'
 import type { CSVPreviewWithMappings, ColumnMappingWithPriority } from '../../shared/types/column-mapping'
 import { toSimpleMapping } from '../../shared/types/column-mapping'
+import type { IngestProgress } from '../../shared/types/classification'
 
 const REQUIRED_COLS = ['supplier_name', 'spend_amount', 'invoice_date']
 
@@ -28,6 +29,7 @@ export default function UploadPage() {
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showMappingEditor, setShowMappingEditor] = useState(false)
+  const [importProgress, setImportProgress] = useState<IngestProgress | null>(null)
 
   // Check for existing upload on mount
   useEffect(() => {
@@ -42,6 +44,27 @@ export default function UploadPage() {
       setShowUploader(true)
     })
   }, [])
+
+  // Listen for import progress events
+  useEffect(() => {
+    const unsubscribe = ipc.ingest.onProgress((progress: IngestProgress) => {
+      setImportProgress(progress)
+
+      if (progress.status === 'completed') {
+        setImporting(false)
+        setImportProgress(null)
+        refreshMetadata().then(() => {
+          navigate('/workflow/data-review')
+        })
+      } else if (progress.status === 'failed') {
+        setError(progress.error || 'Import failed')
+        setImporting(false)
+        setImportProgress(null)
+      }
+    })
+
+    return unsubscribe
+  }, [navigate, refreshMetadata])
 
   const handleFileSelected = async (path: string) => {
     setFilePath(path)
@@ -64,21 +87,23 @@ export default function UploadPage() {
     if (!filePath) return
     setImporting(true)
     setError(null)
+    setImportProgress(null)
     try {
-      await ipc.ingest.importCSV(filePath, toSimpleMapping(mapping))
-      // Derive and save column_priorities so classification can run
+      // Save column_priorities BEFORE firing import — invariant 5.
+      // The mapping is finalized here; do NOT move this into the progress 'completed' handler.
       const required = REQUIRED_COLS.filter((col) => mapping[col]?.csvColumn)
       const optional = Object.entries(mapping)
         .filter(([name, e]) => !REQUIRED_COLS.includes(name) && e.classificationPriority && e.classificationPriority > 0)
         .sort(([, a], [, b]) => (a.classificationPriority ?? 99) - (b.classificationPriority ?? 99))
         .map(([name]) => name)
       await ipc.project.setSetting('column_priorities', [...required, ...optional])
-      await refreshMetadata()
-      navigate('/workflow/data-review')
+
+      // Fire-and-forget — completion handled by ingest:progress event listener
+      await ipc.ingest.importCSV(filePath, toSimpleMapping(mapping))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
-    } finally {
       setImporting(false)
+      setImportProgress(null)
     }
   }
 
@@ -207,7 +232,9 @@ export default function UploadPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Importing...
+                  {importProgress
+                    ? `Importing... ${importProgress.percentage}%`
+                    : 'Starting import...'}
                 </>
               ) : (
                 'Import Data →'

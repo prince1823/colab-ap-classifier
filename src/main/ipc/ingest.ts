@@ -1,8 +1,8 @@
 import { registerHandler } from './register';
-import type { IngestService } from '../../shared/types/services';
+import type { IngestService, EventBus } from '../../shared/types/services';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
 
-export function registerIngestHandlers(ingest: IngestService): void {
+export function registerIngestHandlers(ingest: IngestService, eventBus: EventBus): void {
   registerHandler('ingest:selectFile', async () => {
     return ingest.selectFile();
   });
@@ -15,8 +15,19 @@ export function registerIngestHandlers(ingest: IngestService): void {
     return ingest.suggestMappings(columns as string[], sampleRows as Record<string, string>[]);
   });
 
+  // Fire-and-forget: progress is streamed via EventBus 'ingest:progress'
   registerHandler('ingest:importCSV', async (_event, filePath: unknown, mapping: unknown) => {
-    return ingest.importCSV(filePath as string, mapping as ColumnMapping);
+    ingest.importCSV(filePath as string, mapping as ColumnMapping).catch((err) => {
+      console.error('[IPC] Import failed:', err);
+      eventBus.emit('ingest:progress', {
+        status: 'failed',
+        totalRows: 0,
+        processedRows: 0,
+        percentage: 0,
+        currentStep: 'Import failed',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   });
 
   registerHandler('ingest:getUpload', async () => {

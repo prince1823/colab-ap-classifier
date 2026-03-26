@@ -7,6 +7,9 @@ import path from 'path';
 import { createContainer } from './container';
 import { registerAllHandlers } from './ipc';
 
+// Increase V8 heap limit for large datasets (5M+ rows)
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192');
+
 // Prevent unhandled errors from crashing the entire Electron app
 process.on('uncaughtException', (error) => {
   console.error('[Main] Uncaught exception:', error);
@@ -29,6 +32,7 @@ function createWindow(): void {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
     title: 'Colab91 Classifier',
   });
@@ -61,6 +65,11 @@ app.whenReady().then(() => {
   services.eventBus.on('suppliers:research:progress', (...args: unknown[]) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('suppliers:research:progress', ...args);
+    }
+  });
+  services.eventBus.on('ingest:progress', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('ingest:progress', ...args);
     }
   });
   services.eventBus.on('license:statusChanged', (...args: unknown[]) => {

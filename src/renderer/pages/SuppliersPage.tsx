@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
-import type { ResearchProgress } from '../../shared/types/classification'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
+import { useWorkflowStore } from '../stores/workflowStore'
+import { researchSingle, isResearchRunning } from '../lib/researchRunner'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
@@ -29,7 +30,7 @@ export default function SuppliersPage() {
   const { advancedGrouped, setAdvancedGrouped } = useSupplierFilterStore()
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
+  const researchProgress = useWorkflowStore(s => s.researchProgress)
   const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('10000')
   const [tailSpendSet, setTailSpendSet] = useState(false)
   const [tailSpendActive, setTailSpendActive] = useState(false)
@@ -106,18 +107,12 @@ export default function SuppliersPage() {
     if (viewMode === 'suppliers') loadData()
   }, [viewMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Subscribe to research progress
+  // Reload suppliers when research completes (handles case where user navigated away and back)
   useEffect(() => {
-    const unsub = ipc.suppliers.onResearchProgress((progress: ResearchProgress) => {
-      setResearchProgress(progress)
-      if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
-        setTimeout(() => {
-          setResearchProgress(null)
-        }, 1500)
-      }
-    })
-    return unsub
-  }, [])
+    if (researchProgress?.status === 'completed') {
+      loadData()
+    }
+  }, [researchProgress?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Update local state */
   const updateSuppliers = useCallback((updater: (prev: ProjectSupplierView[]) => ProjectSupplierView[]) => {
@@ -171,32 +166,11 @@ export default function SuppliersPage() {
 
   /** Research a single supplier */
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
-    setResearchProgress({
-      status: 'running',
-      totalSuppliers: 1,
-      processedSuppliers: 0,
-      percentage: 0,
-      currentSupplier: supplier.supplierName,
-      currentStep: 'Researching',
-    })
-    try {
-      const info = await ipc.suppliers.researchSingle(supplier.id)
-      // Update just this supplier in local state instead of full reload
+    const info = await researchSingle(supplier)
+    if (info) {
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, isResearched: true, supplierInfo: info } : s
       ))
-      setResearchProgress({
-        status: 'completed',
-        totalSuppliers: 1,
-        processedSuppliers: 1,
-        percentage: 100,
-        currentSupplier: supplier.supplierName,
-        currentStep: 'Done',
-      })
-      setTimeout(() => setResearchProgress(null), 3000)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Research failed')
-      setResearchProgress(null)
     }
   }, [updateSuppliers])
 
@@ -215,39 +189,18 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Batch research selected */
-  const researchSelected = useCallback(async () => {
-    const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
-    if (selected.length === 0) return
-    const total = selected.length
-    for (let i = 0; i < total; i++) {
-      const s = selected[i]
-      setResearchProgress({
-        status: 'running',
-        totalSuppliers: total,
-        processedSuppliers: i,
-        percentage: Math.round((i / total) * 100),
-        currentSupplier: s.supplierName,
-        currentStep: `Researching ${i + 1} of ${total}`,
-      })
-      try {
-        const info = await ipc.suppliers.researchSingle(s.id)
-        updateSuppliers(prev => prev.map(existing =>
-          existing.id === s.id ? { ...existing, isResearched: true, supplierInfo: info } : existing
-        ))
-      } catch { /* continue */ }
-    }
-    setResearchProgress({
-      status: 'completed',
-      totalSuppliers: total,
-      processedSuppliers: total,
-      percentage: 100,
-      currentSupplier: null,
-      currentStep: 'Done',
+  /** Batch research selected — delegates entirely to the backend */
+  const researchSelected = useCallback(() => {
+    if (isResearchRunning()) return
+    const selectedIds_ = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched).map(s => s.id)
+    if (selectedIds_.length === 0) return
+    // Fire-and-forget: progress is streamed via EventBus → workflowStore.
+    // SuppliersPage reloads supplier data when the completed event arrives (see effect above).
+    ipc.suppliers.researchAll(selectedIds_).catch((err) => {
+      console.error('[Research] researchAll failed:', err)
     })
-    setTimeout(() => setResearchProgress(null), 3000)
     setSelectedIds(new Set())
-  }, [suppliers, selectedIds, updateSuppliers])
+  }, [suppliers, selectedIds])
 
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
@@ -603,7 +556,10 @@ export default function SuppliersPage() {
       {viewMode === 'suppliers' && researchProgress && researchProgress.status === 'running' && (
         <div className="suppliers-progress">
           <div className="flex items-center justify-between mb-1">
-            <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+            {researchProgress.currentSupplier
+              ? <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+              : <span>{researchProgress.currentStep}</span>
+            }
             <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
           </div>
           <div className="progress-bar">

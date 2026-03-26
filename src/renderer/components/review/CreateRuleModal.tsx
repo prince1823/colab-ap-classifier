@@ -8,6 +8,7 @@ import type { GroupedFilter, ConditionGroup, FilterCondition } from '../../../sh
 import type { FieldDefinition } from '../FilterConditionBuilder'
 import type { TaxonomyNode } from '../../../shared/types/taxonomy'
 import type { FlattenedPivotRow } from '../../types/pivot'
+import type { RuleGroup } from '../../../shared/types/rules'
 
 interface CreateRuleModalProps {
   isOpen: boolean
@@ -84,6 +85,10 @@ export default function CreateRuleModal({
   // Filter fields for condition builder
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
 
+  // Rule groups
+  const [ruleGroups, setRuleGroups] = useState<RuleGroup[]>([])
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
+
   // Refs for keyboard navigation
   const nameInputRef = useRef<HTMLInputElement>(null)
   const taxonomyBtnRef = useRef<HTMLButtonElement>(null)
@@ -101,10 +106,12 @@ export default function CreateRuleModal({
     Promise.all([
       ipc.taxonomy.getNodes(),
       ipc.transactions.getFilterFields(),
-    ]).then(([nodes, fields]) => {
+      ipc.rules.listGroups(),
+    ]).then(([nodes, fields, groups]) => {
       // Only show leaf nodes with full L1|L2|L3 path
       setTaxonomyNodes(nodes.filter((n: TaxonomyNode) => n.l3 !== null))
       setFilterFields(fields)
+      setRuleGroups(groups ?? [])
     }).catch(() => {})
   }, [isOpen])
 
@@ -177,6 +184,7 @@ export default function CreateRuleModal({
         name: name.trim(),
         groupedConditions: grouped,
         targetTaxonomyNodeId: targetNodeId,
+        groupId: selectedGroupId,
       })
       onCreated?.()
       setSuccessMessage(`Rule "${name.trim()}" created successfully!`)
@@ -189,7 +197,7 @@ export default function CreateRuleModal({
       setError(e instanceof Error ? e.message : 'Failed to create rule')
       setSaving(false)
     }
-  }, [conditionCount, name, targetNodeId, grouped, onCreated, onClose])
+  }, [conditionCount, name, targetNodeId, grouped, selectedGroupId, onCreated, onClose])
 
   // Taxonomy dropdown keyboard handling
   const handleTaxonomySearchKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -328,6 +336,30 @@ export default function CreateRuleModal({
               placeholder="e.g. IT Software suppliers"
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
+          </div>
+
+          {/* Rule Group */}
+          <div>
+            <label htmlFor="rule-group" className="mb-1 block text-xs font-medium text-gray-600">Rule Group</label>
+            <select
+              id="rule-group"
+              value={selectedGroupId ?? ''}
+              onChange={(e) => setSelectedGroupId(e.target.value || null)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              <option value="">Ungrouped (lowest priority)</option>
+              {ruleGroups
+                .sort((a, b) => b.priority - a.priority)
+                .map(g => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} (Priority {g.priority})
+                  </option>
+                ))
+              }
+            </select>
+            <p className="mt-0.5 text-[10px] text-gray-400">
+              Rules in higher priority groups are evaluated first
+            </p>
           </div>
 
           {/* Target Classification */}

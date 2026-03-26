@@ -1214,49 +1214,76 @@ function ConditionBadges({ rule, expanded, onToggle }: {
   const { groupedConditions } = rule
   if (!groupedConditions?.groups?.length) return <span className="text-gray-400 italic text-[10px]">No conditions</span>
 
-  const allConditions: { field: string; operator: string; value: string; connector?: string }[] = []
-  const groupConnectors: string[] = []
-
-  groupedConditions.groups.forEach((g, gi) => {
-    if (gi > 0) groupConnectors.push(g.groupConnector || groupedConditions.groupConnector)
-    g.conditions.filter(c => c.field).forEach((c, ci, arr) => {
-      allConditions.push({
+  // Build structured groups with their conditions
+  const parsedGroups = groupedConditions.groups
+    .map(g => ({
+      conditions: g.conditions.filter(c => c.field).map(c => ({
         field: c.field,
         operator: OPERATOR_LABELS[c.operator] || c.operator,
         value: String(c.value),
-        connector: ci < arr.length - 1 ? (c.connector || g.connector) : (gi < groupedConditions.groups.length - 1 ? (groupedConditions.groups[gi + 1]?.groupConnector || groupedConditions.groupConnector) : undefined),
-      })
-    })
-  })
+        connector: c.connector || g.connector,
+      })),
+      groupConnector: g.groupConnector || groupedConditions.groupConnector,
+    }))
+    .filter(g => g.conditions.length > 0)
 
-  if (allConditions.length === 0) return <span className="text-gray-400 italic text-[10px]">No conditions configured</span>
+  if (parsedGroups.length === 0) return <span className="text-gray-400 italic text-[10px]">No conditions configured</span>
 
-  const visible = expanded ? allConditions : allConditions.slice(0, MAX_VISIBLE_CONDITIONS)
-  const hiddenCount = allConditions.length - MAX_VISIBLE_CONDITIONS
+  const totalConditions = parsedGroups.reduce((sum, g) => sum + g.conditions.length, 0)
+  const multipleGroups = parsedGroups.length > 1
+
+  // For collapsed view: count how many conditions to show
+  const shouldTruncate = !expanded && totalConditions > MAX_VISIBLE_CONDITIONS
+
+  let conditionCount = 0
 
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {visible.map((c, i) => (
-        <span key={i} className="inline-flex items-center gap-0.5">
-          <span className="inline-flex items-center gap-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[10px]">
-            <span className="font-medium text-gray-700">{c.field}</span>
-            <span className="text-orange-600 font-medium">{c.operator}</span>
-            <span className="text-emerald-700 font-medium">&quot;{c.value}&quot;</span>
+      {parsedGroups.map((group, gi) => {
+        const groupConditions = shouldTruncate
+          ? group.conditions.filter(() => {
+              if (conditionCount >= MAX_VISIBLE_CONDITIONS) return false
+              conditionCount++
+              return true
+            })
+          : group.conditions
+
+        if (groupConditions.length === 0) return null
+
+        return (
+          <span key={gi} className="inline-flex flex-wrap items-center gap-0.5">
+            {/* Group connector (OR/AND between groups) */}
+            {gi > 0 && (
+              <span className="text-[9px] font-bold text-purple-600 uppercase px-0.5">{group.groupConnector}</span>
+            )}
+            {/* Opening paren for multi-group */}
+            {multipleGroups && <span className="text-[10px] font-bold text-gray-400">(</span>}
+            {groupConditions.map((c, ci) => (
+              <span key={ci} className="inline-flex items-center gap-0.5">
+                <span className="inline-flex items-center gap-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[10px]">
+                  <span className="font-medium text-gray-700">{c.field}</span>
+                  <span className="text-orange-600 font-medium">{c.operator}</span>
+                  <span className="text-emerald-700 font-medium">&quot;{c.value}&quot;</span>
+                </span>
+                {ci < groupConditions.length - 1 && (
+                  <span className="text-[9px] font-bold text-blue-500 uppercase px-0.5">{c.connector}</span>
+                )}
+              </span>
+            ))}
+            {/* Closing paren for multi-group */}
+            {multipleGroups && <span className="text-[10px] font-bold text-gray-400">)</span>}
           </span>
-          {c.connector && i < visible.length - 1 && (
-            <span className="text-[9px] font-bold text-blue-500 uppercase px-0.5">{c.connector}</span>
-          )}
-        </span>
-      ))}
-      {!expanded && hiddenCount > 0 && (
+        )
+      })}
+      {shouldTruncate && totalConditions > MAX_VISIBLE_CONDITIONS && (
         <button
           onClick={(e) => { e.stopPropagation(); onToggle() }}
           className="text-[10px] text-blue-600 hover:text-blue-800 font-medium px-1"
         >
-          +{hiddenCount} more
+          +{totalConditions - MAX_VISIBLE_CONDITIONS} more
         </button>
       )}
-      {expanded && allConditions.length > MAX_VISIBLE_CONDITIONS && (
+      {expanded && totalConditions > MAX_VISIBLE_CONDITIONS && (
         <button
           onClick={(e) => { e.stopPropagation(); onToggle() }}
           className="text-[10px] text-blue-600 hover:text-blue-800 font-medium px-1"

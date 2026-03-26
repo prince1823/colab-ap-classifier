@@ -6,7 +6,7 @@ import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSour
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
-import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress, CategorySelectionInput, L3ClassificationInput, QCConfig, QCResult, SpendByTaxonomyResult } from './classification';
+import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress, CategorySelectionInput, L3ClassificationInput, QCConfig, QCResult, SpendByTaxonomyResult, FilterConditionQC } from './classification';
 import type { FeedbackAgentInput, FeedbackRecommendation } from './feedback';
 
 // ─── LLM Config ──────────────────────────────────────────────────────────────
@@ -252,7 +252,7 @@ export interface ClassificationRunner {
 
 export interface QCRunner {
   runQC(config?: QCConfig): Promise<void>;
-  getSupplierCount(filter?: TransactionFilter): Promise<number>;
+  getSupplierCount(scope?: FilterConditionQC[]): Promise<number>;
   getIsRunning(): boolean;
   stop(): void;
 }

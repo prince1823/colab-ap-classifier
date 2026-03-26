@@ -1,12 +1,11 @@
 import { registerHandler } from './register';
 import type { QCRunner, EventBus, ProjectStore } from '../../shared/types/services';
-import type { TransactionFilter } from '../../shared/types/transactions';
-import type { QCConfig } from '../../shared/types/classification';
+import type { QCConfig, FilterConditionQC } from '../../shared/types/classification';
 import { DEFAULT_QC_CONFIG } from '../services/qc';
 
 export function registerQCHandlers(qc: QCRunner, eventBus: EventBus, project: ProjectStore): void {
-  registerHandler('qc:count', async (_event, filter: unknown) =>
-    qc.getSupplierCount(filter as TransactionFilter | undefined)
+  registerHandler('qc:count', async (_event, scope: unknown) =>
+    qc.getSupplierCount(scope as FilterConditionQC[] | undefined)
   );
 
   registerHandler('qc:run', async (_event, config: unknown) => {

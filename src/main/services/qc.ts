@@ -9,7 +9,6 @@ import type {
   TaxonomyStore as ITaxonomyStore,
 } from '../../shared/types/services';
 import type { QCProgress, QCOutcome, QCConfig, FilterConditionQC, SpendByTaxonomyResult } from '../../shared/types/classification';
-import type { TransactionFilter } from '../../shared/types/transactions';
 import { buildDedupGroups } from '../utils/dedup-groups';
 import { findClosestTaxonomyMatch } from '../agents/classification-agent';
 import { DEFAULT_QC_RULES } from '../agents/qc-agent';
@@ -60,14 +59,9 @@ export class QCRunner implements IQCRunner {
     this.isStopped = true;
   }
 
-  async getSupplierCount(filter?: TransactionFilter): Promise<number> {
-    const rows = await this.db.all<{ count: number }>(
-      `SELECT COUNT(DISTINCT t.project_supplier_id) as count
-       FROM transactions t
-       WHERE t.classification_status IN ${CLASSIFIED_STATUSES}
-         AND t.taxonomy_node_id IS NOT NULL`
-    );
-    return rows[0]?.count ?? 0;
+  async getSupplierCount(scope?: FilterConditionQC[]): Promise<number> {
+    const suppliers = await this.resolveScopedSuppliers(scope ?? []);
+    return suppliers.length;
   }
 
   async runQC(config?: QCConfig): Promise<void> {

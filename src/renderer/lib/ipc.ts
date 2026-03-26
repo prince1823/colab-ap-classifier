@@ -1,6 +1,6 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
-import type { ClassificationProgress, ResearchProgress, QCProgress, QCConfig } from '../../shared/types/classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, QCConfig, FilterConditionQC } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
@@ -78,7 +78,7 @@ export const ipc = {
 
   // ── QC (7 channels + 1 event) ──
   qc: {
-    count: (filter?: TransactionFilter) => invoke('qc:count', filter),
+    count: (scope?: FilterConditionQC[]) => invoke('qc:count', scope),
     run: (config?: QCConfig) => invoke('qc:run', config),
     stop: () => invoke('qc:stop'),
     isRunning: () => invoke('qc:isRunning'),

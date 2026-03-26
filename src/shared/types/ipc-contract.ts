@@ -21,7 +21,7 @@ import type {
   PivotAggregationResult,
   GroupedFilter,
 } from './transactions';
-import type { ClassificationProgress, ResearchProgress, QCProgress, QCConfig } from './classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, QCConfig, FilterConditionQC } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
@@ -72,7 +72,7 @@ export interface IPCInvokeMap {
 
   // QC
   'qc:run':        { args: [config?: QCConfig]; result: void };
-  'qc:count':      { args: [filter?: TransactionFilter]; result: number };
+  'qc:count':      { args: [scope?: FilterConditionQC[]]; result: number };
   'qc:stop':       { args: []; result: void };
   'qc:isRunning':  { args: []; result: boolean };
   'qc:getConfig':  { args: []; result: QCConfig };

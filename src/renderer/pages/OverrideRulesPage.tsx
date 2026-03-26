@@ -37,7 +37,7 @@ export default function OverrideRulesPage() {
   const taxonomyDropdownRef = useRef<HTMLDivElement>(null)
 
   // Group UI state
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set([UNGROUPED_ID]))
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
   const [editingGroupName, setEditingGroupName] = useState('')
   const [showNewGroupForm, setShowNewGroupForm] = useState(false)

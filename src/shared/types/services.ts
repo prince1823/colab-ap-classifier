@@ -194,6 +194,7 @@ export interface SupplierService {
 
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
+  listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;

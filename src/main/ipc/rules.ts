@@ -7,6 +7,10 @@ export function registerRulesHandlers(rules: RuleStore): void {
     return rules.listRules();
   });
 
+  registerHandler('rules:listPaginated', async (_event, opts: unknown) => {
+    return rules.listRulesPaginated(opts as { limit: number; offset: number; search?: string });
+  });
+
   registerHandler('rules:create', async (_event, input: unknown) => {
     return rules.createRule(input as OverrideRuleCreate);
   });

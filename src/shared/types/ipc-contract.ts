@@ -109,6 +109,7 @@ export interface IPCInvokeMap {
 
   // Rules
   'rules:list':     { args: []; result: OverrideRule[] };
+  'rules:listPaginated': { args: [opts: { limit: number; offset: number; search?: string }]; result: { rules: OverrideRule[]; total: number } };
   'rules:create':   { args: [input: OverrideRuleCreate]; result: { id: string } };
   'rules:update':   { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
   'rules:delete':   { args: [ruleId: string]; result: void };

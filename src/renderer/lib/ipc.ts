@@ -158,6 +158,7 @@ export const ipc = {
   // ── Rules (12 channels) ──
   rules: {
     list: () => invoke('rules:list'),
+    listPaginated: (opts: { limit: number; offset: number; search?: string }) => invoke('rules:listPaginated', opts),
     create: (input: OverrideRuleCreate) =>
       invoke('rules:create', input),
     update: (ruleId: string, updates: OverrideRuleUpdate) =>

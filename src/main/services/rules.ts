@@ -189,16 +189,40 @@ export class RuleStore implements IRuleStore {
   ) {}
 
   async listRules(): Promise<OverrideRule[]> {
-    // Rules ordered by group priority DESC (higher = evaluated first), then created_at DESC.
-    // COALESCE(rg.priority, 0) places ungrouped rules (group_id IS NULL) below all named groups,
-    // since group priorities are enforced to be >= 1.
+    // Only return grouped rules (rules that belong to a group).
+    // Ungrouped rules are loaded separately via listRulesPaginated for performance.
     const rows = await this.db.all<RuleRow>(`
       SELECT r.*, rg.priority AS group_priority
       FROM override_rules r
       LEFT JOIN rule_groups rg ON r.group_id = rg.id
+      WHERE r.group_id IS NOT NULL
       ORDER BY COALESCE(rg.priority, 0) DESC, r.created_at DESC
     `);
     return rows.map(rowToRule);
+  }
+
+  async listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }> {
+    const { limit, offset, search } = opts;
+    const whereClauses = ['r.group_id IS NULL'];
+    const params: unknown[] = [];
+
+    if (search?.trim()) {
+      whereClauses.push(`(LOWER(r.name) LIKE ? OR LOWER(CAST(r.grouped_conditions AS VARCHAR)) LIKE ?)`);
+      const q = `%${search.trim().toLowerCase()}%`;
+      params.push(q, q);
+    }
+
+    const where = whereClauses.join(' AND ');
+
+    const countRows = await this.db.all<{ cnt: number }>(`SELECT COUNT(*) as cnt FROM override_rules r WHERE ${where}`, ...params);
+    const total = Number(countRows[0]?.cnt ?? 0);
+
+    const rows = await this.db.all<RuleRow>(
+      `SELECT r.*, NULL AS group_priority FROM override_rules r WHERE ${where} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+      ...params, limit, offset
+    );
+
+    return { rules: rows.map(rowToRule), total };
   }
 
   async createRule(input: OverrideRuleCreate): Promise<{ id: string }> {
@@ -239,13 +263,24 @@ export class RuleStore implements IRuleStore {
     await this.db.run('DELETE FROM override_rules WHERE id = ?', ruleId);
   }
 
+  private async listAllRules(): Promise<OverrideRule[]> {
+    // Returns ALL rules (grouped + ungrouped) ordered by group priority DESC, then created_at DESC.
+    const rows = await this.db.all<RuleRow>(`
+      SELECT r.*, rg.priority AS group_priority
+      FROM override_rules r
+      LEFT JOIN rule_groups rg ON r.group_id = rg.id
+      ORDER BY COALESCE(rg.priority, 0) DESC, r.created_at DESC
+    `);
+    return rows.map(rowToRule);
+  }
+
   async evaluateRules(
     transactionIds?: string[]
   ): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>> {
-    // listRules() returns rules ordered by COALESCE(group.priority, 0) DESC, created_at DESC.
+    // listAllRules() returns rules ordered by COALESCE(group.priority, 0) DESC, created_at DESC.
     // First-match-wins: once a transaction is matched by a rule, later rules don't overwrite it.
     // This naturally implements group-priority-based evaluation with ungrouped rules last.
-    const rules = await this.listRules();
+    const rules = await this.listAllRules();
     const activeRules = rules.filter((r) => r.isActive);
     const matched = new Map<string, { ruleId: string; targetTaxonomyNodeId: string }>();
 

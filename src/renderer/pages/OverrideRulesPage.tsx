@@ -8,8 +8,13 @@ import type { TaxonomyNode } from '../../shared/types/taxonomy'
 
 const UNGROUPED_ID = '__ungrouped__'
 
+const UNGROUPED_PAGE_SIZE = 100
+
 export default function OverrideRulesPage() {
-  const [rules, setRules] = useState<OverrideRule[]>([])
+  const [rules, setRules] = useState<OverrideRule[]>([])  // grouped rules only
+  const [ungroupedRulesState, setUngroupedRulesState] = useState<OverrideRule[]>([])
+  const [ungroupedTotal, setUngroupedTotal] = useState(0)
+  const [ungroupedLoading, setUngroupedLoading] = useState(false)
   const [groups, setGroups] = useState<RuleGroup[]>([])
   const [taxonomyNodes, setTaxonomyNodes] = useState<TaxonomyNode[]>([])
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
@@ -68,6 +73,23 @@ export default function OverrideRulesPage() {
   const dragGroupIdRef = useRef<string | null>(null)
   const [dragOverGroupReorderId, setDragOverGroupReorderId] = useState<string | null>(null)
 
+  const loadUngrouped = useCallback(async (offset: number, search?: string, append = false) => {
+    setUngroupedLoading(true)
+    try {
+      const result = await ipc.rules.listPaginated({ limit: UNGROUPED_PAGE_SIZE, offset, search })
+      if (append) {
+        setUngroupedRulesState(prev => [...prev, ...(result?.rules ?? [])])
+      } else {
+        setUngroupedRulesState(result?.rules ?? [])
+      }
+      setUngroupedTotal(result?.total ?? 0)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load ungrouped rules')
+    } finally {
+      setUngroupedLoading(false)
+    }
+  }, [])
+
   const loadData = async () => {
     setLoading(true)
     setError(null)
@@ -89,7 +111,10 @@ export default function OverrideRulesPage() {
     }
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => {
+    loadData()
+    loadUngrouped(0)
+  }, [])
 
   const openCreate = (groupId?: string | null) => {
     setEditingRule(null)
@@ -124,6 +149,7 @@ export default function OverrideRulesPage() {
       }
       setShowEditor(false)
       await loadData()
+      await loadUngrouped(0, ruleSearch.trim() || undefined)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save rule')
     } finally {
@@ -132,24 +158,34 @@ export default function OverrideRulesPage() {
   }
 
   const handleDelete = async (ruleId: string) => {
-    // Optimistic: remove from local state immediately
+    // Optimistic: remove from both lists
     const previousRules = rules
+    const previousUngrouped = ungroupedRulesState
+    const previousTotal = ungroupedTotal
+    const isUngrouped = ungroupedRulesState.some(r => r.id === ruleId)
     setRules(prev => prev.filter(r => r.id !== ruleId))
+    if (isUngrouped) {
+      setUngroupedRulesState(prev => prev.filter(r => r.id !== ruleId))
+      setUngroupedTotal(prev => prev - 1)
+    }
     try {
       await ipc.rules.delete(ruleId)
     } catch (e) {
-      // Rollback on failure
       setRules(previousRules)
+      setUngroupedRulesState(previousUngrouped)
+      setUngroupedTotal(previousTotal)
       setError(e instanceof Error ? e.message : 'Failed to delete rule')
     }
   }
 
   const handleToggle = async (rule: OverrideRule) => {
     setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r))
+    setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r))
     try {
       await ipc.rules.update(rule.id, { isActive: !rule.isActive })
     } catch (e) {
       setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: rule.isActive } : r))
+      setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: rule.isActive } : r))
       setError(e instanceof Error ? e.message : 'Failed to toggle rule')
     }
   }
@@ -188,9 +224,14 @@ export default function OverrideRulesPage() {
   const handleDeleteGroup = async (groupId: string) => {
     const previousGroups = groups
     const previousRules = rules
-    // Optimistic: remove group and ungroup its rules locally
+    const previousUngrouped = ungroupedRulesState
+    const previousUngroupedTotal = ungroupedTotal
+    // Optimistic: move rules from deleted group to ungrouped
+    const movingRules = rules.filter(r => r.groupId === groupId).map(r => ({ ...r, groupId: undefined }))
     setGroups(prev => prev.filter(g => g.id !== groupId))
-    setRules(prev => prev.map(r => r.groupId === groupId ? { ...r, groupId: undefined } : r))
+    setRules(prev => prev.filter(r => r.groupId !== groupId))
+    setUngroupedRulesState(prev => [...movingRules, ...prev])
+    setUngroupedTotal(prev => prev + movingRules.length)
     setDeletingGroupId(null)
     try {
       await ipc.rules.deleteGroup(groupId)
@@ -198,6 +239,8 @@ export default function OverrideRulesPage() {
       // Rollback on failure
       setGroups(previousGroups)
       setRules(previousRules)
+      setUngroupedRulesState(previousUngrouped)
+      setUngroupedTotal(previousUngroupedTotal)
       setError(e instanceof Error ? e.message : 'Failed to delete group')
     }
   }
@@ -230,24 +273,45 @@ export default function OverrideRulesPage() {
 
   const handleGroupDrop = useCallback(async (e: React.DragEvent, targetGroupId: string | null) => {
     const draggedId = dragRuleIdRef.current
+    const sourceGroupId = dragSourceGroupRef.current
     if (!draggedId) return // Not a rule drag — let group reorder handle it
     e.preventDefault()
     setDragOverGroupId(null)
-    if (dragSourceGroupRef.current === targetGroupId) return
+    if (sourceGroupId === targetGroupId) return
 
-    // Optimistic update — move rule locally before server round-trip
+    // Optimistic update — move rule between grouped/ungrouped lists
     const previousRules = rules
-    setRules(prev => prev.map(r =>
-      r.id === draggedId ? { ...r, groupId: targetGroupId ?? undefined } : r
-    ))
+    const previousUngrouped = ungroupedRulesState
+    const previousUngroupedTotal = ungroupedTotal
+
+    // Find the rule in either list
+    const draggedRule = rules.find(r => r.id === draggedId) ?? ungroupedRulesState.find(r => r.id === draggedId)
+    if (!draggedRule) return
+
+    if (targetGroupId === null) {
+      // Moving to ungrouped
+      setRules(prev => prev.filter(r => r.id !== draggedId))
+      setUngroupedRulesState(prev => [{ ...draggedRule, groupId: undefined }, ...prev])
+      setUngroupedTotal(prev => prev + 1)
+    } else if (sourceGroupId === null) {
+      // Moving from ungrouped to a group
+      setUngroupedRulesState(prev => prev.filter(r => r.id !== draggedId))
+      setUngroupedTotal(prev => prev - 1)
+      setRules(prev => [...prev, { ...draggedRule, groupId: targetGroupId }])
+    } else {
+      // Moving between groups
+      setRules(prev => prev.map(r => r.id === draggedId ? { ...r, groupId: targetGroupId } : r))
+    }
 
     try {
       await ipc.rules.moveRule(draggedId, targetGroupId)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to move rule')
       setRules(previousRules)
+      setUngroupedRulesState(previousUngrouped)
+      setUngroupedTotal(previousUngroupedTotal)
     }
-  }, [rules])
+  }, [rules, ungroupedRulesState, ungroupedTotal])
 
   // ─── Drag-and-drop: Group reorder ──────────────────────────────────────────
 
@@ -323,6 +387,7 @@ export default function OverrideRulesPage() {
       setShowBulkAssignModal(false)
       setBulkAssignGroupId(null)
       await loadData()
+      await loadUngrouped(0, ruleSearch.trim() || undefined)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to assign rules')
     }
@@ -331,9 +396,9 @@ export default function OverrideRulesPage() {
   // ─── Filter-based group assignment ─────────────────────────────────────
 
   const handleFilterAssign = async () => {
-    // Find rules matching the filter conditions
+    // Find rules matching the filter conditions (check both grouped and ungrouped)
     const matchingRuleIds: string[] = []
-    for (const rule of rules) {
+    for (const rule of [...rules, ...ungroupedRulesState]) {
       if (matchesFilter(rule, filterAssignGrouped)) {
         matchingRuleIds.push(rule.id)
       }
@@ -348,6 +413,7 @@ export default function OverrideRulesPage() {
       setFilterAssignGrouped({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
       setFilterAssignTargetGroupId(null)
       await loadData()
+      await loadUngrouped(0, ruleSearch.trim() || undefined)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to assign rules')
     }
@@ -475,7 +541,8 @@ export default function OverrideRulesPage() {
 
   // ─── Filtering ────────────────────────────────────────────────────────────
 
-  const filteredRules = useMemo(() => {
+  // Filter grouped rules (client-side — small set)
+  const filteredGroupedRules = useMemo(() => {
     let result = rules
     if (sourceFilter === 'manual') result = result.filter(r => r.source !== 'auto_generated')
     else if (sourceFilter === 'auto') result = result.filter(r => r.source === 'auto_generated')
@@ -492,17 +559,31 @@ export default function OverrideRulesPage() {
     return result
   }, [rules, ruleSearch, taxonomyNodes, sourceFilter])
 
-  // Group rules by groupId; ungrouped → UNGROUPED_ID. Sort within groups by createdAt.
+  // Filter ungrouped rules (client-side filter on source; search is handled server-side)
+  const filteredUngroupedRules = useMemo(() => {
+    let result = ungroupedRulesState
+    if (sourceFilter === 'manual') result = result.filter(r => r.source !== 'auto_generated')
+    else if (sourceFilter === 'auto') result = result.filter(r => r.source === 'auto_generated')
+    return result
+  }, [ungroupedRulesState, sourceFilter])
+
+  // Reload ungrouped when search changes (debounced server-side search)
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    searchTimerRef.current = setTimeout(() => {
+      loadUngrouped(0, ruleSearch.trim() || undefined)
+    }, 300)
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current) }
+  }, [ruleSearch, loadUngrouped])
+
+  // Group rules by groupId. Ungrouped comes from separate paginated state.
   const rulesByGroup = useMemo(() => {
     const map = new Map<string, OverrideRule[]>()
     for (const group of groups) map.set(group.id, [])
-    map.set(UNGROUPED_ID, [])
-    for (const rule of filteredRules) {
+    for (const rule of filteredGroupedRules) {
       const key = rule.groupId ?? UNGROUPED_ID
-      if (!map.has(key)) {
-        // Rule's group wasn't loaded (edge case) — treat as ungrouped
-        map.get(UNGROUPED_ID)!.push(rule)
-      } else {
+      if (map.has(key)) {
         map.get(key)!.push(rule)
       }
     }
@@ -510,8 +591,10 @@ export default function OverrideRulesPage() {
     for (const [, ruleList] of map) {
       ruleList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     }
+    // Ungrouped rules come from paginated state
+    map.set(UNGROUPED_ID, filteredUngroupedRules)
     return map
-  }, [filteredRules, groups])
+  }, [filteredGroupedRules, filteredUngroupedRules, groups])
 
   const toggleGroup = (groupId: string) => {
     setCollapsedGroups(prev => {
@@ -548,7 +631,7 @@ export default function OverrideRulesPage() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Override Rules</h2>
           <p className="mt-0.5 text-xs text-gray-500">
-            {rules.length} rule{rules.length !== 1 ? 's' : ''} across {groups.length} group{groups.length !== 1 ? 's' : ''}.
+            {(rules.length + ungroupedTotal).toLocaleString()} rule{(rules.length + ungroupedTotal) !== 1 ? 's' : ''} across {groups.length} group{groups.length !== 1 ? 's' : ''}.
             Higher priority number = evaluated first.
           </p>
         </div>
@@ -961,7 +1044,8 @@ export default function OverrideRulesPage() {
                       />
                       <span className="flex-1 text-sm font-semibold text-gray-500">Ungrouped</span>
                       <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-500">
-                        {ungroupedRules.length} rule{ungroupedRules.length !== 1 ? 's' : ''}
+                        {ungroupedTotal.toLocaleString()} rule{ungroupedTotal !== 1 ? 's' : ''}
+                        {ungroupedRules.length < ungroupedTotal ? ` (showing ${ungroupedRules.length.toLocaleString()})` : ''}
                       </span>
                       <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600" title="Ungrouped rules are evaluated last (lowest priority)">
                         Lowest Priority
@@ -1009,6 +1093,19 @@ export default function OverrideRulesPage() {
                         }}
                       />
                     ))}
+                    {ungroupedRules.length < ungroupedTotal && (
+                      <tr>
+                        <td colSpan={7} className="px-3 py-3 text-center border border-gray-300">
+                          <button
+                            onClick={() => loadUngrouped(ungroupedRules.length, ruleSearch.trim() || undefined, true)}
+                            disabled={ungroupedLoading}
+                            className="rounded-md bg-gray-100 px-4 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                          >
+                            {ungroupedLoading ? 'Loading...' : `Load more (${(ungroupedTotal - ungroupedRules.length).toLocaleString()} remaining)`}
+                          </button>
+                        </td>
+                      </tr>
+                    )}
                   </>
                 )}
               </>
@@ -1017,7 +1114,7 @@ export default function OverrideRulesPage() {
         </table>
       </div>
 
-      {rules.length === 0 && groups.length === 0 && (
+      {rules.length === 0 && groups.length === 0 && ungroupedTotal === 0 && (
         <div className="text-center py-8 text-gray-500 text-sm">
           No override rules yet. Create groups to organize your rules, then add rules to classify vendors.
         </div>

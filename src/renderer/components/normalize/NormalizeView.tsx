@@ -3,21 +3,16 @@ import {
   Trash2, Plus, Search, X,
   Merge, ArrowRightLeft,
 } from 'lucide-react'
-import { ipc } from '../../lib/ipc'
-import { showError } from '../../lib/toast-errors'
-import type { ProjectSupplierView, SupplierParent } from '../../../shared/types/suppliers'
+import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import MergeModal from './MergeModal'
 import ReassignAliasModal from './ReassignAliasModal'
 import ParentTypeahead from './ParentTypeahead'
+import CsvToolbar from './CsvToolbar'
 import { fmtAbbrev } from '../../utils/formatSpend'
+import { useNormalizeData } from '../../hooks/useNormalizeData'
+import type { AliasData } from '../../hooks/useNormalizeData'
 
 // ── Types ────────────────────────────────────────────────────────────
-
-interface AliasData {
-  rawName: string
-  spend: number
-  txnCount: number
-}
 
 interface NormalizedRow {
   supplier: ProjectSupplierView
@@ -36,15 +31,10 @@ interface NormalizeViewProps {
 }
 
 export default function NormalizeView({ onDataChange }: NormalizeViewProps = {}) {
-  const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
-  const [parents, setParents] = useState<SupplierParent[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const data = useNormalizeData({ onDataChange })
+  const { suppliers, parents, aliasCache, loading, error } = data
 
   const [searchQuery, setSearchQuery] = useState('')
-
-  // Alias cache: supplierId → AliasData[]
-  const [aliasCache, setAliasCache] = useState<Map<string, AliasData[]>>(new Map())
 
   // Selection: set of normalized supplier IDs
   const [selectedSupplierIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -95,53 +85,6 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       outerRef.current?.focus()
     }
   }, [loading, showMergeModal, reassigningAlias, parentTypeahead, editingId, editingParentId])
-
-  // ── Data loading ──────────────────────────────────────────────────
-
-  const loadData = useCallback(async () => {
-    setError(null)
-    try {
-      const [supplierData, parentData] = await Promise.all([
-        ipc.suppliers.list(),
-        ipc.suppliers.listParents(),
-      ])
-      setSuppliers(supplierData as ProjectSupplierView[])
-      setParents(parentData as SupplierParent[])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load data')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { loadData() }, [loadData])
-
-  // ── Auto-load all aliases ────────────────────────────────────────
-
-  const loadAllAliases = useCallback(async (supplierIds: string[]) => {
-    const results = await Promise.all(
-      supplierIds.map(async (id) => {
-        try {
-          const aliases = await ipc.suppliers.getAliases(id)
-          return [id, (aliases as string[]).map(name => ({ rawName: name, spend: 0, txnCount: 0 }))] as const
-        } catch {
-          return [id, []] as const
-        }
-      })
-    )
-    setAliasCache(prev => {
-      const next = new Map(prev)
-      for (const [id, data] of results) next.set(id, data)
-      return next
-    })
-  }, [])
-
-  useEffect(() => {
-    if (suppliers.length > 0) {
-      const unloaded = suppliers.filter(s => !aliasCache.has(s.id))
-      if (unloaded.length > 0) loadAllAliases(unloaded.map(s => s.id))
-    }
-  }, [suppliers, aliasCache, loadAllAliases])
 
   // ── Build normalized rows ─────────────────────────────────────────
 
@@ -202,20 +145,12 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     return info
   }, [flatRows])
 
-  // ── Actions ───────────────────────────────────────────────────────
+  // ── Actions (delegated to hook) ──────────────────────────────────
 
   const handleRename = useCallback(async (supplierId: string, newName: string) => {
-    try {
-      await ipc.suppliers.rename(supplierId, newName)
-      setSuppliers(prev => prev.map(s =>
-        s.id === supplierId ? { ...s, supplierName: newName } : s
-      ))
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Rename failed')
-    }
+    await data.rename(supplierId, newName)
     setEditingId(null)
-  }, [onDataChange])
+  }, [data])
 
   const handleDeleteNormalized = useCallback(async (supplierId: string) => {
     const supplier = suppliers.find(s => s.id === supplierId)
@@ -226,180 +161,51 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     } else {
       if (!window.confirm(`Delete "${supplier.supplierName}"?`)) return
     }
-    try {
-      await ipc.suppliers.delete(supplierId)
-      setSuppliers(prev => prev.filter(s => s.id !== supplierId))
-      setSelectedIds(prev => { const n = new Set(prev); n.delete(supplierId); return n })
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed')
-    }
-  }, [suppliers, aliasCache, onDataChange])
+    await data.deleteSupplier(supplierId)
+    setSelectedIds(prev => { const n = new Set(prev); n.delete(supplierId); return n })
+  }, [suppliers, aliasCache, data])
 
-  const handleDeleteAlias = useCallback(async (alias: AliasData, normalizedId: string) => {
+  const handleDeleteAlias = useCallback((alias: AliasData, normalizedId: string) => {
     if (!window.confirm(`Remove alias "${alias.rawName}"?`)) return
-    try {
-      setAliasCache(prev => {
-        const next = new Map(prev)
-        const aliases = next.get(normalizedId) ?? []
-        next.set(normalizedId, aliases.filter(a => a.rawName !== alias.rawName))
-        return next
-      })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to remove alias')
-    }
-  }, [])
+    data.deleteAlias(alias, normalizedId)
+  }, [data])
 
   const handleChangeParent = useCallback(async (supplierId: string, parentId: string | null) => {
-    try {
-      await ipc.suppliers.assignParent([supplierId], parentId)
-      const parent = parentId ? parents.find(p => p.id === parentId) : null
-      setSuppliers(prev => prev.map(s =>
-        s.id === supplierId ? { ...s, parentSupplierId: parentId, parentName: parent?.name ?? null } : s
-      ))
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to change parent')
-    }
+    await data.changeParent(supplierId, parentId)
     setParentTypeahead(null)
-  }, [parents, onDataChange])
+  }, [data])
 
   const handleRenameParent = useCallback(async (parentId: string, newName: string) => {
-    try {
-      await ipc.suppliers.renameParent(parentId, newName)
-      setParents(prev => prev.map(p => p.id === parentId ? { ...p, name: newName } : p))
-      setSuppliers(prev => prev.map(s =>
-        s.parentSupplierId === parentId ? { ...s, parentName: newName } : s
-      ))
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Rename parent failed')
-    }
+    await data.renameParent(parentId, newName)
     setEditingParentId(null)
-  }, [onDataChange])
+  }, [data])
 
   const handleDeleteParent = useCallback(async (parentId: string) => {
-    // Unassign all children first
-    const children = suppliers.filter(s => s.parentSupplierId === parentId)
-    try {
-      await ipc.suppliers.assignParent(children.map(s => s.id), null)
-      setSuppliers(prev => prev.map(s =>
-        s.parentSupplierId === parentId ? { ...s, parentSupplierId: null, parentName: null } : s
-      ))
-      await ipc.suppliers.deleteParent(parentId)
-      setParents(prev => prev.filter(p => p.id !== parentId))
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete parent')
-    }
+    await data.deleteParent(parentId)
     setPendingDeleteParentRowId(null)
-  }, [suppliers, onDataChange])
+  }, [data])
 
   const handleCreateParentAndAssign = useCallback(async (supplierId: string, name: string) => {
-    try {
-      const parent = await ipc.suppliers.addParent(name) as SupplierParent
-      setParents(prev => [...prev, parent])
-      await ipc.suppliers.assignParent([supplierId], parent.id)
-      setSuppliers(prev => prev.map(s =>
-        s.id === supplierId ? { ...s, parentSupplierId: parent.id, parentName: parent.name } : s
-      ))
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create parent')
-    }
+    await data.createParentAndAssign(supplierId, name)
     setParentTypeahead(null)
-  }, [onDataChange])
+  }, [data])
 
   const handleMerge = useCallback(async (survivorId: string, losingIds: string[]) => {
-    try {
-      await ipc.suppliers.merge(survivorId, losingIds)
-
-      const losingSet = new Set(losingIds)
-
-      // Immediately remove losers from local state — no full reload, no visual disruption
-      setSuppliers(prev => prev.filter(s => !losingSet.has(s.id)))
-      setSelectedIds(prev => { const n = new Set(prev); losingSet.forEach(id => n.delete(id)); n.delete(survivorId); return n })
-      setAliasCache(prev => {
-        const n = new Map(prev)
-        losingSet.forEach(id => n.delete(id))
-        n.delete(survivorId) // invalidate survivor so aliases reload fresh
-        return n
-      })
-
-      // Reload survivor aliases directly (not inside a setState updater)
-      ipc.suppliers.getAliases(survivorId).then(aliases => {
-        const aliasData: AliasData[] = (aliases as string[]).map(name => ({
-          rawName: name, spend: 0, txnCount: 0,
-        }))
-        setAliasCache(c => new Map(c).set(survivorId, aliasData))
-      }).catch((e) => showError('Failed to reload supplier aliases', e))
-
-      // Silently refresh spend/txn counts in background — no loading state, no collapse
-      ipc.suppliers.list().then(fresh => {
-        setSuppliers(fresh as ProjectSupplierView[])
-      }).catch((e) => showError('Failed to refresh supplier list', e))
-
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Merge failed')
-    }
+    await data.mergeSuppliers(survivorId, losingIds)
+    setSelectedIds(prev => { const n = new Set(prev); new Set(losingIds).forEach(id => n.delete(id)); n.delete(survivorId); return n })
     setShowMergeModal(false)
-  }, [onDataChange])
+  }, [data])
 
   const handleMergeParents = useCallback(async (survivorId: string, losingIds: string[]) => {
-    try {
-      await ipc.suppliers.mergeParents(survivorId, losingIds)
-
-      const losingSet = new Set(losingIds)
-      const survivorParent = parents.find(p => p.id === survivorId)
-
-      // Update local state: reassign children of losers to survivor, remove loser parents
-      setSuppliers(prev => prev.map(s =>
-        s.parentSupplierId && losingSet.has(s.parentSupplierId)
-          ? { ...s, parentSupplierId: survivorId, parentName: survivorParent?.name ?? null }
-          : s
-      ))
-      setParents(prev => prev.filter(p => !losingSet.has(p.id)))
-      setSelectedIds(new Set())
-
-      // Background refresh
-      Promise.all([
-        ipc.suppliers.list(),
-        ipc.suppliers.listParents(),
-      ]).then(([freshSuppliers, freshParents]) => {
-        setSuppliers(freshSuppliers as ProjectSupplierView[])
-        setParents(freshParents as SupplierParent[])
-      }).catch((e) => showError('Failed to refresh supplier data after parent merge', e))
-
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Merge parents failed')
-    }
+    await data.mergeParents(survivorId, losingIds)
+    setSelectedIds(new Set())
     setShowMergeModal(false)
-  }, [parents, onDataChange])
+  }, [data])
 
   const handleReassignAlias = useCallback(async (aliasName: string, fromId: string, toId: string) => {
-    try {
-      await ipc.suppliers.assignAlias(toId, aliasName)
-      // Update alias cache: remove from old, add to new
-      setAliasCache(prev => {
-        const next = new Map(prev)
-        const fromAliases = next.get(fromId) ?? []
-        next.set(fromId, fromAliases.filter(a => a.rawName !== aliasName))
-        const toAliases = next.get(toId) ?? []
-        next.set(toId, [...toAliases, { rawName: aliasName, spend: 0, txnCount: 0 }])
-        return next
-      })
-      // Refresh spend totals — transactions moved, so both suppliers' spend changed
-      ipc.suppliers.list().then(fresh => {
-        setSuppliers(fresh as ProjectSupplierView[])
-      }).catch((e) => showError('Failed to refresh supplier list after alias reassign', e))
-      onDataChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Reassign failed')
-    }
+    await data.reassignAlias(aliasName, fromId, toId)
     setReassigningAlias(null)
-  }, [onDataChange])
+  }, [data])
 
   // ── Inline edit helpers ───────────────────────────────────────────
 
@@ -775,6 +581,9 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
           <span><kbd className="px-1 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-[9px]">Shift + R</kbd> Reassign Alias</span>
         </div>
 
+        {/* CSV upload/download */}
+        <CsvToolbar data={data} />
+
         {/* Right: search */}
         <div className="relative w-48">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
@@ -796,7 +605,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       {error && (
         <div className="mx-4 mt-2 flex items-center justify-between rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600">&times;</button>
+          <button onClick={() => data.setError(null)} className="ml-2 text-red-400 hover:text-red-600">&times;</button>
         </div>
       )}
 

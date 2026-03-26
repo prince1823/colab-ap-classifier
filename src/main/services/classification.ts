@@ -220,8 +220,8 @@ export class ClassificationRunner implements IClassificationRunner {
         }
 
         // Resolve supplier info for Call 1
-        const supplierInfo = await this.db.get<{ supplier_name: string; parent_name: string | null }>(
-          `SELECT ps.supplier_name, sp.name AS parent_name
+        const supplierInfo = await this.db.get<{ supplier_name: string; is_researched: boolean; parent_name: string | null }>(
+          `SELECT ps.supplier_name, ps.is_researched, sp.name AS parent_name
            FROM project_suppliers ps
            LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
            WHERE ps.id = ?`,
@@ -232,6 +232,9 @@ export class ClassificationRunner implements IClassificationRunner {
         let research: SupplierInfo | null = null;
         if (supplierName) {
           research = await this.supplierUniverse.getSupplier(supplierName);
+        }
+        if (supplierInfo?.is_researched && !research) {
+          debugLog('WARN', `Supplier "${supplierName}" is marked as researched but no research data found in supplier universe`);
         }
         const parentName = supplierInfo?.parent_name ?? research?.parentCompanyName ?? null;
 
@@ -245,28 +248,30 @@ export class ClassificationRunner implements IClassificationRunner {
 
       if (this.isStopped) return;
 
-      // ── Phase 2: Batched Call 1 (category selection) ──
+      // ── Phase 2: Chunked pipeline — Call 1 (category selection) then Call 2 (L3) per batch ──
       const concurrency = Number(process.env.CLASSIFIER_CONCURRENCY) || DEFAULT_CONCURRENCY;
-      const categoryMap = new Map<string, string>(); // supplierId → categoryPath
 
       if (suppliersNeedingClassification.length > 0) {
-        this.emitProgress({
-          status: 'running',
-          totalSuppliers,
-          processedSuppliers,
-          percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
-          currentSupplier: null,
-          currentStep: 'Selecting categories for suppliers',
-        });
-
         // Chunk into batches of CALL1_BATCH_SIZE
         const batches: typeof suppliersNeedingClassification[] = [];
         for (let i = 0; i < suppliersNeedingClassification.length; i += CALL1_BATCH_SIZE) {
           batches.push(suppliersNeedingClassification.slice(i, i + CALL1_BATCH_SIZE));
         }
 
-        const batchTasks = batches.map((batch, batchIdx) => async () => {
-          if (this.isStopped) return;
+        for (const [batchIdx, batch] of batches.entries()) {
+          if (this.isStopped) break;
+
+          // ── Call 1: category selection for this batch ──
+          this.emitProgress({
+            status: 'running',
+            totalSuppliers,
+            processedSuppliers,
+            percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
+            currentSupplier: null,
+            currentStep: `Selecting categories (batch ${batchIdx + 1}/${batches.length})`,
+          });
+
+          const batchCategoryMap = new Map<string, string>(); // supplierId → categoryPath (batch-scoped)
 
           try {
             const result = await this.classificationAgent.selectCategories({
@@ -284,7 +289,7 @@ export class ClassificationRunner implements IClassificationRunner {
             for (let i = 0; i < batch.length; i++) {
               const categoryPath = result.get(i + 1);
               if (categoryPath) {
-                categoryMap.set(batch[i].id, categoryPath);
+                batchCategoryMap.set(batch[i].id, categoryPath);
               } else {
                 missingIndices.push(i);
               }
@@ -302,7 +307,7 @@ export class ClassificationRunner implements IClassificationRunner {
                 });
                 const path = singleResult.get(1);
                 if (path) {
-                  categoryMap.set(supplier.id, path);
+                  batchCategoryMap.set(supplier.id, path);
                 } else {
                   debugLog('WARN', `Category selection retry returned no result for "${supplier.supplier_name}"`);
                 }
@@ -326,53 +331,56 @@ export class ClassificationRunner implements IClassificationRunner {
                   companyContext,
                 });
                 const path = result.get(1);
-                if (path) categoryMap.set(supplier.id, path);
+                if (path) batchCategoryMap.set(supplier.id, path);
               } catch {
                 debugLog('ERROR', `Individual category selection also failed for "${supplier.supplier_name}"`);
               }
             }
           }
-        });
 
-        await runPool(batchTasks, concurrency, () => this.isStopped);
-      }
+          if (this.isStopped) break;
 
-      if (this.isStopped) return;
+          // ── Call 2: L3 classification for this batch's suppliers ──
+          const call2Tasks = batch.map((supplier) => async () => {
+            if (this.isStopped) return;
 
-      // ── Phase 3: Concurrent Call 2 (L3 classification) ──
-      const call2Tasks = suppliersNeedingClassification.map((supplier) => async () => {
-        if (this.isStopped) return;
+            const categoryPath = batchCategoryMap.get(supplier.id);
 
-        const categoryPath = categoryMap.get(supplier.id);
+            this.emitProgress({
+              status: 'running',
+              totalSuppliers,
+              processedSuppliers,
+              percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
+              currentSupplier: supplier.supplier_name,
+              currentStep: `Classifying: ${supplier.supplier_name}`,
+            });
 
-        this.emitProgress({
-          status: 'running',
-          totalSuppliers,
-          processedSuppliers,
-          percentage: Math.round((processedSuppliers / totalSuppliers) * 100),
-          currentSupplier: supplier.supplier_name,
-          currentStep: `Classifying: ${supplier.supplier_name}`,
-        });
+            try {
+              if (!categoryPath) {
+                await this.markSupplierError(supplier.id, scopedIds);
+              } else {
+                await this.classifySupplierTransactions(
+                  supplier.id, categoryPath, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined
+                );
+              }
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              debugLog('ERROR', `Classification failed for supplier "${supplier.supplier_name}"`, { error: errMsg });
+              try {
+                await this.markSupplierError(supplier.id, scopedIds);
+              } catch (markErr) {
+                debugLog('ERROR', `Failed to mark supplier "${supplier.supplier_name}" as error`, {
+                  error: markErr instanceof Error ? markErr.message : String(markErr),
+                });
+              }
+            } finally {
+              processedSuppliers++;
+            }
+          });
 
-        try {
-          if (!categoryPath) {
-            // No category from Call 1 — mark as error
-            await this.markSupplierError(supplier.id, scopedIds);
-          } else {
-            await this.classifySupplierTransactions(
-              supplier.id, categoryPath, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined
-            );
-          }
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          debugLog('ERROR', `Classification failed for supplier "${supplier.supplier_name}"`, { error: errMsg });
-          await this.markSupplierError(supplier.id, scopedIds);
+          await runPool(call2Tasks, concurrency, () => this.isStopped);
         }
-
-        processedSuppliers++;
-      });
-
-      await runPool(call2Tasks, concurrency, () => this.isStopped);
+      }
 
       if (this.isStopped) return;
 

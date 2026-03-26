@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { debugLog } from '../../../src/main/utils/debug-log';
 import { ClassificationRunner } from '../../../src/main/services/classification';
+
+vi.mock('../../../src/main/utils/debug-log', () => ({
+  debugLog: vi.fn(),
+}));
 import {
   createMockDatabase,
   createMockTaxonomyStore,
@@ -395,6 +400,105 @@ describe('ClassificationRunner', () => {
 
       const call1Args = vi.mocked(classificationAgent.selectCategories).mock.calls[0][0];
       expect(call1Args.suppliers[0].parentName).toBeNull();
+    });
+  });
+
+  describe('research warning', () => {
+    it('should log warning when supplier is_researched but no universe data found', async () => {
+      setupBasicMocks();
+      vi.mocked(db.get).mockImplementation(async (sql: string) => {
+        if (sql.includes('supplier_parents')) return { supplier_name: 'Acme', parent_name: null, is_researched: true };
+        if (sql.includes('COUNT')) return { cnt: 1 };
+        return undefined;
+      });
+      // supplierUniverse.getSupplier returns null by default
+
+      await runner.classifyAll();
+
+      expect(debugLog).toHaveBeenCalledWith(
+        'WARN',
+        expect.stringContaining('marked as researched')
+      );
+    });
+
+    it('should NOT log research warning when universe data exists', async () => {
+      setupBasicMocks();
+      vi.mocked(db.get).mockImplementation(async (sql: string) => {
+        if (sql.includes('supplier_parents')) return { supplier_name: 'Acme', parent_name: null, is_researched: true };
+        if (sql.includes('COUNT')) return { cnt: 1 };
+        return undefined;
+      });
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue({ supplierType: 'IT Services' });
+
+      await runner.classifyAll();
+
+      const warnCalls = vi.mocked(debugLog).mock.calls.filter(
+        ([level, msg]) => level === 'WARN' && typeof msg === 'string' && msg.includes('marked as researched')
+      );
+      expect(warnCalls).toHaveLength(0);
+    });
+  });
+
+  describe('Call 2 error resilience', () => {
+    it('should continue to next supplier when markSupplierError fails', async () => {
+      setupBasicMocks();
+      // Two suppliers
+      vi.mocked(db.all).mockImplementation(async (sql: string) => {
+        if (sql.includes('DISTINCT')) return [
+          { id: 'sup1', supplier_name: 'FailSupplier' },
+          { id: 'sup2', supplier_name: 'GoodSupplier' },
+        ];
+        if (sql.includes('FROM transactions')) {
+          return [{ id: 'tx1', project_supplier_id: 'sup1', spend_amount: 1000, classification_status: 'unclassified' }];
+        }
+        return [];
+      });
+      vi.mocked(db.get).mockImplementation(async (sql: string) => {
+        if (sql.includes('supplier_parents')) return { supplier_name: 'FailSupplier', parent_name: null, is_researched: false };
+        if (sql.includes('COUNT')) return { cnt: 2 };
+        return undefined;
+      });
+
+      // Call 2 fails for first supplier, and markSupplierError also fails
+      let classifyCallCount = 0;
+      vi.mocked(classificationAgent.classifyL3).mockImplementation(async () => {
+        classifyCallCount++;
+        if (classifyCallCount <= 3) throw new Error('LLM failure'); // 3 retries for first supplier
+        return { classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }], assignments: { '1': [1] } };
+      });
+      vi.mocked(transactions.updateTransactions).mockImplementation(async (update) => {
+        if (update.classificationStatus === 'classification_error') {
+          throw new Error('DB write failure');
+        }
+      });
+
+      await runner.classifyAll();
+
+      // Should complete without throwing
+      expect(eventBus.emit).toHaveBeenCalledWith(
+        'classification:progress',
+        expect.objectContaining({ status: 'completed' })
+      );
+    });
+
+    it('should increment progress even when both classification and error marking fail', async () => {
+      setupBasicMocks();
+      // classifyL3 always fails (3 retries exhausted)
+      vi.mocked(classificationAgent.classifyL3).mockRejectedValue(new Error('LLM failure'));
+      // markSupplierError also fails
+      vi.mocked(transactions.updateTransactions).mockImplementation(async (update) => {
+        if (update.classificationStatus === 'classification_error') {
+          throw new Error('DB write failure');
+        }
+      });
+
+      await runner.classifyAll();
+
+      // Should still complete — processedSuppliers incremented via finally
+      expect(eventBus.emit).toHaveBeenCalledWith(
+        'classification:progress',
+        expect.objectContaining({ status: 'completed' })
+      );
     });
   });
 

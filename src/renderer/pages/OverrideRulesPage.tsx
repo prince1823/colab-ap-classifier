@@ -760,231 +760,151 @@ export default function OverrideRulesPage() {
       )}
 
       {/* ═══ Groups as collapsible table sections ═══ */}
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-        {/* Groups sorted by priority DESC (highest number on top) */}
-        {groups.map((group) => {
-          const groupRules = rulesByGroup.get(group.id) ?? []
-          if (ruleSearch.trim() && groupRules.length === 0) return null
-          const isCollapsed = collapsedGroups.has(group.id)
-          const isDragOver = dragOverGroupId === group.id
+      <div className="overflow-auto rounded-lg border border-gray-300">
+        <table className="w-full border-collapse text-xs">
+          {/* Sticky column headers */}
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-gray-50">
+              <th className="w-8 px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300"></th>
+              <th className="w-[15%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Rule Name</th>
+              <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Condition</th>
+              <th className="w-[20%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Target Classification</th>
+              <th className="w-[7%] px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Source</th>
+              <th className="w-[7%] px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Status</th>
+              <th className="w-20 px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {/* Groups sorted by priority DESC (highest number on top) */}
+            {groups.map((group) => {
+              const groupRules = rulesByGroup.get(group.id) ?? []
+              if (ruleSearch.trim() && groupRules.length === 0) return null
+              const isCollapsed = collapsedGroups.has(group.id)
+              const isDragOver = dragOverGroupId === group.id
 
-          return (
-            <div key={group.id} className="border-b border-gray-200 last:border-b-0">
-              {/* Group header row */}
-              <div
-                className={`flex items-center gap-2 px-4 py-2.5 transition-colors cursor-pointer select-none ${
-                  isDragOver ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : 'bg-gray-50 hover:bg-gray-100'
-                }`}
-                onClick={() => toggleGroup(group.id)}
-                onDragOver={(e) => handleGroupDragOver(e, group.id)}
-                onDragLeave={() => setDragOverGroupId(null)}
-                onDrop={(e) => handleGroupDrop(e, group.id)}
-              >
-                {/* Collapse chevron */}
-                <svg className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                </svg>
+              return (
+                <GroupSection
+                  key={group.id}
+                  group={group}
+                  groupRules={groupRules}
+                  isCollapsed={isCollapsed}
+                  isDragOver={isDragOver}
+                  toggleGroup={toggleGroup}
+                  editingGroupId={editingGroupId}
+                  editingGroupName={editingGroupName}
+                  setEditingGroupName={setEditingGroupName}
+                  handleRenameGroup={handleRenameGroup}
+                  setEditingGroupId={setEditingGroupId}
+                  editingPriorityGroupId={editingPriorityGroupId}
+                  editingPriorityValue={editingPriorityValue}
+                  setEditingPriorityValue={setEditingPriorityValue}
+                  handleUpdatePriority={handleUpdatePriority}
+                  setEditingPriorityGroupId={setEditingPriorityGroupId}
+                  openCreate={openCreate}
+                  setDeletingGroupId={setDeletingGroupId}
+                  handleGroupDragOver={handleGroupDragOver}
+                  setDragOverGroupId={setDragOverGroupId}
+                  handleGroupDrop={handleGroupDrop}
+                  getNodePath={getNodePath}
+                  formatConditionSummary={formatConditionSummary}
+                  openEdit={openEdit}
+                  handleDelete={handleDelete}
+                  handleToggle={handleToggle}
+                  handleRuleDragStart={handleRuleDragStart}
+                  handleRuleDragEnd={handleRuleDragEnd}
+                  expandedConditions={expandedConditions}
+                  setExpandedConditions={setExpandedConditions}
+                />
+              )
+            })}
 
-                {/* Group name */}
-                {editingGroupId === group.id ? (
-                  <input
-                    autoFocus
-                    value={editingGroupName}
-                    onChange={(e) => setEditingGroupName(e.target.value)}
-                    onBlur={() => handleRenameGroup(group.id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleRenameGroup(group.id); if (e.key === 'Escape') setEditingGroupId(null); }}
-                    className="min-w-0 flex-1 rounded border border-blue-300 px-2 py-0.5 text-sm font-semibold text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800" title={group.name}>
-                    {group.name}
-                  </span>
-                )}
-
-                {/* Rule count */}
-                <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-600">
-                  {groupRules.length} rule{groupRules.length !== 1 ? 's' : ''}
-                </span>
-
-                {/* Priority badge — click to edit */}
-                {editingPriorityGroupId === group.id ? (
-                  <input
-                    autoFocus
-                    type="number"
-                    min={1}
-                    value={editingPriorityValue}
-                    onChange={(e) => setEditingPriorityValue(e.target.value)}
-                    onBlur={() => handleUpdatePriority(group.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleUpdatePriority(group.id)
-                      if (e.key === 'Escape') setEditingPriorityGroupId(null)
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-16 rounded border border-indigo-300 px-1.5 py-0.5 text-xs font-medium text-indigo-700 text-center focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                  />
-                ) : (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setEditingPriorityGroupId(group.id)
-                      setEditingPriorityValue(String(group.priority))
-                    }}
-                    className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-100 transition-colors"
-                    title="Click to change priority (higher = evaluated first). Duplicate priorities cascade upward."
-                  >
-                    Priority {group.priority}
-                  </button>
-                )}
-
-                {/* Action buttons */}
-                <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={() => openCreate(group.id)}
-                    className="rounded p-1 text-gray-400 hover:bg-white hover:text-gray-600"
-                    title="Add rule to this group"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                  </button>
-                  <button
-                    onClick={() => { setEditingGroupId(group.id); setEditingGroupName(group.name); }}
-                    className="rounded p-1 text-gray-400 hover:bg-white hover:text-gray-600"
-                    title="Rename group"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
-                  </button>
-                  <button
-                    onClick={() => setDeletingGroupId(group.id)}
-                    className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                    title="Delete group"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                  </button>
-                </div>
-              </div>
-
-              {/* Rule rows — shown when expanded */}
-              {!isCollapsed && (
-                <div>
-                  {groupRules.length === 0 && (
-                    <div
-                      className={`px-6 py-6 text-center text-xs text-gray-400 border-b border-gray-100 ${isDragOver ? 'bg-blue-50/50' : ''}`}
-                      onDragOver={(e) => handleGroupDragOver(e, group.id)}
-                      onDragLeave={() => setDragOverGroupId(null)}
-                      onDrop={(e) => handleGroupDrop(e, group.id)}
-                    >
-                      No rules in this group. Drag rules here or click + to add.
+            {/* ═══ Ungrouped section — always at the bottom ═══ */}
+            {(ungroupedRules.length > 0 || !ruleSearch.trim()) && (
+              <>
+                {/* Ungrouped header row */}
+                <tr
+                  className={`cursor-pointer select-none transition-colors ${
+                    dragOverGroupId === UNGROUPED_ID ? 'bg-amber-50' : 'bg-gray-50/60 hover:bg-gray-100'
+                  }`}
+                  onClick={() => toggleGroup(UNGROUPED_ID)}
+                  onDragOver={(e) => handleGroupDragOver(e, null)}
+                  onDragLeave={() => setDragOverGroupId(null)}
+                  onDrop={(e) => handleGroupDrop(e, null)}
+                >
+                  <td colSpan={7} className="px-3 py-2.5 border border-gray-300">
+                    <div className="flex items-center gap-2">
+                      <svg className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${collapsedGroups.has(UNGROUPED_ID) ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                      </svg>
+                      <input
+                        type="checkbox"
+                        checked={allUngroupedSelected}
+                        ref={(el) => { if (el) el.indeterminate = someUngroupedSelected && !allUngroupedSelected }}
+                        onChange={(e) => {
+                          e.stopPropagation()
+                          if (allUngroupedSelected) setSelectedUngroupedIds(new Set())
+                          else setSelectedUngroupedIds(new Set(ungroupedRules.map(r => r.id)))
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        title="Select all ungrouped rules"
+                      />
+                      <span className="flex-1 text-sm font-semibold text-gray-500">Ungrouped</span>
+                      <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                        {ungroupedRules.length} rule{ungroupedRules.length !== 1 ? 's' : ''}
+                      </span>
+                      <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600" title="Ungrouped rules are evaluated last (lowest priority)">
+                        Lowest Priority
+                      </span>
                     </div>
-                  )}
-                  {groupRules.map((rule) => (
-                    <RuleRow
-                      key={rule.id}
-                      rule={rule}
-                      getNodePath={getNodePath}
-                      formatConditionSummary={formatConditionSummary}
-                      onEdit={openEdit}
-                      onDelete={handleDelete}
-                      onToggle={handleToggle}
-                      onDragStart={(e) => handleRuleDragStart(e, rule.id, group.id)}
-                      onDragEnd={handleRuleDragEnd}
-                      expandedConditions={expandedConditions}
-                      setExpandedConditions={setExpandedConditions}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )
-        })}
+                  </td>
+                </tr>
 
-        {/* ═══ Ungrouped section — always at the bottom ═══ */}
-        {(ungroupedRules.length > 0 || !ruleSearch.trim()) && (
-          <div className="border-b border-gray-200 last:border-b-0">
-            {/* Ungrouped header */}
-            <div
-              className={`flex items-center gap-2 px-4 py-2.5 transition-colors cursor-pointer select-none ${
-                dragOverGroupId === UNGROUPED_ID ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-gray-50/60 hover:bg-gray-100'
-              }`}
-              onClick={() => toggleGroup(UNGROUPED_ID)}
-              onDragOver={(e) => handleGroupDragOver(e, null)}
-              onDragLeave={() => setDragOverGroupId(null)}
-              onDrop={(e) => handleGroupDrop(e, null)}
-            >
-              {/* Collapse chevron */}
-              <svg className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${collapsedGroups.has(UNGROUPED_ID) ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-              </svg>
-
-              {/* Select all checkbox */}
-              <input
-                type="checkbox"
-                checked={allUngroupedSelected}
-                ref={(el) => { if (el) el.indeterminate = someUngroupedSelected && !allUngroupedSelected }}
-                onChange={(e) => {
-                  e.stopPropagation()
-                  if (allUngroupedSelected) {
-                    setSelectedUngroupedIds(new Set())
-                  } else {
-                    setSelectedUngroupedIds(new Set(ungroupedRules.map(r => r.id)))
-                  }
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                title="Select all ungrouped rules"
-              />
-
-              <span className="min-w-0 flex-1 text-sm font-semibold text-gray-500">Ungrouped</span>
-
-              <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-500">
-                {ungroupedRules.length} rule{ungroupedRules.length !== 1 ? 's' : ''}
-              </span>
-
-              <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600" title="Ungrouped rules are evaluated last (lowest priority)">
-                Lowest Priority
-              </span>
-            </div>
-
-            {/* Ungrouped rules */}
-            {!collapsedGroups.has(UNGROUPED_ID) && (
-              <div
-                onDragOver={(e) => handleGroupDragOver(e, null)}
-                onDragLeave={() => setDragOverGroupId(null)}
-                onDrop={(e) => handleGroupDrop(e, null)}
-              >
-                {ungroupedRules.length === 0 && (
-                  <div className="px-6 py-6 text-center text-xs text-gray-400 border-b border-gray-100">
-                    No ungrouped rules. Drop rules here to ungroup them.
-                  </div>
+                {/* Ungrouped rules */}
+                {!collapsedGroups.has(UNGROUPED_ID) && (
+                  <>
+                    {ungroupedRules.length === 0 && (
+                      <tr
+                        onDragOver={(e) => handleGroupDragOver(e, null)}
+                        onDragLeave={() => setDragOverGroupId(null)}
+                        onDrop={(e) => handleGroupDrop(e, null)}
+                      >
+                        <td colSpan={7} className="px-6 py-6 text-center text-xs text-gray-400 border border-gray-300">
+                          No ungrouped rules. Drop rules here to ungroup them.
+                        </td>
+                      </tr>
+                    )}
+                    {ungroupedRules.map((rule) => (
+                      <RuleRow
+                        key={rule.id}
+                        rule={rule}
+                        getNodePath={getNodePath}
+                        formatConditionSummary={formatConditionSummary}
+                        onEdit={openEdit}
+                        onDelete={handleDelete}
+                        onToggle={handleToggle}
+                        onDragStart={(e) => handleRuleDragStart(e, rule.id, null)}
+                        onDragEnd={handleRuleDragEnd}
+                        expandedConditions={expandedConditions}
+                        setExpandedConditions={setExpandedConditions}
+                        selectable
+                        selected={selectedUngroupedIds.has(rule.id)}
+                        onSelect={(selected) => {
+                          setSelectedUngroupedIds(prev => {
+                            const next = new Set(prev)
+                            if (selected) next.add(rule.id)
+                            else next.delete(rule.id)
+                            return next
+                          })
+                        }}
+                      />
+                    ))}
+                  </>
                 )}
-                {ungroupedRules.map((rule) => (
-                  <RuleRow
-                    key={rule.id}
-                    rule={rule}
-                    getNodePath={getNodePath}
-                    formatConditionSummary={formatConditionSummary}
-                    onEdit={openEdit}
-                    onDelete={handleDelete}
-                    onToggle={handleToggle}
-                    onDragStart={(e) => handleRuleDragStart(e, rule.id, null)}
-                    onDragEnd={handleRuleDragEnd}
-                    expandedConditions={expandedConditions}
-                    setExpandedConditions={setExpandedConditions}
-                    selectable
-                    selected={selectedUngroupedIds.has(rule.id)}
-                    onSelect={(selected) => {
-                      setSelectedUngroupedIds(prev => {
-                        const next = new Set(prev)
-                        if (selected) next.add(rule.id)
-                        else next.delete(rule.id)
-                        return next
-                      })
-                    }}
-                  />
-                ))}
-              </div>
+              </>
             )}
-          </div>
-        )}
+          </tbody>
+        </table>
       </div>
 
       {rules.length === 0 && groups.length === 0 && (
@@ -996,7 +916,169 @@ export default function OverrideRulesPage() {
   )
 }
 
+// ─── GroupSection component ───────────────────────────────────────────────────
+
+interface GroupSectionProps {
+  group: RuleGroup
+  groupRules: OverrideRule[]
+  isCollapsed: boolean
+  isDragOver: boolean
+  toggleGroup: (id: string) => void
+  editingGroupId: string | null
+  editingGroupName: string
+  setEditingGroupName: (v: string) => void
+  handleRenameGroup: (id: string) => void
+  setEditingGroupId: (id: string | null) => void
+  editingPriorityGroupId: string | null
+  editingPriorityValue: string
+  setEditingPriorityValue: (v: string) => void
+  handleUpdatePriority: (id: string) => void
+  setEditingPriorityGroupId: (id: string | null) => void
+  openCreate: (groupId?: string | null) => void
+  setDeletingGroupId: (id: string | null) => void
+  handleGroupDragOver: (e: React.DragEvent, groupId: string | null) => void
+  setDragOverGroupId: (id: string | null) => void
+  handleGroupDrop: (e: React.DragEvent, groupId: string | null) => void
+  getNodePath: (id: string) => string
+  formatConditionSummary: (rule: OverrideRule) => string
+  openEdit: (rule: OverrideRule) => void
+  handleDelete: (id: string) => void
+  handleToggle: (rule: OverrideRule) => void
+  handleRuleDragStart: (e: React.DragEvent, ruleId: string, sourceGroupId: string | null) => void
+  handleRuleDragEnd: (e: React.DragEvent) => void
+  expandedConditions: Set<string>
+  setExpandedConditions: React.Dispatch<React.SetStateAction<Set<string>>>
+}
+
+function GroupSection({
+  group, groupRules, isCollapsed, isDragOver, toggleGroup,
+  editingGroupId, editingGroupName, setEditingGroupName, handleRenameGroup, setEditingGroupId,
+  editingPriorityGroupId, editingPriorityValue, setEditingPriorityValue, handleUpdatePriority, setEditingPriorityGroupId,
+  openCreate, setDeletingGroupId,
+  handleGroupDragOver, setDragOverGroupId, handleGroupDrop,
+  getNodePath, formatConditionSummary, openEdit, handleDelete, handleToggle,
+  handleRuleDragStart, handleRuleDragEnd, expandedConditions, setExpandedConditions,
+}: GroupSectionProps) {
+  return (
+    <>
+      {/* Group header row */}
+      <tr
+        className={`cursor-pointer select-none transition-colors ${
+          isDragOver ? 'bg-blue-50' : 'bg-gray-50 hover:bg-gray-100'
+        }`}
+        onClick={() => toggleGroup(group.id)}
+        onDragOver={(e) => handleGroupDragOver(e, group.id)}
+        onDragLeave={() => setDragOverGroupId(null)}
+        onDrop={(e) => handleGroupDrop(e, group.id)}
+      >
+        <td colSpan={7} className={`px-3 py-2.5 border border-gray-300 ${isDragOver ? 'ring-2 ring-inset ring-blue-300' : ''}`}>
+          <div className="flex items-center gap-2">
+            <svg className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+
+            {editingGroupId === group.id ? (
+              <input
+                autoFocus
+                value={editingGroupName}
+                onChange={(e) => setEditingGroupName(e.target.value)}
+                onBlur={() => handleRenameGroup(group.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleRenameGroup(group.id); if (e.key === 'Escape') setEditingGroupId(null); }}
+                className="min-w-0 flex-1 rounded border border-blue-300 px-2 py-0.5 text-sm font-semibold text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800" title={group.name}>
+                {group.name}
+              </span>
+            )}
+
+            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-600">
+              {groupRules.length} rule{groupRules.length !== 1 ? 's' : ''}
+            </span>
+
+            {editingPriorityGroupId === group.id ? (
+              <input
+                autoFocus
+                type="number"
+                min={1}
+                value={editingPriorityValue}
+                onChange={(e) => setEditingPriorityValue(e.target.value)}
+                onBlur={() => handleUpdatePriority(group.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleUpdatePriority(group.id)
+                  if (e.key === 'Escape') setEditingPriorityGroupId(null)
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-16 rounded border border-indigo-300 px-1.5 py-0.5 text-xs font-medium text-indigo-700 text-center focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              />
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setEditingPriorityGroupId(group.id)
+                  setEditingPriorityValue(String(group.priority))
+                }}
+                className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-100 transition-colors"
+                title="Click to change priority (higher = evaluated first). Duplicate priorities cascade upward."
+              >
+                Priority {group.priority}
+              </button>
+            )}
+
+            <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => openCreate(group.id)} className="rounded p-1 text-gray-400 hover:bg-white hover:text-gray-600" title="Add rule to this group">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+              </button>
+              <button onClick={() => { setEditingGroupId(group.id); setEditingGroupName(group.name); }} className="rounded p-1 text-gray-400 hover:bg-white hover:text-gray-600" title="Rename group">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
+              </button>
+              <button onClick={() => setDeletingGroupId(group.id)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500" title="Delete group">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+              </button>
+            </div>
+          </div>
+        </td>
+      </tr>
+
+      {/* Rule rows — shown when expanded */}
+      {!isCollapsed && (
+        <>
+          {groupRules.length === 0 && (
+            <tr
+              onDragOver={(e) => handleGroupDragOver(e, group.id)}
+              onDragLeave={() => setDragOverGroupId(null)}
+              onDrop={(e) => handleGroupDrop(e, group.id)}
+            >
+              <td colSpan={7} className={`px-6 py-6 text-center text-xs text-gray-400 border border-gray-300 ${isDragOver ? 'bg-blue-50/50' : ''}`}>
+                No rules in this group. Drag rules here or click + to add.
+              </td>
+            </tr>
+          )}
+          {groupRules.map((rule) => (
+            <RuleRow
+              key={rule.id}
+              rule={rule}
+              getNodePath={getNodePath}
+              formatConditionSummary={formatConditionSummary}
+              onEdit={openEdit}
+              onDelete={handleDelete}
+              onToggle={handleToggle}
+              onDragStart={(e) => handleRuleDragStart(e, rule.id, group.id)}
+              onDragEnd={handleRuleDragEnd}
+              expandedConditions={expandedConditions}
+              setExpandedConditions={setExpandedConditions}
+            />
+          ))}
+        </>
+      )}
+    </>
+  )
+}
+
 // ─── RuleRow component ───────────────────────────────────────────────────────
+
+const CONDITION_TRUNCATE_LENGTH = 50
 
 interface RuleRowProps {
   rule: OverrideRule
@@ -1019,72 +1101,118 @@ function RuleRow({
   onDragStart, onDragEnd, expandedConditions, setExpandedConditions,
   selectable, selected, onSelect,
 }: RuleRowProps) {
+  const conditionText = formatConditionSummary(rule)
+  const isLong = conditionText.length > CONDITION_TRUNCATE_LENGTH
+  const isExpanded = expandedConditions.has(rule.id)
+
   return (
-    <div
+    <tr
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className="group flex items-center gap-3 border-b border-gray-100 last:border-b-0 px-4 py-2 hover:bg-gray-50/80 cursor-grab active:cursor-grabbing transition-colors"
+      className="group cursor-grab transition-colors hover:bg-slate-50 active:cursor-grabbing"
     >
-      {/* Drag handle */}
-      <svg className="h-3.5 w-3.5 shrink-0 text-gray-300 group-hover:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-        <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
-        <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
-        <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
-      </svg>
+      {/* Drag handle + optional checkbox */}
+      <td className="px-3 py-2 border border-gray-300 align-top">
+        <div className="flex items-center gap-1.5">
+          <svg className="h-3.5 w-3.5 shrink-0 text-gray-300 group-hover:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+            <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
+            <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+            <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
+          </svg>
+          {selectable && (
+            <input
+              type="checkbox"
+              checked={selected ?? false}
+              onChange={(e) => onSelect?.(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
+        </div>
+      </td>
 
-      {/* Checkbox for ungrouped */}
-      {selectable && (
-        <input
-          type="checkbox"
-          checked={selected ?? false}
-          onChange={(e) => onSelect?.(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          onClick={(e) => e.stopPropagation()}
-        />
-      )}
+      {/* Rule Name */}
+      <td className="px-3 py-2 border border-gray-300 align-top">
+        <span className="font-medium text-gray-900" title={rule.name}>
+          {rule.name}
+        </span>
+      </td>
 
-      {/* Rule name */}
-      <span className="min-w-0 w-48 shrink-0 truncate text-xs font-semibold text-gray-900" title={rule.name}>
-        {rule.name}
-      </span>
+      {/* Condition */}
+      <td className="px-3 py-2 border border-gray-300 align-top">
+        <div className="text-gray-600">
+          {isLong && !isExpanded ? (
+            <>
+              <span>{conditionText.slice(0, CONDITION_TRUNCATE_LENGTH)}...</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setExpandedConditions(prev => { const n = new Set(prev); n.add(rule.id); return n })
+                }}
+                className="ml-1 text-blue-600 hover:text-blue-800 font-medium"
+              >
+                read more
+              </button>
+            </>
+          ) : isLong && isExpanded ? (
+            <>
+              <span>{conditionText}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setExpandedConditions(prev => { const n = new Set(prev); n.delete(rule.id); return n })
+                }}
+                className="ml-1 text-blue-600 hover:text-blue-800 font-medium"
+              >
+                show less
+              </button>
+            </>
+          ) : (
+            <span>{conditionText}</span>
+          )}
+        </div>
+      </td>
 
-      {/* Conditions summary */}
-      <span className="min-w-0 flex-1 truncate text-[11px] text-gray-500" title={formatConditionSummary(rule)}>
-        {formatConditionSummary(rule)}
-      </span>
+      {/* Target Classification */}
+      <td className="px-3 py-2 border border-gray-300 align-top">
+        <span className="text-gray-700" title={getNodePath(rule.targetTaxonomyNodeId)}>
+          {getNodePath(rule.targetTaxonomyNodeId)}
+        </span>
+      </td>
 
-      {/* Target */}
-      <span className="truncate rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 max-w-[180px] shrink-0" title={getNodePath(rule.targetTaxonomyNodeId)}>
-        {getNodePath(rule.targetTaxonomyNodeId)}
-      </span>
+      {/* Source */}
+      <td className="px-3 py-2 border border-gray-300 align-top text-center">
+        <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+          rule.source === 'auto_generated' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-500'
+        }`}>
+          {rule.source === 'auto_generated' ? 'Auto' : 'Manual'}
+        </span>
+      </td>
 
-      {/* Source badge */}
-      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-        rule.source === 'auto_generated' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-500'
-      }`}>
-        {rule.source === 'auto_generated' ? 'Auto' : 'Manual'}
-      </span>
-
-      {/* Active toggle */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggle(rule) }}
-        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
-          rule.isActive ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-        }`}
-      >
-        {rule.isActive ? 'Active' : 'Inactive'}
-      </button>
-
-      {/* Action buttons */}
-      <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={(e) => { e.stopPropagation(); onEdit(rule) }} className="rounded p-1 text-blue-500 hover:bg-blue-50" title="Edit">
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
+      {/* Status */}
+      <td className="px-3 py-2 border border-gray-300 align-top text-center">
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggle(rule) }}
+          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+            rule.isActive ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+          }`}
+        >
+          {rule.isActive ? 'Active' : 'Inactive'}
         </button>
-        <button onClick={(e) => { e.stopPropagation(); onDelete(rule.id) }} className="rounded p-1 text-red-400 hover:bg-red-50" title="Delete">
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-        </button>
-      </div>
-    </div>
+      </td>
+
+      {/* Actions */}
+      <td className="px-3 py-2 border border-gray-300 align-top text-center">
+        <div className="flex items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={(e) => { e.stopPropagation(); onEdit(rule) }} className="rounded p-1 text-blue-500 hover:bg-blue-50" title="Edit">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(rule.id) }} className="rounded p-1 text-red-400 hover:bg-red-50" title="Delete">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+          </button>
+        </div>
+      </td>
+    </tr>
   )
 }

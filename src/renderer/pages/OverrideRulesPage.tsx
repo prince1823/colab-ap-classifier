@@ -132,10 +132,14 @@ export default function OverrideRulesPage() {
   }
 
   const handleDelete = async (ruleId: string) => {
+    // Optimistic: remove from local state immediately
+    const previousRules = rules
+    setRules(prev => prev.filter(r => r.id !== ruleId))
     try {
       await ipc.rules.delete(ruleId)
-      await loadData()
     } catch (e) {
+      // Rollback on failure
+      setRules(previousRules)
       setError(e instanceof Error ? e.message : 'Failed to delete rule')
     }
   }
@@ -197,11 +201,18 @@ export default function OverrideRulesPage() {
   }
 
   const handleDeleteGroup = async (groupId: string) => {
+    const previousGroups = groups
+    const previousRules = rules
+    // Optimistic: remove group and ungroup its rules locally
+    setGroups(prev => prev.filter(g => g.id !== groupId))
+    setRules(prev => prev.map(r => r.groupId === groupId ? { ...r, groupId: undefined } : r))
+    setDeletingGroupId(null)
     try {
       await ipc.rules.deleteGroup(groupId)
-      setDeletingGroupId(null)
-      await loadData()
     } catch (e) {
+      // Rollback on failure
+      setGroups(previousGroups)
+      setRules(previousRules)
       setError(e instanceof Error ? e.message : 'Failed to delete group')
     }
   }

@@ -772,6 +772,74 @@ export class TransactionStore implements ITransactionStore {
     return ids.length;
   }
 
+    async getSpendByTaxonomy(supplierId: string): Promise<import('../../shared/types/classification').SpendByTaxonomyResult[]> {
+    const CLASSIFIED_STATUSES = `('classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent')`;
+    const rows = await this.db.all<{
+      taxonomy_node_id: string;
+      full_path: string;
+      l1: string;
+      l2: string;
+      spend: number;
+      txn_count: number;
+    }>(
+      `SELECT CAST(t.taxonomy_node_id AS VARCHAR) as taxonomy_node_id,
+              tax.full_path,
+              tax.l1,
+              tax.l2,
+              COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0) as spend,
+              COUNT(*) as txn_count
+       FROM transactions t
+       LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
+       WHERE CAST(t.project_supplier_id AS VARCHAR) = ?
+         AND t.classification_status IN ${CLASSIFIED_STATUSES}
+         AND t.taxonomy_node_id IS NOT NULL
+       GROUP BY t.taxonomy_node_id, tax.full_path, tax.l1, tax.l2`,
+      supplierId
+    );
+
+    if (rows.length === 0) {
+      throw new Error(`No classified transactions found for supplier ${supplierId}`);
+    }
+
+    return rows.map((r) => ({
+      taxonomyNodeId: r.taxonomy_node_id,
+      fullPath: r.full_path ?? '',
+      l1: r.l1 ?? '',
+      l2: r.l2 ?? '',
+      spend: r.spend,
+      txnCount: Number(r.txn_count),
+    }));
+  }
+
+  async getTransactionsByTaxonomy(
+    supplierId: string,
+    taxonomyNodeId: string,
+    columnPriorities: string[]
+  ): Promise<Array<Record<string, unknown>>> {
+    const CLASSIFIED_STATUSES = `('classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent')`;
+
+    // Resolve virtual columns (e.g., supplier_name → ps.supplier_name) and add JOINs
+    const cols = columnPriorities.length > 0
+      ? ['t.id', ...columnPriorities.filter((c) => c !== 'id').map((c) => `${this.resolveColumn(c)} AS ${c}`)]
+      : ['t.*'];
+    const selectCols = cols.join(', ');
+
+    const supplierJoin = this.needsSupplierJoin(columnPriorities) ? SUPPLIER_JOIN : '';
+    const taxonomyJoin = this.needsTaxonomyJoinForColumns(columnPriorities) ? TAXONOMY_JOIN : '';
+
+    return this.db.all<Record<string, unknown>>(
+      `SELECT ${selectCols}
+       FROM transactions t
+       ${supplierJoin}
+       ${taxonomyJoin}
+       WHERE CAST(t.project_supplier_id AS VARCHAR) = ?
+         AND CAST(t.taxonomy_node_id AS VARCHAR) = ?
+         AND t.classification_status IN ${CLASSIFIED_STATUSES}`,
+      supplierId,
+      taxonomyNodeId
+    );
+  }
+
   async markAllReviewed(): Promise<number> {
     const result = await this.db.get<{ cnt: number }>(
       "SELECT COUNT(*) as cnt FROM transactions WHERE human_reviewed = FALSE"

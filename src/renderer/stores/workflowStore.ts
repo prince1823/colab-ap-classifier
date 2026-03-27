@@ -266,15 +266,25 @@ export const useWorkflowStore = create<WorkflowState>()(
       },
 
       subscribeToResearchProgress: () => {
+        let clearTimerId: ReturnType<typeof setTimeout> | null = null
+
         const unsubscribe = ipc.suppliers.onResearchProgress((progress) => {
+          if (clearTimerId) { clearTimeout(clearTimerId); clearTimerId = null }
+
           set({ researchProgress: progress })
+
           if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
-            setTimeout(() => {
+            clearTimerId = setTimeout(() => {
               set({ researchProgress: null })
+              clearTimerId = null
             }, 3000)
           }
         })
-        return unsubscribe
+
+        return () => {
+          if (clearTimerId) clearTimeout(clearTimerId)
+          unsubscribe()
+        }
       },
 
       setLastRoute: (route: string) => {

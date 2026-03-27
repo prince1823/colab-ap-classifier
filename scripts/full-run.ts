@@ -166,6 +166,7 @@ import { ExaWebSearch } from '../src/main/services/exa-search';
 import { LLMClassificationAgent } from '../src/main/agents/classification-agent';
 import { LLMResearchAgent } from '../src/main/agents/research-agent';
 import { LLMColumnMappingAgent } from '../src/main/agents/column-mapping-agent';
+import { LLMQCAgent } from '../src/main/agents/qc-agent';
 import { ChangelogStore } from '../src/main/services/changelog';
 import { TransactionStore } from '../src/main/services/transactions';
 import { ProjectStore } from '../src/main/services/project';
@@ -301,20 +302,24 @@ async function main() {
   const classificationAgent = new LLMClassificationAgent(llm);
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
+  const qcAgent = new LLMQCAgent(llm);
 
   const changelog = new ChangelogStore(db);
   const transactions = new TransactionStore(db, changelog);
   const project = new ProjectStore(db, transactions, supplierUniverse);
   const taxonomy = new TaxonomyStore(db, project);
-  const rules = new RuleStore(db, transactions);
+  const rules = new RuleStore(db, transactions, project);
   const suppliers = new SupplierService(db, supplierUniverse);
-  const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
-  const researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus as any);
+  const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent, eventBus as any);
+  const researcher = new SupplierResearcher(
+    supplierUniverse, webSearch, researchAgent, eventBus as any,
+    suppliers, classificationAgent, db
+  );
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,
     transactions, changelog, classificationAgent, eventBus as any, supplierUniverse
   );
-  const qc = new QCRunner(db, transactions, eventBus as any);
+  const qc = new QCRunner(db, transactions, eventBus as any, qcAgent, supplierUniverse, project, taxonomy);
 
   try {
     // ─── Phase 1: Create project ──────────────────────────────────────────
@@ -340,9 +345,10 @@ async function main() {
     // ─── Phase 3: Import CSV ──────────────────────────────────────────────
 
     start = Date.now();
-    const importResult = await ingest.importCSV(csvPath, columnMapping);
+    await ingest.importCSV(csvPath, columnMapping);
+    const importStats = await transactions.getStats();
     timings.push({ phase: 'Import CSV', ms: Date.now() - start });
-    log(`  ✓ Import CSV: ${importResult.rowsInserted} rows`);
+    log(`  ✓ Import CSV: ${importStats.totalRows} rows`);
 
     // ─── Phase 4: Supplier normalization ──────────────────────────────────
 
@@ -356,18 +362,18 @@ async function main() {
     if (!config.skipSupplierResearch) {
       start = Date.now();
       log('  Researching suppliers:');
-      for (const ps of projectSuppliers) {
+      const nonTailSpend = projectSuppliers.filter((ps) => !ps.isTailSpend);
+      for (const ps of nonTailSpend) {
         const cached = await supplierUniverse.getSupplier(ps.supplierName);
         const hadSubstantiveInfo = !!(cached?.industry || cached?.description);
         const info = await researcher.researchSingle(ps.supplierName);
         // Write back research results to project_suppliers (mirrors IPC handler logic)
-        await suppliers.updateSupplier(ps.id, { supplierInfo: info });
-        await suppliers.markResearched(ps.id);
+        await suppliers.updateSupplier(ps.id, { supplierInfo: info, markResearched: true });
         const source = hadSubstantiveInfo ? 'universe (cached)' : 'LLM';
         log(`    ${ps.supplierName} → ${source}`);
       }
       timings.push({ phase: 'Supplier research', ms: Date.now() - start });
-      log(`  ✓ Supplier research: ${projectSuppliers.length} suppliers`);
+      log(`  ✓ Supplier research: ${nonTailSpend.length} suppliers (${projectSuppliers.length - nonTailSpend.length} tail-spend skipped)`);
     } else {
       log('  ⊘ Supplier research: skipped');
     }
@@ -380,6 +386,28 @@ async function main() {
     }
     timings.push({ phase: 'Confirm suppliers', ms: Date.now() - start });
     log(`  ✓ Confirm suppliers: ${projectSuppliers.length} confirmed`);
+
+    // ─── Phase 5c: Categorize suppliers (populate l1_l2_path) ─────────────
+
+    if (!config.skipSupplierResearch) {
+      start = Date.now();
+      const taxonomyNodes = await taxonomy.getNodes();
+      const companyContext = config.companyContext;
+      const columnPriorities = config.columnPriorities ?? [];
+
+      await researcher.categorizeWithSupplierInfo(taxonomyNodes, companyContext);
+
+      if (columnPriorities.length > 0) {
+        await researcher.categorizeTailSpend(taxonomyNodes, companyContext, columnPriorities);
+      }
+
+      const updatedSuppliers = await suppliers.listProjectSuppliers();
+      const withPath = updatedSuppliers.filter((s) => s.l1L2Path !== null);
+      timings.push({ phase: 'Categorize suppliers', ms: Date.now() - start });
+      log(`  ✓ Categorize suppliers: ${withPath.length}/${updatedSuppliers.length} with l1_l2_path`);
+    } else {
+      log('  ⊘ Categorize suppliers: skipped (research was skipped)');
+    }
 
     // ─── Phase 6: Override rules ──────────────────────────────────────────
 
@@ -397,7 +425,10 @@ async function main() {
         }
         await rules.createRule({
           name: rf.name,
-          conditions: rf.conditions,
+          groupedConditions: {
+            groupConnector: 'AND' as const,
+            groups: [{ connector: 'AND' as const, conditions: rf.conditions }],
+          },
           targetTaxonomyNodeId: targetNode.id,
           priorityScore: rf.priorityScore,
         });

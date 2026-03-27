@@ -4,6 +4,9 @@ import * as path from 'path';
 import type { IAppConfigService } from '../../shared/types/services';
 import type { LicenseStatus } from '../../shared/types/license';
 
+const DEFAULT_LICENSE_SERVER_URL = 'https://colab91-license-server.tanuj-44c.workers.dev';
+const DEFAULT_LICENSE_PUBLIC_KEY = 'MCowBQYDK2VwAyEAExmIdot5+EJbAilti/UwIuBnNOKhognNVVedcxqfIj4=';
+
 interface LicenseDataShape {
   lastResult?: Record<string, unknown>;
   lastChecked?: number;
@@ -219,7 +222,7 @@ export class AppConfigService implements IAppConfigService {
   }
 
   getLicenseServerUrl(): string | null {
-    return this.config.licenseServerUrl || process.env.LICENSE_SERVER_URL || null;
+    return this.config.licenseServerUrl || process.env.LICENSE_SERVER_URL || DEFAULT_LICENSE_SERVER_URL;
   }
 
   async setLicenseServerUrl(url: string): Promise<void> {
@@ -228,7 +231,7 @@ export class AppConfigService implements IAppConfigService {
   }
 
   getLicensePublicKey(): string | null {
-    return this.config.licensePublicKey || process.env.LICENSE_PUBLIC_KEY || null;
+    return this.config.licensePublicKey || process.env.LICENSE_PUBLIC_KEY || DEFAULT_LICENSE_PUBLIC_KEY;
   }
 
   async setLicensePublicKey(key: string): Promise<void> {

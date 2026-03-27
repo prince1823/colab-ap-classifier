@@ -200,7 +200,9 @@ export interface RuleStore {
   createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
-  evaluateRules(transactionIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
+  evaluateRules(transactionIds?: string[], ruleIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
+  previewRules(ruleIds: string[]): Promise<{ affectedRowCount: number; matchingRuleCount: number }>;
+  applyRules(ruleIds: string[]): Promise<{ matchedCount: number; ruleCount: number }>;
   generate_rules_preview(): Promise<GenerateRulesResult>;
   // Group operations
   listGroups(): Promise<RuleGroup[]>;

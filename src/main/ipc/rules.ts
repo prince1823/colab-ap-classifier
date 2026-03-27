@@ -64,4 +64,12 @@ export function registerRulesHandlers(rules: RuleStore): void {
   registerHandler('rules:filterAssign', async (_event, filter: unknown, targetGroupId: unknown) => {
     return rules.filterAndAssignToGroup(filter as GroupedFilter, (targetGroupId as string | null) ?? null);
   });
+
+  registerHandler('rules:previewApply', async (_event, ruleIds: unknown) => {
+    return rules.previewRules(ruleIds as string[]);
+  });
+
+  registerHandler('rules:apply', async (_event, ruleIds: unknown) => {
+    return rules.applyRules(ruleIds as string[]);
+  });
 }

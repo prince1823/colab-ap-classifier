@@ -114,7 +114,9 @@ export interface IPCInvokeMap {
   'rules:createAndApply': { args: [input: OverrideRuleCreate]; result: { id: string; matchedCount: number } };
   'rules:update':         { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
   'rules:delete':   { args: [ruleId: string]; result: void };
-  'rules:generate': { args: []; result: GenerateRulesResult };
+  'rules:generate':      { args: []; result: GenerateRulesResult };
+  'rules:previewApply':  { args: [ruleIds: string[]]; result: { affectedRowCount: number; matchingRuleCount: number } };
+  'rules:apply':         { args: [ruleIds: string[]]; result: { matchedCount: number; ruleCount: number } };
 
   // Rule Groups
   'rules:listGroups':       { args: []; result: RuleGroup[] };

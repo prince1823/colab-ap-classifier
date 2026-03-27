@@ -4,6 +4,7 @@ import {
   Merge, ArrowRightLeft,
 } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 import type { ProjectSupplierView, SupplierParent } from '../../../shared/types/suppliers'
 import MergeModal from './MergeModal'
 import ReassignAliasModal from './ReassignAliasModal'
@@ -30,7 +31,11 @@ interface FlatRow {
 
 // ── Component ────────────────────────────────────────────────────────
 
-export default function NormalizeView() {
+interface NormalizeViewProps {
+  onDataChange?: () => void
+}
+
+export default function NormalizeView({ onDataChange }: NormalizeViewProps = {}) {
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [parents, setParents] = useState<SupplierParent[]>([])
   const [loading, setLoading] = useState(true)
@@ -205,11 +210,12 @@ export default function NormalizeView() {
       setSuppliers(prev => prev.map(s =>
         s.id === supplierId ? { ...s, supplierName: newName } : s
       ))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Rename failed')
     }
     setEditingId(null)
-  }, [])
+  }, [onDataChange])
 
   const handleDeleteNormalized = useCallback(async (supplierId: string) => {
     const supplier = suppliers.find(s => s.id === supplierId)
@@ -224,10 +230,11 @@ export default function NormalizeView() {
       await ipc.suppliers.delete(supplierId)
       setSuppliers(prev => prev.filter(s => s.id !== supplierId))
       setSelectedIds(prev => { const n = new Set(prev); n.delete(supplierId); return n })
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Delete failed')
     }
-  }, [suppliers, aliasCache])
+  }, [suppliers, aliasCache, onDataChange])
 
   const handleDeleteAlias = useCallback(async (alias: AliasData, normalizedId: string) => {
     if (!window.confirm(`Remove alias "${alias.rawName}"?`)) return
@@ -250,11 +257,12 @@ export default function NormalizeView() {
       setSuppliers(prev => prev.map(s =>
         s.id === supplierId ? { ...s, parentSupplierId: parentId, parentName: parent?.name ?? null } : s
       ))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to change parent')
     }
     setParentTypeahead(null)
-  }, [parents])
+  }, [parents, onDataChange])
 
   const handleRenameParent = useCallback(async (parentId: string, newName: string) => {
     try {
@@ -263,11 +271,12 @@ export default function NormalizeView() {
       setSuppliers(prev => prev.map(s =>
         s.parentSupplierId === parentId ? { ...s, parentName: newName } : s
       ))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Rename parent failed')
     }
     setEditingParentId(null)
-  }, [])
+  }, [onDataChange])
 
   const handleDeleteParent = useCallback(async (parentId: string) => {
     // Unassign all children first
@@ -279,11 +288,12 @@ export default function NormalizeView() {
       ))
       await ipc.suppliers.deleteParent(parentId)
       setParents(prev => prev.filter(p => p.id !== parentId))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete parent')
     }
     setPendingDeleteParentRowId(null)
-  }, [suppliers])
+  }, [suppliers, onDataChange])
 
   const handleCreateParentAndAssign = useCallback(async (supplierId: string, name: string) => {
     try {
@@ -293,11 +303,12 @@ export default function NormalizeView() {
       setSuppliers(prev => prev.map(s =>
         s.id === supplierId ? { ...s, parentSupplierId: parent.id, parentName: parent.name } : s
       ))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create parent')
     }
     setParentTypeahead(null)
-  }, [])
+  }, [onDataChange])
 
   const handleMerge = useCallback(async (survivorId: string, losingIds: string[]) => {
     try {
@@ -321,18 +332,19 @@ export default function NormalizeView() {
           rawName: name, spend: 0, txnCount: 0,
         }))
         setAliasCache(c => new Map(c).set(survivorId, aliasData))
-      }).catch(() => {})
+      }).catch((e) => showError('Failed to reload supplier aliases', e))
 
       // Silently refresh spend/txn counts in background — no loading state, no collapse
       ipc.suppliers.list().then(fresh => {
         setSuppliers(fresh as ProjectSupplierView[])
-      }).catch(() => { /* non-fatal */ })
+      }).catch((e) => showError('Failed to refresh supplier list', e))
 
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Merge failed')
     }
     setShowMergeModal(false)
-  }, [])
+  }, [onDataChange])
 
   const handleMergeParents = useCallback(async (survivorId: string, losingIds: string[]) => {
     try {
@@ -357,13 +369,14 @@ export default function NormalizeView() {
       ]).then(([freshSuppliers, freshParents]) => {
         setSuppliers(freshSuppliers as ProjectSupplierView[])
         setParents(freshParents as SupplierParent[])
-      }).catch(() => {})
+      }).catch((e) => showError('Failed to refresh supplier data after parent merge', e))
 
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Merge parents failed')
     }
     setShowMergeModal(false)
-  }, [parents])
+  }, [parents, onDataChange])
 
   const handleReassignAlias = useCallback(async (aliasName: string, fromId: string, toId: string) => {
     try {
@@ -380,12 +393,13 @@ export default function NormalizeView() {
       // Refresh spend totals — transactions moved, so both suppliers' spend changed
       ipc.suppliers.list().then(fresh => {
         setSuppliers(fresh as ProjectSupplierView[])
-      }).catch(() => {})
+      }).catch((e) => showError('Failed to refresh supplier list after alias reassign', e))
+      onDataChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Reassign failed')
     }
     setReassigningAlias(null)
-  }, [])
+  }, [onDataChange])
 
   // ── Inline edit helpers ───────────────────────────────────────────
 
@@ -632,6 +646,53 @@ export default function NormalizeView() {
       }
     }
   }, [flatRows, focusedRowIndex, focusedColIndex, focusedAliasIndex, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleSelect, startEdit, startEditParent, suppliers, focusOuter, expandedAliases, selectedAlias])
+
+  // Global Cmd+key shortcuts — work even when focus is on search input
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (showMergeModal || reassigningAlias || parentTypeahead) return
+
+      const row = flatRows[focusedRowIndex]
+      if (!row) return
+
+      if (e.key === 'm') {
+        e.preventDefault()
+        if (selectedSupplierIds.size >= 2) {
+          if (selectedColIndex === 0) {
+            const uniqueParentIds = new Set<string>()
+            for (const sid of selectedSupplierIds) {
+              const sup = suppliers.find(s => s.id === sid)
+              if (sup?.parentSupplierId) uniqueParentIds.add(sup.parentSupplierId)
+            }
+            if (uniqueParentIds.size >= 2) {
+              setMergeMode('parent')
+              setShowMergeModal(true)
+            }
+          } else {
+            setMergeMode('supplier')
+            setShowMergeModal(true)
+          }
+        }
+      }
+
+      if (e.key === 'p') {
+        e.preventDefault()
+        if (row.normalized) {
+          const el = tableRef.current?.querySelector(`[data-row-index="${focusedRowIndex}"]`)
+          if (el) {
+            const rect = el.getBoundingClientRect()
+            setParentTypeahead({
+              supplierId: row.normalized.supplier.id,
+              anchor: { top: rect.bottom + 4, left: rect.left + 100 },
+            })
+          }
+        }
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [flatRows, focusedRowIndex, selectedSupplierIds, selectedColIndex, showMergeModal, reassigningAlias, parentTypeahead, suppliers])
 
   // Scroll focused row into view
   useEffect(() => {

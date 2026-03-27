@@ -13,7 +13,7 @@ import type {
 import type { TaxonomyNode } from '../../shared/types';
 import type { CompanyContext } from '../../shared/types/project';
 import type { ClassificationProgress, ClassificationResult } from '../../shared/types/classification';
-import type { FilterCondition } from '../../shared/types/transactions';
+import type { FilterCondition, GroupedFilter } from '../../shared/types/transactions';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import { cleanDescription } from '../utils/text';
 import { buildDedupGroups, batchDedupGroups, extractSubBatch, extractFields } from '../utils/dedup-groups';
@@ -60,24 +60,28 @@ export class ClassificationRunner implements IClassificationRunner {
     });
   }
 
-  private async resolveScopedIds(conditions?: FilterCondition[]): Promise<Set<string> | null> {
-    if (!conditions || conditions.length === 0) return null;
-    const ids = await this.transactions.getIdsByConditions(conditions);
+  /**
+   * Resolve grouped filter to a set of matching transaction IDs.
+   * Returns null when no filter is provided (meaning: use default behavior).
+   */
+  private async resolveScopedIds(groupedFilter?: GroupedFilter): Promise<Set<string> | null> {
+    if (!groupedFilter || groupedFilter.groups.length === 0) return null;
+    const ids = await this.transactions.getIdsByGroupedConditions(groupedFilter);
     return new Set(ids);
   }
 
-  async getScopeCount(conditions?: FilterCondition[]): Promise<number> {
-    if (!conditions || conditions.length === 0) {
+  async getScopeCount(groupedFilter?: GroupedFilter): Promise<number> {
+    if (!groupedFilter || groupedFilter.groups.length === 0) {
       const result = await this.db.get<{ cnt: number | bigint }>(
         `SELECT COUNT(*) as cnt FROM transactions WHERE classification_status = 'unclassified'`
       );
       return Number(result?.cnt ?? 0);
     }
-    const ids = await this.transactions.getIdsByConditions(conditions);
+    const ids = await this.transactions.getIdsByGroupedConditions(groupedFilter);
     return ids.length;
   }
 
-  async classifyAll(conditions?: FilterCondition[]): Promise<void> {
+  async classifyAll(groupedFilter?: GroupedFilter): Promise<void> {
     if (this.isRunningFlag) {
       throw new Error('Classification is already running');
     }
@@ -86,7 +90,7 @@ export class ClassificationRunner implements IClassificationRunner {
     this.isStopped = false;
 
     try {
-      const scopedIds = await this.resolveScopedIds(conditions);
+      const scopedIds = await this.resolveScopedIds(groupedFilter);
 
       // Get suppliers with transactions in scope
       let supplierRows: { id: string; supplier_name: string }[];

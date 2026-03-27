@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
 import type { ProjectSupplierView, SupplierInfo, SupplierType } from '../../../shared/types/suppliers'
 import { fmtAbbrev } from '../../utils/formatSpend'
+import { ipc } from '../../lib/ipc'
 
 const SUPPLIER_TYPES: SupplierType[] = ['company', 'individual', 'government']
 
@@ -351,9 +352,10 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
                         onClick={(e) => {
                           e.preventDefault()
                           e.stopPropagation()
-                          window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
+                          const url = src.startsWith('http://') || src.startsWith('https://') ? src : `https://${src}`;
+                          ipc.shell.openExternal(url)
                         }}
-                        title={`Search Google for "${src}"`}
+                        title={src}
                       >
                         {src}
                       </a>

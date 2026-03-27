@@ -1,13 +1,35 @@
-import { useState, useEffect, useRef } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import LaunchModal from './LaunchModal'
 import { useWorkflowStore } from '../stores/workflowStore'
+import ProjectView from '../views/ProjectView'
+import TaxonomyView from '../views/TaxonomyView'
+import DataView from '../views/DataView'
+import SuppliersView from '../views/SuppliersView'
+import ClassificationView from '../views/ClassificationView'
+import ReviewView from '../views/ReviewView'
+import OverrideRulesView from '../views/OverrideRulesView'
+import VersionHistoryView from '../views/VersionHistoryView'
+
+/** Route config for keep-alive rendering */
+const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
+  { path: '/project', element: <ProjectView /> },
+  { path: '/taxonomy', element: <TaxonomyView /> },
+  { path: '/data', element: <DataView /> },
+  { path: '/suppliers', element: <SuppliersView /> },
+  { path: '/classification', element: <ClassificationView /> },
+  { path: '/review', element: <ReviewView /> },
+  { path: '/override-rules', element: <OverrideRulesView /> },
+  { path: '/version-history', element: <VersionHistoryView /> },
+]
 
 export default function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const { subscribeToClassificationProgress, subscribeToResearchProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress } = useWorkflowStore()
   const location = useLocation()
+  // Track which routes have been visited so we mount them once and keep them alive
+  const [visitedRoutes, setVisitedRoutes] = useState<Set<string>>(new Set([location.pathname]))
   const navigate = useNavigate()
   const autoReopenAttempted = useRef(false)
   // Initialize synchronously so the first render already shows the spinner
@@ -37,11 +59,15 @@ export default function AppShell() {
       .finally(() => setReopening(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Track current route in persisted store
+  // Track current route in persisted store + mark as visited for keep-alive
   useEffect(() => {
     if (hasProject && location.pathname !== '/') {
       setLastRoute(location.pathname)
     }
+    setVisitedRoutes((prev) => {
+      if (prev.has(location.pathname)) return prev
+      return new Set(prev).add(location.pathname)
+    })
   }, [location.pathname, hasProject, setLastRoute])
 
   // Subscribe to classification progress events when a project is open
@@ -109,9 +135,9 @@ export default function AppShell() {
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           onSwitchProject={handleSwitchProject}
         />
-        <main className="flex flex-1 flex-col overflow-hidden">
+        <main className="flex flex-1 flex-col overflow-hidden relative">
           {showGlobalResearchProgress && researchProgress && (
-            <div className="flex items-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs">
+            <div className="flex items-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs" style={{ zIndex: 2 }}>
               <div className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300 border-t-blue-600" />
               <span className="font-medium text-blue-800">
                 {researchProgress.currentSupplier
@@ -130,9 +156,23 @@ export default function AppShell() {
               </div>
             </div>
           )}
-          <div className="flex-1 overflow-auto">
-            <Outlet />
-          </div>
+          {ROUTE_PAGES.map(({ path, element }) => {
+            const isActive = location.pathname === path
+            if (!visitedRoutes.has(path)) return null
+            return (
+              <div
+                key={path}
+                className="overflow-auto absolute inset-0"
+                style={{
+                  visibility: isActive ? 'visible' : 'hidden',
+                  pointerEvents: isActive ? 'auto' : 'none',
+                  zIndex: isActive ? 1 : 0,
+                }}
+              >
+                {element}
+              </div>
+            )
+          })}
         </main>
       </div>
       {!hasProject && !reopening && <LaunchModal onProjectReady={handleProjectReady} />}

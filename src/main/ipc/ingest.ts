@@ -15,9 +15,10 @@ export function registerIngestHandlers(ingest: IngestService, eventBus: EventBus
     return ingest.suggestMappings(columns as string[], sampleRows as Record<string, string>[]);
   });
 
-  // Fire-and-forget: progress is streamed via EventBus 'ingest:progress'
   registerHandler('ingest:importCSV', async (_event, filePath: unknown, mapping: unknown) => {
-    ingest.importCSV(filePath as string, mapping as ColumnMapping).catch((err) => {
+    try {
+      return await ingest.importCSV(filePath as string, mapping as ColumnMapping);
+    } catch (err) {
       console.error('[IPC] Import failed:', err);
       eventBus.emit('ingest:progress', {
         status: 'failed',
@@ -27,7 +28,8 @@ export function registerIngestHandlers(ingest: IngestService, eventBus: EventBus
         currentStep: 'Import failed',
         error: err instanceof Error ? err.message : String(err),
       });
-    });
+      throw err;
+    }
   });
 
   registerHandler('ingest:getUpload', async () => {

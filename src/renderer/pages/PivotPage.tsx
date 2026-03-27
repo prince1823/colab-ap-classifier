@@ -8,6 +8,7 @@ import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useReclassification } from '../hooks/useReclassification'
 import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import { usePivotStore } from '../stores/pivotStore'
 import type { FlattenedPivotRow } from '../types/pivot'
 import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
@@ -145,7 +146,7 @@ export default function PivotPage() {
   useEffect(() => {
     ipc.transactions.distinctValues('supplier_name', 5000)
       .then(vals => setSupplierSuggestions(vals.filter(Boolean)))
-      .catch(() => {})
+      .catch((e) => showError('Failed to load supplier suggestions', e))
   }, [])
 
   const filter = useMemo(() => {

@@ -753,17 +753,15 @@ export class TransactionStore implements ITransactionStore {
     return rows.map((r) => String(r.id));
   }
 
+  /**
+   * Applies a rule's conditions to matching transactions.
+   * Caller (RuleStore) is responsible for ensuring ruleId exists.
+   */
   async applyRule(
     ruleId: string,
     groupedConditions: GroupedFilter,
     targetTaxonomyNodeId: string
   ): Promise<number> {
-    const rule = await this.db.get<{ id: string }>(
-      'SELECT id FROM override_rules WHERE id = ?',
-      ruleId
-    );
-    if (!rule) throw new Error(`Rule not found: ${ruleId}`);
-
     const ids = await this.getIdsByGroupedConditions(groupedConditions);
     if (ids.length === 0) return 0;
 

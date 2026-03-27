@@ -9,8 +9,6 @@ import type { GroupedFilter, ConditionGroup, FilterCondition } from '../../../sh
 import type { FieldDefinition } from '../FilterConditionBuilder'
 import type { TaxonomyNode } from '../../../shared/types/taxonomy'
 import type { FlattenedPivotRow } from '../../types/pivot'
-import type { RuleGroup } from '../../../shared/types/rules'
-
 interface CreateRuleModalProps {
   isOpen: boolean
   onClose: () => void
@@ -18,6 +16,10 @@ interface CreateRuleModalProps {
   selectedRows: FlattenedPivotRow[]
   /** Called after successful rule creation */
   onCreated?: () => void
+  /** Rule group selected from the toolbar bucket selector */
+  selectedGroupId?: string | null
+  /** Name of the selected rule group (for display) */
+  selectedGroupName?: string | null
 }
 
 /**
@@ -64,6 +66,8 @@ export default function CreateRuleModal({
   onClose,
   selectedRows,
   onCreated,
+  selectedGroupId,
+  selectedGroupName,
 }: CreateRuleModalProps) {
   const [name, setName] = useState('')
   const [targetNodeId, setTargetNodeId] = useState('')
@@ -86,9 +90,7 @@ export default function CreateRuleModal({
   // Filter fields for condition builder
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
 
-  // Rule groups
-  const [ruleGroups, setRuleGroups] = useState<RuleGroup[]>([])
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
+  // Rule group is now passed via selectedGroupId prop from toolbar
 
   // Refs for keyboard navigation
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -107,12 +109,10 @@ export default function CreateRuleModal({
     Promise.all([
       ipc.taxonomy.getNodes(),
       ipc.transactions.getFilterFields(),
-      ipc.rules.listGroups(),
-    ]).then(([nodes, fields, groups]) => {
+    ]).then(([nodes, fields]) => {
       // Only show leaf nodes with full L1|L2|L3 path
       setTaxonomyNodes(nodes.filter((n: TaxonomyNode) => n.l3 !== null))
       setFilterFields(fields)
-      setRuleGroups(groups ?? [])
     }).catch((e) => showError('Failed to load rule form data', e))
   }, [isOpen])
 
@@ -314,6 +314,15 @@ export default function CreateRuleModal({
           </button>
         </div>
 
+        {/* Bucket info banner */}
+        {selectedGroupId && selectedGroupName && (
+          <div className="px-5 py-2 bg-blue-50 border-b border-blue-100">
+            <p className="text-[11px] text-blue-700">
+              Rule will be inserted into <span className="font-semibold">{selectedGroupName}</span>
+            </p>
+          </div>
+        )}
+
         {/* Body — single scrollable view with all fields */}
         <div className="px-5 py-4 flex-1 space-y-4 overflow-y-auto" style={{ overflow: 'visible' }}>
           {error && (
@@ -357,30 +366,6 @@ export default function CreateRuleModal({
               placeholder="e.g. IT Software suppliers"
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
-          </div>
-
-          {/* Rule Group */}
-          <div>
-            <label htmlFor="rule-group" className="mb-1 block text-xs font-medium text-gray-600">Rule Group</label>
-            <select
-              id="rule-group"
-              value={selectedGroupId ?? ''}
-              onChange={(e) => setSelectedGroupId(e.target.value || null)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-            >
-              <option value="">Ungrouped (lowest priority)</option>
-              {ruleGroups
-                .sort((a, b) => b.priority - a.priority)
-                .map(g => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} (Priority {g.priority})
-                  </option>
-                ))
-              }
-            </select>
-            <p className="mt-0.5 text-[10px] text-gray-400">
-              Rules in higher priority groups are evaluated first
-            </p>
           </div>
 
           {/* Target Classification */}

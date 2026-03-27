@@ -1,21 +1,26 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactionStore, ProjectStore as IProjectStore } from '../../shared/types/services';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource } from '../../shared/types/rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types/rules';
 import type { GroupedFilter } from '../../shared/types/transactions';
-
-// Minimum gap between two float priorities before renormalization is triggered.
-const PRIORITY_PRECISION_THRESHOLD = 1e-10;
 
 interface RuleRow {
   id: string;
   name: string;
   grouped_conditions: string;
   target_taxonomy_node_id: string;
-  priority: number;
-  rank: number;
+  group_id: string | null;
+  group_priority: number | null;
   is_active: boolean;
   source: string;
   created_at: string;
+}
+
+interface GroupRow {
+  id: string;
+  name: string;
+  priority: number;
+  created_at: string;
+  rule_count?: number;
 }
 
 function parseGroupedConditions(raw: unknown): GroupedFilter {
@@ -31,16 +36,25 @@ function parseGroupedConditions(raw: unknown): GroupedFilter {
 }
 
 function rowToRule(row: RuleRow): OverrideRule {
-  const grouped = parseGroupedConditions(row.grouped_conditions);
   return {
     id: row.id,
     name: row.name,
-    groupedConditions: grouped,
+    groupedConditions: parseGroupedConditions(row.grouped_conditions),
     targetTaxonomyNodeId: row.target_taxonomy_node_id,
-    priorityScore: row.rank,
+    groupId: row.group_id ?? null,
     isActive: row.is_active,
     source: (row.source ?? 'manual') as RuleSource,
     createdAt: row.created_at,
+  };
+}
+
+function rowToGroup(row: GroupRow): RuleGroup {
+  return {
+    id: row.id,
+    name: row.name,
+    priority: row.priority,
+    createdAt: row.created_at,
+    ruleCount: row.rule_count ?? 0,
   };
 }
 
@@ -114,7 +128,7 @@ export function generateMultiCategoryRules(
     });
   }
 
-  // Fallback rule (supplier-only) — added last so it gets higher priority number
+  // Fallback rule (supplier-only) — added last
   rules.push({
     name: supplierName,
     groupedConditions: {
@@ -175,37 +189,53 @@ export class RuleStore implements IRuleStore {
   ) {}
 
   async listRules(): Promise<OverrideRule[]> {
-    const rows = await this.db.all<RuleRow>(
-      'SELECT *, ROW_NUMBER() OVER (ORDER BY priority ASC) as rank FROM override_rules ORDER BY priority ASC'
-    );
+    // Only return grouped rules (rules that belong to a group).
+    // Ungrouped rules are loaded separately via listRulesPaginated for performance.
+    const rows = await this.db.all<RuleRow>(`
+      SELECT r.*, rg.priority AS group_priority
+      FROM override_rules r
+      LEFT JOIN rule_groups rg ON r.group_id = rg.id
+      WHERE r.group_id IS NOT NULL
+      ORDER BY COALESCE(rg.priority, 0) DESC, r.created_at DESC
+    `);
     return rows.map(rowToRule);
+  }
+
+  async listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }> {
+    const { limit, offset, search } = opts;
+    const whereClauses = ['r.group_id IS NULL'];
+    const params: unknown[] = [];
+
+    if (search?.trim()) {
+      whereClauses.push(`(LOWER(r.name) LIKE ? OR LOWER(CAST(r.grouped_conditions AS VARCHAR)) LIKE ?)`);
+      const q = `%${search.trim().toLowerCase()}%`;
+      params.push(q, q);
+    }
+
+    const where = whereClauses.join(' AND ');
+
+    const countRows = await this.db.all<{ cnt: number }>(`SELECT COUNT(*) as cnt FROM override_rules r WHERE ${where}`, ...params);
+    const total = Number(countRows[0]?.cnt ?? 0);
+
+    const rows = await this.db.all<RuleRow>(
+      `SELECT r.*, NULL AS group_priority FROM override_rules r WHERE ${where} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+      ...params, limit, offset
+    );
+
+    return { rules: rows.map(rowToRule), total };
   }
 
   async createRule(input: OverrideRuleCreate): Promise<{ id: string }> {
     const id = uuidv4();
-    let float: number;
-
-    if (input.priorityScore === undefined) {
-      float = await this.getNextPriority();
-    } else {
-      float = await this.floatForRank(input.priorityScore);
-    }
-
+    const groupId = input.groupId ?? null;
     const source = input.source ?? 'manual';
 
-    try {
-      await this.db.run(
-        `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, priority, is_active, source, created_at)
-         VALUES (?, ?, ?, ?, ?, TRUE, ?, CURRENT_TIMESTAMP)`,
-        id, input.name, JSON.stringify(input.groupedConditions),
-        input.targetTaxonomyNodeId, float, source
-      );
-    } catch (err) {
-      if (err instanceof Error && err.message.toLowerCase().includes('unique')) {
-        throw new Error(`A rule named "${input.name}" already exists. Rule names must be unique.`);
-      }
-      throw err;
-    }
+    await this.db.run(
+      `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, group_id, is_active, source, created_at)
+       VALUES (?, ?, ?, ?, CAST(? AS VARCHAR), TRUE, ?, CURRENT_TIMESTAMP)`,
+      id, input.name, JSON.stringify(input.groupedConditions ?? { groupConnector: 'AND', groups: [] }),
+      input.targetTaxonomyNodeId, groupId, source
+    );
 
     return { id };
   }
@@ -224,37 +254,39 @@ export class RuleStore implements IRuleStore {
     if (updates.groupedConditions !== undefined) { setClauses.push('grouped_conditions = ?'); params.push(JSON.stringify(updates.groupedConditions)); }
     if (updates.targetTaxonomyNodeId !== undefined) { setClauses.push('target_taxonomy_node_id = ?'); params.push(updates.targetTaxonomyNodeId); }
     if (updates.isActive !== undefined) { setClauses.push('is_active = ?'); params.push(updates.isActive); }
-
-    if (updates.priorityScore !== undefined) {
-      const float = await this.floatForRank(updates.priorityScore, ruleId);
-      setClauses.push('priority = ?');
-      params.push(float);
-    }
+    if ('groupId' in updates) { setClauses.push('group_id = ?'); params.push(updates.groupId ?? null); }
 
     if (setClauses.length === 0) return;
 
     params.push(ruleId);
-    try {
-      await this.db.run(
-        `UPDATE override_rules SET ${setClauses.join(', ')} WHERE id = ?`,
-        ...params
-      );
-    } catch (err) {
-      if (err instanceof Error && err.message.toLowerCase().includes('unique')) {
-        throw new Error(`A rule named "${updates.name}" already exists. Rule names must be unique.`);
-      }
-      throw err;
-    }
+    await this.db.run(
+      `UPDATE override_rules SET ${setClauses.join(', ')} WHERE id = ?`,
+      ...params
+    );
   }
 
   async deleteRule(ruleId: string): Promise<void> {
     await this.db.run('DELETE FROM override_rules WHERE id = ?', ruleId);
   }
 
+  private async listAllRules(): Promise<OverrideRule[]> {
+    // Returns ALL rules (grouped + ungrouped) ordered by group priority DESC, then created_at DESC.
+    const rows = await this.db.all<RuleRow>(`
+      SELECT r.*, rg.priority AS group_priority
+      FROM override_rules r
+      LEFT JOIN rule_groups rg ON r.group_id = rg.id
+      ORDER BY COALESCE(rg.priority, 0) DESC, r.created_at DESC
+    `);
+    return rows.map(rowToRule);
+  }
+
   async evaluateRules(
     transactionIds?: string[]
   ): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>> {
-    const rules = await this.listRules();
+    // listAllRules() returns rules ordered by COALESCE(group.priority, 0) DESC, created_at DESC.
+    // First-match-wins: once a transaction is matched by a rule, later rules don't overwrite it.
+    // This naturally implements group-priority-based evaluation with ungrouped rules last.
+    const rules = await this.listAllRules();
     const activeRules = rules.filter((r) => r.isActive);
     const matched = new Map<string, { ruleId: string; targetTaxonomyNodeId: string }>();
 
@@ -278,7 +310,6 @@ export class RuleStore implements IRuleStore {
     }
 
     // 2. Check which columns actually exist on transactions table
-    // supplier_name is virtual (resolved via JOIN to project_suppliers), so exclude it
     const VIRTUAL_COLS = new Set(['supplier_name']);
     const availableColumns = await this.transactions.getColumns();
     const validPriorities = columnPriorities.filter(col => availableColumns.includes(col) && !VIRTUAL_COLS.has(col));
@@ -317,11 +348,10 @@ export class RuleStore implements IRuleStore {
       supplierMap.get(key)!.push(row);
     }
 
-    // 5. Collect existing rule names for collision detection + suppliers already covered by rules
-    const existingRuleRows = await this.db.all<{ name: string; grouped_conditions: string }>(
-      'SELECT name, grouped_conditions FROM override_rules'
+    // 5. Collect suppliers already covered by rules
+    const existingRuleRows = await this.db.all<{ grouped_conditions: string }>(
+      'SELECT grouped_conditions FROM override_rules'
     );
-    const existingNames = new Set(existingRuleRows.map(r => r.name));
     const suppliersWithRules = new Set<string>();
     for (const row of existingRuleRows) {
       const grouped = parseGroupedConditions(row.grouped_conditions);
@@ -334,24 +364,18 @@ export class RuleStore implements IRuleStore {
       }
     }
 
-    // 6. Generate rules per supplier
+    // 6. Generate rules per supplier (auto-generated rules are ungrouped: group_id = null)
     let rulesCreated = 0;
     let suppliersProcessed = 0;
 
     for (const [supplierName, txns] of supplierMap) {
-      if (suppliersWithRules.has(supplierName)) continue; // already has rules — skip
+      if (suppliersWithRules.has(supplierName)) continue;
 
-      // Group by taxonomy_node_id
       const catMap = new Map<string, CategoryGroup>();
       for (const txn of txns) {
         const nodeId = txn.taxonomy_node_id;
         if (!catMap.has(nodeId)) {
-          catMap.set(nodeId, {
-            taxonomyNodeId: nodeId,
-            fullPath: txn.full_path,
-            txns: [],
-            totalSpend: 0,
-          });
+          catMap.set(nodeId, { taxonomyNodeId: nodeId, fullPath: txn.full_path, txns: [], totalSpend: 0 });
         }
         const group = catMap.get(nodeId)!;
         group.txns.push(txn);
@@ -367,11 +391,8 @@ export class RuleStore implements IRuleStore {
         drafts = generateMultiCategoryRules(supplierName, categories, validPriorities);
       }
 
-      // Deduplicate names and create rules
       for (const draft of drafts) {
-        draft.name = deduplicateName(draft.name, existingNames);
-        existingNames.add(draft.name);
-        await this.createRule(draft);
+        await this.createRule(draft); // groupId defaults to null — ungrouped
         rulesCreated++;
       }
 
@@ -381,88 +402,213 @@ export class RuleStore implements IRuleStore {
     return { rulesCreated, suppliersProcessed };
   }
 
-  /**
-   * Compute the float priority for inserting/moving a rule to a given rank.
-   * If excludeId is provided, that rule is excluded from the rank calculation
-   * (used when reordering an existing rule).
-   * Triggers renormalization if the gap between neighbors is below precision threshold.
-   */
-  private async floatForRank(rank: number, excludeId?: string): Promise<number> {
-    const safeRank = Math.max(1, Math.floor(rank));
-    let { prev, next } = await this.getNeighborFloats(safeRank, excludeId);
+  // ─── Group operations ────────────────────────────────────────────────────────
 
-    if (prev !== null && next !== null && next - prev < PRIORITY_PRECISION_THRESHOLD) {
-      await this.renormalize();
-      ({ prev, next } = await this.getNeighborFloats(safeRank, excludeId));
+  async listGroups(): Promise<RuleGroup[]> {
+    const rows = await this.db.all<GroupRow>(`
+      SELECT rg.*, COUNT(r.id) AS rule_count
+      FROM rule_groups rg
+      LEFT JOIN override_rules r ON r.group_id = rg.id
+      GROUP BY rg.id, rg.name, rg.priority, rg.created_at
+      ORDER BY rg.priority DESC
+    `);
+    return rows.map(rowToGroup);
+  }
+
+  async createGroup(input: RuleGroupCreate): Promise<{ id: string }> {
+    if (input.priority == null || input.priority < 1) {
+      throw new Error('Group priority must be >= 1');
+    }
+    // Cascade: if requested priority is already taken, bump existing groups at that priority and above upward
+    await this.cascadePriorities(input.priority);
+
+    const id = uuidv4();
+    await this.db.run(
+      'INSERT INTO rule_groups (id, name, priority, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
+      id, input.name, input.priority
+    );
+    return { id };
+  }
+
+  private async cascadePriorities(targetPriority: number, excludeGroupId?: string): Promise<void> {
+    // Find all groups at or above the target priority, ordered by priority ASC
+    const condition = excludeGroupId
+      ? 'WHERE priority >= ? AND id != ?'
+      : 'WHERE priority >= ?';
+    const params = excludeGroupId
+      ? [targetPriority, excludeGroupId]
+      : [targetPriority];
+    const conflicts = await this.db.all<{ id: string; priority: number }>(
+      `SELECT id, priority FROM rule_groups ${condition} ORDER BY priority ASC`, ...params
+    );
+    if (conflicts.length === 0) return;
+    // Only cascade if the exact target priority is occupied
+    if (conflicts[0].priority !== targetPriority) return;
+    // Bump each consecutive group up by 1 (work top-down to avoid unique constraint violations)
+    let nextExpected = targetPriority;
+    const toBump: { id: string; newPriority: number }[] = [];
+    for (const g of conflicts) {
+      if (g.priority !== nextExpected) break; // gap found, no more cascading needed
+      toBump.push({ id: g.id, newPriority: g.priority + 1 });
+      nextExpected = g.priority + 1;
+    }
+    // Apply in reverse order (highest first) to avoid unique constraint violations
+    for (let i = toBump.length - 1; i >= 0; i--) {
+      await this.db.run('UPDATE rule_groups SET priority = ? WHERE id = ?', toBump[i].newPriority, toBump[i].id);
+    }
+  }
+
+  async updateGroup(groupId: string, updates: RuleGroupUpdate): Promise<void> {
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (updates.name !== undefined) { setClauses.push('name = ?'); params.push(updates.name); }
+    if (updates.priority !== undefined) {
+      if (updates.priority < 1) throw new Error('Group priority must be >= 1');
+      // Cascade: bump existing groups at the target priority upward
+      await this.cascadePriorities(updates.priority, groupId);
+      setClauses.push('priority = ?');
+      params.push(updates.priority);
     }
 
-    return this.computeFloat(prev, next);
-  }
+    if (setClauses.length === 0) return;
 
-  /**
-   * Returns the internal float priorities immediately before and after rank P
-   * in the sorted list, optionally excluding a specific rule by id.
-   */
-  private async getNeighborFloats(
-    rank: number,
-    excludeId?: string
-  ): Promise<{ prev: number | null; next: number | null }> {
-    const where = excludeId ? 'WHERE id != ?' : '';
-    const baseParams: unknown[] = excludeId ? [excludeId] : [];
-
-    const [prevRow, nextRow] = await Promise.all([
-      rank > 1
-        ? this.db.get<{ priority: number }>(
-            `SELECT priority FROM override_rules ${where} ORDER BY priority ASC LIMIT 1 OFFSET ?`,
-            ...baseParams, rank - 2
-          )
-        : Promise.resolve(undefined),
-      this.db.get<{ priority: number }>(
-        `SELECT priority FROM override_rules ${where} ORDER BY priority ASC LIMIT 1 OFFSET ?`,
-        ...baseParams, rank - 1
-      ),
-    ]);
-
-    return {
-      prev: prevRow?.priority ?? null,
-      next: nextRow?.priority ?? null,
-    };
-  }
-
-  private computeFloat(prev: number | null, next: number | null): number {
-    if (prev === null && next === null) return 1.0;
-    if (prev === null) return next! - 1.0;
-    if (next === null) return prev + 1.0;
-    return (prev + next) / 2;
-  }
-
-  /**
-   * Reassign all priorities as 1.0, 2.0, 3.0, ... resetting float precision.
-   * O(n) but called only when float gaps near exhaustion (~every 52 bisections).
-   */
-  private async renormalize(): Promise<void> {
-    await this.db.exec(`
-      UPDATE override_rules
-      SET priority = sub.new_priority
-      FROM (
-        SELECT id, ROW_NUMBER() OVER (ORDER BY priority ASC) AS new_priority
-        FROM override_rules
-      ) sub
-      WHERE override_rules.id = sub.id
-    `);
-  }
-
-  private async getNextPriority(): Promise<number> {
-    const result = await this.db.get<{ max_priority: number | null }>(
-      'SELECT MAX(priority) as max_priority FROM override_rules'
+    params.push(groupId);
+    await this.db.run(
+      `UPDATE rule_groups SET ${setClauses.join(', ')} WHERE id = ?`,
+      ...params
     );
-    return (result?.max_priority ?? 0) + 1;
+  }
+
+  async deleteGroup(groupId: string): Promise<void> {
+    // Ungroup all rules in this group (set group_id = NULL) before deleting
+    await this.db.run('UPDATE override_rules SET group_id = NULL WHERE group_id = ?', groupId);
+    await this.db.run('DELETE FROM rule_groups WHERE id = ?', groupId);
+  }
+
+  async reorderGroups(orderedIds: string[]): Promise<void> {
+    // Drop unique index to avoid constraint violations during bulk reassignment
+    await this.db.exec('DROP INDEX IF EXISTS idx_rule_groups_priority');
+    try {
+      // Assign sequential priorities: first in list gets highest priority
+      const total = orderedIds.length;
+      for (let i = 0; i < total; i++) {
+        await this.db.run(
+          'UPDATE rule_groups SET priority = ? WHERE id = ?',
+          total - i, orderedIds[i]
+        );
+      }
+    } finally {
+      // Always recreate the unique index
+      await this.db.exec('CREATE UNIQUE INDEX idx_rule_groups_priority ON rule_groups(priority)');
+    }
+  }
+
+  async moveRuleToGroup(ruleId: string, targetGroupId: string | null): Promise<void> {
+    await this.db.run(
+      'UPDATE override_rules SET group_id = CAST(? AS VARCHAR) WHERE id = ?',
+      targetGroupId, ruleId
+    );
+  }
+
+  async assignToGroup(ruleIds: string[], groupId: string | null): Promise<void> {
+    for (const ruleId of ruleIds) {
+      await this.db.run(
+        'UPDATE override_rules SET group_id = CAST(? AS VARCHAR) WHERE id = ?',
+        groupId, ruleId
+      );
+    }
+  }
+
+  async filterAndAssignToGroup(filter: GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }> {
+    // Load ALL rules, match server-side, then assign
+    const allRules = await this.listAllRules();
+    const matchingIds: string[] = [];
+
+    for (const rule of allRules) {
+      if (matchesRuleFilter(rule, filter)) {
+        matchingIds.push(rule.id);
+      }
+    }
+
+    if (matchingIds.length === 0) {
+      return { matched: 0 };
+    }
+
+    await this.assignToGroup(matchingIds, targetGroupId);
+    return { matched: matchingIds.length };
   }
 }
 
-function deduplicateName(name: string, existingNames: Set<string>): string {
-  if (!existingNames.has(name)) return name;
-  let suffix = 2;
-  while (existingNames.has(`${name} (${suffix})`)) suffix++;
-  return `${name} (${suffix})`;
+// ─── Server-side rule filter matching ─────────────────────────────────────────
+
+function matchesRuleFilter(rule: OverrideRule, filter: GroupedFilter): boolean {
+  if (!filter.groups.length) return false;
+
+  // Extract all condition values from the rule's groupedConditions, keyed by field name
+  const ruleConditionsByField = new Map<string, string[]>();
+  for (const g of rule.groupedConditions?.groups ?? []) {
+    for (const c of g.conditions) {
+      if (!c.field) continue;
+      const existing = ruleConditionsByField.get(c.field) ?? [];
+      existing.push(String(c.value ?? '').toLowerCase());
+      ruleConditionsByField.set(c.field, existing);
+    }
+  }
+
+  const matchCondition = (field: string, operator: string, value: unknown): boolean => {
+    const val = String(value ?? '').toLowerCase();
+    const ruleValues = ruleConditionsByField.get(field);
+
+    if (!ruleValues || ruleValues.length === 0) {
+      return operator === 'not_contains' || operator === 'not_equals' || operator === 'is_null';
+    }
+
+    switch (operator) {
+      case 'equals':
+        return ruleValues.some(rv => rv === val);
+      case 'not_equals':
+        return ruleValues.every(rv => rv !== val);
+      case 'contains':
+        return ruleValues.some(rv => rv.includes(val));
+      case 'not_contains':
+        return ruleValues.every(rv => !rv.includes(val));
+      case 'starts_with':
+        return ruleValues.some(rv => rv.startsWith(val));
+      case 'ends_with':
+        return ruleValues.some(rv => rv.endsWith(val));
+      case 'regex':
+        try { const re = new RegExp(val, 'i'); return ruleValues.some(rv => re.test(rv)); }
+        catch { return false; }
+      case 'in_list': {
+        const listVals = Array.isArray(value) ? value.map(v => String(v).toLowerCase()) : val.split(',').map(v => v.trim());
+        return ruleValues.some(rv => listVals.includes(rv));
+      }
+      default:
+        return false;
+    }
+  };
+
+  // Evaluate each group's conditions
+  const groupResults = filter.groups.map(g => {
+    const conditions = g.conditions.filter(c => c.field && (c.value != null || ['is_null', 'is_true', 'is_false'].includes(c.operator)));
+    if (conditions.length === 0) return true;
+    let groupResult = matchCondition(conditions[0].field, conditions[0].operator, conditions[0].value);
+    for (let i = 1; i < conditions.length; i++) {
+      const connector = conditions[i - 1].connector || g.connector;
+      const condResult = matchCondition(conditions[i].field, conditions[i].operator, conditions[i].value);
+      if (connector === 'OR') groupResult = groupResult || condResult;
+      else groupResult = groupResult && condResult;
+    }
+    return groupResult;
+  });
+
+  if (groupResults.length <= 1) return groupResults[0] ?? false;
+  let result = groupResults[0];
+  for (let i = 1; i < groupResults.length; i++) {
+    const connector = filter.groups[i].groupConnector || filter.groupConnector;
+    if (connector === 'OR') result = result || groupResults[i];
+    else result = result && groupResults[i];
+  }
+  return result;
 }

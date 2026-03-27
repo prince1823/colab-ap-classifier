@@ -1,10 +1,10 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
-import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress } from '../../shared/types/classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
-import type { TransactionFilter, TransactionUpdate, FilterCondition, GroupedFilter } from '../../shared/types/transactions';
-import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
+import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
+import type { OverrideRuleCreate, OverrideRuleUpdate, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
 import type { FeedbackAnalyzeInput, FeedbackApplyInput } from '../../shared/types/feedback';
@@ -17,11 +17,7 @@ import type { ChangelogFilter } from '../../shared/types/changelog';
 async function invoke<K extends IPCChannel>(channel: K, ...args: IPCArgs<K>): Promise<IPCResult<K>> {
   const result: IPCResponse<IPCResult<K>> = await window.electronAPI.invoke(channel, ...args);
   if (!result.success) {
-    const err = new Error(result.error || `IPC call failed: ${channel}`);
-    if (result.code) {
-      (err as Error & { code?: string }).code = result.code;
-    }
-    throw err;
+    throw new Error(result.error || `IPC call failed: ${channel}`);
   }
   return result.data as IPCResult<K>;
 }
@@ -69,15 +65,13 @@ export const ipc = {
     deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
       invoke('ingest:deriveMappings', columns, sampleRows, source),
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
-    onProgress: (callback: (progress: IngestProgress) => void) =>
-      on('ingest:progress', callback),
   },
 
   // ── Classification (3 channels + 1 event) ──
   classification: {
-    start: (groupedFilter?: GroupedFilter) => invoke('classification:start', groupedFilter),
+    start: (conditions?: FilterCondition[]) => invoke('classification:start', conditions),
     cancel: () => invoke('classification:cancel'),
-    scopeCount: (groupedFilter?: GroupedFilter) => invoke('classification:scopeCount', groupedFilter),
+    scopeCount: (conditions?: FilterCondition[]) => invoke('classification:scopeCount', conditions),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on('classification:progress', callback),
   },
@@ -161,17 +155,25 @@ export const ipc = {
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
   },
 
-  // ── Rules (6 channels) ──
+  // ── Rules (12 channels) ──
   rules: {
     list: () => invoke('rules:list'),
+    listPaginated: (opts: { limit: number; offset: number; search?: string }) => invoke('rules:listPaginated', opts),
     create: (input: OverrideRuleCreate) =>
       invoke('rules:create', input),
-    createAndApply: (input: OverrideRuleCreate) =>
-      invoke('rules:createAndApply', input),
     update: (ruleId: string, updates: OverrideRuleUpdate) =>
       invoke('rules:update', ruleId, updates),
     delete: (ruleId: string) => invoke('rules:delete', ruleId),
     generate: () => invoke('rules:generate'),
+    // Group operations
+    listGroups: () => invoke('rules:listGroups'),
+    createGroup: (input: RuleGroupCreate) => invoke('rules:createGroup', input),
+    updateGroup: (groupId: string, updates: RuleGroupUpdate) => invoke('rules:updateGroup', groupId, updates),
+    deleteGroup: (groupId: string) => invoke('rules:deleteGroup', groupId),
+    reorderGroups: (orderedIds: string[]) => invoke('rules:reorderGroups', orderedIds),
+    moveRule: (ruleId: string, targetGroupId: string | null) => invoke('rules:moveRule', ruleId, targetGroupId),
+    assignToGroup: (ruleIds: string[], groupId: string | null) => invoke('rules:assignToGroup', ruleIds, groupId),
+    filterAssign: (filter: import('../../shared/types/transactions').GroupedFilter, targetGroupId: string | null) => invoke('rules:filterAssign', filter, targetGroupId),
   },
 
   // ── Changelog (2 channels) ──
@@ -209,11 +211,6 @@ export const ipc = {
     getPath: () => invoke('supplier-universe:getPath'),
     selectFile: () => invoke('supplier-universe:selectFile'),
     createNew: () => invoke('supplier-universe:createNew'),
-  },
-
-  // ── Shell ──
-  shell: {
-    openExternal: (url: string) => invoke('shell:openExternal', url),
   },
 
   // ── License (3 channels + 1 event) ──

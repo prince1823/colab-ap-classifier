@@ -343,9 +343,11 @@ describe('Classifier Mock Pipeline Test', () => {
 
       const { id } = await rules.createRule({
         name: ruleFixture.name,
-        conditions: ruleFixture.conditions,
+        groupedConditions: {
+          groupConnector: 'AND',
+          groups: [{ connector: 'AND', conditions: ruleFixture.conditions }],
+        },
         targetTaxonomyNodeId: targetNode!.id,
-        priorityScore: ruleFixture.priorityScore,
       });
       expect(id).toBeTruthy();
     }

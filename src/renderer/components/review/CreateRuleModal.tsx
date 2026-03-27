@@ -4,11 +4,11 @@ import { X, Check } from 'lucide-react'
 import { makeEmptyGroup } from '../FilterConditionBuilder'
 import AdvancedFilterModal from './AdvancedFilterModal'
 import { ipc } from '../../lib/ipc'
-import { showError } from '../../lib/toast-errors'
 import type { GroupedFilter, ConditionGroup, FilterCondition } from '../../../shared/types/transactions'
 import type { FieldDefinition } from '../FilterConditionBuilder'
 import type { TaxonomyNode } from '../../../shared/types/taxonomy'
 import type { FlattenedPivotRow } from '../../types/pivot'
+import type { RuleGroup } from '../../../shared/types/rules'
 
 interface CreateRuleModalProps {
   isOpen: boolean
@@ -65,7 +65,6 @@ export default function CreateRuleModal({
   onCreated,
 }: CreateRuleModalProps) {
   const [name, setName] = useState('')
-  const [priority, setPriority] = useState(100)
   const [targetNodeId, setTargetNodeId] = useState('')
   const [grouped, setGrouped] = useState<GroupedFilter>({ groupConnector: 'AND', groups: [makeEmptyGroup()] })
   const [saving, setSaving] = useState(false)
@@ -86,9 +85,12 @@ export default function CreateRuleModal({
   // Filter fields for condition builder
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
 
+  // Rule groups
+  const [ruleGroups, setRuleGroups] = useState<RuleGroup[]>([])
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
+
   // Refs for keyboard navigation
   const nameInputRef = useRef<HTMLInputElement>(null)
-  const priorityInputRef = useRef<HTMLInputElement>(null)
   const taxonomyBtnRef = useRef<HTMLButtonElement>(null)
   const taxonomySearchRef = useRef<HTMLInputElement>(null)
   const editConditionsBtnRef = useRef<HTMLButtonElement>(null)
@@ -104,11 +106,13 @@ export default function CreateRuleModal({
     Promise.all([
       ipc.taxonomy.getNodes(),
       ipc.transactions.getFilterFields(),
-    ]).then(([nodes, fields]) => {
+      ipc.rules.listGroups(),
+    ]).then(([nodes, fields, groups]) => {
       // Only show leaf nodes with full L1|L2|L3 path
       setTaxonomyNodes(nodes.filter((n: TaxonomyNode) => n.l3 !== null))
       setFilterFields(fields)
-    }).catch((e) => showError('Failed to load rule form data', e))
+      setRuleGroups(groups ?? [])
+    }).catch(() => {})
   }, [isOpen])
 
   // Reset form only when modal first opens
@@ -118,7 +122,6 @@ export default function CreateRuleModal({
     prevOpenRef.current = isOpen
     if (!justOpened) return
     setName('')
-    setPriority(100)
     setTargetNodeId('')
     setError(null)
     setSaving(false)
@@ -177,15 +180,14 @@ export default function CreateRuleModal({
     setSaving(true)
     setError(null)
     try {
-      const { matchedCount } = await ipc.rules.createAndApply({
+      await ipc.rules.create({
         name: name.trim(),
         groupedConditions: grouped,
         targetTaxonomyNodeId: targetNodeId,
-        priorityScore: priority,
+        groupId: selectedGroupId,
       })
-
       onCreated?.()
-      setSuccessMessage(`Rule "${name.trim()}" created and applied to ${matchedCount} transaction${matchedCount !== 1 ? 's' : ''}.`)
+      setSuccessMessage(`Rule "${name.trim()}" created successfully!`)
       setSaving(false)
       closeTimerRef.current = setTimeout(() => {
         setSuccessMessage(null)
@@ -195,7 +197,7 @@ export default function CreateRuleModal({
       setError(e instanceof Error ? e.message : 'Failed to create rule')
       setSaving(false)
     }
-  }, [conditionCount, name, targetNodeId, grouped, priority, onCreated, onClose])
+  }, [conditionCount, name, targetNodeId, grouped, selectedGroupId, onCreated, onClose])
 
   // Taxonomy dropdown keyboard handling
   const handleTaxonomySearchKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -229,15 +231,6 @@ export default function CreateRuleModal({
     }
   }, [taxonomyHighlightIdx])
 
-  // Ordered list of focusable refs for arrow-key navigation
-  const focusOrder = useMemo(() => [
-    editConditionsBtnRef,
-    nameInputRef,
-    priorityInputRef,
-    taxonomyBtnRef,
-    saveBtnRef,
-  ], [])
-
   // Global keyboard handler for the modal
   const handleModalKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Don't interfere with taxonomy dropdown keyboard nav
@@ -256,19 +249,8 @@ export default function CreateRuleModal({
       return
     }
 
-    // Arrow key navigation between form fields
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      const active = document.activeElement
-      const currentIdx = focusOrder.findIndex(ref => ref.current === active)
-      if (currentIdx === -1) return
-
-      e.preventDefault()
-      const nextIdx = e.key === 'ArrowDown'
-        ? Math.min(currentIdx + 1, focusOrder.length - 1)
-        : Math.max(currentIdx - 1, 0)
-      focusOrder[nextIdx].current?.focus()
-    }
-  }, [taxonomyDropdownOpen, onClose, handleSave, focusOrder])
+    // Tab navigation is native — just let it flow through the focusable elements
+  }, [taxonomyDropdownOpen, onClose, handleSave])
 
   if (!isOpen) return null
 
@@ -301,7 +283,7 @@ export default function CreateRuleModal({
       <div className="relative bg-white rounded-xl shadow-2xl w-[560px] max-h-[85vh] flex flex-col" style={{ overflow: 'visible' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-base font-semibold text-gray-900">Classify and Create Rule</h3>
+          <h3 className="text-base font-semibold text-gray-900">Create Override Rule</h3>
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
@@ -343,30 +325,41 @@ export default function CreateRuleModal({
           {/* Divider */}
           <div className="border-t border-gray-100" />
 
-          {/* Rule Name + Priority — same row */}
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label htmlFor="rule-name" className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
-              <input
-                id="rule-name"
-                ref={nameInputRef}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. IT Software suppliers"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
-            <div style={{ width: 100 }}>
-              <label htmlFor="rule-priority" className="mb-1 block text-xs font-medium text-gray-600">Priority</label>
-              <input
-                id="rule-priority"
-                ref={priorityInputRef}
-                type="number"
-                value={priority}
-                onChange={(e) => setPriority(Number(e.target.value))}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
+          {/* Rule Name */}
+          <div>
+            <label htmlFor="rule-name" className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
+            <input
+              id="rule-name"
+              ref={nameInputRef}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. IT Software suppliers"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+          </div>
+
+          {/* Rule Group */}
+          <div>
+            <label htmlFor="rule-group" className="mb-1 block text-xs font-medium text-gray-600">Rule Group</label>
+            <select
+              id="rule-group"
+              value={selectedGroupId ?? ''}
+              onChange={(e) => setSelectedGroupId(e.target.value || null)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              <option value="">Ungrouped (lowest priority)</option>
+              {ruleGroups
+                .sort((a, b) => b.priority - a.priority)
+                .map(g => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} (Priority {g.priority})
+                  </option>
+                ))
+              }
+            </select>
+            <p className="mt-0.5 text-[10px] text-gray-400">
+              Rules in higher priority groups are evaluated first
+            </p>
           </div>
 
           {/* Target Classification */}
@@ -456,7 +449,7 @@ export default function CreateRuleModal({
               disabled={saving}
               className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
             >
-              {saving ? 'Creating...' : 'Classify & Create Rule'}
+              {saving ? 'Creating...' : 'Save Rule'}
             </button>
           </div>
         </div>

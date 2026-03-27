@@ -5,6 +5,7 @@ import type {
   EventBus,
   SupplierResearcher as ISupplierResearcher,
   SupplierService,
+  TransactionStore as ITransactionStore,
 } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 
@@ -21,10 +22,11 @@ export class SupplierResearcher implements ISupplierResearcher {
     private webSearch: WebSearch,
     private researchAgent: ResearchAgent,
     private eventBus: EventBus,
-    private supplierService: SupplierService
+    private supplierService: SupplierService,
+    private transactions: ITransactionStore,
   ) {}
 
-  async researchSingle(supplierName: string): Promise<SupplierInfo> {
+  async researchSingle(supplierName: string, supplierId?: string): Promise<SupplierInfo> {
     // Check if already researched with substantive info
     const existing = await this.supplierUniverse.getSupplier(supplierName);
     if (existing) {
@@ -34,8 +36,10 @@ export class SupplierResearcher implements ISupplierResearcher {
       }
     }
 
-    // Get supplier address if available
-    const address = existing?.supplierAddress;
+    // Get supplier address from transactions (CSV-imported, authoritative)
+    const address = supplierId
+      ? await this.transactions.getSupplierAddress(supplierId)
+      : undefined;
 
     // Search web for enrichment
     let searchResults: Array<{ title: string; url: string; text: string }> = [];

@@ -784,4 +784,19 @@ export class TransactionStore implements ITransactionStore {
     }
     return count;
   }
+
+  async getSupplierAddress(supplierId: string): Promise<string | undefined> {
+    // supplier_address is an optional dynamic column — only present if the CSV mapped it
+    const cols = await this.getColumns();
+    if (!cols.includes('supplier_address')) return undefined;
+
+    const row = await this.db.get<{ supplier_address: string }>(
+      `SELECT supplier_address FROM transactions
+       WHERE project_supplier_id = ?
+         AND supplier_address IS NOT NULL AND supplier_address != ''
+       LIMIT 1`,
+      supplierId
+    );
+    return row?.supplier_address;
+  }
 }

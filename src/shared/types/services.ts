@@ -152,6 +152,7 @@ export interface TransactionStore {
   getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
   markAllReviewed(): Promise<number>;
   applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
+  getSupplierAddress(supplierId: string): Promise<string | undefined>;
 }
 
 export interface TaxonomyStore {
@@ -242,7 +243,7 @@ export interface ExportService {
 export type ResearchProgressCallback = (progress: ResearchProgress) => void;
 
 export interface SupplierResearcher {
-  researchSingle(supplierName: string): Promise<SupplierInfo>;
+  researchSingle(supplierName: string, supplierId?: string): Promise<SupplierInfo>;
   researchAll(onProgress?: ResearchProgressCallback): Promise<void>;
   cancel(): void;
 }

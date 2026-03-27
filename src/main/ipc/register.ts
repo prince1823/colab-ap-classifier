@@ -20,9 +20,10 @@ export function registerHandler<T>(
       return { success: true, data };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const code = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : undefined;
       debugLog('ERROR', `✗ ${channel} (${Date.now() - t0}ms)`, message);
       console.error(`[IPC] Error in ${channel}:`, message);
-      return { success: false, error: message };
+      return { success: false, error: message, ...(code ? { code } : {}) };
     }
   });
 }

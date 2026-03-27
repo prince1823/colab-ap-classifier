@@ -1,4 +1,5 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
+import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import type { FilterCondition, FilterOperator, FieldType, FieldDefinition, ConditionGroup, GroupedFilter } from '../../shared/types/transactions'
 
 /* ---------- Stable key helper ---------- */
@@ -67,7 +68,10 @@ function SuggestInput({ value, onChange, suggestions, placeholder, className }: 
   const [open, setOpen] = useState(false)
   const [focusIdx, setFocusIdx] = useState(-1)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const dropdownRef = useRef<HTMLUListElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 200 })
 
   const filtered = useMemo(() => {
     if (!value) return suggestions
@@ -75,11 +79,22 @@ function SuggestInput({ value, onChange, suggestions, placeholder, className }: 
     return suggestions.filter(s => s.toLowerCase().includes(q))
   }, [value, suggestions])
 
+  // Position the dropdown relative to the input, rendered via portal
+  useLayoutEffect(() => {
+    if (!open || !inputRef.current) return
+    const rect = inputRef.current.getBoundingClientRect()
+    setPos({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+  }, [open, filtered])
+
   // Close dropdown when clicking outside — use 'pointerdown' on capture phase
   // so it doesn't interfere with button click handlers
   useEffect(() => {
     const handler = (e: PointerEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      if (
+        wrapRef.current && !wrapRef.current.contains(target) &&
+        (!dropdownRef.current || !dropdownRef.current.contains(target))
+      ) {
         setOpen(false)
       }
     }
@@ -118,8 +133,9 @@ function SuggestInput({ value, onChange, suggestions, placeholder, className }: 
   }
 
   return (
-    <div ref={wrapRef} className="relative min-w-0 flex-1">
+    <div ref={wrapRef} className="min-w-0 flex-1">
       <input
+        ref={inputRef}
         value={value}
         onChange={(e) => { onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
@@ -128,10 +144,11 @@ function SuggestInput({ value, onChange, suggestions, placeholder, className }: 
         type="text"
         className={className}
       />
-      {open && filtered.length > 0 && (
+      {open && filtered.length > 0 && createPortal(
         <ul
-          ref={listRef}
-          className="absolute left-0 top-full z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg"
+          ref={(el) => { (listRef as React.MutableRefObject<HTMLUListElement | null>).current = el; (dropdownRef as React.MutableRefObject<HTMLUListElement | null>).current = el }}
+          className="fixed z-[9999] max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg"
+          style={{ top: pos.top, left: pos.left, width: pos.width }}
         >
           {filtered.slice(0, 50).map((s, idx) => (
             <li
@@ -150,7 +167,212 @@ function SuggestInput({ value, onChange, suggestions, placeholder, className }: 
               +{filtered.length - 50} more — type to narrow
             </li>
           )}
-        </ul>
+        </ul>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+/* ---------- SearchableSelect: custom dropdown replacement for <select> ---------- */
+
+interface SelectOption {
+  value: string
+  label: string
+  group?: string
+}
+
+interface SearchableSelectProps {
+  value: string
+  onChange: (val: string) => void
+  options: SelectOption[]
+  placeholder?: string
+  className?: string
+  searchable?: boolean
+}
+
+function SearchableSelect({ value, onChange, options, placeholder = 'Select...', className, searchable = true }: SearchableSelectProps) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [focusIdx, setFocusIdx] = useState(-1)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 224 })
+
+  const selectedLabel = options.find(o => o.value === value)?.label ?? ''
+
+  const filtered = useMemo(() => {
+    if (!query) return options
+    const q = query.toLowerCase()
+    return options.filter(o => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
+  }, [query, options])
+
+  // Group filtered options
+  const grouped = useMemo(() => {
+    const hasGroups = filtered.some(o => o.group)
+    if (!hasGroups) return null
+    const map = new Map<string, SelectOption[]>()
+    for (const o of filtered) {
+      const g = o.group ?? ''
+      if (!map.has(g)) map.set(g, [])
+      map.get(g)!.push(o)
+    }
+    return map
+  }, [filtered])
+
+  // Flat list for keyboard nav
+  const flatFiltered = filtered
+
+  // Position the dropdown relative to the button, rendered via portal
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return
+    const rect = btnRef.current.getBoundingClientRect()
+    setPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 224) })
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: PointerEvent) => {
+      const target = e.target as Node
+      if (
+        wrapRef.current && !wrapRef.current.contains(target) &&
+        dropdownRef.current && !dropdownRef.current.contains(target)
+      ) {
+        setOpen(false)
+        setQuery('')
+      }
+    }
+    document.addEventListener('pointerdown', handler, true)
+    return () => document.removeEventListener('pointerdown', handler, true)
+  }, [open])
+
+  useEffect(() => { setFocusIdx(-1) }, [filtered])
+
+  useEffect(() => {
+    if (open && searchable && inputRef.current) inputRef.current.focus()
+  }, [open, searchable])
+
+  useEffect(() => {
+    if (focusIdx >= 0 && listRef.current) {
+      const items = listRef.current.querySelectorAll('[data-option]')
+      const item = items[focusIdx] as HTMLElement | undefined
+      item?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [focusIdx])
+
+  const select = (val: string) => {
+    onChange(val)
+    setOpen(false)
+    setQuery('')
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setFocusIdx(prev => (prev + 1) % flatFiltered.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setFocusIdx(prev => (prev <= 0 ? flatFiltered.length - 1 : prev - 1))
+    } else if (e.key === 'Enter' && focusIdx >= 0) {
+      e.preventDefault()
+      select(flatFiltered[focusIdx].value)
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+      setQuery('')
+    }
+  }
+
+  const renderOptions = () => {
+    if (flatFiltered.length === 0) {
+      return <div className="px-2.5 py-2 text-xs text-gray-400 italic">No matches</div>
+    }
+
+    if (grouped) {
+      return Array.from(grouped.entries()).map(([group, opts]) => (
+        <div key={group || '__ungrouped'}>
+          {group && (
+            <div className="sticky top-0 bg-gray-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+              {group}
+            </div>
+          )}
+          {opts.map((o) => {
+            const idx = flatFiltered.indexOf(o)
+            return (
+              <div
+                key={o.value}
+                data-option
+                onMouseDown={(e) => { e.preventDefault(); select(o.value) }}
+                onMouseEnter={() => setFocusIdx(idx)}
+                className={`cursor-pointer px-2.5 py-1.5 text-xs ${
+                  idx === focusIdx ? 'bg-blue-50 text-blue-700' : o.value === value ? 'bg-gray-50 text-gray-800 font-medium' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                {o.label}
+              </div>
+            )
+          })}
+        </div>
+      ))
+    }
+
+    return flatFiltered.map((o, idx) => (
+      <div
+        key={o.value}
+        data-option
+        onMouseDown={(e) => { e.preventDefault(); select(o.value) }}
+        onMouseEnter={() => setFocusIdx(idx)}
+        className={`cursor-pointer px-2.5 py-1.5 text-xs ${
+          idx === focusIdx ? 'bg-blue-50 text-blue-700' : o.value === value ? 'bg-gray-50 text-gray-800 font-medium' : 'text-gray-700 hover:bg-gray-50'
+        }`}
+      >
+        {o.label}
+      </div>
+    ))
+  }
+
+  return (
+    <div ref={wrapRef} className={className ?? ''}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between gap-1 rounded-md bg-gray-50 px-2 py-1 text-xs ring-1 ring-gray-200 hover:ring-gray-300 focus:ring-blue-400 transition-colors"
+      >
+        <span className={`truncate ${value ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>
+          {selectedLabel || placeholder}
+        </span>
+        <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+
+      {open && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-[9999] rounded-lg border border-gray-200 bg-white shadow-lg"
+          style={{ top: pos.top, left: pos.left, width: pos.width }}
+          onKeyDown={handleKeyDown}
+        >
+          {searchable && (
+            <div className="border-b border-gray-100 p-1.5">
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search..."
+                className="w-full rounded-md bg-gray-50 px-2 py-1 text-xs text-gray-800 ring-1 ring-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-blue-400"
+                onKeyDown={handleKeyDown}
+              />
+            </div>
+          )}
+          <div ref={listRef} className="max-h-48 overflow-y-auto py-1">
+            {renderOptions()}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -216,6 +438,17 @@ function ConditionRow({
   const isEnum = fieldDef.type === 'enum' && fieldDef.enumValues
   const hasSuggestions = fieldDef.type === 'string' && fieldDef.suggestions && fieldDef.suggestions.length > 0 && (c.operator === 'equals' || c.operator === 'not_equals')
 
+  const fieldOptions: SelectOption[] = useMemo(() => {
+    if (groupedFields) {
+      const opts: SelectOption[] = []
+      for (const [group, gFields] of groupedFields.entries()) {
+        for (const f of gFields) opts.push({ value: f.name, label: f.label, group: group || undefined })
+      }
+      return opts
+    }
+    return fields.map(f => ({ value: f.name, label: f.label }))
+  }, [fields, groupedFields])
+
   const updateField = (newField: string) => {
     const def = getFieldDef(newField)
     const validOps = OPERATORS_BY_TYPE[def.type] ?? ALL_OPERATORS
@@ -241,46 +474,31 @@ function ConditionRow({
         </div>
       )}
       <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-1.5 py-1">
-        <select
-          value={c.field as string}
-          onChange={(e) => updateField(e.target.value)}
-          className="max-w-[130px] shrink-0 rounded-md border-0 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-800 ring-1 ring-gray-200 focus:ring-blue-400"
-        >
-          <option value="">field...</option>
-          {groupedFields ? (
-            Array.from(groupedFields.entries()).map(([group, gFields]) =>
-              group ? (
-                <optgroup key={group} label={group}>
-                  {gFields.map((f) => <option key={f.name} value={f.name}>{f.label}</option>)}
-                </optgroup>
-              ) : (
-                gFields.map((f) => <option key={f.name} value={f.name}>{f.label}</option>)
-              )
-            )
-          ) : (
-            fields.map((f) => <option key={f.name} value={f.name}>{f.label}</option>)
-          )}
-        </select>
-        <select
+        <SearchableSelect
+          value={c.field}
+          onChange={updateField}
+          options={fieldOptions}
+          placeholder="field..."
+          className="max-w-[150px] shrink-0"
+        />
+        <SearchableSelect
           value={c.operator}
-          onChange={(e) => onChange({ ...c, operator: e.target.value as FilterOperator })}
-          className="max-w-[110px] shrink-0 rounded-md border-0 bg-gray-50 px-2 py-1 text-xs text-gray-600 ring-1 ring-gray-200 focus:ring-blue-400"
-        >
-          {operators.map((op) => <option key={op} value={op}>{OPERATOR_LABELS[op]}</option>)}
-        </select>
+          onChange={(val) => onChange({ ...c, operator: val as FilterOperator })}
+          options={operators.map(op => ({ value: op, label: OPERATOR_LABELS[op] }))}
+          placeholder="operator..."
+          className="max-w-[120px] shrink-0"
+          searchable={false}
+        />
         {needsValue && (
           <>
             {isEnum ? (
-              <select
+              <SearchableSelect
                 value={String(c.value)}
-                onChange={(e) => onChange({ ...c, value: e.target.value })}
-                className="min-w-0 flex-1 rounded-md border-0 bg-gray-50 px-2 py-1 text-xs text-gray-800 ring-1 ring-gray-200 focus:ring-blue-400"
-              >
-                <option value="">select...</option>
-                {fieldDef.enumValues!.map((v) => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
+                onChange={(val) => onChange({ ...c, value: val })}
+                options={fieldDef.enumValues!.map(v => ({ value: v, label: v }))}
+                placeholder="select..."
+                className="min-w-0 flex-1"
+              />
             ) : hasSuggestions ? (
               <SuggestInput
                 value={String(c.value)}

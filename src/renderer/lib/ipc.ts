@@ -1,10 +1,10 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
-import type { ClassificationProgress, ResearchProgress, QCProgress } from '../../shared/types/classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
-import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types/transactions';
-import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
+import type { TransactionFilter, TransactionUpdate, FilterCondition, GroupedFilter } from '../../shared/types/transactions';
+import type { OverrideRuleCreate, OverrideRuleUpdate, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
 import type { FeedbackAnalyzeInput, FeedbackApplyInput } from '../../shared/types/feedback';
@@ -17,7 +17,11 @@ import type { ChangelogFilter } from '../../shared/types/changelog';
 async function invoke<K extends IPCChannel>(channel: K, ...args: IPCArgs<K>): Promise<IPCResult<K>> {
   const result: IPCResponse<IPCResult<K>> = await window.electronAPI.invoke(channel, ...args);
   if (!result.success) {
-    throw new Error(result.error || `IPC call failed: ${channel}`);
+    const err = new Error(result.error || `IPC call failed: ${channel}`);
+    if (result.code) {
+      (err as Error & { code?: string }).code = result.code;
+    }
+    throw err;
   }
   return result.data as IPCResult<K>;
 }
@@ -65,23 +69,28 @@ export const ipc = {
     deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
       invoke('ingest:deriveMappings', columns, sampleRows, source),
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
+    onProgress: (callback: (progress: IngestProgress) => void) =>
+      on('ingest:progress', callback),
   },
 
   // ── Classification (3 channels + 1 event) ──
   classification: {
-    start: (conditions?: FilterCondition[]) => invoke('classification:start', conditions),
-    cancel: () => invoke('classification:cancel'),
-    scopeCount: (conditions?: FilterCondition[]) => invoke('classification:scopeCount', conditions),
+    start: (groupedFilter?: GroupedFilter) => invoke('classification:start', groupedFilter),
+    stop: () => invoke('classification:stop'),
+    scopeCount: (groupedFilter?: GroupedFilter) => invoke('classification:scopeCount', groupedFilter),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on('classification:progress', callback),
   },
 
-  // ── QC (4 channels + 1 event) ──
+  // ── QC (7 channels + 1 event) ──
   qc: {
-    count: (filter?: TransactionFilter) => invoke('qc:count', filter),
-    start: (filter?: TransactionFilter) => invoke('qc:start', filter),
-    cancel: () => invoke('qc:cancel'),
+    count: (scope?: FilterConditionQC[]) => invoke('qc:count', scope),
+    run: (config?: QCConfig) => invoke('qc:run', config),
+    stop: () => invoke('qc:stop'),
     isRunning: () => invoke('qc:isRunning'),
+    getConfig: () => invoke('qc:getConfig'),
+    setConfig: (config: QCConfig) => invoke('qc:setConfig', config),
+    getDefaults: () => invoke('qc:getDefaults'),
     onProgress: (callback: (progress: QCProgress) => void) =>
       on('qc:progress', callback),
   },
@@ -133,7 +142,8 @@ export const ipc = {
       invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
-    researchAll: () => invoke('suppliers:researchAll'),
+    researchAll: (supplierIds?: string[]) => invoke('suppliers:researchAll', supplierIds),
+    cancelResearch: () => invoke('suppliers:cancelResearch'),
     researchSingle: (supplierId: string) =>
       invoke('suppliers:researchSingle', supplierId),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>
@@ -155,15 +165,29 @@ export const ipc = {
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
   },
 
-  // ── Rules (5 channels) ──
+  // ── Rules (12 channels) ──
   rules: {
     list: () => invoke('rules:list'),
+    listPaginated: (opts: { limit: number; offset: number; search?: string }) => invoke('rules:listPaginated', opts),
     create: (input: OverrideRuleCreate) =>
       invoke('rules:create', input),
+    createAndApply: (input: OverrideRuleCreate) =>
+      invoke('rules:createAndApply', input),
     update: (ruleId: string, updates: OverrideRuleUpdate) =>
       invoke('rules:update', ruleId, updates),
     delete: (ruleId: string) => invoke('rules:delete', ruleId),
     generate: () => invoke('rules:generate'),
+    // Group operations
+    listGroups: () => invoke('rules:listGroups'),
+    createGroup: (input: RuleGroupCreate) => invoke('rules:createGroup', input),
+    updateGroup: (groupId: string, updates: RuleGroupUpdate) => invoke('rules:updateGroup', groupId, updates),
+    deleteGroup: (groupId: string) => invoke('rules:deleteGroup', groupId),
+    reorderGroups: (orderedIds: string[]) => invoke('rules:reorderGroups', orderedIds),
+    moveRule: (ruleId: string, targetGroupId: string | null) => invoke('rules:moveRule', ruleId, targetGroupId),
+    assignToGroup: (ruleIds: string[], groupId: string | null) => invoke('rules:assignToGroup', ruleIds, groupId),
+    filterAssign: (filter: import('../../shared/types/transactions').GroupedFilter, targetGroupId: string | null) => invoke('rules:filterAssign', filter, targetGroupId),
+    previewApply: (ruleIds: string[]) => invoke('rules:previewApply', ruleIds),
+    apply: (ruleIds: string[]) => invoke('rules:apply', ruleIds),
   },
 
   // ── Changelog (2 channels) ──
@@ -201,6 +225,11 @@ export const ipc = {
     getPath: () => invoke('supplier-universe:getPath'),
     selectFile: () => invoke('supplier-universe:selectFile'),
     createNew: () => invoke('supplier-universe:createNew'),
+  },
+
+  // ── Shell ──
+  shell: {
+    openExternal: (url: string) => invoke('shell:openExternal', url),
   },
 
   // ── License (3 channels + 1 event) ──

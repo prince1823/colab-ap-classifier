@@ -1,15 +1,71 @@
 import { registerHandler } from './register';
-import type { SupplierResearcher, SupplierService } from '../../shared/types/services';
+import type { SupplierResearcher, SupplierService, TaxonomyStore, ProjectStore, EventBus } from '../../shared/types/services';
+import type { ResearchProgress } from '../../shared/types/classification';
 
 export function registerSupplierResearchHandlers(
   researcher: SupplierResearcher,
-  suppliers: SupplierService
+  suppliers: SupplierService,
+  taxonomy: TaxonomyStore,
+  project: ProjectStore,
+  eventBus: EventBus
 ): void {
-  registerHandler('suppliers:researchAll', async () => {
-    // Fire-and-forget — progress is streamed via EventBus
-    researcher.researchAll().catch((err) => {
-      console.error('[IPC] Supplier research failed:', err);
+  registerHandler('suppliers:researchAll', async (_event, supplierIds?: unknown) => {
+    const ids = Array.isArray(supplierIds) ? (supplierIds as string[]) : undefined;
+
+    const taxonomyNodes = await taxonomy.getNodes();
+    let context;
+    try {
+      context = (await project.getSetting('company_context') as { industry: string }) ?? { industry: 'Unknown' };
+    } catch {
+      context = { industry: 'Unknown' };
+    }
+    const columnPriorities = (await project.getSetting('column_priorities') as string[] | null) ?? [];
+
+    // Fire-and-forget: research → categorize non-tail-spend → categorize tail-spend → completed
+    // Each phase is individually try/caught so one failure doesn't skip subsequent phases.
+    (async () => {
+      try {
+        await researcher.researchAll(ids, { suppressTerminal: true });
+      } catch (err) {
+        console.error('[IPC] Research failed:', err);
+      }
+
+      try {
+        await researcher.categorizeWithSupplierInfo(taxonomyNodes, context);
+      } catch (err) {
+        console.error('[IPC] Non-tail-spend categorization failed:', err);
+      }
+
+      if (columnPriorities.length > 0) {
+        try {
+          await researcher.categorizeTailSpend(taxonomyNodes, context, columnPriorities);
+        } catch (err) {
+          console.error('[IPC] Tail spend categorization failed:', err);
+        }
+      }
+
+      eventBus.emit('suppliers:research:progress', {
+        status: 'completed',
+        totalSuppliers: 0,
+        processedSuppliers: 0,
+        percentage: 100,
+        currentSupplier: null,
+        currentStep: 'Complete',
+      } satisfies ResearchProgress);
+    })().catch((err) => {
+      eventBus.emit('suppliers:research:progress', {
+        status: 'failed',
+        totalSuppliers: 0,
+        processedSuppliers: 0,
+        percentage: 0,
+        currentSupplier: null,
+        currentStep: err instanceof Error ? err.message : String(err),
+      } satisfies ResearchProgress);
     });
+  });
+
+  registerHandler('suppliers:cancelResearch', async () => {
+    researcher.cancel();
   });
 
   registerHandler('suppliers:researchSingle', async (_event, supplierId: unknown) => {

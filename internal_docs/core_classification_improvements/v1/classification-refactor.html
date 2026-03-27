@@ -1,0 +1,1917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Classification Refactor — Colab91 AP Classifier</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg2: #161b22;
+      --bg3: #1e2530;
+      --bg4: #252d3a;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-dim: #8b949e;
+      --text-bright: #f0f6fc;
+      --blue: #388bfd;
+      --blue-dim: #1f6feb;
+      --green: #3fb950;
+      --green-dim: #238636;
+      --purple: #bc8cff;
+      --orange: #ffa657;
+      --yellow: #e3b341;
+      --red: #f85149;
+      --teal: #39d353;
+      --pink: #f778ba;
+      --call1: #1a3a5c;
+      --call1-border: #388bfd;
+      --call1-text: #79c0ff;
+      --call2: #1a3a1a;
+      --call2-border: #3fb950;
+      --call2-text: #7ee787;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 40px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-bright);
+    }
+
+    header .subtitle {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    nav {
+      display: flex;
+      gap: 6px;
+    }
+
+    nav a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 13px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: all 0.15s;
+      border: 1px solid transparent;
+    }
+
+    nav a:hover, nav a.active {
+      color: var(--text-bright);
+      background: var(--bg3);
+      border-color: var(--border);
+    }
+
+    .main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 40px;
+    }
+
+    /* ─── Tabs ─── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 32px;
+    }
+
+    .tab {
+      padding: 10px 18px;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--text-dim);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--text-bright);
+      border-bottom-color: var(--blue);
+    }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ─── Cards ─── */
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+    }
+
+    .card.call1 { border-color: var(--call1-border); background: var(--call1); }
+    .card.call2 { border-color: var(--call2-border); background: var(--call2); }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .badge.call1 { background: rgba(56,139,253,0.15); color: var(--call1-text); border: 1px solid rgba(56,139,253,0.3); }
+    .badge.call2 { background: rgba(63,185,80,0.15); color: var(--call2-text); border: 1px solid rgba(63,185,80,0.3); }
+    .badge.rule  { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
+    .badge.new   { background: rgba(255,166,87,0.15); color: var(--orange); border: 1px solid rgba(255,166,87,0.3); }
+    .badge.qc    { background: rgba(247,120,186,0.15); color: var(--pink); border: 1px solid rgba(247,120,186,0.3); }
+    .badge.p0    { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+    .badge.p1    { background: rgba(227,179,65,0.15); color: var(--yellow); border: 1px solid rgba(227,179,65,0.3); }
+
+    /* ─── Flow diagram ─── */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .flow-step {
+      display: flex;
+      gap: 16px;
+      position: relative;
+    }
+
+    .flow-step:not(:last-child) .flow-line {
+      position: absolute;
+      left: 19px;
+      top: 40px;
+      bottom: -8px;
+      width: 2px;
+      background: var(--border);
+    }
+
+    .flow-dot {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      flex-shrink: 0;
+      margin-top: 4px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .flow-dot.rule  { background: rgba(188,140,255,0.2); border: 2px solid var(--purple); color: var(--purple); }
+    .flow-dot.c1    { background: rgba(56,139,253,0.2); border: 2px solid var(--blue); color: var(--blue); }
+    .flow-dot.c2    { background: rgba(63,185,80,0.2); border: 2px solid var(--green); color: var(--green); }
+    .flow-dot.save  { background: rgba(227,179,65,0.2); border: 2px solid var(--yellow); color: var(--yellow); }
+    .flow-dot.qc    { background: rgba(247,120,186,0.2); border: 2px solid var(--pink); color: var(--pink); }
+
+    .flow-content {
+      flex: 1;
+      padding-bottom: 28px;
+    }
+
+    .flow-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 4px;
+    }
+
+    .flow-desc {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    /* ─── Expand/collapse ─── */
+    .expandable {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .expand-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      background: var(--bg3);
+      user-select: none;
+      transition: background 0.15s;
+    }
+
+    .expand-header:hover { background: var(--bg4); }
+
+    .expand-header .expand-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+
+    .expand-arrow {
+      font-size: 10px;
+      color: var(--text-dim);
+      transition: transform 0.2s;
+    }
+
+    .expandable.open .expand-arrow { transform: rotate(180deg); }
+
+    .expand-body {
+      display: none;
+      padding: 14px 16px;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+    }
+
+    .expandable.open .expand-body { display: block; }
+
+    /* ─── Code blocks ─── */
+    pre, code {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    }
+
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-size: 12.5px;
+      overflow-x: auto;
+      line-height: 1.6;
+      margin: 8px 0;
+    }
+
+    code {
+      background: rgba(110,118,129,0.15);
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+
+    pre code { background: none; padding: 0; }
+
+    /* ─── Token table ─── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin: 12px 0;
+    }
+
+    th {
+      text-align: left;
+      padding: 8px 12px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-weight: 500;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    td {
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    tr:hover td { background: var(--bg3); }
+
+    td.good { color: var(--green); }
+    td.bad  { color: var(--red); }
+
+    /* ─── Grid ─── */
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .grid3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* ─── IO boxes ─── */
+    .io-grid {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 12px;
+      align-items: start;
+      margin-top: 10px;
+    }
+
+    .io-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+    }
+
+    .io-box h4 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    .io-box ul {
+      list-style: none;
+      font-size: 12.5px;
+    }
+
+    .io-box ul li {
+      padding: 3px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .io-box ul li::before {
+      content: '→';
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+
+    .io-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      color: var(--text-dim);
+      padding-top: 32px;
+    }
+
+    /* ─── Status pills ─── */
+    .status-flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 12px 0;
+    }
+
+    .status-pill {
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .status-pill.unclassified { background: rgba(110,118,129,0.2); border: 1px solid rgba(110,118,129,0.4); color: var(--text-dim); }
+    .status-pill.rule { background: rgba(188,140,255,0.15); border: 1px solid rgba(188,140,255,0.3); color: var(--purple); }
+    .status-pill.ai { background: rgba(63,185,80,0.15); border: 1px solid rgba(63,185,80,0.3); color: var(--green); }
+    .status-pill.error { background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.3); color: var(--red); }
+    .status-pill.qc { background: rgba(247,120,186,0.15); border: 1px solid rgba(247,120,186,0.3); color: var(--pink); }
+    .status-pill.arrow { background: none; border: none; color: var(--text-dim); font-size: 14px; }
+
+    /* ─── Section headers ─── */
+    h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 10px;
+    }
+
+    p {
+      font-size: 13.5px;
+      color: var(--text);
+      margin-bottom: 10px;
+      line-height: 1.65;
+    }
+
+    ul.plain {
+      list-style: none;
+      font-size: 13px;
+    }
+
+    ul.plain li {
+      padding: 4px 0;
+      padding-left: 16px;
+      position: relative;
+    }
+
+    ul.plain li::before {
+      content: '•';
+      position: absolute;
+      left: 0;
+      color: var(--text-dim);
+    }
+
+    .highlight {
+      background: rgba(227,179,65,0.1);
+      border-left: 3px solid var(--yellow);
+      padding: 10px 14px;
+      border-radius: 0 4px 4px 0;
+      font-size: 13px;
+      margin: 10px 0;
+    }
+
+    .info-box {
+      background: rgba(56,139,253,0.08);
+      border-left: 3px solid var(--blue);
+      padding: 10px 14px;
+      border-radius: 0 4px 4px 0;
+      font-size: 13px;
+      margin: 10px 0;
+    }
+
+    /* ─── File ref ─── */
+    .file-ref {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: monospace;
+      font-size: 11.5px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 7px;
+      color: var(--blue);
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .file-ref:hover { background: var(--bg4); }
+
+    .file-ref-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 8px 0;
+    }
+
+    .file-ref-line span {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    /* ─── Divider ─── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 24px 0;
+    }
+
+    /* ─── Rename table ─── */
+    .rename-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    .rename-row:last-child { border-bottom: none; }
+    .rename-old { color: var(--red); font-family: monospace; font-size: 12px; text-decoration: line-through; }
+    .rename-arrow { color: var(--text-dim); }
+    .rename-new { color: var(--green); font-family: monospace; font-size: 12px; }
+    .rename-note { color: var(--text-dim); font-size: 12px; margin-left: auto; }
+
+    /* ─── Batch visualizer ─── */
+    .batch-vis {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin: 10px 0;
+    }
+
+    .batch-chip {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .batch-chip.s1 { background: rgba(56,139,253,0.2); border: 1px solid var(--call1-border); color: var(--call1-text); }
+    .batch-chip.s2 { background: rgba(63,185,80,0.2); border: 1px solid var(--call2-border); color: var(--call2-text); }
+    .batch-chip.gap { background: none; border: 1px dashed var(--border); color: var(--text-dim); }
+
+    .batch-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: center;
+      margin-top: 4px;
+    }
+
+    .batch-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    /* ─── Scrollable ─── */
+    .scroll-x { overflow-x: auto; }
+
+    /* small screen */
+    @media (max-width: 768px) {
+      .main { padding: 20px 16px; }
+      header { padding: 14px 16px; flex-direction: column; align-items: flex-start; gap: 10px; }
+      .grid2, .grid3, .io-grid { grid-template-columns: 1fr; }
+      .io-arrow { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Classification Refactor</h1>
+    <div class="subtitle">colab-ap-classifier · issues #221, #302, #303, #306, #317, #323</div>
+  </div>
+  <nav>
+    <a href="#" class="active" onclick="showTab('flow', this)">Flow</a>
+    <a href="#" onclick="showTab('calls', this)">Call 1 &amp; 2</a>
+    <a href="#" onclick="showTab('impl', this)">Implementation</a>
+    <a href="#" onclick="showTab('runtime', this)">Runtime</a>
+    <a href="#" onclick="showTab('qc', this)">QC Agent</a>
+    <a href="#" onclick="showTab('tasks', this)">All Tasks</a>
+  </nav>
+</header>
+
+<div class="main">
+
+  <!-- ═══════════════ TAB: FLOW ═══════════════ -->
+  <div id="tab-flow" class="panel active">
+    <h2>Classification Pipeline</h2>
+
+    <div class="info-box">
+      <strong>What changed:</strong> The original single-call approach (full taxonomy per supplier) was split into two sequential LLM calls — a <span class="badge call1">Call 1</span> supplier-level category selection (batched at 10) and a <span class="badge call2">Call 2</span> transaction-level L3 classification. These run as a <strong>chunked pipeline</strong>: each batch of 10 suppliers completes Call 1 → Call 2 before the next batch starts. No global in-memory map — crash at supplier 5,000 means the first 4,990 are already classified in the DB.
+    </div>
+
+    <div style="margin-top: 24px;">
+      <div class="flow">
+
+        <!-- Phase 0: Entry -->
+        <div class="flow-step">
+          <div class="flow-line"></div>
+          <div class="flow-dot save">⚙</div>
+          <div class="flow-content">
+            <div class="flow-title">classifyAll() — entry point</div>
+            <div class="flow-desc">Called by IPC handler <code>classification:start</code>. Accepts optional <code>scopedTxnIds</code> for partial runs. Manages concurrency pool (default 5, configurable via <code>CLASSIFIER_CONCURRENCY</code>).</div>
+            <div class="file-ref-line">
+              <span>Location:</span>
+              <code class="file-ref">src/main/services/classification.ts:~171</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 1: Override Rules -->
+        <div class="flow-step">
+          <div class="flow-line"></div>
+          <div class="flow-dot rule">1</div>
+          <div class="flow-content">
+            <div class="flow-title">Phase 1 — Apply Override Rules</div>
+            <div class="flow-desc">For each supplier with unclassified transactions, evaluate override rules. Matched transactions skip both LLM calls.</div>
+
+            <div class="expandable">
+              <div class="expand-header">
+                <div class="expand-label"><span class="badge rule">Rule Engine</span> Details</div>
+                <div class="expand-arrow">▼</div>
+              </div>
+              <div class="expand-body">
+                <ul class="plain">
+                  <li>Load all unclassified transactions grouped by <code>project_supplier_id</code></li>
+                  <li>Evaluate each supplier's rules (from <code>project_suppliers.rules</code>)</li>
+                  <li>Rules: JSON array of <code>{field, operator, value}</code> — AND logic, first match wins</li>
+                  <li>Matched transactions: <code>classification_status = 'classified_by_rule'</code> + <code>appliedRuleId</code></li>
+                  <li>Remaining suppliers (still have unclassified txns) proceed to Phase 2</li>
+                  <li>Supplier info (name, parent, research) is resolved here for Call 1</li>
+                  <li><strong>Research warning:</strong> If <code>is_researched = true</code> but <code>supplierUniverse.getSupplier()</code> returns null, logs a <code>WARN</code> so operators can diagnose stale/mismatched universe data</li>
+                </ul>
+                <div class="highlight" style="margin-top:10px;">
+                  <strong>Deviation from spec:</strong> The spec implied rules + Call 2 happen together in <code>classifySupplierTransactions</code>. Actual implementation moves rules to Phase 1 so Call 1 only includes suppliers that still need classification.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 2: Chunked Pipeline (Call 1 → Call 2 per batch) -->
+        <div class="flow-step">
+          <div class="flow-line"></div>
+          <div class="flow-dot c1">2</div>
+          <div class="flow-content">
+            <div class="flow-title">Phase 2 — Chunked Pipeline: Call 1 → Call 2 per batch</div>
+            <div class="flow-desc">Suppliers are chunked into batches of 10. Each batch flows through <span class="badge call1">Call 1</span> (category selection) then immediately into <span class="badge call2">Call 2</span> (L3 classification) before the next batch starts. No global in-memory map — results are consumed within the same batch iteration.</div>
+
+            <div class="highlight" style="margin-top:10px;">
+              <strong>Why chunked, not two-phase:</strong> The original design ran ALL Call 1 into a global <code>categoryMap</code> before starting ANY Call 2. At 10K suppliers, this meant 1,000 LLM calls before a single transaction got classified. A crash between phases lost everything. The chunked pipeline gives incremental persistence — crash at supplier 5,000, the first 4,990 are already in the DB.
+            </div>
+
+            <h3 style="margin-top:16px;">Per-batch flow</h3>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0;">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+                <div class="batch-vis">
+                  <div class="batch-chip s1">S1</div><div class="batch-chip s1">S2</div><div class="batch-chip s1">...</div><div class="batch-chip s1">S10</div>
+                </div>
+                <div class="batch-label"><span class="badge call1">Call 1</span> batch</div>
+              </div>
+              <div style="color:var(--text-dim);font-size:18px;">→</div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+                <div class="batch-vis">
+                  <div class="batch-chip s2">S1</div><div class="batch-chip s2">S2</div><div class="batch-chip s2">...</div><div class="batch-chip s2">S10</div>
+                </div>
+                <div class="batch-label"><span class="badge call2">Call 2</span> concurrent</div>
+              </div>
+              <div style="color:var(--text-dim);font-size:18px;">→</div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+                <div class="batch-vis">
+                  <div class="batch-chip s1">S11</div><div class="batch-chip s1">S12</div><div class="batch-chip s1">...</div><div class="batch-chip s1">S20</div>
+                </div>
+                <div class="batch-label"><span class="badge call1">Call 1</span> next batch</div>
+              </div>
+              <div style="color:var(--text-dim);font-size:18px;">→ ...</div>
+            </div>
+
+            <div class="card call1" style="margin-top:16px;">
+              <div class="card-title"><span class="badge call1">CALL 1</span> selectCategories() — per batch</div>
+              <div class="io-grid">
+                <div class="io-box">
+                  <h4>Input (per batch)</h4>
+                  <ul>
+                    <li>Supplier name (× up to 10)</li>
+                    <li>Supplier research / NAICS / industry</li>
+                    <li>Parent company name</li>
+                    <li>Company context</li>
+                    <li>L1|L2 taxonomy (paths + L2 descriptions only, no L3)</li>
+                  </ul>
+                </div>
+                <div class="io-arrow">→</div>
+                <div class="io-box">
+                  <h4>Output</h4>
+                  <ul>
+                    <li>Map: supplierIndex → L1|L2 path</li>
+                    <li>e.g. <code>"Indirect|IT"</code></li>
+                  </ul>
+                  <pre style="margin-top:8px;font-size:11px;">{"categories": [
+  {"supplierIndex": 1,
+   "categoryPath": "L1|L2"},
+  ...
+]}</pre>
+                </div>
+              </div>
+            </div>
+
+            <div class="expandable" style="margin-top:8px;">
+              <div class="expand-header">
+                <div class="expand-label">Call 1 validation &amp; retry logic</div>
+                <div class="expand-arrow">▼</div>
+              </div>
+              <div class="expand-body">
+                <ul class="plain">
+                  <li>Fuzzy-match returned L1|L2 paths against taxonomy (<code>normalizePath</code> + <code>findClosestTaxonomyMatch</code>)</li>
+                  <li>Any supplier missing from batch response → individual Call 1 retry</li>
+                  <li>Entire batch fails → retry each supplier individually</li>
+                  <li>Still no match after retry → supplier proceeds to Call 2 with no categoryPath → marked as <code>classification_error</code></li>
+                  <li>Results stored in batch-scoped <code>batchCategoryMap</code> (not global)</li>
+                </ul>
+                <div class="file-ref-line" style="margin-top:8px;">
+                  <code class="file-ref">classification-agent.ts: selectCategories()</code>
+                  <code class="file-ref">classification.ts:~261–339</code>
+                </div>
+              </div>
+            </div>
+
+            <div class="card call2" style="margin-top:16px;">
+              <div class="card-title"><span class="badge call2">CALL 2</span> classifyL3() via classifySupplierTransactions() — per supplier</div>
+              <div class="io-grid">
+                <div class="io-box">
+                  <h4>Input (per supplier)</h4>
+                  <ul>
+                    <li>categoryPath (L1|L2 from this batch's Call 1)</li>
+                    <li>L3 taxonomy nodes filtered to that branch</li>
+                    <li>Transaction dedup groups (by column priorities)</li>
+                    <li>Supplier name + type (brief context only)</li>
+                    <li>Company context</li>
+                  </ul>
+                </div>
+                <div class="io-arrow">→</div>
+                <div class="io-box">
+                  <h4>Output</h4>
+                  <ul>
+                    <li><code>{classifications, assignments}</code></li>
+                    <li>Each classification: full L1|L2|L3 path</li>
+                    <li>Assignments: which dedup groups map to it</li>
+                  </ul>
+                  <pre style="margin-top:8px;font-size:11px;">{"classifications": [
+  {"id": 1,
+   "classificationPath": "L1|L2|L3"}
+],
+"assignments": {
+  "1": [1, 2, 3]
+}}</pre>
+                </div>
+              </div>
+            </div>
+
+            <div class="expandable" style="margin-top:8px;">
+              <div class="expand-header">
+                <div class="expand-label">Inside classifySupplierTransactions()</div>
+                <div class="expand-arrow">▼</div>
+              </div>
+              <div class="expand-body">
+                <ul class="plain">
+                  <li>Queries transactions with <code>classification_status = 'unclassified'</code></li>
+                  <li>Resolves supplier name, parent, research (self-contained — no pre-fetched data needed)</li>
+                  <li>Cleans transaction descriptions (strips junk)</li>
+                  <li>Builds dedup groups keyed by column priorities</li>
+                  <li>Filters taxonomy: only L3 nodes where <code>l1 === L1 && l2 === L2</code></li>
+                  <li>Batches dedup groups into chunks → calls <code>classifyL3()</code> per chunk</li>
+                  <li>Retry up to 3 attempts per chunk for missed groups</li>
+                  <li>On total failure: marks txns as <code>classification_error</code></li>
+                  <li>On success: updates txns with <code>taxonomyNodeId</code> + <code>classified_by_ai</code></li>
+                </ul>
+                <div class="file-ref-line" style="margin-top:8px;">
+                  <code class="file-ref">classification.ts:~422–542</code>
+                </div>
+              </div>
+            </div>
+
+            <div class="expandable" style="margin-top:8px;">
+              <div class="expand-header">
+                <div class="expand-label"><span class="badge new">NEW</span> Call 2 error resilience</div>
+                <div class="expand-arrow">▼</div>
+              </div>
+              <div class="expand-body">
+                <ul class="plain">
+                  <li><code>processedSuppliers++</code> is in a <code>finally</code> block — always increments, even if both classification AND <code>markSupplierError</code> fail</li>
+                  <li><code>markSupplierError</code> failures are caught with a nested try/catch and logged — they don't propagate to the outer handler</li>
+                  <li>Pipeline always moves to the next supplier in the batch, never stalls</li>
+                </ul>
+                <pre style="margin-top:8px;">try {
+  // classifySupplierTransactions or markSupplierError
+} catch (err) {
+  try { await markSupplierError(...); }
+  catch (markErr) { debugLog('ERROR', ...); }
+} finally {
+  processedSuppliers++;  // always runs
+}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 3: Results -->
+        <div class="flow-step">
+          <div class="flow-dot save">✓</div>
+          <div class="flow-content">
+            <div class="flow-title">Results applied to DB</div>
+            <div class="flow-desc">All transactions now have a final <code>classification_status</code>.</div>
+
+            <div class="status-flow">
+              <div class="status-pill unclassified">unclassified</div>
+              <div class="status-pill arrow">→</div>
+              <div class="status-pill rule">classified_by_rule</div>
+              <div class="status-pill arrow">or</div>
+              <div class="status-pill ai">classified_by_ai</div>
+              <div class="status-pill arrow">or</div>
+              <div class="status-pill error">classification_error</div>
+            </div>
+
+            <div class="info-box" style="margin-top:8px;">
+              <strong>Stop behavior:</strong> The <code>isStopped</code> flag is checked between phases. In-flight LLM calls complete, but results are discarded. All already-classified rows are preserved — no rollback.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ TAB: CALLS ═══════════════ -->
+  <div id="tab-calls" class="panel">
+    <h2>Call 1 vs Call 2 — Deep Dive</h2>
+
+    <div class="grid2" style="margin-bottom:20px;">
+      <div class="card call1">
+        <div class="card-title"><span class="badge call1">CALL 1</span> Category Selection — supplier level</div>
+        <p style="font-size:13px;">Answers: <em>"What kind of spend is this supplier?"</em></p>
+        <hr class="divider" style="margin:10px 0;" />
+        <table>
+          <tr><th>Where</th><td><code>LLMClassificationAgent.selectCategories()</code></td></tr>
+          <tr><th>Called from</th><td><code>classification.ts</code> Phase 2 chunked loop (~lines 261–339)</td></tr>
+          <tr><th>Batch size</th><td>10 suppliers per call</td></tr>
+          <tr><th>Taxonomy sent</th><td>L1|L2 only (~300–536 tokens fixed)</td></tr>
+          <tr><th>Per-supplier tokens</th><td>~207 median, ~300 at p90</td></tr>
+          <tr><th>Concurrency</th><td>Pool of 5 (same as Call 2)</td></tr>
+          <tr><th>Temperature</th><td>0</td></tr>
+          <tr><th>Max tokens</th><td>4096</td></tr>
+        </table>
+      </div>
+      <div class="card call2">
+        <div class="card-title"><span class="badge call2">CALL 2</span> L3 Classification — transaction level</div>
+        <p style="font-size:13px;">Answers: <em>"Which specific L3 for each transaction group?"</em></p>
+        <hr class="divider" style="margin:10px 0;" />
+        <table>
+          <tr><th>Where</th><td><code>LLMClassificationAgent.classifyL3()</code></td></tr>
+          <tr><th>Called from</th><td><code>classifySupplierTransactions()</code> Phase 2 Call 2 (~lines 344–382)</td></tr>
+          <tr><th>Batch size</th><td>1 supplier per call (cannot batch — group numbering collisions)</td></tr>
+          <tr><th>Taxonomy sent</th><td>Filtered L3 nodes only (~500–1500 tokens)</td></tr>
+          <tr><th>Per-supplier tokens</th><td>+ transaction dedup groups</td></tr>
+          <tr><th>Concurrency</th><td>Pool of 5 (same as Call 1)</td></tr>
+          <tr><th>Temperature</th><td>0</td></tr>
+          <tr><th>Max tokens</th><td>16384</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <h3>Why Call 2 can't be batched</h3>
+    <p>Call 2 dedup groups are numbered sequentially starting at 1 per supplier. Batching multiple suppliers would create group numbering collisions, and cross-supplier transaction context would confuse the LLM about which transactions belong to which supplier. Per-supplier is the only viable approach.</p>
+
+    <hr class="divider" />
+
+    <h3>Token cost comparison: old vs new</h3>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr>
+            <th>Aspect</th>
+            <th>Old (single call)</th>
+            <th>New — Call 1</th>
+            <th>New — Call 2</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Taxonomy tokens</td>
+            <td class="bad">~4000–5000 (all L3 + descriptions)</td>
+            <td class="good">~300–536 (L1|L2 only)</td>
+            <td class="good">~500–1500 (filtered L3 under one L2)</td>
+          </tr>
+          <tr>
+            <td>LLM focus</td>
+            <td class="bad">Supplier identity + all L3 paths + transaction matching simultaneously</td>
+            <td class="good">Pure supplier reasoning</td>
+            <td class="good">Pure transaction matching against small L3 set</td>
+          </tr>
+          <tr>
+            <td>API calls (10K suppliers)</td>
+            <td>10,000</td>
+            <td>1,000 batches</td>
+            <td>10,000</td>
+          </tr>
+          <tr>
+            <td>Net taxonomy tokens/supplier</td>
+            <td class="bad">~4500</td>
+            <td colspan="2" class="good">~2000 total</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="divider" />
+
+    <h3>Prompts</h3>
+    <div class="expandable">
+      <div class="expand-header">
+        <div class="expand-label"><span class="badge call1">CALL 1</span> buildCategorySelectionSystemPrompt()</div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <pre>You are a supplier category classifier. Given a supplier's identity and
+research, determine which L1|L2 spend category they belong to.
+
+Rules:
+- Return exactly one L1|L2 path
+- Government supplier type is a strong signal for Exempt
+- Intercompany/subsidiary → Exempt
+- Use supplier research (industry, products, NAICS) as primary signal
+- Use supplier name as fallback when research is unavailable
+- Company context helps interpret domain-specific suppliers
+
+Response format: {"categoryPath": "L1|L2"}</pre>
+        <p style="font-size:12px;color:var(--text-dim);margin-top:8px;">For batches: system prompt stays the same; user prompt includes all supplier sections. Response format is <code>{"categories": [{"supplierIndex": N, "categoryPath": "L1|L2"}, ...]}</code>.</p>
+      </div>
+    </div>
+
+    <div class="expandable" style="margin-top:8px;">
+      <div class="expand-header">
+        <div class="expand-label"><span class="badge call2">CALL 2</span> buildL3ClassificationSystemPrompt()</div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <pre>You are a transaction classifier. Classify transactions into L3 categories
+within the provided taxonomy branch.
+
+Rules:
+- Must return exactly L1|L2|L3 (3 levels)
+- Transaction fields are in priority order (most important first)
+- Prefer specific categories over "Other"
+- Tax/adjustment lines for non-government suppliers: classify with primary spend
+
+Response format: same {classifications, assignments} as today</pre>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <h3>Response parsing hardening</h3>
+    <div class="card">
+      <h3>Call 1 — parseCategorySelectionResponse()</h3>
+      <ul class="plain">
+        <li>Strips markdown fencing</li>
+        <li>Handles both batch format <code>{"categories": [...]}</code> and single-supplier <code>{"categoryPath": "..."}</code></li>
+        <li>Unwraps single-element arrays for <code>categoryPath</code> field</li>
+        <li>Field fallbacks: <code>categoryPath</code> → <code>category_path</code> → <code>path</code></li>
+      </ul>
+      <hr class="divider" />
+      <h3>Call 2 — parseResponse()</h3>
+      <ul class="plain">
+        <li>Strips markdown fencing</li>
+        <li>Unwraps outer wrapper objects <code>{"result": {...}}</code> or <code>{"transactions": [...]}</code></li>
+        <li>Unwraps single-element arrays for <code>classificationPath</code> field (GPT-4o-mini bug, ~50% occurrence)</li>
+        <li>Field fallbacks: <code>classificationPath</code> → <code>classification_path</code> → <code>path</code></li>
+        <li>validateClassification() normalizes case, finds closest L3 match, validates 3-level depth</li>
+      </ul>
+    </div>
+
+    <hr class="divider" />
+
+    <h3>Backward compatibility: classifyTransactionGroup()</h3>
+    <p>The old entry point (formerly <code>classifyInvoiceGroup</code>) is kept as a thin wrapper for tests and standalone use. It calls <code>selectCategories()</code> with a single-supplier batch, then <code>classifyL3()</code>. Falls back to <code>_legacyClassify()</code> if Call 1 returns no valid category path.</p>
+    <div class="file-ref-line">
+      <code class="file-ref">classification-agent.ts:~771–818</code>
+    </div>
+  </div>
+
+  <!-- ═══════════════ TAB: IMPLEMENTATION ═══════════════ -->
+  <div id="tab-impl" class="panel">
+    <h2>Implementation Details</h2>
+
+    <h3>New methods added</h3>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>Method</th><th>File</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>buildCategorySelectionSystemPrompt()</code></td>
+            <td>classification-agent.ts</td>
+            <td>System prompt for Call 1</td>
+          </tr>
+          <tr>
+            <td><code>buildCategorySelectionUserPrompt(input)</code></td>
+            <td>classification-agent.ts</td>
+            <td>User prompt for Call 1 (L1|L2 taxonomy + context + per-supplier sections)</td>
+          </tr>
+          <tr>
+            <td><code>selectCategories(suppliers)</code></td>
+            <td>classification-agent.ts</td>
+            <td>Batched Call 1 — up to 10 suppliers → Map&lt;index, L1|L2&gt;</td>
+          </tr>
+          <tr>
+            <td><code>buildL3ClassificationSystemPrompt()</code></td>
+            <td>classification-agent.ts</td>
+            <td>System prompt for Call 2</td>
+          </tr>
+          <tr>
+            <td><code>buildL3ClassificationUserPrompt(input)</code></td>
+            <td>classification-agent.ts</td>
+            <td>User prompt for Call 2 (filtered L3 + context + dedup groups)</td>
+          </tr>
+          <tr>
+            <td><code>classifyL3(input)</code></td>
+            <td>classification-agent.ts</td>
+            <td>Per-supplier Call 2 → ClassificationResult</td>
+          </tr>
+          <tr>
+            <td><code>formatL1L2Taxonomy(taxonomy)</code></td>
+            <td>classification-agent.ts</td>
+            <td>Extracts unique L1|L2 paths with L2-level descriptions</td>
+          </tr>
+          <tr>
+            <td><code>classifySupplierTransactions()</code></td>
+            <td>classification.ts</td>
+            <td>Renamed from <code>classifySupplier()</code> — Call 2 only, receives categoryPath. Called within chunked pipeline per batch.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="divider" />
+
+    <h3>Renames</h3>
+    <div class="card">
+      <div class="rename-row">
+        <span class="rename-old">classifySupplier()</span>
+        <span class="rename-arrow">→</span>
+        <span class="rename-new">classifySupplierTransactions()</span>
+        <span class="rename-note">Call 2 only now; receives categoryPath param</span>
+      </div>
+      <div class="rename-row">
+        <span class="rename-old">classifyInvoiceGroup()</span>
+        <span class="rename-arrow">→</span>
+        <span class="rename-new">classifyTransactionGroup()</span>
+        <span class="rename-note">Backward-compat wrapper</span>
+      </div>
+      <div class="rename-row">
+        <span class="rename-old">isCancelled / cancel()</span>
+        <span class="rename-arrow">→</span>
+        <span class="rename-new">isStopped / stop()</span>
+        <span class="rename-note">Reflects no-rollback semantics</span>
+      </div>
+      <div class="rename-row">
+        <span class="rename-old">classification:cancel</span>
+        <span class="rename-arrow">→</span>
+        <span class="rename-new">classification:stop</span>
+        <span class="rename-note">IPC channel</span>
+      </div>
+      <div class="rename-row">
+        <span class="rename-old">qc:cancel</span>
+        <span class="rename-arrow">→</span>
+        <span class="rename-new">qc:stop</span>
+        <span class="rename-note">IPC channel</span>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <h3>New types (src/shared/types/classification.ts)</h3>
+    <pre>interface CategorySelectionResult {
+  categoryPath: string;  // "L1|L2"
+}
+
+interface CategorySelectionInput {
+  suppliers: Array&lt;{
+    name: string;
+    research: SupplierInfo | null;
+    parentName: string | null;
+  }&gt;;
+  taxonomy: TaxonomyNode[];
+  companyContext: CompanyContext;
+}
+
+interface L3ClassificationInput {
+  categoryPath: string;          // "L1|L2" from Call 1
+  l3Taxonomy: TaxonomyNode[];    // pre-filtered to nodes under categoryPath
+  transactions: Record&lt;string, unknown&gt;[];
+  columnPriorities: string[];
+  companyContext: CompanyContext;
+  supplierName: string;
+  supplierType: string | null;
+}</pre>
+
+    <hr class="divider" />
+
+    <h3>Task 2: Parent Name Injection</h3>
+    <p>The <code>parentName</code> field was initialized to <code>null</code> and never assigned (classification.ts line ~330). The research agent already extracts and stores parent company info — it just wasn't being read.</p>
+    <pre>// Replace classifySupplier() lines 321-333:
+const supplierInfo = await this.db.get&lt;{
+  supplier_name: string;
+  parent_name: string | null;
+}&gt;(
+  `SELECT ps.supplier_name, sp.name AS parent_name
+   FROM project_suppliers ps
+   LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
+   WHERE ps.id = ?`,
+  projectSupplierId
+);
+const parentName = supplierInfo?.parent_name
+  ?? supplierResearch?.parentCompanyName
+  ?? null;</pre>
+    <p>Fallback chain: project-level parent (user-assigned or auto-created during research) → universe <code>parentCompanyName</code> → null.</p>
+
+    <hr class="divider" />
+
+    <h3>Task 1: LLM Trace Logging</h3>
+    <p>Opt-in via <code>LLM_TRACE_FILE</code> env var. Zero overhead when unset.</p>
+    <pre>// src/main/utils/llm-trace.ts
+interface TraceEntry {
+  timestamp: string;
+  agent: 'classification-category' | 'classification-l3'
+       | 'research' | 'column-mapping' | 'qc';
+  supplier?: string;
+  batchIndex?: number;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  response: string;
+  elapsedMs: number;
+  tokenEstimate?: { input: number; output: number };
+}</pre>
+    <p>Each entry is one line of JSON appended to the file (JSONL — greppable with jq). Called by each agent after <code>llmClient.chat()</code> returns, not inside LLMClient (agents have the semantic context).</p>
+    <pre>npm run dev:trace   # sets both LOG_FILE and LLM_TRACE_FILE</pre>
+  </div>
+
+  <!-- ═══════════════ TAB: RUNTIME ═══════════════ -->
+  <div id="tab-runtime" class="panel">
+    <h2>Runtime: Batching &amp; Concurrency</h2>
+
+    <div class="info-box">
+      At 10,000 suppliers with sequential execution, Call 2 alone takes ~11 hours. Both batching (Call 1) and concurrency (both calls) are required.
+    </div>
+
+    <hr class="divider" />
+
+    <h3>Chunked pipeline — how it works</h3>
+    <p>Suppliers are chunked into batches of 10. Each batch completes Call 1 → Call 2 before the next batch starts. Call 2 tasks within a batch run concurrently via <code>runPool</code>.</p>
+
+    <div style="margin:16px 0;">
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Example: 23 suppliers → 3 chunks, each flows Call 1 → Call 2</p>
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+        <div class="batch-group">
+          <div class="batch-vis">
+            <div class="batch-chip s1">S1</div><div class="batch-chip s1">S2</div><div class="batch-chip s1">...</div><div class="batch-chip s1">S10</div>
+          </div>
+          <div class="batch-label"><span class="badge call1">Call 1</span> Batch 1</div>
+        </div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
+        <div class="batch-group">
+          <div class="batch-vis">
+            <div class="batch-chip s2">S1</div><div class="batch-chip s2">S2</div><div class="batch-chip s2">...</div><div class="batch-chip s2">S10</div>
+          </div>
+          <div class="batch-label"><span class="badge call2">Call 2</span> Batch 1</div>
+        </div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
+        <div class="batch-group">
+          <div class="batch-vis">
+            <div class="batch-chip s1">S11</div><div class="batch-chip s1">S12</div><div class="batch-chip s1">...</div><div class="batch-chip s1">S20</div>
+          </div>
+          <div class="batch-label"><span class="badge call1">Call 1</span> Batch 2</div>
+        </div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
+        <div class="batch-group">
+          <div class="batch-vis">
+            <div class="batch-chip s2">S11</div><div class="batch-chip s2">S12</div><div class="batch-chip s2">...</div><div class="batch-chip s2">S20</div>
+          </div>
+          <div class="batch-label"><span class="badge call2">Call 2</span> Batch 2</div>
+        </div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
+        <div class="batch-group">
+          <div class="batch-vis">
+            <div class="batch-chip s1">S21</div><div class="batch-chip s1">S22</div><div class="batch-chip s1">S23</div>
+          </div>
+          <div class="batch-label"><span class="badge call1">Call 1</span> Batch 3</div>
+        </div>
+        <div style="padding-top:10px;color:var(--text-dim);font-size:14px;">→</div>
+        <div class="batch-group">
+          <div class="batch-vis">
+            <div class="batch-chip s2">S21</div><div class="batch-chip s2">S22</div><div class="batch-chip s2">S23</div>
+          </div>
+          <div class="batch-label"><span class="badge call2">Call 2</span> Batch 3</div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <h3>Concurrency scaling (10K suppliers)</h3>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Concurrency</th><th>Call 2 time</th><th>Total (incl. Call 1)</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1 (sequential)</td><td class="bad">~11 hours</td><td class="bad">~11.5 hrs</td><td>Baseline</td></tr>
+          <tr style="background:rgba(63,185,80,0.05);">
+            <td><strong>5 (default)</strong></td>
+            <td class="good">~133 min</td>
+            <td class="good"><strong>~2.3 hrs</strong></td>
+            <td>Safe for all API tiers. Default.</td>
+          </tr>
+          <tr><td>10</td><td class="good">~67 min</td><td class="good">~1.2 hrs</td><td>For higher API tiers</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:8px;">Configurable via <code>CLASSIFIER_CONCURRENCY</code> env var. The same pool applies to both Call 1 batches and Call 2 calls — no separate settings needed.</p>
+
+    <hr class="divider" />
+
+    <h3>Token estimates (Call 1)</h3>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Component</th><th>Tokens</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>L1|L2 taxonomy + company context + system prompt (fixed per batch)</td><td>~536</td></tr>
+          <tr><td>Per supplier — median</td><td>~207</td></tr>
+          <tr><td>Per supplier — p90 (research-rich)</td><td>~300</td></tr>
+          <tr><td>Batch of 10 @ p90</td><td class="good">~3,500 total — well within limits</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="divider" />
+
+    <h3>Orchestration order</h3>
+    <pre>classifyAll():
+  1. Phase 1: Override rules for all suppliers → collect suppliersNeedingClassification
+  2. Phase 2: For each batch of CALL1_BATCH_SIZE (10) suppliers:
+       a. Call 1 — one LLM call for the batch → batchCategoryMap
+       b. Call 2 — runPool(concurrent per supplier) → classify L3, write to DB
+       c. processedSuppliers incremented per supplier (in finally block)
+     Batches processed sequentially; Call 2 tasks within each batch run concurrently.
+
+  Stop check: isStopped checked before each batch and before each Call 2 task.
+  In-flight calls complete; results are written to DB as they finish.</pre>
+
+    <div class="highlight">
+      <strong>Progress bar improvement:</strong> The old two-phase design stalled on "Selecting categories" for the entire Call 1 phase. Now <code>processedSuppliers</code> increments after each supplier's Call 2 completes, and Call 2 starts after every batch of 10. The progress bar moves steadily from the start.
+    </div>
+
+    <div class="info-box" style="margin-top:10px;">
+      <strong>Crash resilience:</strong> Each batch's Call 2 writes results to the DB immediately. If the process crashes at supplier 5,000, the first ~4,990 are already classified. On re-run, Phase 1 skips rule-matched suppliers, and <code>classifySupplierTransactions</code> only queries <code>classification_status = 'unclassified'</code> — already-classified suppliers are effectively skipped.
+    </div>
+  </div>
+
+  <!-- ═══════════════ TAB: QC AGENT ═══════════════ -->
+  <div id="tab-qc" class="panel">
+    <h2>QC Agent — Full Specification</h2>
+
+    <div class="info-box">
+      <strong>Role distinction:</strong> Classification produces a <em>deterministic baseline</em> — same logic every run, no user input. QC is where the <em>user takes control</em> — they choose what to review, what rules to apply, and can run QC multiple times with different configurations. Any QC change gets flagged for human review.
+    </div>
+
+    <!-- ─── QC Flow ─── -->
+    <h3 style="margin-top:24px;">QC Pipeline Flow</h3>
+    <div class="flow" style="margin-top:16px;">
+
+      <div class="flow-step">
+        <div class="flow-line"></div>
+        <div class="flow-dot qc">1</div>
+        <div class="flow-content">
+          <div class="flow-title">Resolve scoped suppliers</div>
+          <div class="flow-desc">Apply <code>scope: FilterCondition[]</code> to all suppliers with classified transactions. Compute per-supplier fields: <code>total_spend</code>, <code>transaction_count</code>, <code>num_categories</code>, <code>is_tail_spend</code>, <code>is_researched</code>.</div>
+          <pre style="font-size:11.5px;">SELECT ps.id, ps.supplier_name, ps.is_tail_spend, ps.is_researched,
+       COUNT(t.id) as transaction_count,
+       COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0) as total_spend,
+       COUNT(DISTINCT t.taxonomy_node_id) as num_categories
+FROM project_suppliers ps
+JOIN transactions t ON t.project_supplier_id = ps.id
+WHERE t.classification_status IN (classified statuses)
+GROUP BY ps.id, ps.supplier_name, ps.is_tail_spend, ps.is_researched</pre>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-line"></div>
+        <div class="flow-dot qc">2</div>
+        <div class="flow-content">
+          <div class="flow-title">Algorithmic pass (if enabled)</div>
+          <div class="flow-desc">Spend-weighted consolidation for suppliers with &gt;1 L3 category. Runs on all scoped suppliers.</div>
+
+          <div class="expandable">
+            <div class="expand-header">
+              <div class="expand-label"><span class="badge qc">Algorithmic</span> Consolidation logic</div>
+              <div class="expand-arrow">▼</div>
+            </div>
+            <div class="expand-body">
+              <h3>L3 pass</h3>
+              <p>If ≥ <code>l3_threshold</code> (default 0.95) of spend is in one L3 category → consolidate outlier transactions into that dominant L3.</p>
+              <h3 style="margin-top:12px;">L2 pass</h3>
+              <p>If ≥ <code>l2_threshold</code> (default 0.90) of spend is in one L2, AND ≥ <code>l3_threshold</code> of that L2's spend is in one L3 → consolidate outliers across L3s within that L2 into the dominant.</p>
+              <h3 style="margin-top:12px;">Result</h3>
+              <p>Each supplier tagged with <code>algorithmic_resolved = true/false</code>. Consolidated transactions: <code>classification_status = 'classified_by_qc_agent'</code>, <code>flagged_for_review = true</code>.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-line"></div>
+        <div class="flow-dot qc">3</div>
+        <div class="flow-content">
+          <div class="flow-title">LLM pass (if enabled)</div>
+          <div class="flow-desc">Filter scoped suppliers by <code>gate_conditions</code>. Per matching supplier: build full supplier summary → single LLM call with user rules → apply group-level recommendations.</div>
+
+          <div class="expandable">
+            <div class="expand-header">
+              <div class="expand-label"><span class="badge qc">LLM</span> Full detail</div>
+              <div class="expand-arrow">▼</div>
+            </div>
+            <div class="expand-body">
+              <p><strong>Gate conditions</strong> determine which scoped suppliers get LLM review. Default: <code>algorithmic_resolved = false</code> (only review what algorithmic didn't resolve).</p>
+              <p style="margin-top:8px;"><strong>Per matching supplier:</strong></p>
+              <ul class="plain">
+                <li>Build full supplier summary via <code>buildSupplierSummary()</code></li>
+                <li>Single LLM call: system prompt (hardcoded) + user prompt (summary + user rules)</li>
+                <li>Parse response: validate group numbers, fuzzy-match taxonomy paths</li>
+                <li>Apply valid recommendations, skip invalid ones with warning</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-dot qc">4</div>
+        <div class="flow-content">
+          <div class="flow-title">Flag all changes</div>
+          <div class="flow-desc">Every transaction modified by QC: <code>classification_status = 'classified_by_qc_agent'</code> + <code>flagged_for_review = true</code>. No exceptions.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ─── QC Config ─── -->
+    <h3>QC Configuration</h3>
+    <p>Stored in <code>project_settings.qc_config</code>. Fully user-configurable.</p>
+
+    <pre>interface QCConfig {
+  scope: FilterCondition[];              // which suppliers to process
+  algorithmic: {
+    enabled: boolean;                    // default true
+    l3Threshold: number;                 // default 0.95
+    l2Threshold: number;                 // default 0.90
+  };
+  llm: {
+    enabled: boolean;                    // default true
+    gateConditions: FilterCondition[];   // which scoped suppliers get LLM review
+    rules: string;                       // user prompt injected into LLM call
+  };
+}</pre>
+
+    <h3 style="margin-top:20px;">Default config (out of the box)</h3>
+    <pre>{
+  scope: [],  // all suppliers
+  algorithmic: { enabled: true, l3Threshold: 0.95, l2Threshold: 0.90 },
+  llm: {
+    enabled: true,
+    gateConditions: [
+      { field: 'algorithmic_resolved', operator: 'is_false' }
+    ],
+    rules: DEFAULT_QC_RULES
+  }
+}</pre>
+    <p>Default behavior: algorithmic consolidation runs on everything; LLM reviews only what algorithmic didn't resolve.</p>
+
+    <hr class="divider" />
+
+    <!-- ─── Gate condition fields ─── -->
+    <h3>Gate condition fields</h3>
+    <p>Available for both <code>scope</code> and <code>gate_conditions</code>. Computed per-supplier at QC runtime.</p>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>is_tail_spend</code></td><td>boolean</td><td>From <code>project_suppliers.is_tail_spend</code></td></tr>
+          <tr><td><code>is_researched</code></td><td>boolean</td><td>From <code>project_suppliers.is_researched</code></td></tr>
+          <tr><td><code>total_spend</code></td><td>number</td><td>Sum of <code>spend_amount</code> for supplier's transactions</td></tr>
+          <tr><td><code>transaction_count</code></td><td>number</td><td>Count of transactions</td></tr>
+          <tr><td><code>num_categories</code></td><td>number</td><td>Distinct L3 classifications after classification</td></tr>
+          <tr><td><code>algorithmic_resolved</code></td><td>boolean</td><td>Whether algorithmic pass resolved this supplier (only in <code>gate_conditions</code>, computed after algorithmic pass)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="highlight" style="margin-top:12px;">
+      <strong>FilterConditionQC vs FilterCondition:</strong> These fields don't exist in the transactions table — they're computed at QC runtime and evaluated in-memory against <code>SupplierQCData</code> objects. This is why <code>FilterConditionQC</code> is a separate type with QC-specific operators (<code>is_true</code>, <code>is_false</code>).
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ─── Supplier summary ─── -->
+    <h3>Supplier summary (LLM input)</h3>
+    <p>The LLM receives a <strong>full supplier summary</strong> — the same view a human reviewer would have. Built by <code>buildSupplierSummary()</code>.</p>
+
+    <div class="card" style="font-family:monospace;font-size:12px;white-space:pre-line;line-height:1.7;">
+<strong style="color:var(--pink);">SUPPLIER CONTEXT</strong>
+  Name: Acme Corp
+  Type: company
+  Industry: IT consulting and staffing
+  Products/Services: IT consulting, staff augmentation, managed services
+  Parent Company: Acme Holdings
+  Tail Spend: no
+  Total Spend: $163,700
+  Transaction Count: 62
+
+<strong style="color:var(--pink);">CURRENT CLASSIFICATIONS</strong>
+  IT|Consulting|IT Consulting — $120,000 (45 txns)
+    Group 1 (30 rows, $85,000): {description: "consulting services", gl_code: "6100"}
+    Group 2 (15 rows, $35,000): {description: "staff augmentation", gl_code: "6100"}
+
+  IT|Software|Custom Development — $42,500 (15 txns)
+    Group 3 (12 rows, $38,000): {description: "software development", gl_code: "6200"}
+    Group 4 (3 rows, $4,500): {description: "software license renewal", gl_code: "6200"}
+
+  Exempt|Tax|Sales Tax — $1,200 (2 txns)
+    Group 5 (2 rows, $1,200): {description: "sales tax payable", gl_code: "2100"}
+
+<strong style="color:var(--pink);">COMPANY CONTEXT</strong>
+  Industry: Technology Services
+  Description: Mid-size IT services company
+  Sister Companies: Acme Digital, Acme Cloud
+
+<strong style="color:var(--pink);">AVAILABLE TAXONOMY</strong>
+  [All L1|L2|L3 paths — so LLM can recommend moves to any category]
+    </div>
+
+    <h3 style="margin-top:16px;">Data sources for each section</h3>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Section</th><th>Source</th><th>Method</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Supplier context</td><td><code>project_suppliers</code> + <code>supplier_parents</code> + <code>supplier_universe</code></td><td>JOIN for parent name; <code>supplierUniverse.getSupplier()</code> for research</td></tr>
+          <tr><td>Current classifications</td><td><code>transactions</code> + <code>taxonomy</code></td><td><code>getSpendByTaxonomy(supplierId)</code></td></tr>
+          <tr><td>Transaction groups</td><td><code>transactions</code> with column priorities</td><td><code>getTransactionsByTaxonomy()</code> → <code>buildDedupGroups()</code></td></tr>
+          <tr><td>Company context</td><td><code>project_settings</code></td><td>Keys: <code>company_industry</code>, <code>company_description</code>, <code>sister_companies</code>, <code>additional_details</code></td></tr>
+          <tr><td>Available taxonomy</td><td><code>taxonomy</code> table</td><td>All L3 paths with descriptions</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ─── LLM prompts ─── -->
+    <h3>LLM prompt structure</h3>
+
+    <div class="expandable open">
+      <div class="expand-header">
+        <div class="expand-label"><span class="badge qc">System prompt</span> (hardcoded)</div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <pre>You are a spend classification QC agent. You review a supplier's
+current classifications and recommend corrections.
+
+You will receive a full supplier summary including: supplier identity
+and research, current classifications with spend and transaction
+detail, company context, and available taxonomy paths.
+
+Apply the QC rules provided to determine what should change.
+Only recommend changes that are clearly warranted by the rules.
+
+Response format (JSON only):
+{
+  "recommendations": [
+    {
+      "groupNumbers": [3, 5],
+      "toClassificationPath": "L1|L2|L3",
+      "reason": "brief explanation"
+    }
+  ],
+  "noChangeNeeded": false
+}
+
+Rules:
+- groupNumbers: which transaction groups to move (from the summary)
+- toClassificationPath: the target L1|L2|L3 from the available taxonomy
+- If no changes needed, return {"recommendations": [], "noChangeNeeded": true}
+- Every recommendation must reference valid group numbers and a valid taxonomy path</pre>
+      </div>
+    </div>
+
+    <div class="expandable open" style="margin-top:8px;">
+      <div class="expand-header">
+        <div class="expand-label"><span class="badge qc">User prompt</span> (dynamic)</div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <pre>[Full supplier summary — as shown above]
+
+## QC Rules
+[User's custom rules OR default rules, inserted here]
+
+Review the above supplier. Apply the QC rules and recommend any
+reclassifications. Respond with JSON only.</pre>
+      </div>
+    </div>
+
+    <div class="expandable" style="margin-top:8px;">
+      <div class="expand-header">
+        <div class="expand-label"><span class="badge qc">Default QC rules</span> (when user hasn't customized)</div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <pre>- If any tax rows exist for a supplier that is NOT a government entity,
+  collapse them into the supplier's primary spend category.
+- If transactions fall into categories outside the supplier's known line
+  of business, recommend moving them to an aligned category.
+- Prefer consolidation to the dominant category when the supplier clearly
+  operates in one business area.</pre>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ─── Response format ─── -->
+    <h3>LLM response format &amp; application</h3>
+
+    <div class="grid2">
+      <div>
+        <h3>Example response</h3>
+        <pre>{
+  "recommendations": [
+    {
+      "groupNumbers": [5],
+      "toClassificationPath":
+        "IT|Consulting|IT Consulting",
+      "reason": "Tax rows for non-government
+        IT supplier — consolidate into primary"
+    },
+    {
+      "groupNumbers": [3, 4],
+      "toClassificationPath":
+        "IT|Consulting|IT Consulting",
+      "reason": "Software development is core
+        consulting for this supplier"
+    }
+  ],
+  "noChangeNeeded": false
+}</pre>
+      </div>
+      <div>
+        <h3>Application steps</h3>
+        <ul class="plain" style="margin-top:8px;">
+          <li><strong>1.</strong> Map <code>groupNumbers</code> → transaction IDs (via dedup group mapping, same as classification)</li>
+          <li><strong>2.</strong> Resolve <code>toClassificationPath</code> → <code>taxonomy_node_id</code> (fuzzy matching via <code>findClosestTaxonomyMatch()</code>)</li>
+          <li><strong>3.</strong> Update matched transactions: <code>taxonomy_node_id</code>, <code>classification_status = 'classified_by_qc_agent'</code></li>
+          <li><strong>4.</strong> Flag ALL transactions for the supplier: <code>flagged_for_review = true</code></li>
+        </ul>
+        <div class="highlight" style="margin-top:12px;">
+          Invalid group numbers → skipped with warning. Invalid taxonomy paths → fuzzy match attempted; if still no match, skipped with warning. Valid recommendations are still applied.
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ─── What user prompts can do ─── -->
+    <h3>What user prompts can leverage</h3>
+    <p>Because the supplier summary includes all context, users can write arbitrarily specific rules:</p>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>User prompt example</th><th>Data that supports it</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>"Consolidate tax rows for non-government suppliers"</td><td>Supplier type + transaction groups showing tax descriptions</td></tr>
+          <tr><td>"Expand classification for multi-domain suppliers using line of business"</td><td>Supplier research (industry, products) + transaction groups</td></tr>
+          <tr><td>"If supplier industry doesn't match L1, reclassify"</td><td>Supplier research + current paths + full taxonomy</td></tr>
+          <tr><td>"Staffing suppliers should be under HR, not IT"</td><td>Supplier research (products/industry) + current paths</td></tr>
+          <tr><td>"If &lt;5% spend in a category, consolidate into dominant"</td><td>Spend amounts per classification</td></tr>
+          <tr><td>"Subsidiaries of our company → Exempt"</td><td>Parent company + sister companies from company context</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ─── Implementation ─── -->
+    <h3>Implementation files &amp; interfaces</h3>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">New files</div>
+        <ul class="plain">
+          <li><code>src/main/agents/qc-agent.ts</code> — QCAgent class</li>
+          <li><code>src/main/services/qc.ts</code> — QCRunner rewrite</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title">QCRunner dependencies</div>
+        <ul class="plain">
+          <li><code>qcAgent: QCAgent</code> (LLM)</li>
+          <li><code>supplierUniverse: SupplierUniverse</code> (research)</li>
+          <li><code>project: ProjectStore</code> (config, column priorities, company context)</li>
+          <li><code>transactions: TransactionStore</code> (new methods)</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin-top:16px;">Interfaces</h3>
+    <pre>// QCAgent (src/shared/types/services.ts)
+interface QCAgent {
+  review(input: { supplierSummary: string; rules: string }): Promise&lt;QCResult&gt;;
+}
+
+// QCRunner — renamed methods
+interface QCRunner {
+  runQC(config?: QCConfig): Promise&lt;void&gt;;
+  getSupplierCount(filter?: TransactionFilter): Promise&lt;number&gt;;
+  getIsRunning(): boolean;
+  stop(): void;  // renamed from cancel()
+}
+
+// New TransactionStore methods
+getSpendByTaxonomy(supplierId: string): Promise&lt;SpendByTaxonomyResult[]&gt;;
+getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string,
+  columnPriorities: string[]): Promise&lt;Array&lt;Record&lt;string, unknown&gt;&gt;&gt;;</pre>
+
+    <h3 style="margin-top:16px;">IPC channels</h3>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Channel</th><th>Args</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>qc:getConfig</code></td><td><code>[]</code></td><td><code>QCConfig</code></td></tr>
+          <tr><td><code>qc:setConfig</code></td><td><code>[config: QCConfig]</code></td><td><code>void</code></td></tr>
+          <tr><td><code>qc:getDefaults</code></td><td><code>[]</code></td><td><code>QCConfig</code></td></tr>
+          <tr><td><code>qc:run</code></td><td><code>[config?: QCConfig]</code></td><td><code>void</code></td></tr>
+          <tr><td><code>qc:stop</code></td><td><code>[]</code></td><td><code>void</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ─── Error handling ─── -->
+    <h3>Error handling</h3>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>Scenario</th><th>Behavior</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>llm.rules</code> empty</td><td>Fall back to <code>DEFAULT_QC_RULES</code>, log warning</td></tr>
+          <tr><td>Thresholds missing</td><td>Fall back to 0.95 / 0.90</td></tr>
+          <tr><td><code>scope</code> empty</td><td>All suppliers (not an error)</td></tr>
+          <tr><td><code>gate_conditions</code> empty</td><td>All scoped suppliers get LLM review</td></tr>
+          <tr><td>No classified transactions for supplier</td><td>Skip supplier, log error</td></tr>
+          <tr><td>Invalid group numbers in LLM response</td><td>Skip those recommendations, apply valid ones</td></tr>
+          <tr><td>Invalid taxonomy path in LLM response</td><td>Fuzzy match → if still no match, skip recommendation</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ─── Deviations ─── -->
+    <h3>Implementation deviations from spec</h3>
+    <div class="card">
+      <ul class="plain">
+        <li><strong>IPC channel:</strong> <code>qc:start</code> → <code>qc:run</code> (matches config-first design — old <code>qc:start</code> took a <code>TransactionFilter</code>; new <code>qc:run</code> takes <code>QCConfig</code>)</li>
+        <li><strong>Algorithmic flagging:</strong> <code>pullOutliersTo</code> now sets <code>flaggedForReview = true</code> on all consolidation changes (spec: "Any QC change = flagged. No exceptions.")</li>
+        <li><strong>FilterConditionQC:</strong> Separate type from <code>FilterCondition</code> — QC-specific operators (<code>is_true</code>, <code>is_false</code>) and fields computed at runtime that don't exist in transactions table. Evaluated in-memory against <code>SupplierQCData</code>.</li>
+        <li><strong>Stop status:</strong> QC progress events use existing <code>'cancelled'</code> status (not <code>'stopped'</code>) for renderer consistency with the existing progress UI.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ═══════════════ TAB: ALL TASKS ═══════════════ -->
+  <div id="tab-tasks" class="panel">
+    <h2>All Tasks — Core Classification Improvements</h2>
+
+    <!-- Task 1 -->
+    <div class="expandable open" style="margin-bottom:12px;">
+      <div class="expand-header">
+        <div class="expand-label">
+          <span class="badge p0">P0</span>
+          <strong>Task 1 — LLM Trace Logging</strong>
+          <span style="font-size:12px;color:var(--text-dim);">Issue #303 · Size S</span>
+        </div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <p><strong>Problem:</strong> No observability into LLM calls. Debugging misclassifications requires guessing what the LLM saw.</p>
+        <p><strong>Solution:</strong> File-based trace logger (<code>src/main/utils/llm-trace.ts</code>). Opt-in via <code>LLM_TRACE_FILE</code> env var. JSONL format — one entry per call, fully greppable.</p>
+        <p><strong>Integration:</strong> Each agent calls <code>traceLog()</code> after <code>llmClient.chat()</code> returns — not inside LLMClient (agents have the semantic context: supplier name, batch index, agent type).</p>
+        <p><strong>New script:</strong> <code>npm run dev:trace</code> — sets both <code>LOG_FILE</code> and <code>LLM_TRACE_FILE</code>.</p>
+        <p><strong>Status:</strong> <span class="badge new">DONE</span> — implemented in classification agent, research agent, column mapping agent, QC agent.</p>
+      </div>
+    </div>
+
+    <!-- Task 2 -->
+    <div class="expandable open" style="margin-bottom:12px;">
+      <div class="expand-header">
+        <div class="expand-label">
+          <span class="badge p0">P0</span>
+          <strong>Task 2 — Parent Name Injection</strong>
+          <span style="font-size:12px;color:var(--text-dim);">Issue #302 · Size S</span>
+        </div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <p><strong>Problem:</strong> <code>parentName</code> was always <code>null</code> in classification calls. The research agent extracts and stores parent company names — they just weren't being read.</p>
+        <p><strong>Solution:</strong> JOIN <code>supplier_parents</code> in the supplier info query. Fallback chain: project-level parent → universe <code>parentCompanyName</code> → null.</p>
+        <p><strong>Status:</strong> <span class="badge new">DONE</span></p>
+      </div>
+    </div>
+
+    <!-- Task 3 -->
+    <div class="expandable open" style="margin-bottom:12px;">
+      <div class="expand-header">
+        <div class="expand-label">
+          <span class="badge p0">P0</span>
+          <strong>Task 3 — Split Classification into Two Calls</strong>
+          <span style="font-size:12px;color:var(--text-dim);">Issues #317, #221 · Size L</span>
+        </div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <p><strong>Problem:</strong> Single call per supplier sends full taxonomy (~4000–5000 tokens). LLM must simultaneously reason about supplier identity, category selection, and transaction-level L3 matching.</p>
+        <p><strong>Solution:</strong> Two sequential calls. Call 1 is supplier-level + batched at 10. Call 2 is transaction-level + per-supplier with filtered taxonomy.</p>
+        <p><strong>Revision:</strong> Originally implemented as two-phase (all Call 1 → all Call 2 via global <code>categoryMap</code>). Revised to <strong>chunked pipeline</strong> — each batch of 10 flows through Call 1 → Call 2 before the next batch starts. Eliminates global in-memory map, gives incremental persistence and steady progress bar.</p>
+        <p><strong>Key deviations from spec:</strong></p>
+        <ul class="plain">
+          <li>Override rules moved to Phase 1 pre-pass (not inside <code>classifySupplierTransactions</code>)</li>
+          <li>Supplier info fetched twice: Phase 1 (for Call 1 batch) + <code>classifySupplierTransactions</code> (for Call 2 context injection). Keeps Call 2 self-contained.</li>
+          <li>Legacy fallback in <code>classifyTransactionGroup()</code> wrapper when Call 1 returns no valid category</li>
+          <li>Chunked pipeline replaces two-phase: <code>batchCategoryMap</code> (batch-scoped) instead of global <code>categoryMap</code></li>
+        </ul>
+        <p><strong>Status:</strong> <span class="badge new">DONE</span></p>
+      </div>
+    </div>
+
+    <!-- Task 4 -->
+    <div class="expandable open" style="margin-bottom:12px;">
+      <div class="expand-header">
+        <div class="expand-label">
+          <span class="badge p1">P1</span>
+          <strong>Task 4 — QC Agent</strong>
+          <span style="font-size:12px;color:var(--text-dim);">Issue #306 · Size L</span>
+        </div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <p><strong>Design principle:</strong> Classification is deterministic — one L1|L2 per supplier, consistent baseline. QC is user-controlled — user configures scope, gate conditions, and rules prompt. Can be run multiple times.</p>
+
+        <div class="card qc" style="border-color:var(--pink);background:rgba(247,120,186,0.05);margin:12px 0;">
+          <div class="card-title"><span class="badge qc">QC</span> runQC(config)</div>
+          <ul class="plain">
+            <li><strong>Scope:</strong> FilterCondition[] — which suppliers to process</li>
+            <li><strong>Algorithmic pass:</strong> spend-weighted consolidation (l3_threshold: 0.95, l2_threshold: 0.90)</li>
+            <li><strong>LLM pass:</strong> gate_conditions determine which scoped suppliers get LLM review; <code>rules</code> is user prompt injected into the call</li>
+            <li><strong>All QC changes:</strong> flagged for human review (<code>flaggedForReview = true</code>)</li>
+          </ul>
+        </div>
+
+        <p><strong>QC status flow:</strong></p>
+        <div class="status-flow">
+          <div class="status-pill ai">classified_by_ai</div>
+          <div class="status-pill arrow">→</div>
+          <div class="status-pill qc">classified_by_qc_agent</div>
+          <div class="status-pill arrow">+</div>
+          <div class="status-pill qc">flaggedForReview = true</div>
+        </div>
+
+        <p><strong>Key deviations from spec:</strong></p>
+        <ul class="plain">
+          <li>QC IPC channel renamed from <code>qc:start</code> to <code>qc:run</code> to match config-first design</li>
+          <li>Algorithmic pass sets <code>flaggedForReview = true</code> on all consolidation changes (spec: "Any QC change = flagged. No exceptions.")</li>
+          <li><code>FilterConditionQC</code> is a separate type from <code>FilterCondition</code> — QC conditions are evaluated in-memory against <code>SupplierQCData</code> objects (fields like <code>algorithmic_resolved</code>, <code>total_spend</code> don't exist in the transactions table)</li>
+          <li>Stop status uses existing <code>'cancelled'</code> (not <code>'stopped'</code>) in QC progress events for renderer consistency</li>
+        </ul>
+        <p><strong>Status:</strong> <span class="badge new">DONE</span></p>
+      </div>
+    </div>
+
+    <!-- Task 5 -->
+    <div class="expandable open" style="margin-bottom:12px;">
+      <div class="expand-header">
+        <div class="expand-label">
+          <span class="badge p1">P1</span>
+          <strong>Task 5 — Research Warning Logging</strong>
+          <span style="font-size:12px;color:var(--text-dim);">Size XS</span>
+        </div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <p><strong>Problem:</strong> If a supplier is marked <code>is_researched = true</code> in <code>project_suppliers</code> but <code>supplierUniverse.getSupplier()</code> returns null, classification silently proceeds without research data. This indicates stale or mismatched universe data that should be surfaced.</p>
+        <p><strong>Solution:</strong> Added <code>is_researched</code> to the Phase 1 supplier info query. After the universe lookup, if <code>is_researched && !research</code>, log a <code>WARN</code> via <code>debugLog</code>.</p>
+        <pre>if (supplierInfo?.is_researched && !research) {
+  debugLog('WARN', `Supplier "${supplierName}" is marked as researched but no research data found in supplier universe`);
+}</pre>
+        <p><strong>Status:</strong> <span class="badge new">DONE</span></p>
+      </div>
+    </div>
+
+    <!-- Task 6 -->
+    <div class="expandable open" style="margin-bottom:12px;">
+      <div class="expand-header">
+        <div class="expand-label">
+          <span class="badge p1">P1</span>
+          <strong>Task 6 — Call 2 Error Resilience</strong>
+          <span style="font-size:12px;color:var(--text-dim);">Size XS</span>
+        </div>
+        <div class="expand-arrow">▼</div>
+      </div>
+      <div class="expand-body">
+        <p><strong>Problem:</strong> If <code>classifySupplierTransactions</code> threw AND <code>markSupplierError</code> also threw (e.g., DB failure), the error escaped and <code>processedSuppliers++</code> never ran. The pipeline would stall or report incorrect progress.</p>
+        <p><strong>Solution:</strong> Two changes:</p>
+        <ul class="plain">
+          <li>Moved <code>processedSuppliers++</code> into a <code>finally</code> block — always increments regardless of success/failure</li>
+          <li>Wrapped <code>markSupplierError</code> in its own try/catch inside the outer catch — double failures are logged but don't propagate</li>
+        </ul>
+        <pre>try {
+  // classification or markSupplierError (no categoryPath)
+} catch (err) {
+  debugLog('ERROR', ...);
+  try { await this.markSupplierError(...); }
+  catch (markErr) { debugLog('ERROR', ...); }
+} finally {
+  processedSuppliers++;  // always runs
+}</pre>
+        <p><strong>Status:</strong> <span class="badge new">DONE</span></p>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <h3>Design principles</h3>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">Classification is deterministic</div>
+        <p style="font-size:13px;">One supplier → one L1|L2 → L3 assignments. No multi-L2 per supplier. No user configuration — same logic every run. Produces a consistent baseline.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">QC is user-controlled</div>
+        <p style="font-size:13px;">User decides: which suppliers to review (scope), when to use LLM (gate conditions), what the LLM checks (rules prompt). Any QC change gets flagged.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Tail spend is not special</div>
+        <p style="font-size:13px;">Same 2-call pipeline, just with empty research. Call 1 infers from name alone. QC catches any mistakes. Keeps architecture uniform.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Rules handle returning suppliers</div>
+        <p style="font-size:13px;">Generate Rules captures reviewed classifications as override rules. Returning suppliers hit rules before LLM is invoked. The chunked pipeline gives crash resilience — Call 1 results don't need DB persistence because Call 2 writes to DB immediately after each batch.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function showTab(name, el) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    el.classList.add('active');
+    return false;
+  }
+
+  // Event delegation — one handler on document, finds closest .expand-header
+  document.addEventListener('click', function(e) {
+    var header = e.target.closest('.expand-header');
+    if (!header) return;
+    var expandable = header.parentElement;
+    if (expandable && expandable.classList.contains('expandable')) {
+      e.stopPropagation();
+      expandable.classList.toggle('open');
+    }
+  });
+</script>
+
+</body>
+</html>

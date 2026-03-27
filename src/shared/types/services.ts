@@ -3,10 +3,10 @@ import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfir
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
-import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
+import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress, CategorySelectionInput, L3ClassificationInput, TailSpendCategorySelectionInput, TailSpendL3Input, QCConfig, QCResult, SpendByTaxonomyResult, FilterConditionQC } from './classification';
 import type { FeedbackAgentInput, FeedbackRecommendation } from './feedback';
 
 // ─── LLM Config ──────────────────────────────────────────────────────────────
@@ -104,7 +104,12 @@ export interface WebSearch {
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 export interface ClassificationAgent {
-  classifyInvoiceGroup(input: ClassificationInput): Promise<ClassificationResult>;
+  selectCategories(input: CategorySelectionInput): Promise<Map<number, string>>;
+  selectCategoriesForTailSpend(input: TailSpendCategorySelectionInput): Promise<Map<number, string>>;
+  classifyL3(input: L3ClassificationInput): Promise<ClassificationResult>;
+  classifyL3ForTailSpend(input: TailSpendL3Input): Promise<Map<number, string>>;
+  /** Backward compat wrapper — calls selectCategories + classifyL3 */
+  classifyTransactionGroup(input: ClassificationInput): Promise<ClassificationResult>;
 }
 
 export interface ResearchAgent {
@@ -118,6 +123,10 @@ export interface ColumnMappingAgent {
 
 export interface FeedbackAgent {
   analyze(input: FeedbackAgentInput): Promise<FeedbackRecommendation>;
+}
+
+export interface QCAgent {
+  review(input: { supplierSummary: string; rules: string }): Promise<QCResult>;
 }
 
 // ─── Data Services ───────────────────────────────────────────────────────────
@@ -151,6 +160,9 @@ export interface TransactionStore {
   getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;
   getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
   markAllReviewed(): Promise<number>;
+  applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
+  getSpendByTaxonomy(supplierId: string): Promise<SpendByTaxonomyResult[]>;
+  getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string, columnPriorities: string[]): Promise<Array<Record<string, unknown>>>;
 }
 
 export interface TaxonomyStore {
@@ -194,11 +206,24 @@ export interface SupplierService {
 
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
+  listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
+  createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
-  evaluateRules(transactionIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
+  evaluateRules(transactionIds?: string[], ruleIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
+  previewRules(ruleIds: string[]): Promise<{ affectedRowCount: number; matchingRuleCount: number }>;
+  applyRules(ruleIds: string[]): Promise<{ matchedCount: number; ruleCount: number }>;
   generate_rules_preview(): Promise<GenerateRulesResult>;
+  // Group operations
+  listGroups(): Promise<RuleGroup[]>;
+  createGroup(input: RuleGroupCreate): Promise<{ id: string }>;
+  updateGroup(groupId: string, updates: RuleGroupUpdate): Promise<void>;
+  deleteGroup(groupId: string): Promise<void>;
+  reorderGroups(orderedIds: string[]): Promise<void>;
+  moveRuleToGroup(ruleId: string, targetGroupId: string | null): Promise<void>;
+  assignToGroup(ruleIds: string[], groupId: string | null): Promise<void>;
+  filterAndAssignToGroup(filter: import('./transactions').GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }>;
 }
 
 export interface ChangelogStore {
@@ -211,7 +236,7 @@ export interface ChangelogStore {
 
 export interface IngestService {
   selectFile(): Promise<string | null>;
-  parseCSVPreview(filePath: string): CSVPreview;
+  parseCSVPreview(filePath: string): Promise<CSVPreview>;
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
   importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
   getUploadHistory(): Promise<UploadRecord[]>;
@@ -229,23 +254,25 @@ export type ResearchProgressCallback = (progress: ResearchProgress) => void;
 
 export interface SupplierResearcher {
   researchSingle(supplierName: string): Promise<SupplierInfo>;
-  researchAll(onProgress?: ResearchProgressCallback): Promise<void>;
+  researchAll(supplierIds?: string[], options?: { suppressTerminal?: boolean }): Promise<void>;
+  categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void>;
+  categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[]): Promise<void>;
   cancel(): void;
 }
 
 export interface ClassificationRunner {
-  classifyAll(conditions?: FilterCondition[]): Promise<void>;
-  getScopeCount(conditions?: FilterCondition[]): Promise<number>;
-  classifySupplier(projectSupplierId: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], scopedTxnIds?: Set<string>): Promise<void>;
+  classifyAll(groupedFilter?: import('./transactions').GroupedFilter): Promise<void>;
+  getScopeCount(groupedFilter?: import('./transactions').GroupedFilter): Promise<number>;
+  classifySupplierTransactions(projectSupplierId: string, categoryPath: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], scopedTxnIds?: Set<string>): Promise<void>;
   getIsRunning(): boolean;
-  cancel(): Promise<void>;
+  stop(): Promise<void>;
 }
 
 export interface QCRunner {
-  runQC(filter?: TransactionFilter): Promise<void>;
-  getSupplierCount(filter?: TransactionFilter): Promise<number>;
+  runQC(config?: QCConfig): Promise<void>;
+  getSupplierCount(scope?: FilterConditionQC[]): Promise<number>;
   getIsRunning(): boolean;
-  cancel(): void;
+  stop(): void;
 }
 
 // ─── Upload Record ───────────────────────────────────────────────────────────

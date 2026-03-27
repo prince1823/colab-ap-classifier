@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
-import type { ResearchProgress } from '../../shared/types/classification'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
+import { useWorkflowStore } from '../stores/workflowStore'
+import { researchSingle, isResearchRunning } from '../lib/researchRunner'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
@@ -29,7 +30,7 @@ export default function SuppliersPage() {
   const { advancedGrouped, setAdvancedGrouped } = useSupplierFilterStore()
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
+  const researchProgress = useWorkflowStore(s => s.researchProgress)
   const [tailSpendThreshold, setTailSpendThreshold] = useState<string>('10000')
   const [tailSpendSet, setTailSpendSet] = useState(false)
   const [tailSpendActive, setTailSpendActive] = useState(false)
@@ -101,23 +102,31 @@ export default function SuppliersPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Reload supplier data when switching back from normalize tab
-  useEffect(() => {
-    if (viewMode === 'suppliers') loadData()
-  }, [viewMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Track whether normalize made changes that need a supplier refresh
+  const supplierDataStale = useRef(false)
+  const markSupplierDataStale = useCallback(() => { supplierDataStale.current = true }, [])
 
-  // Subscribe to research progress
-  useEffect(() => {
-    const unsub = ipc.suppliers.onResearchProgress((progress: ResearchProgress) => {
-      setResearchProgress(progress)
-      if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
-        setTimeout(() => {
-          setResearchProgress(null)
-        }, 1500)
+  // Tab switch — visibility:hidden preserves scroll natively, no manual save/restore needed
+  const handleViewModeSwitch = useCallback(() => {
+    setViewMode(prev => {
+      const next = prev === 'normalize' ? 'suppliers' : 'normalize'
+      // Switching back to suppliers and data was changed in normalize → background refresh
+      if (next === 'suppliers' && supplierDataStale.current) {
+        supplierDataStale.current = false
+        // Delay loadData so it runs AFTER the visibility switch renders,
+        // keeping scroll position intact while new data streams in
+        setTimeout(() => loadData(), 0)
       }
+      return next
     })
-    return unsub
-  }, [])
+  }, [loadData])
+
+  // Reload suppliers when research reaches any terminal state
+  useEffect(() => {
+    if (researchProgress?.status === 'completed' || researchProgress?.status === 'cancelled' || researchProgress?.status === 'failed') {
+      loadData()
+    }
+  }, [researchProgress?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Update local state */
   const updateSuppliers = useCallback((updater: (prev: ProjectSupplierView[]) => ProjectSupplierView[]) => {
@@ -169,34 +178,28 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
+  /** Save l1L2Path directly on project_suppliers */
+  const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
+    setSaving(true)
+    try {
+      await ipc.suppliers.update(supplier.id, { l1L2Path: newValue || undefined })
+      updateSuppliers(prev => prev.map(s =>
+        s.id === supplier.id ? { ...s, l1L2Path: newValue || null } : s
+      ))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update')
+    } finally {
+      setSaving(false)
+    }
+  }, [updateSuppliers])
+
   /** Research a single supplier */
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
-    setResearchProgress({
-      status: 'running',
-      totalSuppliers: 1,
-      processedSuppliers: 0,
-      percentage: 0,
-      currentSupplier: supplier.supplierName,
-      currentStep: 'Researching',
-    })
-    try {
-      const info = await ipc.suppliers.researchSingle(supplier.id)
-      // Update just this supplier in local state instead of full reload
+    const info = await researchSingle(supplier)
+    if (info) {
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, isResearched: true, supplierInfo: info } : s
       ))
-      setResearchProgress({
-        status: 'completed',
-        totalSuppliers: 1,
-        processedSuppliers: 1,
-        percentage: 100,
-        currentSupplier: supplier.supplierName,
-        currentStep: 'Done',
-      })
-      setTimeout(() => setResearchProgress(null), 3000)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Research failed')
-      setResearchProgress(null)
     }
   }, [updateSuppliers])
 
@@ -215,39 +218,18 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Batch research selected */
-  const researchSelected = useCallback(async () => {
-    const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
-    if (selected.length === 0) return
-    const total = selected.length
-    for (let i = 0; i < total; i++) {
-      const s = selected[i]
-      setResearchProgress({
-        status: 'running',
-        totalSuppliers: total,
-        processedSuppliers: i,
-        percentage: Math.round((i / total) * 100),
-        currentSupplier: s.supplierName,
-        currentStep: `Researching ${i + 1} of ${total}`,
-      })
-      try {
-        const info = await ipc.suppliers.researchSingle(s.id)
-        updateSuppliers(prev => prev.map(existing =>
-          existing.id === s.id ? { ...existing, isResearched: true, supplierInfo: info } : existing
-        ))
-      } catch { /* continue */ }
-    }
-    setResearchProgress({
-      status: 'completed',
-      totalSuppliers: total,
-      processedSuppliers: total,
-      percentage: 100,
-      currentSupplier: null,
-      currentStep: 'Done',
+  /** Batch research selected — delegates entirely to the backend */
+  const researchSelected = useCallback(() => {
+    if (isResearchRunning()) return
+    const selectedIds_ = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched).map(s => s.id)
+    if (selectedIds_.length === 0) return
+    // Fire-and-forget: progress is streamed via EventBus → workflowStore.
+    // SuppliersPage reloads supplier data when the completed event arrives (see effect above).
+    ipc.suppliers.researchAll(selectedIds_).catch((err) => {
+      console.error('[Research] researchAll failed:', err)
     })
-    setTimeout(() => setResearchProgress(null), 3000)
     setSelectedIds(new Set())
-  }, [suppliers, selectedIds, updateSuppliers])
+  }, [suppliers, selectedIds])
 
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
@@ -517,7 +499,7 @@ export default function SuppliersPage() {
         </div>
 
         <button
-          onClick={() => setViewMode(viewMode === 'normalize' ? 'suppliers' : 'normalize')}
+          onClick={handleViewModeSwitch}
           className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
             viewMode === 'normalize'
               ? 'border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100'
@@ -596,74 +578,100 @@ export default function SuppliersPage() {
         )}
       </div>
 
-      {/* Normalize view */}
-      {viewMode === 'normalize' && <NormalizeView />}
+      {/* Tab content wrapper — both views stay mounted, clip hidden to preserve scroll
+           Uses z-index stacking instead of visibility (which would override parent's
+           visibility:hidden in AppShell's keep-alive routing) */}
+      <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
+        {/* Normalize view — always mounted */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column',
+          zIndex: viewMode === 'normalize' ? 1 : 0,
+          pointerEvents: viewMode === 'normalize' ? 'auto' : 'none',
+          opacity: viewMode === 'normalize' ? 1 : 0,
+        }}>
+          <NormalizeView onDataChange={markSupplierDataStale} />
+        </div>
 
-      {/* Row 2: Research progress bar */}
-      {viewMode === 'suppliers' && researchProgress && researchProgress.status === 'running' && (
-        <div className="suppliers-progress">
-          <div className="flex items-center justify-between mb-1">
-            <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
-            <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
-          </div>
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+        {/* Suppliers view — always mounted */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column',
+          zIndex: viewMode === 'suppliers' ? 1 : 0,
+          pointerEvents: viewMode === 'suppliers' ? 'auto' : 'none',
+          opacity: viewMode === 'suppliers' ? 1 : 0,
+        }}>
+          {/* Research progress bar */}
+          {researchProgress && researchProgress.status === 'running' && (
+            <div className="suppliers-progress">
+              <div className="flex items-center justify-between mb-1">
+                {researchProgress.currentSupplier
+                  ? <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+                  : <span>{researchProgress.currentStep}</span>
+                }
+                <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {researchProgress && researchProgress.status === 'completed' && (
+            <div className="suppliers-progress">
+              <div className="flex items-center gap-2 py-1">
+                <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
+                <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''} researched)</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
+              </div>
+            </div>
+          )}
+
+          {/* Two-panel layout */}
+          <div className="suppliers-content">
+            <SupplierListPanel
+              suppliers={displayedSuppliers}
+              focusedIndex={focusedIndex}
+              selectedIds={selectedIds}
+              selectedSupplierId={selectedSupplierId}
+              searchQuery={searchQuery}
+              quickFilter={quickFilter}
+              unresearchedCount={unresearchedCount}
+              unconfirmedCount={unconfirmedCount}
+              onSearchChange={setSearchQuery}
+              onQuickFilterChange={setQuickFilter}
+              onSupplierClick={handleSupplierClick}
+              onToggleCheck={toggleCheckById}
+              onToggleSelectAll={toggleSelectAll}
+              onKeyDown={handleKeyDown}
+              allChecked={allChecked}
+              isActive={activePanel === 'list'}
+              onResearch={researchSupplier}
+              onResearchSelected={researchSelected}
+              onConfirmSelected={confirmSelected}
+            />
+            <SupplierDetailPanel
+              ref={detailPanelRef}
+              supplier={selectedSupplier}
+              onSaveField={saveField}
+              onSaveParentName={saveParentName}
+              onSaveL1L2Path={saveL1L2Path}
+              onResearch={researchSupplier}
+              onConfirm={confirmSupplier}
+              focusedFieldIndex={detailFieldIndex}
+              onFocusedFieldChange={setDetailFieldIndex}
+              editingFieldIndex={editingFieldIndex}
+              onEditingFieldChange={setEditingFieldIndex}
+              onMoveToList={handleMoveToList}
+              isActive={activePanel === 'detail'}
             />
           </div>
         </div>
-      )}
-      {viewMode === 'suppliers' && researchProgress && researchProgress.status === 'completed' && (
-        <div className="suppliers-progress">
-          <div className="flex items-center gap-2 py-1">
-            <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
-            <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''} researched)</span>
-          </div>
-          <div className="progress-bar">
-            <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
-          </div>
-        </div>
-      )}
-
-      {/* Two-panel layout */}
-      {viewMode === 'suppliers' && <div className="suppliers-content">
-        <SupplierListPanel
-          suppliers={displayedSuppliers}
-          focusedIndex={focusedIndex}
-          selectedIds={selectedIds}
-          selectedSupplierId={selectedSupplierId}
-          searchQuery={searchQuery}
-          quickFilter={quickFilter}
-          unresearchedCount={unresearchedCount}
-          unconfirmedCount={unconfirmedCount}
-          onSearchChange={setSearchQuery}
-          onQuickFilterChange={setQuickFilter}
-          onSupplierClick={handleSupplierClick}
-          onToggleCheck={toggleCheckById}
-          onToggleSelectAll={toggleSelectAll}
-          onKeyDown={handleKeyDown}
-          allChecked={allChecked}
-          isActive={activePanel === 'list'}
-          onResearch={researchSupplier}
-          onResearchSelected={researchSelected}
-          onConfirmSelected={confirmSelected}
-        />
-        <SupplierDetailPanel
-          ref={detailPanelRef}
-          supplier={selectedSupplier}
-          onSaveField={saveField}
-          onSaveParentName={saveParentName}
-          onResearch={researchSupplier}
-          onConfirm={confirmSupplier}
-          focusedFieldIndex={detailFieldIndex}
-          onFocusedFieldChange={setDetailFieldIndex}
-          editingFieldIndex={editingFieldIndex}
-          onEditingFieldChange={setEditingFieldIndex}
-          onMoveToList={handleMoveToList}
-          isActive={activePanel === 'detail'}
-        />
-      </div>}
+      </div>
 
       {saving && <div className="supplier-saving">Saving...</div>}
 

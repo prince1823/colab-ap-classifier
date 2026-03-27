@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Plus, X, ChevronUp, ChevronDown, Filter, Layers, Pin, Flag } from 'lucide-react'
+import { Plus, X, ChevronUp, ChevronDown, Filter, Layers, Pin, Flag, FolderOpen } from 'lucide-react'
 import { useDrag, useDrop } from 'react-dnd'
 import * as Popover from '@radix-ui/react-popover'
 import type { Aggregation, SpendDisplayMode } from '../../types/pivot'
 import type { PivotFilterState } from './PivotFilterBar'
+import type { RuleGroup } from '../../../shared/types/rules'
 import '../../styles/PivotHierarchy.css'
 
 const PIVOT_DIM_TYPE = 'PIVOT_DIM'
@@ -65,6 +66,10 @@ interface PivotToolbarProps {
   /* Flagged for review toggle */
   flaggedForReviewOnly?: boolean
   onFlaggedForReviewOnlyChange?: (on: boolean) => void
+  /* Rule group (bucket) selector */
+  ruleGroups?: RuleGroup[]
+  selectedGroupId?: string | null
+  onSelectedGroupIdChange?: (id: string | null) => void
 }
 
 /** Columns to exclude from the filter list (non-filterable) */
@@ -99,6 +104,9 @@ export default function PivotToolbar({
   onOpenAdvancedFilter,
   flaggedForReviewOnly = false,
   onFlaggedForReviewOnlyChange,
+  ruleGroups,
+  selectedGroupId,
+  onSelectedGroupIdChange,
 }: PivotToolbarProps) {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [addMenuSearch, setAddMenuSearch] = useState('')
@@ -345,28 +353,15 @@ export default function PivotToolbar({
         )}
       </div>
 
-      {/* Value + Aggregation + Spend toggle */}
-      <div className="pivot-toolbar-section">
-        <span className="pivot-toolbar-label">Value:</span>
-        <select
-          className="pivot-toolbar-select"
-          value={valueDimension}
-          onChange={e => onValueDimensionChange(e.target.value)}
-        >
-          {numericColumns.map(col => (
-            <option key={col} value={col}>{colLabel(col)}</option>
-          ))}
-        </select>
-        <select
-          className="pivot-toolbar-select"
-          value={aggregation}
-          onChange={e => onAggregationChange(e.target.value as Aggregation)}
-          style={{ width: 60 }}
-        >
-          <option value="sum">Sum</option>
-          <option value="count">Count</option>
-          <option value="average">Avg</option>
-        </select>
+      {/* Right side: Bucket, $, Filter, Review, Collapse, Freeze */}
+      <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
+        {ruleGroups && ruleGroups.length > 0 && onSelectedGroupIdChange && (
+          <BucketSelector
+            groups={ruleGroups}
+            selectedGroupId={selectedGroupId ?? null}
+            onChange={onSelectedGroupIdChange}
+          />
+        )}
         {showSpendToggle && (
           <button
             className="pivot-toolbar-icon-btn"
@@ -405,10 +400,6 @@ export default function PivotToolbar({
             )}
           </button>
         )}
-      </div>
-
-      {/* Flagged for review toggle + Collapse cycle — right side */}
-      <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
         {onFlaggedForReviewOnlyChange && (
           <button
             className={`pivot-toolbar-icon-btn${flaggedForReviewOnly ? ' pivot-toolbar-icon-btn-active' : ''}`}
@@ -813,6 +804,73 @@ function OverflowFilterBtn({
                 Clear filter
               </button>
             )}
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  )
+}
+
+function BucketSelector({
+  groups,
+  selectedGroupId,
+  onChange,
+}: {
+  groups: RuleGroup[]
+  selectedGroupId: string | null
+  onChange: (id: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const sorted = useMemo(
+    () => [...groups].sort((a, b) => b.priority - a.priority),
+    [groups]
+  )
+  const selectedName = selectedGroupId
+    ? sorted.find(g => g.id === selectedGroupId)?.name ?? 'Ungrouped'
+    : 'Ungrouped'
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          className="pivot-toolbar-icon-btn"
+          title={`Rule bucket: ${selectedName}`}
+          data-active={selectedGroupId ? '' : undefined}
+          style={{ display: 'flex', alignItems: 'center', gap: 3 }}
+        >
+          <FolderOpen size={12} />
+          <span style={{ fontSize: 9, fontWeight: 700, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {selectedName}
+          </span>
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          sideOffset={4}
+          align="end"
+          className="z-50 w-48 rounded-lg border border-gray-200 bg-white shadow-lg"
+        >
+          <div className="py-1">
+            <button
+              onClick={() => { onChange(null); setOpen(false) }}
+              className={`w-full text-left px-3 py-1.5 text-[11px] cursor-pointer transition-colors ${
+                !selectedGroupId ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Ungrouped
+            </button>
+            {sorted.map(g => (
+              <button
+                key={g.id}
+                onClick={() => { onChange(g.id); setOpen(false) }}
+                className={`w-full text-left px-3 py-1.5 text-[11px] cursor-pointer transition-colors ${
+                  selectedGroupId === g.id ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {g.name}
+                <span className="text-gray-400 ml-1">(P{g.priority})</span>
+              </button>
+            ))}
           </div>
         </Popover.Content>
       </Popover.Portal>

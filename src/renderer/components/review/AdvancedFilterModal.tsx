@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { GroupedFilterBuilder, conditionsToGrouped, makeEmptyGroup } from '../FilterConditionBuilder'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 import type { FilterCondition, GroupedFilter } from '../../../shared/types/transactions'
 import type { FieldDefinition } from '../FilterConditionBuilder'
 
@@ -92,12 +93,13 @@ export default function AdvancedFilterModal({
 
     const stringFields = availableFields.filter(f => f.type === 'string').map(f => f.name)
     for (const field of stringFields) {
-      ipc.transactions.distinctValues(field, 5000)
+      getDistinctValues(field, 5000)
         .then((values: string[]) => {
           setDistinctValues(prev => ({ ...prev, [field]: values ?? [] }))
         })
-        .catch(() => {
+        .catch((e) => {
           setDistinctValues(prev => ({ ...prev, [field]: [] }))
+          showError(`Failed to load suggestions for "${field}"`, e)
         })
     }
   }, [isOpen, availableFields])

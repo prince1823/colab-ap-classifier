@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { Aggregation, SpendDisplayMode } from '../types/pivot'
 import type { PivotFilterState } from '../components/review/PivotFilterBar'
 import type { GroupedFilter } from '../../shared/types/transactions'
@@ -20,7 +21,8 @@ interface PivotState {
   showAdvancedFilter: boolean
   /** Toggle: show only rows flagged for review */
   flaggedForReviewOnly: boolean
-
+  /** Selected rule group for new rules */
+  selectedGroupId: string | null
   // Actions
   setRowDimensions: (dims: string[]) => void
   setValueDimension: (dim: string) => void
@@ -30,6 +32,7 @@ interface PivotState {
   setAdvancedGrouped: (grouped: GroupedFilter | null) => void
   setShowAdvancedFilter: (show: boolean) => void
   setFlaggedForReviewOnly: (on: boolean) => void
+  setSelectedGroupId: (id: string | null) => void
   clearAllFilters: () => void
   /** Reset all state (e.g., on project switch) */
   reset: () => void
@@ -44,19 +47,36 @@ const INITIAL_STATE = {
   advancedGrouped: null as GroupedFilter | null,
   showAdvancedFilter: false,
   flaggedForReviewOnly: false,
+  selectedGroupId: null as string | null,
 }
 
-export const usePivotStore = create<PivotState>()((set) => ({
-  ...INITIAL_STATE,
+export const usePivotStore = create<PivotState>()(
+  persist(
+    (set) => ({
+      ...INITIAL_STATE,
 
-  setRowDimensions: (dims) => set({ rowDimensions: dims }),
-  setValueDimension: (dim) => set({ valueDimension: dim }),
-  setAggregation: (agg) => set({ aggregation: agg }),
-  setFilterState: (state) => set({ filterState: state }),
-  setSpendDisplayMode: (mode) => set({ spendDisplayMode: mode }),
-  setAdvancedGrouped: (grouped) => set({ advancedGrouped: grouped }),
-  setShowAdvancedFilter: (show) => set({ showAdvancedFilter: show }),
-  setFlaggedForReviewOnly: (on) => set({ flaggedForReviewOnly: on }),
-  clearAllFilters: () => set({ filterState: {}, advancedGrouped: null, flaggedForReviewOnly: false }),
-  reset: () => set(INITIAL_STATE),
-}))
+      setRowDimensions: (dims) => set({ rowDimensions: dims }),
+      setValueDimension: (dim) => set({ valueDimension: dim }),
+      setAggregation: (agg) => set({ aggregation: agg }),
+      setFilterState: (state) => set({ filterState: state }),
+      setSpendDisplayMode: (mode) => set({ spendDisplayMode: mode }),
+      setAdvancedGrouped: (grouped) => set({ advancedGrouped: grouped }),
+      setShowAdvancedFilter: (show) => set({ showAdvancedFilter: show }),
+      setFlaggedForReviewOnly: (on) => set({ flaggedForReviewOnly: on }),
+      setSelectedGroupId: (id) => set({ selectedGroupId: id }),
+      clearAllFilters: () => set({ filterState: {}, advancedGrouped: null, flaggedForReviewOnly: false }),
+      reset: () => set(INITIAL_STATE),
+    }),
+    {
+      name: 'c91-pivot',
+      version: 2,
+      partialize: (state) => ({
+        rowDimensions: state.rowDimensions,
+        valueDimension: state.valueDimension,
+        aggregation: state.aggregation,
+        spendDisplayMode: state.spendDisplayMode,
+        selectedGroupId: state.selectedGroupId,
+      }),
+    }
+  )
+)

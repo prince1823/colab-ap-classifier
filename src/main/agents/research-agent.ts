@@ -4,6 +4,7 @@ import type { SupplierInfo } from '../../shared/types/suppliers';
 import type { ExaSearchResult } from '../services/exa-search';
 import type { ResearchAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
+import { traceLog } from '../utils/llm-trace';
 
 export interface SupplierResearchResult extends SupplierInfo {
   confidence: 'high' | 'medium' | 'low';
@@ -105,10 +106,9 @@ export function buildUserPrompt(
   if (companyContext) {
     const contextParts: string[] = [];
     contextParts.push(`Industry: ${companyContext.industry}`);
-    if (companyContext.sector) contextParts.push(`Sector: ${companyContext.sector}`);
     if (companyContext.description) contextParts.push(`Description: ${companyContext.description}`);
-    if (companyContext.businessFocus) contextParts.push(`Business Focus: ${companyContext.businessFocus}`);
-    if (companyContext.procurementNuances) contextParts.push(`Procurement Nuances: ${companyContext.procurementNuances}`);
+    if (companyContext.sisterCompanies) contextParts.push(`Sister Companies: ${companyContext.sisterCompanies}`);
+    if (companyContext.additionalDetails) contextParts.push(`Additional Details: ${companyContext.additionalDetails}`);
 
     sections.push(`## Purchasing Company Context\n\n${contextParts.join('\n')}`);
   }
@@ -291,12 +291,58 @@ export class LLMResearchAgent implements ResearchAgent {
       searchResults as ExaSearchResult[] | undefined
     );
 
-    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
-      temperature: 0,
-      maxTokens: 1024,
+    const start = Date.now();
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 1024,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'research',
+        supplier: supplierName,
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    const elapsedMs = Date.now() - start;
+
+    let result: SupplierInfo;
+    try {
+      result = parseResponse(responseText).result;
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'research',
+        supplier: supplierName,
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
+
+    traceLog({
+      timestamp: new Date().toISOString(),
+      agent: 'research',
+      supplier: supplierName,
+      model: 'default',
+      systemPrompt,
+      userPrompt,
+      response: responseText,
+      elapsedMs,
     });
 
-    const { result } = parseResponse(responseText);
     return result;
   }
 }

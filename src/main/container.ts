@@ -21,6 +21,7 @@ import type {
   SupplierResearcher as ISupplierResearcher,
   ClassificationRunner as IClassificationRunner,
   QCRunner as IQCRunner,
+  QCAgent as IQCAgent,
 } from '../shared/types/services';
 
 import { DuckDBDatabase } from './services/database';
@@ -33,6 +34,7 @@ import { LLMClassificationAgent } from './agents/classification-agent';
 import { LLMResearchAgent } from './agents/research-agent';
 import { LLMColumnMappingAgent } from './agents/column-mapping-agent';
 import { LLMFeedbackAgent } from './agents/feedback-agent';
+import { LLMQCAgent } from './agents/qc-agent';
 import { ChangelogStore } from './services/changelog';
 import { TransactionStore } from './services/transactions';
 import { ProjectStore } from './services/project';
@@ -89,6 +91,7 @@ export function createContainer(): ServiceContainer {
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
   const feedbackAgent = new LLMFeedbackAgent(llm);
+  const qcAgent: IQCAgent = new LLMQCAgent(llm);
 
   // Data layer (order matters — respect dependency graph)
   const changelog = new ChangelogStore(db);
@@ -97,18 +100,19 @@ export function createContainer(): ServiceContainer {
   const taxonomy = new TaxonomyStore(db, project);
   const suppliers = new SupplierService(db, supplierUniverse);
   const rules = new RuleStore(db, transactions, project);
-  const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
+  const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent, eventBus);
   const exportSvc = new ExportService(db);
 
   // Orchestrators
   const researcher = new SupplierResearcher(
-    supplierUniverse, webSearch, researchAgent, eventBus, suppliers
+    supplierUniverse, webSearch, researchAgent, eventBus, suppliers,
+    classificationAgent, db
   );
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,
     transactions, changelog, classificationAgent, eventBus, supplierUniverse
   );
-  const qc = new QCRunner(db, transactions, eventBus);
+  const qc = new QCRunner(db, transactions, eventBus, qcAgent, supplierUniverse, project, taxonomy);
 
   return {
     db, supplierUniverse, eventBus, llm, appConfig, webSearch, license,

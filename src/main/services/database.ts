@@ -1,6 +1,7 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
 import { existsSync, unlinkSync } from 'fs';
 import type { Database } from '../../shared/types/services';
+import { debugLog } from '../utils/debug-log';
 
 /**
  * Convert `?` placeholders to DuckDB positional `$1, $2, ...` format.
@@ -36,7 +37,7 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents', 'rule_groups'];
 
 export { convertPlaceholders };
 
@@ -65,7 +66,7 @@ export class DuckDBDatabase implements Database {
       const walPath = filePath + '.wal';
       if (existsSync(walPath)) {
         console.warn(`[Database] Failed to open database, removing corrupted WAL file: ${walPath}`);
-        try { unlinkSync(walPath); } catch { /* ignore */ }
+        try { unlinkSync(walPath); } catch (e) { debugLog('WARN', 'Failed to remove WAL file', e); }
         this.instance = await DuckDBInstance.create(filePath);
         this.connection = await this.instance.connect();
       } else {
@@ -146,15 +147,23 @@ export class DuckDBDatabase implements Database {
       `);
     }
 
+    // Migrate: ensure l1_l2_path column exists on project_suppliers
+    const l1l2Col = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'l1_l2_path'"
+    );
+    if (l1l2Col.length === 0) {
+      await this.exec('ALTER TABLE project_suppliers ADD COLUMN l1_l2_path VARCHAR');
+    }
+
     // Migrate: drop classification_reasoning column from transactions if it exists
     try {
       await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
-    } catch { /* column doesn't exist, ignore */ }
+    } catch (e) { debugLog('INFO', 'Migration: classification_reasoning column not present (expected)', e); }
 
     // Migrate: add is_reverted column to change_log
     try {
       await this.exec('ALTER TABLE change_log ADD COLUMN is_reverted BOOLEAN DEFAULT FALSE');
-    } catch { /* column already exists, ignore */ }
+    } catch (e) { debugLog('INFO', 'Migration: is_reverted column already exists (expected)', e); }
 
     // Migrate: clean up old "Reverted:" entries — mark originals as reverted and delete the revert rows
     try {
@@ -170,12 +179,12 @@ export class DuckDBDatabase implements Database {
       `);
       // Delete old "Reverted:" rows (those with description starting with 'Reverted:')
       await this.exec("DELETE FROM change_log WHERE description LIKE 'Reverted:%'");
-    } catch { /* ignore — reverted_change_id column may not exist */ }
+    } catch (e) { debugLog('INFO', 'Migration: reverted_change_id cleanup skipped (expected if column absent)', e); }
 
     // Drop old reverted_change_id column if it exists
     try {
       await this.exec('ALTER TABLE change_log DROP COLUMN reverted_change_id');
-    } catch { /* column doesn't exist, ignore */ }
+    } catch (e) { debugLog('INFO', 'Migration: reverted_change_id column not present (expected)', e); }
 
     // Migrate: ensure flagged_for_review column exists on transactions
     const frCol = await this.all<{ column_name: string }>(
@@ -193,10 +202,32 @@ export class DuckDBDatabase implements Database {
       await this.exec('ALTER TABLE transactions ADD COLUMN applied_rule_id VARCHAR');
     }
 
-    // Migrate: ensure override_rules.name is unique
+    // Migrate: drop name unique index and convert priority DOUBLE→INTEGER for existing projects
     try {
-      await this.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name)');
-    } catch { /* index may already exist or constraint already enforced */ }
+      await this.exec('DROP INDEX IF EXISTS idx_override_rules_name');
+    } catch { /* ignore */ }
+    const priorityColType = await this.all<{ data_type: string }>(
+      "SELECT data_type FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'priority'"
+    );
+    if (priorityColType.length > 0 && priorityColType[0].data_type.toUpperCase() === 'DOUBLE') {
+      await this.exec(`
+        CREATE TABLE override_rules_int_migration (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL,
+          grouped_conditions JSON NOT NULL,
+          target_taxonomy_node_id VARCHAR NOT NULL,
+          priority INTEGER NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          source VARCHAR DEFAULT 'manual',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO override_rules_int_migration
+          SELECT id, name, grouped_conditions, target_taxonomy_node_id, CAST(ROUND(priority) AS INTEGER), is_active, source, created_at
+          FROM override_rules;
+        DROP TABLE override_rules;
+        ALTER TABLE override_rules_int_migration RENAME TO override_rules;
+      `);
+    }
 
     // Migrate: ensure supplier_parents table exists
     const spTable = await this.all<{ table_name: string }>(
@@ -221,7 +252,7 @@ export class DuckDBDatabase implements Database {
     }
     try {
       await this.exec('ALTER TABLE project_suppliers DROP COLUMN parent_supplier_name');
-    } catch { /* column already removed, ignore */ }
+    } catch (e) { debugLog('INFO', 'Migration: parent_supplier_name column already removed (expected)', e); }
 
     // Migrate: drop flat conditions column and make grouped_conditions the sole conditions store.
     // Recreates the table if conditions column still exists (handles INTEGER priority and old schema in one pass).
@@ -239,19 +270,18 @@ export class DuckDBDatabase implements Database {
       await this.exec(`
         CREATE TABLE override_rules_new (
           id VARCHAR PRIMARY KEY,
-          name VARCHAR NOT NULL UNIQUE,
+          name VARCHAR NOT NULL,
           grouped_conditions JSON NOT NULL,
           target_taxonomy_node_id VARCHAR NOT NULL,
-          priority DOUBLE NOT NULL,
+          priority INTEGER NOT NULL,
           is_active BOOLEAN DEFAULT TRUE,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         INSERT INTO override_rules_new
-          SELECT id, name, ${groupedSelect}, target_taxonomy_node_id, CAST(priority AS DOUBLE), is_active, created_at
+          SELECT id, name, ${groupedSelect}, target_taxonomy_node_id, CAST(ROUND(CAST(priority AS DOUBLE)) AS INTEGER), is_active, created_at
           FROM override_rules;
         DROP TABLE override_rules;
         ALTER TABLE override_rules_new RENAME TO override_rules;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_override_rules_name ON override_rules(name);
       `);
     }
 
@@ -261,6 +291,76 @@ export class DuckDBDatabase implements Database {
     );
     if (sourceCol.length === 0) {
       await this.exec("ALTER TABLE override_rules ADD COLUMN source VARCHAR DEFAULT 'manual'");
+    }
+
+    // Migrate: create rule_groups table (replaces rule_buckets)
+    const ruleGroupsExists = await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_name = 'rule_groups'"
+    );
+    if (ruleGroupsExists.length === 0) {
+      await this.exec(`
+        CREATE TABLE rule_groups (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL,
+          priority INTEGER NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE UNIQUE INDEX idx_rule_groups_priority ON rule_groups(priority);
+      `);
+
+      // Migrate non-default buckets from rule_buckets if that table exists
+      const ruleBucketsExists = await this.all<{ table_name: string }>(
+        "SELECT table_name FROM information_schema.tables WHERE table_name = 'rule_buckets'"
+      );
+      if (ruleBucketsExists.length > 0) {
+        // seed priority from sort_order + 1 to ensure >= 1
+        await this.exec(`
+          INSERT INTO rule_groups (id, name, priority, created_at)
+          SELECT id, name, sort_order + 1, created_at
+          FROM rule_buckets
+          WHERE is_default = FALSE
+        `);
+      }
+    }
+
+    // Migrate: replace bucket_id + priority columns on override_rules with group_id
+    const overrideRuleCols = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules'"
+    );
+    const colNames = overrideRuleCols.map((r) => r.column_name);
+    const hasBucketId = colNames.includes('bucket_id');
+    const hasPriority = colNames.includes('priority');
+
+    if (hasBucketId || hasPriority) {
+      // Recreate table with new schema; all rules migrate to group_id = NULL (ungrouped)
+      const hasGroupedCond = colNames.includes('grouped_conditions');
+      const gcSelect = hasGroupedCond ? 'grouped_conditions' : "'{}'";
+      await this.exec(`
+        CREATE TABLE override_rules_groups_migration (
+          id VARCHAR PRIMARY KEY,
+          name VARCHAR NOT NULL,
+          grouped_conditions JSON NOT NULL,
+          target_taxonomy_node_id VARCHAR NOT NULL,
+          group_id VARCHAR,
+          is_active BOOLEAN DEFAULT TRUE,
+          source VARCHAR DEFAULT 'manual',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO override_rules_groups_migration
+          SELECT id, name, ${gcSelect}, target_taxonomy_node_id, NULL AS group_id,
+                 is_active, COALESCE(source, 'manual'), created_at
+          FROM override_rules;
+        DROP TABLE override_rules;
+        ALTER TABLE override_rules_groups_migration RENAME TO override_rules;
+      `);
+    }
+
+    // Ensure group_id column exists (handles projects created after bucket removal but before this migration)
+    const hasGroupId = (await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'group_id'"
+    )).length > 0;
+    if (!hasGroupId) {
+      await this.exec('ALTER TABLE override_rules ADD COLUMN group_id VARCHAR');
     }
   }
 
@@ -367,12 +467,21 @@ export class DuckDBDatabase implements Database {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS rule_groups (
+        id VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL,
+        priority INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_groups_priority ON rule_groups(priority);
+
       CREATE TABLE IF NOT EXISTS override_rules (
         id VARCHAR PRIMARY KEY,
-        name VARCHAR NOT NULL UNIQUE,
+        name VARCHAR NOT NULL,
         grouped_conditions JSON NOT NULL,
         target_taxonomy_node_id VARCHAR NOT NULL,
-        priority DOUBLE NOT NULL,
+        group_id VARCHAR,
         is_active BOOLEAN DEFAULT TRUE,
         source VARCHAR DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -419,6 +528,7 @@ export class DuckDBDatabase implements Database {
         is_researched BOOLEAN DEFAULT FALSE,
         supplier_info JSON,
         mapped_taxonomy_paths JSON,
+        l1_l2_path VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );

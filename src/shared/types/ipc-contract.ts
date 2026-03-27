@@ -21,10 +21,10 @@ import type {
   PivotAggregationResult,
   GroupedFilter,
 } from './transactions';
-import type { ClassificationProgress, ResearchProgress, QCProgress } from './classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
 import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
 import type { FeedbackAnalyzeInput, FeedbackRecommendation, FeedbackApplyInput } from './feedback';
@@ -66,15 +66,18 @@ export interface IPCInvokeMap {
   'transactions:markAllReviewed':   { args: []; result: number };
 
   // Classification
-  'classification:start':      { args: [conditions?: FilterCondition[]]; result: void };
-  'classification:cancel':     { args: []; result: void };
-  'classification:scopeCount': { args: [conditions?: FilterCondition[]]; result: number };
+  'classification:start':      { args: [groupedFilter?: GroupedFilter]; result: void };
+  'classification:stop':       { args: []; result: void };
+  'classification:scopeCount': { args: [groupedFilter?: GroupedFilter]; result: number };
 
   // QC
-  'qc:start':     { args: [filter?: TransactionFilter]; result: void };
-  'qc:count':     { args: [filter?: TransactionFilter]; result: number };
-  'qc:cancel':    { args: []; result: void };
-  'qc:isRunning': { args: []; result: boolean };
+  'qc:run':        { args: [config?: QCConfig]; result: void };
+  'qc:count':      { args: [scope?: FilterConditionQC[]]; result: number };
+  'qc:stop':       { args: []; result: void };
+  'qc:isRunning':  { args: []; result: boolean };
+  'qc:getConfig':  { args: []; result: QCConfig };
+  'qc:setConfig':  { args: [config: QCConfig]; result: void };
+  'qc:getDefaults': { args: []; result: QCConfig };
 
   // Taxonomy
   'taxonomy:getNodeCount':   { args: []; result: number };
@@ -90,7 +93,8 @@ export interface IPCInvokeMap {
   'suppliers:list':           { args: [filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }]; result: ProjectSupplierView[] };
   'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
-  'suppliers:researchAll':    { args: []; result: void };
+  'suppliers:researchAll':    { args: [supplierIds?: string[]]; result: void };
+  'suppliers:cancelResearch': { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierId: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
@@ -109,10 +113,24 @@ export interface IPCInvokeMap {
 
   // Rules
   'rules:list':     { args: []; result: OverrideRule[] };
-  'rules:create':   { args: [input: OverrideRuleCreate]; result: { id: string } };
-  'rules:update':   { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
+  'rules:listPaginated': { args: [opts: { limit: number; offset: number; search?: string }]; result: { rules: OverrideRule[]; total: number } };
+  'rules:create':         { args: [input: OverrideRuleCreate]; result: { id: string } };
+  'rules:createAndApply': { args: [input: OverrideRuleCreate]; result: { id: string; matchedCount: number } };
+  'rules:update':         { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
   'rules:delete':   { args: [ruleId: string]; result: void };
-  'rules:generate': { args: []; result: GenerateRulesResult };
+  'rules:generate':      { args: []; result: GenerateRulesResult };
+  'rules:previewApply':  { args: [ruleIds: string[]]; result: { affectedRowCount: number; matchingRuleCount: number } };
+  'rules:apply':         { args: [ruleIds: string[]]; result: { matchedCount: number; ruleCount: number } };
+
+  // Rule Groups
+  'rules:listGroups':       { args: []; result: RuleGroup[] };
+  'rules:createGroup':      { args: [input: RuleGroupCreate]; result: { id: string } };
+  'rules:updateGroup':      { args: [groupId: string, updates: RuleGroupUpdate]; result: void };
+  'rules:deleteGroup':      { args: [groupId: string]; result: void };
+  'rules:reorderGroups':    { args: [orderedIds: string[]]; result: void };
+  'rules:moveRule':         { args: [ruleId: string, targetGroupId: string | null]; result: void };
+  'rules:assignToGroup':    { args: [ruleIds: string[], groupId: string | null]; result: void };
+  'rules:filterAssign':     { args: [filter: GroupedFilter, targetGroupId: string | null]; result: { matched: number } };
 
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };
@@ -146,12 +164,16 @@ export interface IPCInvokeMap {
   'license:activate':  { args: [licenseKey: string]; result: LicenseActivationResult };
   'license:getStatus': { args: []; result: LicenseStatus };
   'license:checkNow':  { args: []; result: LicenseStatus };
+
+  // Shell
+  'shell:openExternal': { args: [url: string]; result: void };
 }
 
 export interface IPCEventMap {
   'classification:progress':     ClassificationProgress;
   'suppliers:research:progress': ResearchProgress;
   'qc:progress':                 QCProgress;
+  'ingest:progress':             IngestProgress;
   'license:statusChanged':       LicenseStatus;
 }
 

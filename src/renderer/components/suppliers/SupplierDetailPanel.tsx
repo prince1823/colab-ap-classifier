@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
 import type { ProjectSupplierView, SupplierInfo, SupplierType } from '../../../shared/types/suppliers'
 import { fmtAbbrev } from '../../utils/formatSpend'
+import { ipc } from '../../lib/ipc'
 
 const SUPPLIER_TYPES: SupplierType[] = ['company', 'individual', 'government']
 
 /** Info fields config — order and layout */
 const DETAIL_FIELDS: {
-  key: keyof SupplierInfo | 'parentName'
+  key: keyof SupplierInfo | 'parentName' | 'l1L2Path'
   label: string
   editable: boolean
   type: 'text' | 'select' | 'readonly'
   wide?: boolean
 }[] = [
+  { key: 'l1L2Path', label: 'L1|L2 Category', editable: true, type: 'text', wide: true },
   { key: 'supplierType', label: 'Supplier Type', editable: true, type: 'select' },
   { key: 'officialBusinessName', label: 'Official Business Name', editable: true, type: 'text' },
   { key: 'parentName', label: 'Parent Supplier', editable: true, type: 'text' },
@@ -19,7 +21,6 @@ const DETAIL_FIELDS: {
   { key: 'serviceType', label: 'Service Type', editable: true, type: 'text' },
   { key: 'naicsCode', label: 'NAICS Code', editable: true, type: 'text' },
   { key: 'naicsDescription', label: 'NAICS Description', editable: true, type: 'text', wide: true },
-  { key: 'confidence', label: 'Confidence', editable: false, type: 'readonly' },
   { key: 'productsServices', label: 'Products & Services', editable: true, type: 'text', wide: true },
   { key: 'description', label: 'Description', editable: true, type: 'text', wide: true },
   { key: 'websiteUrl', label: 'Website', editable: true, type: 'text', wide: true },
@@ -157,6 +158,7 @@ interface SupplierDetailPanelProps {
   supplier: ProjectSupplierView | null
   onSaveField: (supplier: ProjectSupplierView, field: keyof SupplierInfo, value: string) => void
   onSaveParentName: (supplier: ProjectSupplierView, value: string) => void
+  onSaveL1L2Path: (supplier: ProjectSupplierView, value: string) => void
   onResearch: (supplier: ProjectSupplierView) => void
   onConfirm: (supplier: ProjectSupplierView) => void
   focusedFieldIndex: number
@@ -171,6 +173,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   supplier,
   onSaveField,
   onSaveParentName,
+  onSaveL1L2Path,
   onResearch,
   onConfirm,
   focusedFieldIndex,
@@ -232,19 +235,20 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   }
 
   const info = supplier.supplierInfo ?? {}
-  const getVal = (key: keyof SupplierInfo | 'parentName'): string => {
+  const getVal = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path'): string => {
     if (key === 'parentName') return supplier.parentName || ''
+    if (key === 'l1L2Path') return supplier.l1L2Path || ''
     const v = info[key as keyof SupplierInfo]
     if (v == null) return ''
     if (Array.isArray(v)) return v.join(', ')
     return String(v)
   }
 
-  const confidenceVal = getVal('confidence')
-
-  const handleSave = (key: keyof SupplierInfo | 'parentName', val: string) => {
+  const handleSave = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path', val: string) => {
     if (key === 'parentName') {
       onSaveParentName(supplier, val)
+    } else if (key === 'l1L2Path') {
+      onSaveL1L2Path(supplier, val)
     } else {
       onSaveField(supplier, key as keyof SupplierInfo, val)
     }
@@ -299,22 +303,6 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       {/* Info grid */}
       <div className="detail-info-grid">
         {DETAIL_FIELDS.map((field) => {
-          // Readonly confidence field
-          if (field.key === 'confidence') {
-            return (
-              <div key={field.key} className="detail-field">
-                <label className="detail-field-label">{field.label}</label>
-                <div className="detail-field-value">
-                  {confidenceVal ? (
-                    <span className={`confidence-badge ${confidenceVal}`}>{confidenceVal}</span>
-                  ) : (
-                    <span className="text-gray-300 italic">—</span>
-                  )}
-                </div>
-              </div>
-            )
-          }
-
           // Editable field with keyboard nav
           const currentNavIdx = navIdx
           navIdx++
@@ -364,9 +352,10 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
                         onClick={(e) => {
                           e.preventDefault()
                           e.stopPropagation()
-                          window.open(`https://www.google.com/search?q=${encodeURIComponent(src)}`, '_blank')
+                          const url = src.startsWith('http://') || src.startsWith('https://') ? src : `https://${src}`;
+                          ipc.shell.openExternal(url)
                         }}
-                        title={`Search Google for "${src}"`}
+                        title={src}
                       >
                         {src}
                       </a>

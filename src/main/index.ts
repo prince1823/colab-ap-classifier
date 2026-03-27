@@ -2,10 +2,13 @@
 import { loadEnv } from './load-env';
 loadEnv();
 
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, nativeImage } from 'electron';
 import path from 'path';
 import { createContainer } from './container';
 import { registerAllHandlers } from './ipc';
+
+// Increase V8 heap limit for large datasets (5M+ rows)
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192');
 
 // Prevent unhandled errors from crashing the entire Electron app
 process.on('uncaughtException', (error) => {
@@ -29,8 +32,10 @@ function createWindow(): void {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
     title: 'Colab91 Classifier',
+    icon: path.join(__dirname, '..', '..', '..', 'build', 'icon.png'),
   });
 
   const isDev = !app.isPackaged;
@@ -50,6 +55,16 @@ function createWindow(): void {
 app.whenReady().then(() => {
   const services = createContainer();
   registerAllHandlers(services);
+
+  // Set dock icon on macOS
+  const iconPath = path.join(__dirname, '..', '..', '..', 'build', 'icon.png');
+  if (process.platform === 'darwin' && app.dock) {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      app.dock.setIcon(icon);
+    }
+  }
+
   createWindow();
 
   // Forward EventBus events to renderer
@@ -61,6 +76,16 @@ app.whenReady().then(() => {
   services.eventBus.on('suppliers:research:progress', (...args: unknown[]) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('suppliers:research:progress', ...args);
+    }
+  });
+  services.eventBus.on('qc:progress', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('qc:progress', ...args);
+    }
+  });
+  services.eventBus.on('ingest:progress', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('ingest:progress', ...args);
     }
   });
   services.eventBus.on('license:statusChanged', (...args: unknown[]) => {

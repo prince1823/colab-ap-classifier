@@ -180,4 +180,44 @@ describe('IngestService', () => {
       expect(columnMappingAgent.suggestMappings).toHaveBeenCalled();
     });
   });
+
+  describe('importCSV — mapping validation', () => {
+    const CSV_PATH = path.join(FIXTURES_DIR, 'standard.csv');
+    // standard.csv columns: Supplier, Invoice Number, Amount, Date, Description
+
+    const VALID_MAPPING = {
+      supplier_name: 'Supplier',
+      spend_amount: 'Amount',
+      invoice_date: 'Date',
+    };
+
+    it('should throw when a required canonical column is missing from the mapping', async () => {
+      const { spend_amount: _, ...missingSupplier } = VALID_MAPPING;
+      await expect(service.importCSV(CSV_PATH, missingSupplier)).rejects.toThrow(
+        'Required canonical column "spend_amount" is missing from the mapping'
+      );
+    });
+
+    it('should throw when the same CSV column is assigned to multiple canonical columns', async () => {
+      const duplicateMapping = {
+        ...VALID_MAPPING,
+        line_description: 'Supplier', // 'Supplier' already used by supplier_name
+      };
+      await expect(service.importCSV(CSV_PATH, duplicateMapping)).rejects.toThrow(
+        'CSV column "Supplier" is assigned to multiple canonical columns'
+      );
+    });
+
+    it('should allow changing which CSV column a canonical maps to', async () => {
+      // Re-map supplier_name to a different CSV column — should not throw
+      const remappedMapping = {
+        ...VALID_MAPPING,
+        supplier_name: 'Description', // changed from 'Supplier'
+      };
+      await expect(service.importCSV(CSV_PATH, remappedMapping)).resolves.toMatchObject({
+        rowsInserted: expect.any(Number),
+        uploadId: expect.any(String),
+      });
+    });
+  });
 });

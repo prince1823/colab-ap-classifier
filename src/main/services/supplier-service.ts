@@ -93,6 +93,8 @@ export class SupplierService implements ISupplierService {
        WHERE original_supplier_name IS NOT NULL AND project_supplier_id IS NULL`
     );
 
+    if (supplierRows.length === 0) return;
+
     // Pre-fetch all existing alias mappings once for O(1) lookup per raw name
     const aliasRows = await this.db.all<{ key: string; project_supplier_id: string }>(
       `SELECT lower(original_supplier_name) AS key, project_supplier_id
@@ -101,15 +103,41 @@ export class SupplierService implements ISupplierService {
     );
     const aliasMap = new Map(aliasRows.map(r => [r.key, r.project_supplier_id]));
 
+    // Build a map of rawName → supplierId (this creates project_suppliers records as needed)
+    const nameToSupplierId = new Map<string, string>();
     for (const row of supplierRows) {
       const supplierId = await this.normalizeSupplierName(row.original_supplier_name, aliasMap);
-      await this.db.run(
-        'UPDATE transactions SET project_supplier_id = ? WHERE original_supplier_name = ? AND project_supplier_id IS NULL',
-        supplierId,
-        row.original_supplier_name
-      );
+      nameToSupplierId.set(row.original_supplier_name, supplierId);
     }
 
+    // Bulk UPDATE using a per-call temp table to avoid collisions if imports overlap
+    const tmpTable = `_norm_map_${uuidv4().replace(/-/g, '')}`;
+    await this.db.exec(`CREATE TEMP TABLE ${tmpTable} (original_name VARCHAR, supplier_id VARCHAR)`);
+
+    try {
+      // Insert mappings into temp table in chunks
+      const CHUNK_SIZE = 1000;
+      const entries = [...nameToSupplierId.entries()];
+      for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
+        const chunk = entries.slice(i, i + CHUNK_SIZE);
+        // sid is always a UUID from normalizeSupplierName — safe to interpolate
+        const valueRows = chunk.map(([name, sid]) =>
+          `('${name.replace(/'/g, "''")}', '${sid.replace(/'/g, "''")}')`
+        ).join(',\n');
+        await this.db.exec(`INSERT INTO ${tmpTable} (original_name, supplier_id) VALUES ${valueRows}`);
+      }
+
+      // Single bulk UPDATE from temp table
+      await this.db.exec(`
+        UPDATE transactions
+        SET project_supplier_id = m.supplier_id
+        FROM ${tmpTable} m
+        WHERE transactions.original_supplier_name = m.original_name
+          AND transactions.project_supplier_id IS NULL
+      `);
+    } finally {
+      try { await this.db.exec(`DROP TABLE IF EXISTS ${tmpTable}`); } catch { /* ignore cleanup error */ }
+    }
   }
 
   async assignAlias(supplierId: string, rawName: string): Promise<void> {
@@ -217,6 +245,14 @@ export class SupplierService implements ISupplierService {
     if (updates.mappedTaxonomyPaths !== undefined) {
       setClauses.push('mapped_taxonomy_paths = ?');
       params.push(JSON.stringify(updates.mappedTaxonomyPaths));
+    }
+    if (updates.l1L2Path !== undefined) {
+      setClauses.push('l1_l2_path = ?');
+      params.push(updates.l1L2Path);
+    }
+
+    if (updates.markResearched) {
+      setClauses.push('is_researched = TRUE');
     }
 
     if (setClauses.length === 0) return;
@@ -346,7 +382,7 @@ export class SupplierService implements ISupplierService {
     const innerSQL = `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
         ps.parent_supplier_id, sp.name AS parent_name,
         ps.data_source, ps.universe_match, ps.is_researched,
-        ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at, ps.updated_at,
+        ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at, ps.updated_at,
         COUNT(t.id) as transaction_count,
         ${spendExpr} as total_spend
       FROM project_suppliers ps
@@ -375,6 +411,7 @@ export class SupplierService implements ISupplierService {
       is_researched: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
+      l1_l2_path: string | null;
       created_at: string;
       transaction_count: number | bigint;
       total_spend: number | bigint;
@@ -403,6 +440,7 @@ export class SupplierService implements ISupplierService {
       parentName: row.parent_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
+      l1L2Path: row.l1_l2_path ?? null,
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
       createdAt: String(row.created_at),
@@ -424,12 +462,13 @@ export class SupplierService implements ISupplierService {
       is_researched: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
+      l1_l2_path: string | null;
       created_at: string;
     }>(
       `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
               ps.parent_supplier_id, sp.name AS parent_name,
               ps.universe_match, ps.is_researched,
-              ps.supplier_info, ps.mapped_taxonomy_paths, ps.created_at
+              ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at
        FROM project_suppliers ps
        LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
        WHERE ps.id = ?`,
@@ -447,6 +486,7 @@ export class SupplierService implements ISupplierService {
       parentName: row.parent_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
+      l1L2Path: row.l1_l2_path ?? null,
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
       createdAt: String(row.created_at),

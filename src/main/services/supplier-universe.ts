@@ -143,15 +143,19 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
 
   async getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>> {
     if (names.length === 0) return new Map();
-    const placeholders = names.map(() => '?').join(', ');
-    const rows = await this.allRaw<{ supplier_name: string; supplier_info: string }>(
-      `SELECT supplier_name, supplier_info FROM suppliers WHERE supplier_name IN (${placeholders})`,
-      ...names
-    );
     const result = new Map<string, SupplierInfo>();
-    for (const row of rows) {
-      const info = parseJSON<SupplierInfo>(row.supplier_info);
-      if (info) result.set(row.supplier_name, info);
+    const CHUNK = 500;
+    for (let i = 0; i < names.length; i += CHUNK) {
+      const chunk = names.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = await this.allRaw<{ supplier_name: string; supplier_info: string }>(
+        `SELECT supplier_name, supplier_info FROM suppliers WHERE supplier_name IN (${placeholders})`,
+        ...chunk
+      );
+      for (const row of rows) {
+        const info = parseJSON<SupplierInfo>(row.supplier_info);
+        if (info) result.set(row.supplier_name, info);
+      }
     }
     return result;
   }

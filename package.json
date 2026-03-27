@@ -1,12 +1,13 @@
 {
   "name": "colab-ap-classifier",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Electron desktop app for automated classification of accounts payable transactions using LLMs",
   "private": true,
   "main": "dist/main/main/index.js",
   "scripts": {
     "dev": "concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
     "dev:log": "LOG_FILE=/tmp/c91-debug.log concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
+    "dev:trace": "LOG_FILE=/tmp/c91-debug.log LLM_TRACE_FILE=/tmp/c91-trace.jsonl concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
     "dev:main": "tsc -p tsconfig.main.json && electron dist/main/main/index.js",
     "dev:renderer": "vite",
     "build": "npm run build:main && npm run build:renderer",
@@ -47,6 +48,7 @@
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.1",
     "recharts": "^2.10.3",
+    "sonner": "^2.0.7",
     "uuid": "^11.1.0",
     "xlsx": "^0.18.5",
     "zustand": "^4.4.7"

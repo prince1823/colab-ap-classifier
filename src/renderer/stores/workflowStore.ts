@@ -1,16 +1,18 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import { usePivotStore } from './pivotStore'
 import { useSupplierFilterStore } from './supplierFilterStore'
 import type { ProjectMetadata } from '../../shared/types/project'
-import type { ClassificationProgress, QCProgress } from '../../shared/types/classification'
+import type { ClassificationProgress, QCProgress, ResearchProgress } from '../../shared/types/classification'
 
 interface WorkflowState {
   // Core state
   projectMetadata: ProjectMetadata | null
   classificationProgress: ClassificationProgress | null
   qcProgress: QCProgress | null
+  researchProgress: ResearchProgress | null
 
   // Persisted for auto-reopen only — a plain string, never a partial cast of ProjectMetadata
   projectFilePath: string | null
@@ -44,6 +46,8 @@ interface WorkflowState {
   subscribeToClassificationProgress: () => () => void
   subscribeToQCProgress: () => () => void
   setClassificationProgress: (progress: ClassificationProgress | null) => void
+  setResearchProgress: (progress: ResearchProgress | null) => void
+  subscribeToResearchProgress: () => () => void
   setLastRoute: (route: string) => void
   reset: () => void
 }
@@ -61,10 +65,11 @@ const INITIAL_GATE_STATE = {
 
 export const useWorkflowStore = create<WorkflowState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       projectMetadata: null,
       classificationProgress: null,
       qcProgress: null,
+      researchProgress: null,
       projectFilePath: null,
       lastRoute: null,
       hasProject: false,
@@ -91,11 +96,14 @@ export const useWorkflowStore = create<WorkflowState>()(
       },
 
       loadProject: async (filePath: string) => {
+        const prevFilePath = get().projectFilePath
         try { await ipc.project.close() } catch { /* already closed */ }
         set({ projectMetadata: null, classificationProgress: null, hasProject: false, isClassifying: false, ...INITIAL_GATE_STATE })
-        // Clear page state so stale filters from previous project don't carry over
-        usePivotStore.getState().reset()
-        useSupplierFilterStore.getState().reset()
+        // Clear page state only when switching to a different project, not on reload/reopen
+        if (filePath !== prevFilePath) {
+          usePivotStore.getState().reset()
+          useSupplierFilterStore.getState().reset()
+        }
 
         const result = await ipc.project.open(filePath)
         if (result?.needsSupplierUniverseSetup) {
@@ -106,7 +114,7 @@ export const useWorkflowStore = create<WorkflowState>()(
         try {
           metadata = await ipc.project.getMetadata()
         } catch (e) {
-          console.warn('[loadProject] getMetadata failed, using fallback:', e)
+          showError('Failed to load project metadata', e)
           metadata = {
             id: '',
             projectName: filePath.split('/').pop()?.replace(/\.c91$/, '') ?? 'Unknown',
@@ -134,8 +142,8 @@ export const useWorkflowStore = create<WorkflowState>()(
         let metadata: ProjectMetadata | null = null
         try {
           metadata = await ipc.project.getMetadata()
-        } catch {
-          // keep null
+        } catch (e) {
+          showError('Failed to load project metadata', e)
         }
         set({
           projectMetadata: metadata,
@@ -168,37 +176,40 @@ export const useWorkflowStore = create<WorkflowState>()(
           const metadata = await ipc.project.getMetadata()
           if (!metadata) return
           set({ projectMetadata: metadata, hasProject: true })
-        } catch {
-          // IPC failed — keep existing state intact
+        } catch (e) {
+          showError('Failed to refresh project metadata', e)
         }
       },
 
       refreshGateState: async () => {
         try {
+          const prev = get()
+
           const [stats, nodeCount, suppliers] = await Promise.all([
-            ipc.transactions.stats().catch(() => null),
-            ipc.taxonomy.getNodeCount().catch(() => 0),
-            ipc.suppliers.list().catch(() => []),
+            ipc.transactions.stats().catch((e) => { showError('Failed to load transaction stats', e); return null }),
+            ipc.taxonomy.getNodeCount().catch((e) => { showError('Failed to load taxonomy count', e); return null }),
+            ipc.suppliers.list().catch((e) => { showError('Failed to load suppliers', e); return null }),
           ])
 
-          const totalRows = stats?.totalRows ?? 0
-          const classifiedRows = stats?.classifiedRows ?? 0
-          const confirmedSupplierCount = suppliers.filter(
-            (s) => s.confirmationStatus === 'confirmed'
-          ).length
+          const totalRows = stats !== null ? (stats.totalRows ?? 0) : prev.totalRows
+          const classifiedRows = stats !== null ? (stats.classifiedRows ?? 0) : prev.classifiedRows
+          const taxonomyNodeCount = nodeCount !== null ? nodeCount : prev.taxonomyNodeCount
+          const confirmedSupplierCount = suppliers !== null
+            ? suppliers.filter((s) => s.confirmationStatus === 'confirmed').length
+            : prev.confirmedSupplierCount
 
           set({
-            hasTaxonomy: nodeCount > 0,
+            hasTaxonomy: taxonomyNodeCount > 0,
             hasUploadedData: totalRows > 0,
             hasConfirmedSuppliers: confirmedSupplierCount > 0,
             hasClassifiedRows: classifiedRows > 0,
-            taxonomyNodeCount: nodeCount,
+            taxonomyNodeCount,
             totalRows,
             classifiedRows,
             confirmedSupplierCount,
           })
-        } catch {
-          // Keep existing state on failure
+        } catch (e) {
+          showError('Failed to refresh workflow state', e)
         }
       },
 
@@ -250,6 +261,32 @@ export const useWorkflowStore = create<WorkflowState>()(
         })
       },
 
+      setResearchProgress: (progress) => {
+        set({ researchProgress: progress })
+      },
+
+      subscribeToResearchProgress: () => {
+        let clearTimerId: ReturnType<typeof setTimeout> | null = null
+
+        const unsubscribe = ipc.suppliers.onResearchProgress((progress) => {
+          if (clearTimerId) { clearTimeout(clearTimerId); clearTimerId = null }
+
+          set({ researchProgress: progress })
+
+          if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
+            clearTimerId = setTimeout(() => {
+              set({ researchProgress: null })
+              clearTimerId = null
+            }, 3000)
+          }
+        })
+
+        return () => {
+          if (clearTimerId) clearTimeout(clearTimerId)
+          unsubscribe()
+        }
+      },
+
       setLastRoute: (route: string) => {
         set({ lastRoute: route })
       },
@@ -260,6 +297,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           projectFilePath: null,
           classificationProgress: null,
           qcProgress: null,
+          researchProgress: null,
           lastRoute: null,
           hasProject: false,
           isClassifying: false,

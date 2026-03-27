@@ -5,6 +5,7 @@ import type {
 import { CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import type { ColumnMappingAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
+import { traceLog } from '../utils/llm-trace';
 
 const MAX_SAMPLE_ROWS = 5;
 
@@ -14,7 +15,7 @@ const MAX_SAMPLE_ROWS = 5;
 export function buildSystemPrompt(): string {
   const columnDescriptions = CANONICAL_COLUMNS.map(
     (col) =>
-      `- **${col.name}** (type: ${col.type}, relevance: ${col.relevance}): ${col.description}. Common aliases: ${col.aliases.join(', ')}`
+      `- **${col.name}** (type: ${col.type}): ${col.description}. Common aliases: ${col.aliases.join(', ')}`
   ).join('\n');
 
   return `You are a data mapping assistant. Map client data columns to canonical columns for spend classification.
@@ -30,15 +31,9 @@ CRITICAL: Map ALL available fields matching canonical columns. Missing fields br
 ${columnDescriptions}
 
 ## Mapping Strategy
-1. Map ALL Critical/High fields if available
-2. Map Medium/Low fields if available
+1. Map supplier_name, spend_amount, and invoice_date first — these are required
+2. Map all other canonical columns if a matching CSV column is available
 3. Skip ONLY system/metadata fields (mapping rules, flags, audit fields, derived indicators)
-
-## Relevance Levels
-- Critical: supplier_name, line_description, spend_amount — MUST MAP
-- High: gl_description, gl_code, department, invoice_date — SHOULD MAP
-- Medium: company, cost_center, creation_date, po_number, supplier_address — MAP if available
-- Low: currency, memo — MAP if available
 
 ## Invoice Grouping Fields (Important)
 - invoice_date (Accounting Date) — CRITICAL for invoice grouping
@@ -176,12 +171,14 @@ export function parseResponse(responseText: string): ColumnMappingResult {
 
     if (inverted) {
       // LLM returned { csvColumn: canonicalName } — flip to canonical→CSV
-      if (canonicalNames.has(value)) {
+      // First-wins: ignore later entries that would overwrite an already-mapped canonical
+      if (canonicalNames.has(value) && !(value in mappings)) {
         mappings[value] = key;
       }
     } else {
       // Expected orientation: { canonicalName: csvColumn }
-      if (canonicalNames.has(key)) {
+      // First-wins: ignore later entries that would overwrite an already-mapped canonical
+      if (canonicalNames.has(key) && !(key in mappings)) {
         mappings[key] = value;
       }
     }
@@ -261,11 +258,55 @@ export class LLMColumnMappingAgent implements ColumnMappingAgent {
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt(columns, sampleRows);
 
-    const responseText = await this.llm.chat(systemPrompt, userPrompt, {
-      temperature: 0,
-      maxTokens: 1024,
+    const start = Date.now();
+    let responseText: string;
+    try {
+      responseText = await this.llm.chat(systemPrompt, userPrompt, {
+        temperature: 0,
+        maxTokens: 1024,
+      });
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'column-mapping',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: '',
+        elapsedMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    const elapsedMs = Date.now() - start;
+
+    let parsed: import('../../shared/types/column-mapping').ColumnMappingResult;
+    try {
+      parsed = parseResponse(responseText);
+    } catch (err) {
+      traceLog({
+        timestamp: new Date().toISOString(),
+        agent: 'column-mapping',
+        model: 'default',
+        systemPrompt,
+        userPrompt,
+        response: responseText,
+        elapsedMs,
+        error: `parse: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
+    }
+
+    traceLog({
+      timestamp: new Date().toISOString(),
+      agent: 'column-mapping',
+      model: 'default',
+      systemPrompt,
+      userPrompt,
+      response: responseText,
+      elapsedMs,
     });
 
-    return parseResponse(responseText);
+    return parsed;
   }
 }

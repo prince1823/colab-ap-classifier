@@ -15,6 +15,7 @@ import { registerSupplierUniverseHandlers } from './supplier-universe';
 import { registerLicenseHandlers } from './license';
 import { registerFeedbackHandlers } from './feedback';
 import { registerQCHandlers } from './qc';
+import { registerShellHandlers } from './shell';
 
 export function registerAllHandlers(services: ServiceContainer): void {
   // Test channel
@@ -24,9 +25,9 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerProjectHandlers(services.project, services.db, services.supplierUniverse, services.suppliers);
   registerChangelogHandlers(services.changelog);
   registerTaxonomyHandlers(services.taxonomy);
-  registerIngestHandlers(services.ingest);
+  registerIngestHandlers(services.ingest, services.eventBus);
   registerSuppliersHandlers(services.suppliers, services.researcher);
-  registerSupplierResearchHandlers(services.researcher, services.suppliers);
+  registerSupplierResearchHandlers(services.researcher, services.suppliers, services.taxonomy, services.project, services.eventBus);
   registerClassificationHandlers(services.classifier, services.eventBus);
   registerRulesHandlers(services.rules);
   registerTransactionsHandlers(services.transactions);
@@ -38,5 +39,6 @@ export function registerAllHandlers(services: ServiceContainer): void {
     services.feedbackAgent, services.changelog, services.taxonomy,
     services.project, services.suppliers, services.rules,
   );
-  registerQCHandlers(services.qc, services.eventBus);
+  registerQCHandlers(services.qc, services.eventBus, services.project);
+  registerShellHandlers();
 }

@@ -1,17 +1,22 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ipc } from '../../lib/ipc'
-import { useWorkflowStore } from '../../stores/workflowStore'
-import type { FilterCondition } from '../../../shared/types/transactions'
+import type { GroupedFilter } from '../../../shared/types/transactions'
 
 interface Props {
   isRunning: boolean
-  conditions: FilterCondition[]
+  groupedFilter: GroupedFilter
   onStarted: () => void
   onError: (msg: string) => void
   onCancelled: () => void
 }
 
-export default function ClassificationControls({ isRunning, conditions, onStarted, onError, onCancelled }: Props) {
+/** Check if a GroupedFilter has any real conditions (non-empty groups with non-empty fields). */
+function hasConditions(gf: GroupedFilter): boolean {
+  return gf.groups.length > 0 && gf.groups.some(g => g.conditions.length > 0 && g.conditions.some(c => c.field !== ''))
+}
+
+export default function ClassificationControls({ isRunning, groupedFilter, onStarted, onError, onCancelled }: Props) {
   const [starting, setStarting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [confirmCount, setConfirmCount] = useState<number | null>(null)
@@ -22,7 +27,7 @@ export default function ClassificationControls({ isRunning, conditions, onStarte
     onError('')
     try {
       const count = await ipc.classification.scopeCount(
-        conditions.length > 0 ? conditions : undefined
+        hasConditions(groupedFilter) ? groupedFilter : undefined
       )
       setConfirmCount(count)
     } catch (e) {
@@ -38,7 +43,7 @@ export default function ClassificationControls({ isRunning, conditions, onStarte
     setStarting(true)
     try {
       await ipc.classification.start(
-        conditions.length > 0 ? conditions : undefined
+        hasConditions(groupedFilter) ? groupedFilter : undefined
       )
       onStarted()
     } catch (e) {
@@ -56,15 +61,7 @@ export default function ClassificationControls({ isRunning, conditions, onStarte
   const handleCancel = async () => {
     setCancelling(true)
     try {
-      await ipc.classification.cancel()
-      useWorkflowStore.getState().setClassificationProgress({
-        status: 'cancelled',
-        totalSuppliers: 0,
-        processedSuppliers: 0,
-        percentage: 0,
-        currentSupplier: null,
-        currentStep: 'Cancelled',
-      })
+      await ipc.classification.stop()
       onCancelled()
     } catch (e) {
       console.error('Failed to cancel classification:', e)
@@ -73,54 +70,61 @@ export default function ClassificationControls({ isRunning, conditions, onStarte
     }
   }
 
-  // Confirmation dialog
-  if (confirmCount !== null) {
-    return (
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-        <p className="text-sm text-blue-800">
-          Start classification on <strong>{confirmCount.toLocaleString()}</strong> {confirmCount === 1 ? 'row' : 'rows'}?
-        </p>
-        <div className="mt-3 flex items-center gap-3">
+  return (
+    <>
+      <div className="flex items-center gap-4">
+        {isRunning ? (
           <button
-            onClick={handleConfirm}
-            disabled={starting || confirmCount === 0}
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {cancelling ? 'Cancelling...' : 'Cancel'}
+          </button>
+        ) : (
+          <button
+            onClick={handleStartClick}
+            disabled={loadingCount}
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {starting ? 'Starting...' : 'Start Classification'}
+            {loadingCount ? 'Checking...' : 'Start Classification'}
           </button>
-          <button
-            onClick={handleCancelConfirm}
-            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          {confirmCount === 0 && (
-            <span className="text-sm text-gray-500">No rows match the current filter.</span>
-          )}
-        </div>
+        )}
       </div>
-    )
-  }
 
-  return (
-    <div className="flex items-center gap-4">
-      {isRunning ? (
-        <button
-          onClick={handleCancel}
-          disabled={cancelling}
-          className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-        >
-          {cancelling ? 'Cancelling...' : 'Cancel'}
-        </button>
-      ) : (
-        <button
-          onClick={handleStartClick}
-          disabled={loadingCount}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loadingCount ? 'Checking...' : 'Start Classification'}
-        </button>
+      {/* Confirmation modal */}
+      {confirmCount !== null && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={handleCancelConfirm} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-[400px] p-6">
+            <h3 className="text-base font-semibold text-gray-900">
+              Confirm Classification
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              {confirmCount === 0
+                ? 'No rows match the current filter.'
+                : <>Start classification on <strong>{confirmCount.toLocaleString()}</strong> {confirmCount === 1 ? 'row' : 'rows'}?</>
+              }
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                onClick={handleCancelConfirm}
+                className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={starting || confirmCount === 0}
+                className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                {starting ? 'Starting...' : 'Start Classification'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   )
 }

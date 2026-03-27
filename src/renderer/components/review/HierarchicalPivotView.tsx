@@ -13,6 +13,7 @@ import { OPERATOR_LABELS } from '../FilterConditionBuilder'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import { ipc } from '../../lib/ipc'
 import type { SupplierInfo } from '../../../shared/types/suppliers'
+import type { RuleGroup } from '../../../shared/types/rules'
 import SupplierInfoModal from './SupplierInfoModal'
 import '../../styles/PivotHierarchy.css'
 
@@ -59,6 +60,10 @@ interface HierarchicalPivotViewProps {
   /** Flagged for review toggle */
   flaggedForReviewOnly?: boolean
   onFlaggedForReviewOnlyChange?: (on: boolean) => void
+  /** Rule group (bucket) selector */
+  ruleGroups?: RuleGroup[]
+  selectedGroupId?: string | null
+  onSelectedGroupIdChange?: (id: string | null) => void
 }
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -247,6 +252,9 @@ export default function HierarchicalPivotView({
   onSetAdvancedGrouped,
   flaggedForReviewOnly = false,
   onFlaggedForReviewOnlyChange,
+  ruleGroups,
+  selectedGroupId,
+  onSelectedGroupIdChange,
 }: HierarchicalPivotViewProps) {
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
@@ -789,6 +797,9 @@ export default function HierarchicalPivotView({
         onOpenAdvancedFilter={onOpenAdvancedFilter}
         flaggedForReviewOnly={flaggedForReviewOnly}
         onFlaggedForReviewOnlyChange={onFlaggedForReviewOnlyChange}
+        ruleGroups={ruleGroups}
+        selectedGroupId={selectedGroupId}
+        onSelectedGroupIdChange={onSelectedGroupIdChange}
       />
 
       {(!hasData || rowDimensions.length === 0) && (

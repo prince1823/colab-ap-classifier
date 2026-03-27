@@ -21,6 +21,8 @@ interface PivotState {
   showAdvancedFilter: boolean
   /** Toggle: show only rows flagged for review */
   flaggedForReviewOnly: boolean
+  /** Selected rule group for new rules */
+  selectedGroupId: string | null
   // Actions
   setRowDimensions: (dims: string[]) => void
   setValueDimension: (dim: string) => void
@@ -30,6 +32,7 @@ interface PivotState {
   setAdvancedGrouped: (grouped: GroupedFilter | null) => void
   setShowAdvancedFilter: (show: boolean) => void
   setFlaggedForReviewOnly: (on: boolean) => void
+  setSelectedGroupId: (id: string | null) => void
   clearAllFilters: () => void
   /** Reset all state (e.g., on project switch) */
   reset: () => void
@@ -44,6 +47,7 @@ const INITIAL_STATE = {
   advancedGrouped: null as GroupedFilter | null,
   showAdvancedFilter: false,
   flaggedForReviewOnly: false,
+  selectedGroupId: null as string | null,
 }
 
 export const usePivotStore = create<PivotState>()(
@@ -59,17 +63,19 @@ export const usePivotStore = create<PivotState>()(
       setAdvancedGrouped: (grouped) => set({ advancedGrouped: grouped }),
       setShowAdvancedFilter: (show) => set({ showAdvancedFilter: show }),
       setFlaggedForReviewOnly: (on) => set({ flaggedForReviewOnly: on }),
+      setSelectedGroupId: (id) => set({ selectedGroupId: id }),
       clearAllFilters: () => set({ filterState: {}, advancedGrouped: null, flaggedForReviewOnly: false }),
       reset: () => set(INITIAL_STATE),
     }),
     {
       name: 'c91-pivot',
-      version: 1,
+      version: 2,
       partialize: (state) => ({
         rowDimensions: state.rowDimensions,
         valueDimension: state.valueDimension,
         aggregation: state.aggregation,
         spendDisplayMode: state.spendDisplayMode,
+        selectedGroupId: state.selectedGroupId,
       }),
     }
   )

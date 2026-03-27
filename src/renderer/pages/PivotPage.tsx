@@ -13,6 +13,7 @@ import { usePivotStore } from '../stores/pivotStore'
 import type { FlattenedPivotRow } from '../types/pivot'
 import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
+import type { RuleGroup } from '../../shared/types/rules'
 import { groupedToConditions } from '../components/FilterConditionBuilder'
 import { RefreshCw, ListFilter } from 'lucide-react'
 
@@ -85,6 +86,7 @@ export default function PivotPage() {
     advancedGrouped, setAdvancedGrouped,
     showAdvancedFilter, setShowAdvancedFilter,
     flaggedForReviewOnly, setFlaggedForReviewOnly,
+    selectedGroupId, setSelectedGroupId,
     clearAllFilters,
   } = usePivotStore()
 
@@ -147,6 +149,14 @@ export default function PivotPage() {
     ipc.transactions.distinctValues('supplier_name', 5000)
       .then(vals => setSupplierSuggestions(vals.filter(Boolean)))
       .catch((e) => showError('Failed to load supplier suggestions', e))
+  }, [])
+
+  // Load rule groups for the bucket selector on the toolbar
+  const [ruleGroups, setRuleGroups] = useState<RuleGroup[]>([])
+  useEffect(() => {
+    ipc.rules.listGroups()
+      .then(groups => setRuleGroups(groups ?? []))
+      .catch((e) => showError('Failed to load rule groups', e))
   }, [])
 
   const filter = useMemo(() => {
@@ -289,6 +299,7 @@ export default function PivotPage() {
           <button
             onClick={() => setConfirmGenerate(true)}
             disabled={generating}
+            title="Auto-generated rules will go into the Ungrouped bucket"
             className="px-3 py-1 rounded-md border border-gray-300 text-[11px] font-medium text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {generating ? 'Generating...' : 'Generate Rules'}
@@ -325,6 +336,9 @@ export default function PivotPage() {
           onSetAdvancedGrouped={setAdvancedGrouped}
           flaggedForReviewOnly={flaggedForReviewOnly}
           onFlaggedForReviewOnlyChange={setFlaggedForReviewOnly}
+          ruleGroups={ruleGroups}
+          selectedGroupId={selectedGroupId}
+          onSelectedGroupIdChange={setSelectedGroupId}
         />
       </div>
 
@@ -368,6 +382,8 @@ export default function PivotPage() {
         onClose={() => setCreateRuleRows(null)}
         selectedRows={createRuleRows ?? []}
         onCreated={refetch}
+        selectedGroupId={selectedGroupId}
+        selectedGroupName={ruleGroups.find(g => g.id === selectedGroupId)?.name ?? null}
       />
 
       {/* Generate Rules confirmation modal */}

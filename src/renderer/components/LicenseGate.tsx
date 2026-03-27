@@ -28,9 +28,12 @@ export default function LicenseGate({ children }: Props) {
     return null
   }
 
-  if (isBlocked) {
-    return <LicenseModal />
-  }
-
-  return <>{children}</>
+  return (
+    <>
+      <div style={isBlocked ? { visibility: 'hidden', pointerEvents: 'none' } : undefined}>
+        {children}
+      </div>
+      {isBlocked && <LicenseModal />}
+    </>
+  )
 }

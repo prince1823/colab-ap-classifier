@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { Aggregation, SpendDisplayMode } from '../types/pivot'
 import type { PivotFilterState } from '../components/review/PivotFilterBar'
 import type { GroupedFilter } from '../../shared/types/transactions'
@@ -45,17 +46,31 @@ const INITIAL_STATE = {
   flaggedForReviewOnly: false,
 }
 
-export const usePivotStore = create<PivotState>()((set) => ({
-  ...INITIAL_STATE,
+export const usePivotStore = create<PivotState>()(
+  persist(
+    (set) => ({
+      ...INITIAL_STATE,
 
-  setRowDimensions: (dims) => set({ rowDimensions: dims }),
-  setValueDimension: (dim) => set({ valueDimension: dim }),
-  setAggregation: (agg) => set({ aggregation: agg }),
-  setFilterState: (state) => set({ filterState: state }),
-  setSpendDisplayMode: (mode) => set({ spendDisplayMode: mode }),
-  setAdvancedGrouped: (grouped) => set({ advancedGrouped: grouped }),
-  setShowAdvancedFilter: (show) => set({ showAdvancedFilter: show }),
-  setFlaggedForReviewOnly: (on) => set({ flaggedForReviewOnly: on }),
-  clearAllFilters: () => set({ filterState: {}, advancedGrouped: null, flaggedForReviewOnly: false }),
-  reset: () => set(INITIAL_STATE),
-}))
+      setRowDimensions: (dims) => set({ rowDimensions: dims }),
+      setValueDimension: (dim) => set({ valueDimension: dim }),
+      setAggregation: (agg) => set({ aggregation: agg }),
+      setFilterState: (state) => set({ filterState: state }),
+      setSpendDisplayMode: (mode) => set({ spendDisplayMode: mode }),
+      setAdvancedGrouped: (grouped) => set({ advancedGrouped: grouped }),
+      setShowAdvancedFilter: (show) => set({ showAdvancedFilter: show }),
+      setFlaggedForReviewOnly: (on) => set({ flaggedForReviewOnly: on }),
+      clearAllFilters: () => set({ filterState: {}, advancedGrouped: null, flaggedForReviewOnly: false }),
+      reset: () => set(INITIAL_STATE),
+    }),
+    {
+      name: 'c91-pivot',
+      version: 1,
+      partialize: (state) => ({
+        rowDimensions: state.rowDimensions,
+        valueDimension: state.valueDimension,
+        aggregation: state.aggregation,
+        spendDisplayMode: state.spendDisplayMode,
+      }),
+    }
+  )
+)

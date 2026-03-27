@@ -65,7 +65,7 @@ const INITIAL_GATE_STATE = {
 
 export const useWorkflowStore = create<WorkflowState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       projectMetadata: null,
       classificationProgress: null,
       qcProgress: null,
@@ -96,11 +96,14 @@ export const useWorkflowStore = create<WorkflowState>()(
       },
 
       loadProject: async (filePath: string) => {
+        const prevFilePath = get().projectFilePath
         try { await ipc.project.close() } catch { /* already closed */ }
         set({ projectMetadata: null, classificationProgress: null, hasProject: false, isClassifying: false, ...INITIAL_GATE_STATE })
-        // Clear page state so stale filters from previous project don't carry over
-        usePivotStore.getState().reset()
-        useSupplierFilterStore.getState().reset()
+        // Clear page state only when switching to a different project, not on reload/reopen
+        if (filePath !== prevFilePath) {
+          usePivotStore.getState().reset()
+          useSupplierFilterStore.getState().reset()
+        }
 
         const result = await ipc.project.open(filePath)
         if (result?.needsSupplierUniverseSetup) {
@@ -180,24 +183,27 @@ export const useWorkflowStore = create<WorkflowState>()(
 
       refreshGateState: async () => {
         try {
+          const prev = get()
+
           const [stats, nodeCount, suppliers] = await Promise.all([
             ipc.transactions.stats().catch((e) => { showError('Failed to load transaction stats', e); return null }),
-            ipc.taxonomy.getNodeCount().catch((e) => { showError('Failed to load taxonomy count', e); return 0 }),
-            ipc.suppliers.list().catch((e) => { showError('Failed to load suppliers', e); return [] as Awaited<ReturnType<typeof ipc.suppliers.list>> }),
+            ipc.taxonomy.getNodeCount().catch((e) => { showError('Failed to load taxonomy count', e); return null }),
+            ipc.suppliers.list().catch((e) => { showError('Failed to load suppliers', e); return null }),
           ])
 
-          const totalRows = stats?.totalRows ?? 0
-          const classifiedRows = stats?.classifiedRows ?? 0
-          const confirmedSupplierCount = suppliers.filter(
-            (s) => s.confirmationStatus === 'confirmed'
-          ).length
+          const totalRows = stats !== null ? (stats.totalRows ?? 0) : prev.totalRows
+          const classifiedRows = stats !== null ? (stats.classifiedRows ?? 0) : prev.classifiedRows
+          const taxonomyNodeCount = nodeCount !== null ? nodeCount : prev.taxonomyNodeCount
+          const confirmedSupplierCount = suppliers !== null
+            ? suppliers.filter((s) => s.confirmationStatus === 'confirmed').length
+            : prev.confirmedSupplierCount
 
           set({
-            hasTaxonomy: nodeCount > 0,
+            hasTaxonomy: taxonomyNodeCount > 0,
             hasUploadedData: totalRows > 0,
             hasConfirmedSuppliers: confirmedSupplierCount > 0,
             hasClassifiedRows: classifiedRows > 0,
-            taxonomyNodeCount: nodeCount,
+            taxonomyNodeCount,
             totalRows,
             classifiedRows,
             confirmedSupplierCount,

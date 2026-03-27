@@ -78,6 +78,11 @@ app.whenReady().then(() => {
       mainWindow.webContents.send('suppliers:research:progress', ...args);
     }
   });
+  services.eventBus.on('qc:progress', (...args: unknown[]) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('qc:progress', ...args);
+    }
+  });
   services.eventBus.on('ingest:progress', (...args: unknown[]) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('ingest:progress', ...args);

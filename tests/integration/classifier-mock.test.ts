@@ -103,33 +103,77 @@ function tempPath(suffix: string): string {
 function createMockClassificationAgentFromFixture(
   db: DuckDBDatabase
 ): ClassificationAgent {
-  return {
-    classifyInvoiceGroup: vi.fn().mockImplementation(async (invoiceGroup) => {
-      // Look up supplier name from the first transaction in the group
-      const txId = invoiceGroup.transactions?.[0]?.id;
-      let supplierKey = '_default';
-      if (txId) {
-        const row = await db.get<{ original_supplier_name: string }>(
-          'SELECT original_supplier_name FROM transactions WHERE id = ?',
-          txId
-        );
-        if (row?.original_supplier_name) {
-          supplierKey = row.original_supplier_name.toLowerCase();
-        }
+  const selectCategories = vi.fn().mockImplementation(async (input: any) => {
+    const result = new Map<number, string>();
+    for (let i = 0; i < input.suppliers.length; i++) {
+      const name = input.suppliers[i].name.toLowerCase();
+      const match = mockClassifications[name] || mockClassifications['_default'];
+      const parts = match.classificationPath.split('|');
+      result.set(i + 1, `${parts[0]}|${parts[1]}`);
+    }
+    return result;
+  });
+
+  const classifyL3 = vi.fn().mockImplementation(async (input: any) => {
+    // Determine supplier from input
+    const supplierName = (input.supplierName || '').toLowerCase();
+    const match = mockClassifications[supplierName] || mockClassifications['_default'];
+
+    const { groupCount } = buildDedupGroups(input.transactions, input.columnPriorities ?? []);
+    const allGroups = Array.from({ length: groupCount }, (_, i) => i + 1);
+
+    return {
+      classifications: [{ id: 1, classificationPath: match.classificationPath }],
+      assignments: { '1': allGroups },
+    };
+  });
+
+  const classifyTransactionGroup = vi.fn().mockImplementation(async (invoiceGroup: any) => {
+    const txId = invoiceGroup.transactions?.[0]?.id;
+    let supplierKey = '_default';
+    if (txId) {
+      const row = await db.get<{ original_supplier_name: string }>(
+        'SELECT original_supplier_name FROM transactions WHERE id = ?',
+        txId
+      );
+      if (row?.original_supplier_name) {
+        supplierKey = row.original_supplier_name.toLowerCase();
       }
-      const match = mockClassifications[supplierKey] || mockClassifications['_default'];
+    }
+    const match = mockClassifications[supplierKey] || mockClassifications['_default'];
 
-      // Compute group count from dedup groups so assignments cover all groups
-      const columnPriorities = invoiceGroup.columnPriorities ?? [];
-      const { groupCount } = buildDedupGroups(invoiceGroup.transactions, columnPriorities);
-      const allGroups = Array.from({ length: groupCount }, (_, i) => i + 1);
+    const columnPriorities = invoiceGroup.columnPriorities ?? [];
+    const { groupCount } = buildDedupGroups(invoiceGroup.transactions, columnPriorities);
+    const allGroups = Array.from({ length: groupCount }, (_, i) => i + 1);
 
-      return {
-        classifications: [{ id: 1, classificationPath: match.classificationPath }],
-        assignments: { '1': allGroups },
-      };
-    }),
-  } as unknown as ClassificationAgent;
+    return {
+      classifications: [{ id: 1, classificationPath: match.classificationPath }],
+      assignments: { '1': allGroups },
+    };
+  });
+
+  const selectCategoriesForTailSpend = vi.fn().mockImplementation(async (input: any) => {
+    const result = new Map<number, string>();
+    for (let i = 0; i < input.suppliers.length; i++) {
+      const name = input.suppliers[i].name.toLowerCase();
+      const match = mockClassifications[name] || mockClassifications['_default'];
+      const parts = match.classificationPath.split('|');
+      result.set(i + 1, `${parts[0]}|${parts[1]}`);
+    }
+    return result;
+  });
+
+  const classifyL3ForTailSpend = vi.fn().mockImplementation(async (input: any) => {
+    const result = new Map<number, string>();
+    for (let i = 0; i < input.suppliers.length; i++) {
+      const name = input.suppliers[i].name.toLowerCase();
+      const match = mockClassifications[name] || mockClassifications['_default'];
+      result.set(i + 1, match.classificationPath);
+    }
+    return result;
+  });
+
+  return { selectCategories, selectCategoriesForTailSpend, classifyL3, classifyL3ForTailSpend, classifyTransactionGroup } as unknown as ClassificationAgent;
 }
 
 function createMockResearchAgentFromFixture(): ResearchAgent {
@@ -215,9 +259,12 @@ describe('Classifier Mock Pipeline Test', () => {
     taxonomy = new TaxonomyStore(db, project);
     rules = new RuleStore(db, transactions, project);
     suppliers = new SupplierService(db, supplierUniverse);
-    ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
+    ingest = new IngestService(db, transactions, suppliers, columnMappingAgent, eventBus);
     exportSvc = new ExportService(db);
-    researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus);
+    researcher = new SupplierResearcher(
+      supplierUniverse, webSearch, researchAgent, eventBus,
+      suppliers, classificationAgent, db
+    );
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
       transactions, changelog, classificationAgent, eventBus, supplierUniverse
@@ -323,14 +370,43 @@ describe('Classifier Mock Pipeline Test', () => {
     const mckesson = await supplierUniverse.getSupplier('mckesson medical surgical');
     expect(mckesson).not.toBeNull();
 
-    // Research all project suppliers
+    // Research all project suppliers and persist info to project_suppliers
     const projectSuppliers = await suppliers.listProjectSuppliers();
     for (const ps of projectSuppliers) {
-      await researcher.researchSingle(ps.supplierName);
+      if (ps.isTailSpend) continue;
+      const info = await researcher.researchSingle(ps.supplierName);
+      await suppliers.updateSupplier(ps.id, { supplierInfo: info, markResearched: true });
     }
 
-    console.log(`  Researched ${projectSuppliers.length} suppliers`);
+    console.log(`  Researched ${projectSuppliers.filter(s => !s.isTailSpend).length} suppliers`);
   });
+
+  // ─── Phase 5b: Populate l1_l2_path for all suppliers ────────────────────
+
+  it('Phase 5b: Populate l1_l2_path via categorize methods', async () => {
+    const taxonomyNodes = await taxonomy.getNodes();
+    const companyContext = await project.getSetting('company_context') as Record<string, string>;
+    const columnPriorities = await project.getSetting('column_priorities') as string[];
+
+    // Categorize non-tail-spend suppliers (those with supplier_info)
+    await researcher.categorizeWithSupplierInfo(taxonomyNodes, companyContext);
+
+    // Categorize tail spend suppliers
+    if (columnPriorities && columnPriorities.length > 0) {
+      await researcher.categorizeTailSpend(taxonomyNodes, companyContext, columnPriorities);
+    }
+
+    // Verify l1_l2_path is populated on project_suppliers
+    const projectSuppliers = await suppliers.listProjectSuppliers();
+    const withPath = projectSuppliers.filter(s => s.l1L2Path !== null);
+    console.log(`  Categorized ${withPath.length}/${projectSuppliers.length} suppliers with l1_l2_path`);
+
+    // All non-tail-spend suppliers should have l1_l2_path
+    const nonTailSpend = projectSuppliers.filter(s => !s.isTailSpend);
+    for (const s of nonTailSpend) {
+      expect(s.l1L2Path).not.toBeNull();
+    }
+  }, 30000);
 
   // ─── Phase 6: Create override rules ─────────────────────────────────────
 

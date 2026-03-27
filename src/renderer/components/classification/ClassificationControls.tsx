@@ -62,7 +62,7 @@ export default function ClassificationControls({ isRunning, groupedFilter, onSta
   const handleCancel = async () => {
     setCancelling(true)
     try {
-      await ipc.classification.cancel()
+      await ipc.classification.stop()
       useWorkflowStore.getState().setClassificationProgress({
         status: 'cancelled',
         totalSuppliers: 0,

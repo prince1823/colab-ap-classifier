@@ -3,7 +3,7 @@ import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { useWorkflowStore } from '../stores/workflowStore'
-import { researchSingle, researchBatch, isResearchRunning } from '../lib/researchRunner'
+import { researchSingle, isResearchRunning } from '../lib/researchRunner'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
@@ -178,6 +178,21 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
+  /** Save l1L2Path directly on project_suppliers */
+  const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
+    setSaving(true)
+    try {
+      await ipc.suppliers.update(supplier.id, { l1L2Path: newValue || undefined })
+      updateSuppliers(prev => prev.map(s =>
+        s.id === supplier.id ? { ...s, l1L2Path: newValue || null } : s
+      ))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update')
+    } finally {
+      setSaving(false)
+    }
+  }, [updateSuppliers])
+
   /** Research a single supplier */
   const researchSupplier = useCallback(async (supplier: ProjectSupplierView) => {
     const info = await researchSingle(supplier)
@@ -203,21 +218,18 @@ export default function SuppliersPage() {
     }
   }, [updateSuppliers])
 
-  /** Batch research selected */
-  const researchSelected = useCallback(async () => {
+  /** Batch research selected — delegates entirely to the backend */
+  const researchSelected = useCallback(() => {
     if (isResearchRunning()) return
-    const selected = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched)
-    if (selected.length === 0) return
-
-    // The batch loop runs in a module-level runner that survives page navigation.
-    // onEachComplete updates local state if this component is still mounted.
-    researchBatch(selected, (supplierId, info) => {
-      updateSuppliers(prev => prev.map(existing =>
-        existing.id === supplierId ? { ...existing, isResearched: true, supplierInfo: info } : existing
-      ))
+    const selectedIds_ = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched).map(s => s.id)
+    if (selectedIds_.length === 0) return
+    // Fire-and-forget: progress is streamed via EventBus → workflowStore.
+    // SuppliersPage reloads supplier data when the completed event arrives (see effect above).
+    ipc.suppliers.researchAll(selectedIds_).catch((err) => {
+      console.error('[Research] researchAll failed:', err)
     })
     setSelectedIds(new Set())
-  }, [suppliers, selectedIds, updateSuppliers])
+  }, [suppliers, selectedIds])
 
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
@@ -593,7 +605,10 @@ export default function SuppliersPage() {
           {researchProgress && researchProgress.status === 'running' && (
             <div className="suppliers-progress">
               <div className="flex items-center justify-between mb-1">
-                <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+                {researchProgress.currentSupplier
+                  ? <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+                  : <span>{researchProgress.currentStep}</span>
+                }
                 <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
               </div>
               <div className="progress-bar">
@@ -644,6 +659,7 @@ export default function SuppliersPage() {
               supplier={selectedSupplier}
               onSaveField={saveField}
               onSaveParentName={saveParentName}
+              onSaveL1L2Path={saveL1L2Path}
               onResearch={researchSupplier}
               onConfirm={confirmSupplier}
               focusedFieldIndex={detailFieldIndex}

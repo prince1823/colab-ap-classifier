@@ -7,12 +7,13 @@ const SUPPLIER_TYPES: SupplierType[] = ['company', 'individual', 'government']
 
 /** Info fields config — order and layout */
 const DETAIL_FIELDS: {
-  key: keyof SupplierInfo | 'parentName'
+  key: keyof SupplierInfo | 'parentName' | 'l1L2Path'
   label: string
   editable: boolean
   type: 'text' | 'select' | 'readonly'
   wide?: boolean
 }[] = [
+  { key: 'l1L2Path', label: 'L1|L2 Category', editable: true, type: 'text', wide: true },
   { key: 'supplierType', label: 'Supplier Type', editable: true, type: 'select' },
   { key: 'officialBusinessName', label: 'Official Business Name', editable: true, type: 'text' },
   { key: 'parentName', label: 'Parent Supplier', editable: true, type: 'text' },
@@ -157,6 +158,7 @@ interface SupplierDetailPanelProps {
   supplier: ProjectSupplierView | null
   onSaveField: (supplier: ProjectSupplierView, field: keyof SupplierInfo, value: string) => void
   onSaveParentName: (supplier: ProjectSupplierView, value: string) => void
+  onSaveL1L2Path: (supplier: ProjectSupplierView, value: string) => void
   onResearch: (supplier: ProjectSupplierView) => void
   onConfirm: (supplier: ProjectSupplierView) => void
   focusedFieldIndex: number
@@ -171,6 +173,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   supplier,
   onSaveField,
   onSaveParentName,
+  onSaveL1L2Path,
   onResearch,
   onConfirm,
   focusedFieldIndex,
@@ -232,17 +235,20 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   }
 
   const info = supplier.supplierInfo ?? {}
-  const getVal = (key: keyof SupplierInfo | 'parentName'): string => {
+  const getVal = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path'): string => {
     if (key === 'parentName') return supplier.parentName || ''
+    if (key === 'l1L2Path') return supplier.l1L2Path || ''
     const v = info[key as keyof SupplierInfo]
     if (v == null) return ''
     if (Array.isArray(v)) return v.join(', ')
     return String(v)
   }
 
-  const handleSave = (key: keyof SupplierInfo | 'parentName', val: string) => {
+  const handleSave = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path', val: string) => {
     if (key === 'parentName') {
       onSaveParentName(supplier, val)
+    } else if (key === 'l1L2Path') {
+      onSaveL1L2Path(supplier, val)
     } else {
       onSaveField(supplier, key as keyof SupplierInfo, val)
     }

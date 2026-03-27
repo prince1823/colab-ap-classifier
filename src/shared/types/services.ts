@@ -3,7 +3,7 @@ import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfir
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress } from './classification';
@@ -195,12 +195,22 @@ export interface SupplierService {
 
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
+  listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
   createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
   evaluateRules(transactionIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
   generate_rules_preview(): Promise<GenerateRulesResult>;
+  // Group operations
+  listGroups(): Promise<RuleGroup[]>;
+  createGroup(input: RuleGroupCreate): Promise<{ id: string }>;
+  updateGroup(groupId: string, updates: RuleGroupUpdate): Promise<void>;
+  deleteGroup(groupId: string): Promise<void>;
+  reorderGroups(orderedIds: string[]): Promise<void>;
+  moveRuleToGroup(ruleId: string, targetGroupId: string | null): Promise<void>;
+  assignToGroup(ruleIds: string[], groupId: string | null): Promise<void>;
+  filterAndAssignToGroup(filter: import('./transactions').GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }>;
 }
 
 export interface ChangelogStore {

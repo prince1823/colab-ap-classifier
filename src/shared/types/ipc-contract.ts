@@ -24,7 +24,7 @@ import type {
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
 import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
 import type { FeedbackAnalyzeInput, FeedbackRecommendation, FeedbackApplyInput } from './feedback';
@@ -114,11 +114,22 @@ export interface IPCInvokeMap {
 
   // Rules
   'rules:list':           { args: []; result: OverrideRule[] };
+  'rules:listPaginated':  { args: [opts: { limit: number; offset: number; search?: string }]; result: { rules: OverrideRule[]; total: number } };
   'rules:create':         { args: [input: OverrideRuleCreate]; result: { id: string } };
   'rules:createAndApply': { args: [input: OverrideRuleCreate]; result: { id: string; matchedCount: number } };
   'rules:update':         { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
   'rules:delete':         { args: [ruleId: string]; result: void };
   'rules:generate':       { args: []; result: GenerateRulesResult };
+
+  // Rule Groups
+  'rules:listGroups':     { args: []; result: RuleGroup[] };
+  'rules:createGroup':    { args: [input: RuleGroupCreate]; result: { id: string } };
+  'rules:updateGroup':    { args: [groupId: string, updates: RuleGroupUpdate]; result: void };
+  'rules:deleteGroup':    { args: [groupId: string]; result: void };
+  'rules:reorderGroups':  { args: [orderedIds: string[]]; result: void };
+  'rules:moveRule':       { args: [ruleId: string, targetGroupId: string | null]; result: void };
+  'rules:assignToGroup':  { args: [ruleIds: string[], groupId: string | null]; result: void };
+  'rules:filterAssign':   { args: [filter: GroupedFilter, targetGroupId: string | null]; result: { matched: number } };
 
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };

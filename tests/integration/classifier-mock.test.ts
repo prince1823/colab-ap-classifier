@@ -217,7 +217,7 @@ describe('Classifier Mock Pipeline Test', () => {
     suppliers = new SupplierService(db, supplierUniverse);
     ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
     exportSvc = new ExportService(db);
-    researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus);
+    researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus, suppliers, transactions);
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
       transactions, changelog, classificationAgent, eventBus, supplierUniverse

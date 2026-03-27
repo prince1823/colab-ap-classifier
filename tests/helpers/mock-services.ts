@@ -128,6 +128,7 @@ export function createMockTransactionStore(): TransactionStore {
     getIdsByConditions: vi.fn().mockResolvedValue([]),
     getIdsByGroupedConditions: vi.fn().mockResolvedValue([]),
     applyRule: vi.fn().mockResolvedValue(0),
+    getSupplierAddress: vi.fn().mockResolvedValue(undefined),
   };
 }
 

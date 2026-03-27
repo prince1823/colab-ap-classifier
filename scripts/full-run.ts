@@ -309,7 +309,7 @@ async function main() {
   const rules = new RuleStore(db, transactions);
   const suppliers = new SupplierService(db, supplierUniverse);
   const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
-  const researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus as any);
+  const researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus as any, suppliers, transactions);
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,
     transactions, changelog, classificationAgent, eventBus as any, supplierUniverse

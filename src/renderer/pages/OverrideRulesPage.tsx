@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { Zap, X, CheckCircle2 } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import { makeEmptyGroup, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
@@ -56,6 +58,20 @@ export default function OverrideRulesPage() {
 
   // Selection state for ungrouped rules
   const [selectedUngroupedIds, setSelectedUngroupedIds] = useState<Set<string>>(new Set())
+
+  // Selection state for grouped rules
+  const [selectedGroupedIds, setSelectedGroupedIds] = useState<Set<string>>(new Set())
+
+  // Combined selection across grouped + ungrouped
+  const allSelectedIds = useMemo(
+    () => new Set([...selectedGroupedIds, ...selectedUngroupedIds]),
+    [selectedGroupedIds, selectedUngroupedIds]
+  )
+
+  // Apply rules state
+  const [applying, setApplying] = useState(false)
+  const [applyPreview, setApplyPreview] = useState<{ affectedRowCount: number; matchingRuleCount: number } | null>(null)
+  const [applyResult, setApplyResult] = useState<{ matchedCount: number; ruleCount: number } | null>(null)
 
   // Bulk assign modal
   const [showBulkAssignModal, setShowBulkAssignModal] = useState(false)
@@ -433,6 +449,39 @@ export default function OverrideRulesPage() {
       await loadUngrouped(0, ruleSearch.trim() || undefined)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to assign rules')
+    }
+  }
+
+  // ─── Apply selected rules ─────────────────────────────────────────────────
+
+  const handleApplyClick = async () => {
+    if (allSelectedIds.size === 0) return
+    setApplying(true)
+    setApplyPreview(null)
+    setApplyResult(null)
+    try {
+      const preview = await ipc.rules.previewApply(Array.from(allSelectedIds))
+      setApplyPreview(preview)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to preview rules')
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const handleApplyConfirm = async () => {
+    if (allSelectedIds.size === 0) return
+    setApplying(true)
+    try {
+      const result = await ipc.rules.apply(Array.from(allSelectedIds))
+      setApplyPreview(null)
+      setApplyResult(result)
+      setSelectedGroupedIds(new Set())
+      setSelectedUngroupedIds(new Set())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to apply rules')
+    } finally {
+      setApplying(false)
     }
   }
 
@@ -870,29 +919,146 @@ export default function OverrideRulesPage() {
         )
       })()}
 
-      {/* Bulk assign bar for selected ungrouped rules */}
-      {selectedUngroupedIds.size > 0 && (
+      {/* Apply rules confirm modal — portal overlay */}
+      {applyPreview && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setApplyPreview(null)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/30">
+                <Zap className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Apply Rules</h2>
+                <p className="text-xs text-gray-500">Review before confirming</p>
+              </div>
+              <button
+                onClick={() => setApplyPreview(null)}
+                className="ml-auto rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Divider */}
+            <div className="my-4 h-px bg-gray-100" />
+
+            {/* Body */}
+            {applyPreview.affectedRowCount > 0 ? (
+              <p className="text-sm text-gray-700">
+                This will apply{' '}
+                <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                  {applyPreview.matchingRuleCount} rule{applyPreview.matchingRuleCount !== 1 ? 's' : ''}
+                </span>{' '}
+                to{' '}
+                <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                  {applyPreview.affectedRowCount.toLocaleString()} row{applyPreview.affectedRowCount !== 1 ? 's' : ''}
+                </span>
+                . This action will overwrite any existing classifications for matched transactions.
+              </p>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <span className="text-lg">⚠️</span>
+                No transactions matched the selected rules.
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setApplyPreview(null)}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              {applyPreview.affectedRowCount > 0 && (
+                <button
+                  onClick={handleApplyConfirm}
+                  disabled={applying}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-indigo-500/30 hover:from-indigo-600 hover:to-violet-700 disabled:opacity-50 transition-all duration-150"
+                >
+                  {applying ? (
+                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  ) : (
+                    <Zap className="h-4 w-4" />
+                  )}
+                  {applying ? 'Applying…' : 'Confirm & Apply'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Apply rules result toast */}
+      {applyResult && createPortal(
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl bg-gray-900 px-4 py-3 text-sm text-white shadow-xl">
+          <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+          <span>
+            <span className="font-semibold text-emerald-400">{applyResult.matchedCount.toLocaleString()}</span>
+            {' '}row{applyResult.matchedCount !== 1 ? 's' : ''} classified by{' '}
+            <span className="font-semibold text-indigo-400">{applyResult.ruleCount}</span>
+            {' '}rule{applyResult.ruleCount !== 1 ? 's' : ''}.
+          </span>
+          <button onClick={() => setApplyResult(null)} className="ml-1 text-gray-400 hover:text-white transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>,
+        document.body
+      )}
+
+      {/* Bulk action bar — shown when any rules are selected */}
+      {allSelectedIds.size > 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5">
-          <span className="text-sm font-medium text-blue-800">{selectedUngroupedIds.size} rule{selectedUngroupedIds.size !== 1 ? 's' : ''} selected</span>
-          <select
-            value={bulkAssignGroupId ?? ''}
-            onChange={(e) => setBulkAssignGroupId(e.target.value || null)}
-            className="rounded-md border border-blue-300 bg-white px-3 py-1 text-sm"
-          >
-            <option value="" disabled>Move to group...</option>
-            {groups.map(g => (
-              <option key={g.id} value={g.id}>{g.name} (P{g.priority})</option>
-            ))}
-          </select>
+          <span className="text-sm font-medium text-blue-800">{allSelectedIds.size} rule{allSelectedIds.size !== 1 ? 's' : ''} selected</span>
+          {selectedUngroupedIds.size > 0 && (
+            <>
+              <select
+                value={bulkAssignGroupId ?? ''}
+                onChange={(e) => setBulkAssignGroupId(e.target.value || null)}
+                className="rounded-md border border-blue-300 bg-white px-3 py-1 text-sm"
+              >
+                <option value="" disabled>Move to group...</option>
+                {groups.map(g => (
+                  <option key={g.id} value={g.id}>{g.name} (P{g.priority})</option>
+                ))}
+              </select>
+              <button
+                onClick={handleBulkAssign}
+                disabled={!bulkAssignGroupId}
+                className="rounded-md bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                Move
+              </button>
+            </>
+          )}
           <button
-            onClick={handleBulkAssign}
-            disabled={!bulkAssignGroupId}
-            className="rounded-md bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            onClick={handleApplyClick}
+            disabled={applying}
+            className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 px-3 py-1 text-xs font-semibold text-white shadow shadow-indigo-500/30 hover:from-indigo-600 hover:to-violet-700 disabled:opacity-50 transition-all duration-150"
           >
-            Move
+            {applying ? (
+              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+            ) : (
+              <Zap className="h-3 w-3" />
+            )}
+            {applying ? 'Loading…' : 'Apply Rules'}
           </button>
           <button
-            onClick={() => setSelectedUngroupedIds(new Set())}
+            onClick={() => { setSelectedUngroupedIds(new Set()); setSelectedGroupedIds(new Set()) }}
             className="ml-auto text-xs text-blue-600 hover:text-blue-800"
           >
             Clear selection
@@ -950,6 +1116,15 @@ export default function OverrideRulesPage() {
                   handleRuleDragEnd={handleRuleDragEnd}
                   expandedConditions={expandedConditions}
                   setExpandedConditions={setExpandedConditions}
+                  selectedGroupedIds={selectedGroupedIds}
+                  onGroupRuleSelect={(ruleId, selected) => {
+                    setSelectedGroupedIds(prev => {
+                      const next = new Set(prev)
+                      if (selected) next.add(ruleId)
+                      else next.delete(ruleId)
+                      return next
+                    })
+                  }}
                   handleGroupDragStart={handleGroupDragStart}
                   handleGroupDragEnd={handleGroupDragEnd}
                   handleGroupReorderDragOver={handleGroupReorderDragOver}
@@ -1099,6 +1274,8 @@ interface GroupSectionProps {
   handleRuleDragEnd: (e: React.DragEvent) => void
   expandedConditions: Set<string>
   setExpandedConditions: React.Dispatch<React.SetStateAction<Set<string>>>
+  selectedGroupedIds: Set<string>
+  onGroupRuleSelect: (ruleId: string, selected: boolean) => void
   handleGroupDragStart: (e: React.DragEvent, groupId: string) => void
   handleGroupDragEnd: (e: React.DragEvent) => void
   handleGroupReorderDragOver: (e: React.DragEvent, targetGroupId: string) => void
@@ -1114,6 +1291,7 @@ function GroupSection({
   handleGroupDragOver, setDragOverGroupId, handleGroupDrop,
   getNodePath, formatConditionSummary, openEdit, handleDelete, handleToggle,
   handleRuleDragStart, handleRuleDragEnd, expandedConditions, setExpandedConditions,
+  selectedGroupedIds, onGroupRuleSelect,
   handleGroupDragStart, handleGroupDragEnd, handleGroupReorderDragOver, handleGroupReorderDrop, setDragOverGroupReorderId, isDragOverReorder,
 }: GroupSectionProps) {
   return (
@@ -1218,6 +1396,9 @@ function GroupSection({
               onDragEnd={handleRuleDragEnd}
               expandedConditions={expandedConditions}
               setExpandedConditions={setExpandedConditions}
+              selectable
+              selected={selectedGroupedIds.has(rule.id)}
+              onSelect={(selected) => onGroupRuleSelect(rule.id, selected)}
             />
           ))}
         </>

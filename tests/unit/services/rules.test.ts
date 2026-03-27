@@ -602,6 +602,89 @@ describe('RuleStore', () => {
     });
   });
 
+  // ─── evaluateRules — ruleIds filter ──────────────────────────────────────────
+
+  describe('evaluateRules — ruleIds filter', () => {
+    it('empty ruleIds array returns empty map without querying transactions', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({ id: 'r1', is_active: true }),
+      ]);
+
+      const result = await store.evaluateRules(undefined, []);
+
+      expect(result.size).toBe(0);
+      expect(transactions.getIdsByGroupedConditions).not.toHaveBeenCalled();
+    });
+
+    it('ruleIds filters to only those rules, ignoring other active rules', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({ id: 'r1', target_taxonomy_node_id: 'tid1', group_id: 'g1', group_priority: 2 }),
+        makeRuleRow({ id: 'r2', target_taxonomy_node_id: 'tid2', group_id: 'g1', group_priority: 1 }),
+      ]);
+      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1']);
+
+      const result = await store.evaluateRules(undefined, ['r2']);
+
+      // Only r2 should have been evaluated — one call, not two
+      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledTimes(1);
+      expect(result.get('tx1')).toEqual({ ruleId: 'r2', targetTaxonomyNodeId: 'tid2' });
+    });
+
+    it('ruleIds containing an inactive rule — inactive rule is skipped', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({ id: 'r-inactive', is_active: false }),
+      ]);
+
+      const result = await store.evaluateRules(undefined, ['r-inactive']);
+
+      expect(result.size).toBe(0);
+      expect(transactions.getIdsByGroupedConditions).not.toHaveBeenCalled();
+    });
+
+    it('ruleIds containing an unknown rule ID — silently ignored, no error', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({ id: 'r1', is_active: true }),
+      ]);
+
+      const result = await store.evaluateRules(undefined, ['nonexistent-id']);
+
+      expect(result.size).toBe(0);
+      expect(transactions.getIdsByGroupedConditions).not.toHaveBeenCalled();
+    });
+
+    it('both ruleIds and transactionIds — specified rules evaluated against specified transactions', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({ id: 'r1', target_taxonomy_node_id: 'tid1' }),
+        makeRuleRow({ id: 'r2', target_taxonomy_node_id: 'tid2' }),
+      ]);
+      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx5']);
+
+      const result = await store.evaluateRules(['tx5', 'tx6', 'tx7'], ['r1']);
+
+      // Only r1 evaluated — one call
+      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledTimes(1);
+      // transactionIds passed through as scopeToIds
+      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledWith(
+        expect.anything(),
+        ['tx5', 'tx6', 'tx7']
+      );
+      expect(result.get('tx5')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
+    });
+
+    it('ruleIds with valid rules that match no transactions — returns empty map', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({ id: 'r1', is_active: true }),
+      ]);
+      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue([]);
+
+      const result = await store.evaluateRules(undefined, ['r1']);
+
+      expect(result.size).toBe(0);
+      // Still queried — the rule was evaluated, it just matched nothing
+      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // ─── Rule groups ─────────────────────────────────────────────────────────────
 
   describe('listGroups', () => {

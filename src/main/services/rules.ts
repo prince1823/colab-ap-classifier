@@ -282,13 +282,21 @@ export class RuleStore implements IRuleStore {
   }
 
   async evaluateRules(
-    transactionIds?: string[]
+    transactionIds?: string[],
+    ruleIds?: string[]
   ): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>> {
     // listAllRules() returns rules ordered by COALESCE(group.priority, 0) DESC, created_at DESC.
     // First-match-wins: once a transaction is matched by a rule, later rules don't overwrite it.
     // This naturally implements group-priority-based evaluation with ungrouped rules last.
     const rules = await this.listAllRules();
-    const activeRules = rules.filter((r) => r.isActive);
+    let activeRules = rules.filter((r) => r.isActive);
+
+    if (ruleIds !== undefined) {
+      if (ruleIds.length === 0) return new Map();
+      const idSet = new Set(ruleIds);
+      activeRules = activeRules.filter((r) => idSet.has(r.id));
+    }
+
     const matched = new Map<string, { ruleId: string; targetTaxonomyNodeId: string }>();
 
     for (const rule of activeRules) {
@@ -301,6 +309,37 @@ export class RuleStore implements IRuleStore {
     }
 
     return matched;
+  }
+
+  async previewRules(ruleIds: string[]): Promise<{ affectedRowCount: number; matchingRuleCount: number }> {
+    const matched = await this.evaluateRules(undefined, ruleIds);
+    const matchingRuleCount = new Set([...matched.values()].map((v) => v.ruleId)).size;
+    return { affectedRowCount: matched.size, matchingRuleCount };
+  }
+
+  async applyRules(ruleIds: string[]): Promise<{ matchedCount: number; ruleCount: number }> {
+    const matched = await this.evaluateRules(undefined, ruleIds);
+    if (matched.size === 0) return { matchedCount: 0, ruleCount: 0 };
+
+    // Group by (ruleId, targetTaxonomyNodeId) to batch updateTransactions calls.
+    const batches = new Map<string, { ruleId: string; targetTaxonomyNodeId: string; ids: string[] }>();
+    for (const [txId, { ruleId, targetTaxonomyNodeId }] of matched) {
+      const key = `${ruleId}::${targetTaxonomyNodeId}`;
+      if (!batches.has(key)) {
+        batches.set(key, { ruleId, targetTaxonomyNodeId, ids: [] });
+      }
+      batches.get(key)!.ids.push(txId);
+    }
+
+    for (const { ruleId, targetTaxonomyNodeId, ids } of batches.values()) {
+      await this.transactions.updateTransactions(
+        { ids, taxonomyNodeId: targetTaxonomyNodeId, classificationStatus: 'classified_by_rule', appliedRuleId: ruleId },
+        'rule'
+      );
+    }
+
+    const ruleCount = new Set([...matched.values()].map((v) => v.ruleId)).size;
+    return { matchedCount: matched.size, ruleCount };
   }
 
   async generate_rules_preview(): Promise<GenerateRulesResult> {

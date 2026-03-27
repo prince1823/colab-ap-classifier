@@ -191,6 +191,7 @@ export interface SupplierService {
   renameParent(parentId: string, newName: string): Promise<void>;
   deleteParent(parentId: string): Promise<void>;
   mergeParents(survivorId: string, losingIds: string[]): Promise<void>;
+  importSupplierCSV(filePath: string, supplierNameColumn: string): Promise<{ created: number; skipped: number }>;
 }
 
 export interface RuleStore {

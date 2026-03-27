@@ -159,6 +159,8 @@ export const ipc = {
     renameParent: (parentId: string, newName: string) => invoke('suppliers:renameParent', parentId, newName),
     deleteParent: (parentId: string) => invoke('suppliers:deleteParent', parentId),
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
+    parseCSV: (filePath: string) => invoke('suppliers:parseCSV', filePath),
+    importCSV: (filePath: string, supplierNameColumn: string) => invoke('suppliers:importCSV', filePath, supplierNameColumn),
   },
 
   // ── Rules (6 channels) ──

@@ -1,4 +1,6 @@
+import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import { parse as parseStream } from 'csv-parse';
 import { cleanSupplierName } from '../utils/supplier-name';
 import type {
   Database,
@@ -591,5 +593,95 @@ export class SupplierService implements ISupplierService {
       'UPDATE project_suppliers SET is_researched = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       supplierId
     );
+  }
+
+  async importSupplierCSV(filePath: string, supplierNameColumn: string): Promise<{ created: number; skipped: number }> {
+    if (!filePath || !fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Stream CSV and collect unique supplier names from the chosen column
+    const rawNames = await new Promise<string[]>((resolve, reject) => {
+      const names: string[] = [];
+      const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+      const parser = stream.pipe(parseStream({
+        columns: true,
+        skip_empty_lines: true,
+        relax_column_count: true,
+        trim: true,
+        bom: true,
+      }));
+
+      parser.on('data', (record: Record<string, string>) => {
+        const value = record[supplierNameColumn];
+        if (value && value.trim().length > 0) {
+          names.push(value.trim());
+        }
+      });
+      parser.on('end', () => resolve(names));
+      parser.on('error', reject);
+      stream.on('error', reject);
+    });
+
+    // Deduplicate (case-insensitive)
+    const seen = new Set<string>();
+    const uniqueNames: string[] = [];
+    for (const name of rawNames) {
+      const key = name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueNames.push(name);
+      }
+    }
+
+    let created = 0;
+    let skipped = 0;
+
+    for (const rawName of uniqueNames) {
+      const cleanedName = cleanSupplierName(rawName);
+
+      // Check if this supplier already exists
+      const existing = await this.db.get<{ id: string }>(
+        'SELECT id FROM project_suppliers WHERE lower(supplier_name) = lower(?)',
+        cleanedName
+      );
+
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      // Check supplier universe for variants that might already be project suppliers
+      const variants = await this.supplierUniverse.searchVariants(rawName);
+      let matched = false;
+      if (variants.length > 0) {
+        for (const variant of variants) {
+          const variantRow = await this.db.get<{ id: string }>(
+            'SELECT id FROM project_suppliers WHERE lower(supplier_name) = lower(?)',
+            cleanSupplierName(variant)
+          );
+          if (variantRow) {
+            matched = true;
+            skipped++;
+            break;
+          }
+        }
+      }
+      if (matched) continue;
+
+      // Create new project supplier
+      const id = uuidv4();
+      const universeInfo = await this.supplierUniverse.getSupplier(rawName);
+      await this.db.run(
+        `INSERT INTO project_suppliers (id, supplier_name, universe_match)
+         VALUES (?, ?, ?)`,
+        id,
+        cleanedName,
+        universeInfo ? true : false
+      );
+      created++;
+    }
+
+    return { created, skipped };
   }
 }

@@ -106,6 +106,8 @@ export interface IPCInvokeMap {
   'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
   'suppliers:deleteParent':    { args: [parentId: string]; result: void };
   'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
+  'suppliers:importCSV':       { args: [filePath: string, supplierNameColumn: string]; result: { created: number; skipped: number } };
+  'suppliers:parseCSV':        { args: [filePath: string]; result: { columns: string[]; sampleRows: Record<string, string>[]; totalRows: number } };
 
   // Rules
   'rules:list':           { args: []; result: OverrideRule[] };

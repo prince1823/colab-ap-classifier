@@ -582,7 +582,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
         </div>
 
         {/* CSV upload/download */}
-        <CsvToolbar data={data} />
+        <CsvToolbar data={data} onIngestComplete={onDataChange} />
 
         {/* Right: search */}
         <div className="relative w-48">

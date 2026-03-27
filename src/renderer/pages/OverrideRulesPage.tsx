@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { Zap, X, CheckCircle2 } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import { makeEmptyGroup, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
@@ -917,42 +919,102 @@ export default function OverrideRulesPage() {
         )
       })()}
 
-      {/* Apply rules confirmation */}
-      {applyPreview && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm text-amber-800">
-            Apply <strong>{applyPreview.matchingRuleCount}</strong> rule{applyPreview.matchingRuleCount !== 1 ? 's' : ''} to <strong>{applyPreview.affectedRowCount.toLocaleString()}</strong> row{applyPreview.affectedRowCount !== 1 ? 's' : ''}?
-            {applyPreview.affectedRowCount === 0 && ' No transactions matched the selected rules.'}
-          </p>
-          {applyPreview.affectedRowCount > 0 && (
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={handleApplyConfirm}
-                disabled={applying}
-                className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-              >
-                {applying ? 'Applying...' : 'Confirm'}
-              </button>
+      {/* Apply rules confirm modal — portal overlay */}
+      {applyPreview && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setApplyPreview(null)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/30">
+                <Zap className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Apply Rules</h2>
+                <p className="text-xs text-gray-500">Review before confirming</p>
+              </div>
               <button
                 onClick={() => setApplyPreview(null)}
-                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                className="ml-auto rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Divider */}
+            <div className="my-4 h-px bg-gray-100" />
+
+            {/* Body */}
+            {applyPreview.affectedRowCount > 0 ? (
+              <p className="text-sm text-gray-700">
+                This will apply{' '}
+                <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                  {applyPreview.matchingRuleCount} rule{applyPreview.matchingRuleCount !== 1 ? 's' : ''}
+                </span>{' '}
+                to{' '}
+                <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                  {applyPreview.affectedRowCount.toLocaleString()} row{applyPreview.affectedRowCount !== 1 ? 's' : ''}
+                </span>
+                . This action will overwrite any existing classifications for matched transactions.
+              </p>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <span className="text-lg">⚠️</span>
+                No transactions matched the selected rules.
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setApplyPreview(null)}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
+              {applyPreview.affectedRowCount > 0 && (
+                <button
+                  onClick={handleApplyConfirm}
+                  disabled={applying}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-indigo-500/30 hover:from-indigo-600 hover:to-violet-700 disabled:opacity-50 transition-all duration-150"
+                >
+                  {applying ? (
+                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  ) : (
+                    <Zap className="h-4 w-4" />
+                  )}
+                  {applying ? 'Applying…' : 'Confirm & Apply'}
+                </button>
+              )}
             </div>
-          )}
-          {applyPreview.affectedRowCount === 0 && (
-            <button onClick={() => setApplyPreview(null)} className="mt-2 text-xs text-amber-600 underline">dismiss</button>
-          )}
-        </div>
+          </div>
+        </div>,
+        document.body
       )}
 
-      {/* Apply rules result */}
-      {applyResult && (
-        <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          {applyResult.matchedCount.toLocaleString()} row{applyResult.matchedCount !== 1 ? 's' : ''} classified by {applyResult.ruleCount} rule{applyResult.ruleCount !== 1 ? 's' : ''}.
-          <button onClick={() => setApplyResult(null)} className="ml-2 text-xs text-green-500 underline">dismiss</button>
-        </div>
+      {/* Apply rules result toast */}
+      {applyResult && createPortal(
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl bg-gray-900 px-4 py-3 text-sm text-white shadow-xl">
+          <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+          <span>
+            <span className="font-semibold text-emerald-400">{applyResult.matchedCount.toLocaleString()}</span>
+            {' '}row{applyResult.matchedCount !== 1 ? 's' : ''} classified by{' '}
+            <span className="font-semibold text-indigo-400">{applyResult.ruleCount}</span>
+            {' '}rule{applyResult.ruleCount !== 1 ? 's' : ''}.
+          </span>
+          <button onClick={() => setApplyResult(null)} className="ml-1 text-gray-400 hover:text-white transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>,
+        document.body
       )}
 
       {/* Bulk action bar — shown when any rules are selected */}
@@ -983,9 +1045,17 @@ export default function OverrideRulesPage() {
           <button
             onClick={handleApplyClick}
             disabled={applying}
-            className="rounded-md bg-green-600 px-3 py-1 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 px-3 py-1 text-xs font-semibold text-white shadow shadow-indigo-500/30 hover:from-indigo-600 hover:to-violet-700 disabled:opacity-50 transition-all duration-150"
           >
-            {applying ? 'Loading...' : 'Apply'}
+            {applying ? (
+              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+            ) : (
+              <Zap className="h-3 w-3" />
+            )}
+            {applying ? 'Loading…' : 'Apply Rules'}
           </button>
           <button
             onClick={() => { setSelectedUngroupedIds(new Set()); setSelectedGroupedIds(new Set()) }}

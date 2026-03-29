@@ -48,6 +48,8 @@ export function createMockSupplierUniverse(): SupplierUniverse {
     getSupplier: vi.fn().mockResolvedValue(null),
     getSuppliersByNames: vi.fn().mockResolvedValue(new Map()),
     upsertSupplier: vi.fn(),
+    upsertSupplierFull: vi.fn(),
+    getSupplierRecord: vi.fn().mockResolvedValue(null),
     searchVariants: vi.fn().mockResolvedValue([]),
   };
 }

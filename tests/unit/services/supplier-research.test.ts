@@ -63,7 +63,7 @@ describe('SupplierResearcher', () => {
       // searchSupplier is called with (name, address) — address may be undefined
       expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', undefined);
       expect(researchAgent.researchSupplier).toHaveBeenCalled();
-      expect(supplierUniverse.upsertSupplier).toHaveBeenCalled();
+      expect(supplierUniverse.upsertSupplier).not.toHaveBeenCalled(); // no auto-push — user-gated
       expect(result).toMatchObject({ supplierType: 'Corporation', industry: 'Software' });
     });
 

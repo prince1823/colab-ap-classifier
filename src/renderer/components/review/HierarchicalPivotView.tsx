@@ -15,6 +15,7 @@ import { ipc } from '../../lib/ipc'
 import type { SupplierInfo } from '../../../shared/types/suppliers'
 import type { RuleGroup } from '../../../shared/types/rules'
 import SupplierInfoModal from './SupplierInfoModal'
+import ExportModal from './ExportModal'
 import '../../styles/PivotHierarchy.css'
 
 interface HierarchicalPivotViewProps {
@@ -259,6 +260,7 @@ export default function HierarchicalPivotView({
   const [search, setSearch] = useState('')
   const [collapseLevel, setCollapseLevel] = useState(rowDimensions.length) // start fully expanded
   const [freezeLevel, setFreezeLevel] = useState(0) // 0 = off, 1 = freeze L1, 2 = freeze L1+L2, etc.
+  const [showExportModal, setShowExportModal] = useState(false)
 
   // Supplier info modal (Cmd+S) — supports multiple suppliers
   const [supplierInfoModal, setSupplierInfoModal] = useState<Array<{
@@ -758,10 +760,10 @@ export default function HierarchicalPivotView({
             )}
           </div>
           <button
-            onClick={handlePivotExport}
+            onClick={() => setShowExportModal(true)}
             disabled={!hasData}
             className="inline-flex items-center gap-0.5 rounded border border-gray-300 bg-white px-1.5 py-px text-[10px] text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-            title="Export pivot view as CSV"
+            title="Export CSV"
             style={{ height: 20 }}
           >
             <ArrowDownTrayIcon className="h-2.5 w-2.5" />
@@ -939,6 +941,14 @@ export default function HierarchicalPivotView({
         />,
         document.body
       )}
+
+      {/* Export options modal */}
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onFullExport={() => ipc.export.csv()}
+        onPivotExport={handlePivotExport}
+      />
     </div>
   )
 }

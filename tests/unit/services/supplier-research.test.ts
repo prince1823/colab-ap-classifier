@@ -6,9 +6,13 @@ import {
   createMockResearchAgent,
   createMockEventBus,
   createMockSupplierService,
+  createMockClassificationAgent,
   createMockTransactionStore,
 } from '../../helpers/mock-services';
-import type { SupplierUniverse, WebSearch, ResearchAgent, EventBus, SupplierService, TransactionStore } from '../../../src/shared/types/services';
+import type {
+  SupplierUniverse, WebSearch, ResearchAgent, EventBus,
+  SupplierService, ClassificationAgent, TransactionStore,
+} from '../../../src/shared/types/services';
 
 describe('SupplierResearcher', () => {
   let supplierUniverse: SupplierUniverse;
@@ -16,6 +20,7 @@ describe('SupplierResearcher', () => {
   let researchAgent: ResearchAgent;
   let eventBus: EventBus;
   let supplierService: SupplierService;
+  let classificationAgent: ClassificationAgent;
   let transactions: TransactionStore;
   let researcher: SupplierResearcher;
 
@@ -26,8 +31,12 @@ describe('SupplierResearcher', () => {
     researchAgent = createMockResearchAgent();
     eventBus = createMockEventBus();
     supplierService = createMockSupplierService();
+    classificationAgent = createMockClassificationAgent();
     transactions = createMockTransactionStore();
-    researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus, supplierService, transactions);
+    researcher = new SupplierResearcher(
+      supplierUniverse, webSearch, researchAgent, eventBus,
+      supplierService, classificationAgent, transactions
+    );
   });
 
   describe('researchSingle', () => {
@@ -80,7 +89,7 @@ describe('SupplierResearcher', () => {
         industry: 'Software',
       });
 
-      await researcher.researchSingle('Acme Corp', 'supplier-123');
+      await researcher.researchSingle('Acme Corp', undefined, 'supplier-123');
 
       expect(transactions.getSupplierAddress).toHaveBeenCalledWith('supplier-123');
       expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', '123 Main St, Springfield');
@@ -117,7 +126,7 @@ describe('SupplierResearcher', () => {
         supplierType: 'Corporation',
       });
 
-      await researcher.researchSingle('Acme Corp', 'supplier-123');
+      await researcher.researchSingle('Acme Corp', undefined, 'supplier-123');
 
       expect(transactions.getSupplierAddress).toHaveBeenCalledWith('supplier-123');
       expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', undefined);
@@ -131,13 +140,138 @@ describe('SupplierResearcher', () => {
   });
 
   describe('researchAll', () => {
-    it('should emit a progress event', async () => {
+    it('should emit a progress event when no suppliers to research', async () => {
+      await researcher.researchAll();
+
+      expect(eventBus.emit).toHaveBeenCalledWith(
+        'suppliers:research:progress',
+        expect.objectContaining({ currentStep: 'No suppliers to research' })
+      );
+    });
+
+    it('should emit starting research when there are candidates', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([
+        {
+          id: 'sup1', supplierName: 'Acme', confirmationStatus: 'pending',
+          isTailSpend: false, parentSupplierId: null, parentName: null,
+          supplierInfo: null, mappedTaxonomyPaths: null,
+          l1L2Path: null, universeMatch: false, isResearched: false,
+          createdAt: '', transactionCount: 5, totalSpend: 1000, aliases: [],
+        },
+      ] as any);
+
       await researcher.researchAll();
 
       expect(eventBus.emit).toHaveBeenCalledWith(
         'suppliers:research:progress',
         expect.objectContaining({ currentStep: 'Starting research' })
       );
+    });
+  });
+
+  describe('categorizeWithSupplierInfo', () => {
+    it('should call selectCategories for non-tail-spend suppliers with supplierInfo and no l1L2Path', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([
+        {
+          id: 'sup1', supplierName: 'Acme', confirmationStatus: 'pending',
+          isTailSpend: false, parentSupplierId: null, parentName: null,
+          supplierInfo: { industry: 'Tech' }, mappedTaxonomyPaths: null,
+          l1L2Path: null, universeMatch: false, isResearched: true,
+          createdAt: '', transactionCount: 5, totalSpend: 1000, aliases: [],
+        },
+      ] as any);
+
+      const taxonomy = [
+        { id: 't1', fullPath: 'L1|L2', l1: 'L1', l2: 'L2', l3: null, depth: 2, description: null, parentPath: 'L1', createdAt: '' },
+      ];
+      vi.mocked(classificationAgent.selectCategories).mockResolvedValue(new Map([[1, 'L1|L2']]));
+
+      await researcher.categorizeWithSupplierInfo(taxonomy as any, { industry: 'Tech' });
+
+      expect(classificationAgent.selectCategories).toHaveBeenCalledTimes(1);
+      expect(supplierService.updateSupplier).toHaveBeenCalledWith('sup1', { l1L2Path: 'L1|L2' });
+    });
+
+    it('should skip suppliers that already have l1L2Path', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([
+        {
+          id: 'sup1', supplierName: 'Acme', confirmationStatus: 'pending',
+          isTailSpend: false, parentSupplierId: null, parentName: null,
+          supplierInfo: { industry: 'Tech' }, mappedTaxonomyPaths: null,
+          l1L2Path: 'Already|Set', universeMatch: false, isResearched: true,
+          createdAt: '', transactionCount: 5, totalSpend: 1000, aliases: [],
+        },
+      ] as any);
+
+      await researcher.categorizeWithSupplierInfo([], { industry: 'Tech' });
+
+      expect(classificationAgent.selectCategories).not.toHaveBeenCalled();
+    });
+
+    it('should skip tail spend suppliers', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([
+        {
+          id: 'sup1', supplierName: 'SmallCo', confirmationStatus: 'pending',
+          isTailSpend: true, parentSupplierId: null, parentName: null,
+          supplierInfo: { industry: 'Tech' }, mappedTaxonomyPaths: null,
+          l1L2Path: null, universeMatch: false, isResearched: true,
+          createdAt: '', transactionCount: 1, totalSpend: 50, aliases: [],
+        },
+      ] as any);
+
+      await researcher.categorizeWithSupplierInfo([], { industry: 'Tech' });
+
+      expect(classificationAgent.selectCategories).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('categorizeTailSpend', () => {
+    it('should call selectCategoriesForTailSpend for tail spend suppliers', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([
+        {
+          id: 'sup1', supplierName: 'SmallCo', confirmationStatus: 'pending',
+          isTailSpend: true, parentSupplierId: null, parentName: null,
+          supplierInfo: null, mappedTaxonomyPaths: null,
+          l1L2Path: null, universeMatch: false, isResearched: false,
+          createdAt: '', transactionCount: 2, totalSpend: 50, aliases: [],
+        },
+      ] as any);
+      vi.mocked(supplierService.getProjectSupplier).mockResolvedValue({
+        id: 'sup1', supplierName: 'SmallCo', confirmationStatus: 'pending',
+        isTailSpend: true, parentSupplierId: null, parentName: null,
+        supplierInfo: null, mappedTaxonomyPaths: null,
+        l1L2Path: null, universeMatch: false, isResearched: false, createdAt: '',
+      });
+      vi.mocked(transactions.queryBySupplier).mockResolvedValue([
+        { id: 'tx1', project_supplier_id: 'sup1', spend_amount: 25, gl_description: 'Office supplies' },
+        { id: 'tx2', project_supplier_id: 'sup1', spend_amount: 25, gl_description: 'Pens' },
+      ]);
+
+      const taxonomy = [
+        { id: 't1', fullPath: 'L1|L2', l1: 'L1', l2: 'L2', l3: null, depth: 2, description: null, parentPath: 'L1', createdAt: '' },
+      ];
+      vi.mocked(classificationAgent.selectCategoriesForTailSpend).mockResolvedValue(new Map([[1, 'L1|L2']]));
+
+      await researcher.categorizeTailSpend(taxonomy as any, { industry: 'Tech' }, ['gl_description']);
+
+      expect(classificationAgent.selectCategoriesForTailSpend).toHaveBeenCalledTimes(1);
+      expect(supplierService.updateSupplier).toHaveBeenCalledWith('sup1', { l1L2Path: 'L1|L2' });
+    });
+
+    it('should skip suppliers that already have l1L2Path', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([
+        {
+          id: 'sup1', supplierName: 'SmallCo', confirmationStatus: 'pending',
+          isTailSpend: true, parentSupplierId: null, parentName: null,
+          supplierInfo: null, mappedTaxonomyPaths: null,
+          l1L2Path: 'Already|Set', universeMatch: false, isResearched: false,
+          createdAt: '', transactionCount: 2, totalSpend: 50, aliases: [],
+        },
+      ] as any);
+
+      await researcher.categorizeTailSpend([], { industry: 'Tech' }, ['gl_description']);
+
+      expect(classificationAgent.selectCategoriesForTailSpend).not.toHaveBeenCalled();
     });
   });
 

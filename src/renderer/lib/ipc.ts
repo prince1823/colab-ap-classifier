@@ -1,6 +1,6 @@
 import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
-import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress } from '../../shared/types/classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition, GroupedFilter } from '../../shared/types/transactions';
@@ -76,18 +76,21 @@ export const ipc = {
   // ── Classification (3 channels + 1 event) ──
   classification: {
     start: (groupedFilter?: GroupedFilter) => invoke('classification:start', groupedFilter),
-    cancel: () => invoke('classification:cancel'),
+    stop: () => invoke('classification:stop'),
     scopeCount: (groupedFilter?: GroupedFilter) => invoke('classification:scopeCount', groupedFilter),
     onProgress: (callback: (progress: ClassificationProgress) => void) =>
       on('classification:progress', callback),
   },
 
-  // ── QC (4 channels + 1 event) ──
+  // ── QC (7 channels + 1 event) ──
   qc: {
-    count: (filter?: TransactionFilter) => invoke('qc:count', filter),
-    start: (filter?: TransactionFilter) => invoke('qc:start', filter),
-    cancel: () => invoke('qc:cancel'),
+    count: (scope?: FilterConditionQC[]) => invoke('qc:count', scope),
+    run: (config?: QCConfig) => invoke('qc:run', config),
+    stop: () => invoke('qc:stop'),
     isRunning: () => invoke('qc:isRunning'),
+    getConfig: () => invoke('qc:getConfig'),
+    setConfig: (config: QCConfig) => invoke('qc:setConfig', config),
+    getDefaults: () => invoke('qc:getDefaults'),
     onProgress: (callback: (progress: QCProgress) => void) =>
       on('qc:progress', callback),
   },
@@ -139,7 +142,8 @@ export const ipc = {
       invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
-    researchAll: () => invoke('suppliers:researchAll'),
+    researchAll: (supplierIds?: string[]) => invoke('suppliers:researchAll', supplierIds),
+    cancelResearch: () => invoke('suppliers:cancelResearch'),
     researchSingle: (supplierId: string) =>
       invoke('suppliers:researchSingle', supplierId),
     onResearchProgress: (callback: (progress: ResearchProgress) => void) =>

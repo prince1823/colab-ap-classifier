@@ -21,7 +21,7 @@ import type {
   PivotAggregationResult,
   GroupedFilter,
 } from './transactions';
-import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress } from './classification';
+import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
@@ -67,14 +67,17 @@ export interface IPCInvokeMap {
 
   // Classification
   'classification:start':      { args: [groupedFilter?: GroupedFilter]; result: void };
-  'classification:cancel':     { args: []; result: void };
+  'classification:stop':       { args: []; result: void };
   'classification:scopeCount': { args: [groupedFilter?: GroupedFilter]; result: number };
 
   // QC
-  'qc:start':     { args: [filter?: TransactionFilter]; result: void };
-  'qc:count':     { args: [filter?: TransactionFilter]; result: number };
-  'qc:cancel':    { args: []; result: void };
-  'qc:isRunning': { args: []; result: boolean };
+  'qc:run':        { args: [config?: QCConfig]; result: void };
+  'qc:count':      { args: [scope?: FilterConditionQC[]]; result: number };
+  'qc:stop':       { args: []; result: void };
+  'qc:isRunning':  { args: []; result: boolean };
+  'qc:getConfig':  { args: []; result: QCConfig };
+  'qc:setConfig':  { args: [config: QCConfig]; result: void };
+  'qc:getDefaults': { args: []; result: QCConfig };
 
   // Taxonomy
   'taxonomy:getNodeCount':   { args: []; result: number };
@@ -90,7 +93,8 @@ export interface IPCInvokeMap {
   'suppliers:list':           { args: [filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }]; result: ProjectSupplierView[] };
   'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
-  'suppliers:researchAll':    { args: []; result: void };
+  'suppliers:researchAll':    { args: [supplierIds?: string[]]; result: void };
+  'suppliers:cancelResearch': { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierId: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };

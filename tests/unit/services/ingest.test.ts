@@ -79,54 +79,54 @@ describe('IngestService', () => {
   });
 
   describe('parseCSVPreview — standard CSV', () => {
-    it('should parse columns correctly', () => {
-      const result = service.parseCSVPreview(path.join(FIXTURES_DIR, 'standard.csv'));
+    it('should parse columns correctly', async () => {
+      const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'standard.csv'));
       expect(result.columns).toEqual([
         'Supplier', 'Invoice Number', 'Amount', 'Date', 'Description',
       ]);
     });
 
-    it('should return all rows as sample rows when <= 10', () => {
-      const result = service.parseCSVPreview(path.join(FIXTURES_DIR, 'standard.csv'));
+    it('should return all rows as sample rows when <= 10', async () => {
+      const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'standard.csv'));
       expect(result.sampleRows).toHaveLength(5);
       expect(result.totalRows).toBe(5);
     });
   });
 
   describe('parseCSVPreview — special characters', () => {
-    it('should handle apostrophes and ampersands', () => {
-      const result = service.parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+    it('should handle apostrophes and ampersands', async () => {
+      const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
       expect(result.sampleRows[0].Supplier).toBe("O'Brien & Associates");
     });
 
-    it('should handle commas within quoted fields', () => {
-      const result = service.parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
+    it('should handle commas within quoted fields', async () => {
+      const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'special-chars.csv'));
       expect(result.sampleRows[0].Description).toBe('Legal fees, consulting');
     });
   });
 
   describe('parseCSVPreview — large file', () => {
-    it('should return only 10 sample rows', () => {
-      const result = service.parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
+    it('should return only 10 sample rows', async () => {
+      const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
       expect(result.sampleRows).toHaveLength(10);
     });
 
-    it('should report accurate totalRows count', () => {
-      const result = service.parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
+    it('should report accurate totalRows count', async () => {
+      const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
       expect(result.totalRows).toBe(50);
     });
   });
 
   describe('parseCSVPreview — delimiter detection', () => {
-    it('should detect semicolon delimiter', () => {
-      const result = service.parseCSVPreview(path.join(FIXTURES_DIR, 'semicolon.csv'));
+    it('should detect semicolon delimiter', async () => {
+      const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'semicolon.csv'));
       expect(result.columns).toEqual([
         'Supplier', 'Invoice Number', 'Amount', 'Date', 'Description',
       ]);
     });
 
-    it('should detect tab delimiter', () => {
-      const result = service.parseCSVPreview(path.join(FIXTURES_DIR, 'tab-delimited.csv'));
+    it('should detect tab delimiter', async () => {
+      const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'tab-delimited.csv'));
       expect(result.columns).toEqual([
         'Supplier', 'Invoice Number', 'Amount', 'Date', 'Description',
       ]);
@@ -134,20 +134,20 @@ describe('IngestService', () => {
   });
 
   describe('parseCSVPreview — error handling', () => {
-    it('should throw for an empty file path', () => {
-      expect(() => service.parseCSVPreview('')).toThrow('File path must not be empty');
+    it('should throw for an empty file path', async () => {
+      await expect(service.parseCSVPreview('')).rejects.toThrow('File path must not be empty');
     });
 
-    it('should throw for a non-existent file', () => {
-      expect(() => service.parseCSVPreview('/nonexistent/path/file.csv')).toThrow('File not found');
+    it('should throw for a non-existent file', async () => {
+      await expect(service.parseCSVPreview('/nonexistent/path/file.csv')).rejects.toThrow('File not found');
     });
 
-    it('should throw for an empty file', () => {
+    it('should throw for an empty file', async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-test-'));
       const emptyFile = path.join(tmpDir, 'empty.csv');
       fs.writeFileSync(emptyFile, '');
       try {
-        expect(() => service.parseCSVPreview(emptyFile)).toThrow('File is empty');
+        await expect(service.parseCSVPreview(emptyFile)).rejects.toThrow('File is empty');
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
@@ -155,14 +155,14 @@ describe('IngestService', () => {
   });
 
   describe('parseCSVPreview — encoding detection', () => {
-    it('should handle UTF-8 BOM', () => {
+    it('should handle UTF-8 BOM', async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-test-'));
       const bomFile = path.join(tmpDir, 'bom.csv');
       const bom = Buffer.from([0xef, 0xbb, 0xbf]);
       const content = Buffer.from('Name,Value\nAlice,100\nBob,200\n', 'utf-8');
       fs.writeFileSync(bomFile, Buffer.concat([bom, content]));
       try {
-        const result = service.parseCSVPreview(bomFile);
+        const result = await service.parseCSVPreview(bomFile);
         expect(result.columns).toEqual(['Name', 'Value']);
         expect(result.totalRows).toBe(2);
       } finally {

@@ -35,6 +35,7 @@ describe('ExportService', () => {
         filePath: tmpPath,
       });
 
+      let dataCallCount = 0;
       vi.mocked(db.all).mockImplementation(async (sql: string) => {
         if (sql.includes('information_schema.columns')) {
           return [
@@ -48,15 +49,20 @@ describe('ExportService', () => {
             { column_name: 'spend_amount' },
           ];
         }
-        return [
-          {
-            id: 'tx1', row_index: 0, taxonomy_node_id: 'tid1',
-            classification_status: 'classified',
-            created_at: '2026-01-01', updated_at: '2026-01-01',
-            supplier_name: 'Acme Corp', spend_amount: 5000,
-            classification_path: 'Indirect|IT|Software',
-          },
-        ];
+        // First data batch returns 1 row; subsequent batches return empty to end the loop
+        dataCallCount++;
+        if (dataCallCount === 1) {
+          return [
+            {
+              id: 'tx1', row_index: 0, taxonomy_node_id: 'tid1',
+              classification_status: 'classified',
+              created_at: '2026-01-01', updated_at: '2026-01-01',
+              supplier_name: 'Acme Corp', spend_amount: 5000,
+              classification_path: 'Indirect|IT|Software',
+            },
+          ];
+        }
+        return [];
       });
 
       try {

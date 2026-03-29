@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ipc } from '../../lib/ipc'
-import { useWorkflowStore } from '../../stores/workflowStore'
 import type { GroupedFilter } from '../../../shared/types/transactions'
 
 interface Props {
@@ -62,15 +61,7 @@ export default function ClassificationControls({ isRunning, groupedFilter, onSta
   const handleCancel = async () => {
     setCancelling(true)
     try {
-      await ipc.classification.cancel()
-      useWorkflowStore.getState().setClassificationProgress({
-        status: 'cancelled',
-        totalSuppliers: 0,
-        processedSuppliers: 0,
-        percentage: 0,
-        currentSupplier: null,
-        currentStep: 'Cancelled',
-      })
+      await ipc.classification.stop()
       onCancelled()
     } catch (e) {
       console.error('Failed to cancel classification:', e)

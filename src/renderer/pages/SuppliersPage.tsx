@@ -375,6 +375,16 @@ export default function SuppliersPage() {
   const unresearchedCount = useMemo(() => sortedSuppliers.filter(s => !s.isResearched).length, [sortedSuppliers])
   const unconfirmedCount = useMemo(() => sortedSuppliers.filter(s => s.confirmationStatus !== 'confirmed').length, [sortedSuppliers])
 
+  /** Check if any selected suppliers have actionable bulk operations */
+  const hasConfirmable = useMemo(() =>
+    suppliers.some(s => selectedIds.has(s.id) && s.isResearched && s.confirmationStatus !== 'confirmed'),
+    [suppliers, selectedIds]
+  )
+  const hasResearchable = useMemo(() =>
+    suppliers.some(s => selectedIds.has(s.id) && !s.isResearched),
+    [suppliers, selectedIds]
+  )
+
   /** Selected supplier for detail panel */
   const selectedSupplier = useMemo(() =>
     selectedSupplierId ? suppliers.find(s => s.id === selectedSupplierId) ?? null : null,
@@ -690,8 +700,8 @@ export default function SuppliersPage() {
               allChecked={allChecked}
               isActive={activePanel === 'list'}
               onResearch={researchSupplier}
-              onResearchSelected={researchSelected}
-              onConfirmSelected={confirmSelected}
+              onResearchSelected={hasResearchable ? researchSelected : undefined}
+              onConfirmSelected={hasConfirmable ? confirmSelected : undefined}
               onSyncToUniverse={handleSyncClick}
             />
             <SupplierDetailPanel

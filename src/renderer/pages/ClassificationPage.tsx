@@ -55,8 +55,6 @@ const PRESET_LABELS: Record<ScopePreset, string> = {
 
 export default function ClassificationPage() {
   const storeProgress = useWorkflowStore((s) => s.classificationProgress)
-  const subscribeToClassificationProgress = useWorkflowStore((s) => s.subscribeToClassificationProgress)
-  const subscribeToQCProgress = useWorkflowStore((s) => s.subscribeToQCProgress)
   // Tab state
   const [activeTab, setActiveTab] = useState<ActiveTab>('classification')
 
@@ -70,13 +68,10 @@ export default function ClassificationPage() {
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
   const [filterModalOpen, setFilterModalOpen] = useState(false)
 
-  // Load filter fields on mount, subscribe to classification + QC progress via store
+  // Load filter fields on mount
   useEffect(() => {
     ipc.transactions.getFilterFields().then(setFilterFields).catch(console.error)
-    const unsubscribeClassification = subscribeToClassificationProgress()
-    const unsubscribeQC = subscribeToQCProgress()
-    return () => { unsubscribeClassification(); unsubscribeQC() }
-  }, [subscribeToClassificationProgress, subscribeToQCProgress])
+  }, [])
 
   // Sync local state from the store.
   useEffect(() => {

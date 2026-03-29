@@ -83,4 +83,8 @@ export function registerSuppliersHandlers(
   registerHandler('suppliers:mergeParents', async (_event, survivorId: unknown, losingIds: unknown) => {
     await suppliers.mergeParents(survivorId as string, losingIds as string[]);
   });
+
+  registerHandler('suppliers:syncToUniverse', async (_event, supplierIds: unknown) => {
+    return suppliers.syncToUniverse(supplierIds as string[]);
+  });
 }

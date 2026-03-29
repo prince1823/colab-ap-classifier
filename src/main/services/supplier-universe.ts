@@ -141,6 +141,35 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
     return parseJSON<SupplierInfo>(row[0].supplier_info);
   }
 
+  async getSupplierRecord(name: string): Promise<{
+    supplierInfo: SupplierInfo;
+    aliases: string[];
+    parentName: string | null;
+    mappedTaxonomyPaths: string[];
+  } | null> {
+    const rows = await this.allRaw<{
+      supplier_info: string;
+      aliases: string;
+      parent_name: string | null;
+      mapped_taxonomy_paths: string;
+    }>(
+      'SELECT supplier_info, aliases, parent_name, mapped_taxonomy_paths FROM suppliers WHERE supplier_name = ?',
+      name
+    );
+    if (rows.length === 0) return null;
+    const row = rows[0];
+    const supplierInfo = parseJSON<SupplierInfo>(row.supplier_info);
+    if (!supplierInfo) return null;
+    const hasSubstantiveInfo = !!(supplierInfo.industry || supplierInfo.description);
+    if (!hasSubstantiveInfo) return null;
+    return {
+      supplierInfo,
+      aliases: parseJSON<string[]>(row.aliases) || [],
+      parentName: row.parent_name ?? null,
+      mappedTaxonomyPaths: parseJSON<string[]>(row.mapped_taxonomy_paths) || [],
+    };
+  }
+
   async getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>> {
     if (names.length === 0) return new Map();
     const result = new Map<string, SupplierInfo>();
@@ -177,6 +206,76 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
       await this.runRaw(
         'INSERT INTO suppliers (id, supplier_name, supplier_info) VALUES (?, ?, ?)',
         id, name, JSON.stringify(data)
+      );
+    }
+  }
+
+  async upsertSupplierFull(name: string, data: {
+    supplierInfo?: Partial<SupplierInfo>;
+    aliases?: string[];
+    parentName?: string | null;
+    mappedTaxonomyPaths?: string[];
+  }): Promise<void> {
+    const existing = await this.allRaw<{
+      id: string;
+      supplier_info: string;
+      aliases: string;
+      mapped_taxonomy_paths: string;
+    }>(
+      'SELECT id, supplier_info, aliases, mapped_taxonomy_paths FROM suppliers WHERE supplier_name = ?',
+      name
+    );
+
+    if (existing.length > 0) {
+      const row = existing[0];
+
+      // Shallow-merge supplierInfo
+      const currentInfo = parseJSON<SupplierInfo>(row.supplier_info) || {};
+      const mergedInfo = data.supplierInfo ? { ...currentInfo, ...data.supplierInfo } : currentInfo;
+
+      // Union aliases (case-insensitive dedup)
+      const currentAliases = parseJSON<string[]>(row.aliases) || [];
+      let mergedAliases = currentAliases;
+      if (data.aliases && data.aliases.length > 0) {
+        const seen = new Set(currentAliases.map((a) => a.toLowerCase()));
+        for (const alias of data.aliases) {
+          if (!seen.has(alias.toLowerCase())) {
+            mergedAliases.push(alias);
+            seen.add(alias.toLowerCase());
+          }
+        }
+      }
+
+      // Union mapped taxonomy paths (dedup)
+      const currentPaths = parseJSON<string[]>(row.mapped_taxonomy_paths) || [];
+      let mergedPaths = currentPaths;
+      if (data.mappedTaxonomyPaths && data.mappedTaxonomyPaths.length > 0) {
+        const pathSet = new Set(currentPaths);
+        for (const path of data.mappedTaxonomyPaths) {
+          pathSet.add(path);
+        }
+        mergedPaths = [...pathSet];
+      }
+
+      await this.runRaw(
+        `UPDATE suppliers SET supplier_info = ?, aliases = ?, mapped_taxonomy_paths = ?,
+         parent_name = COALESCE(?, parent_name), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        JSON.stringify(mergedInfo),
+        JSON.stringify(mergedAliases),
+        JSON.stringify(mergedPaths),
+        data.parentName ?? null,
+        row.id
+      );
+    } else {
+      const id = crypto.randomUUID();
+      await this.runRaw(
+        'INSERT INTO suppliers (id, supplier_name, supplier_info, aliases, parent_name, mapped_taxonomy_paths) VALUES (?, ?, ?, ?, ?, ?)',
+        id,
+        name,
+        JSON.stringify(data.supplierInfo || {}),
+        JSON.stringify(data.aliases || []),
+        data.parentName ?? null,
+        JSON.stringify(data.mappedTaxonomyPaths || [])
       );
     }
   }

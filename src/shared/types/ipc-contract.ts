@@ -110,6 +110,7 @@ export interface IPCInvokeMap {
   'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
   'suppliers:deleteParent':    { args: [parentId: string]; result: void };
   'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
+  'suppliers:syncToUniverse':  { args: [supplierIds: string[]]; result: { synced: number; failed: number; errors: string[] } };
 
   // Rules
   'rules:list':     { args: []; result: OverrideRule[] };

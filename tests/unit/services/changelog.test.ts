@@ -134,8 +134,10 @@ describe('ChangelogStore', () => {
       );
       expect(afterRevert?.taxonomy_node_id).toBe('original-node');
 
+      // revertChange toggles is_reverted on the existing entry (no new row)
       const changes = await store.listChanges();
-      expect(changes).toHaveLength(2);
+      expect(changes).toHaveLength(1);
+      expect(changes[0].isReverted).toBe(true);
     });
 
     it('should throw when changelog entry not found', async () => {

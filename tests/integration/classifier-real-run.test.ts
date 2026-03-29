@@ -106,6 +106,13 @@ import { ClassificationRunner } from '../../src/main/services/classification';
 
 // ─── Temp paths ─────────────────────────────────────────────────────────────
 
+/** Pre-create a valid empty DuckDB file so DuckDBSupplierUniverse.open() can open it. */
+async function supplierUniversePreCreate(dbPath: string): Promise<void> {
+  const { DuckDBInstance } = await import('@duckdb/node-api');
+  const inst = await DuckDBInstance.create(dbPath);
+  inst.closeSync();
+}
+
 const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'c91-real-run-'));
 const DB_PATH = path.join(TEMP_DIR, 'test-pipeline.c91');
 const UNIVERSE_PATH = path.join(TEMP_DIR, 'test-universe.db');
@@ -134,6 +141,9 @@ describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
     const csvContent = fs.readFileSync(FIXTURE_CSV, 'utf-8').replace(/^\uFEFF/, '');
     csvRowCount = csvContent.trim().split(/\r?\n/).length - 1;
     expect(csvRowCount).toBeGreaterThan(0);
+
+    // Pre-create universe file so DuckDBSupplierUniverse.open() can open it
+    await supplierUniversePreCreate(UNIVERSE_PATH);
 
     // Build real service graph
     db = new DuckDBDatabase();
@@ -263,6 +273,24 @@ describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
     console.log(`  Researched ${projectSuppliers.length} suppliers`);
   });
 
+  // ─── Phase 5b: Populate l1_l2_path for all suppliers ────────────────────
+
+  it.skipIf(!HAS_API_KEY)('Phase 5b: Populate l1_l2_path via categorize methods', async () => {
+    const taxonomyNodes = await taxonomy.getNodes();
+    const companyContext = await project.getSetting('company_context') as Record<string, string>;
+    const columnPriorities = await project.getSetting('column_priorities') as string[];
+
+    await researcher.categorizeWithSupplierInfo(taxonomyNodes, companyContext);
+
+    if (columnPriorities && columnPriorities.length > 0) {
+      await researcher.categorizeTailSpend(taxonomyNodes, companyContext, columnPriorities);
+    }
+
+    const projectSuppliers = await suppliers.listProjectSuppliers();
+    const withPath = projectSuppliers.filter(s => s.l1L2Path !== null);
+    console.log(`  Categorized ${withPath.length}/${projectSuppliers.length} suppliers with l1_l2_path`);
+  });
+
   // ─── Phase 6: Create override rules ─────────────────────────────────────
 
   it('Phase 6: Create override rules from fixture', async () => {
@@ -274,17 +302,19 @@ describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
 
       const { id } = await rules.createRule({
         name: ruleFixture.name,
-        conditions: ruleFixture.conditions,
+        groupedConditions: {
+          groupConnector: 'AND',
+          groups: [{ connector: 'AND', conditions: ruleFixture.conditions }],
+        },
         targetTaxonomyNodeId: targetNode!.id,
-        priorityScore: ruleFixture.priorityScore,
       });
       expect(id).toBeTruthy();
     }
 
-    const ruleList = await rules.listRules();
-    expect(ruleList.length).toBe(rulesFixture.length);
+    const ruleList = await rules.listRulesPaginated({ limit: 100, offset: 0 });
+    expect(ruleList.rules.length).toBe(rulesFixture.length);
 
-    console.log(`  Created ${ruleList.length} override rules`);
+    console.log(`  Created ${ruleList.rules.length} override rules`);
   });
 
   // ─── Phase 7: Run classification ────────────────────────────────────────

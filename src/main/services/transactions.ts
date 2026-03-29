@@ -762,6 +762,9 @@ export class TransactionStore implements ITransactionStore {
     groupedConditions: GroupedFilter,
     targetTaxonomyNodeId: string
   ): Promise<number> {
+    const rule = await this.db.get<{ id: string }>('SELECT id FROM override_rules WHERE id = ?', ruleId);
+    if (!rule) throw new Error(`Rule not found: ${ruleId}`);
+
     const ids = await this.getIdsByGroupedConditions(groupedConditions);
     if (ids.length === 0) return 0;
 

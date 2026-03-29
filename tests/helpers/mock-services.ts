@@ -40,7 +40,7 @@ export function createMockDatabase(): Database {
 
 export function createMockSupplierUniverse(): SupplierUniverse {
   return {
-    open: vi.fn(),
+    open: vi.fn().mockResolvedValue({ created: false }),
     close: vi.fn(),
     isOpen: vi.fn().mockReturnValue(true),
     configure: vi.fn(),

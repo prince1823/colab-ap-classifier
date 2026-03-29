@@ -17,7 +17,8 @@ export class ExaWebSearch implements WebSearch {
   }
 
   private getApiKey(): string | null {
-    return this.configService?.getExaApiKey() ?? process.env.EXA_API_KEY ?? null;
+    const key = this.configService?.getExaApiKey() ?? process.env.EXA_API_KEY ?? null;
+    return key?.trim() || null;
   }
 
   private getClient(): Exa | null {

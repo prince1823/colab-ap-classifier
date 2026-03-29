@@ -213,14 +213,10 @@ describe('IPC Workflow Integration — Full Flow (v2 DI)', () => {
   // ────────────────────────────────────────────────────────────────────
 
   it('Phase 4a: Verify changelog via changelog:list', async () => {
-    const res = await invoke<Array<{
-      id: string;
-      source: string;
-      description: string | null;
-      affectedCount: number;
-    }>>('changelog:list');
+    const res = await invoke<{ rows: unknown[]; totalCount: number; page: number; pageSize: number }>('changelog:list');
     expect(res.success).toBe(true);
-    expect(Array.isArray(res.data)).toBe(true);
+    expect(res.data).toHaveProperty('rows');
+    expect(Array.isArray(res.data?.rows)).toBe(true);
   });
 
   // ────────────────────────────────────────────────────────────────────

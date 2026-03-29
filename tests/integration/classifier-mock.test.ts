@@ -91,6 +91,13 @@ const supplierResearchFixture: SupplierResearchFixture = JSON.parse(
 
 // ─── Temp path helpers ──────────────────────────────────────────────────────
 
+/** Pre-create a valid empty DuckDB file so DuckDBSupplierUniverse.open() can open it. */
+async function supplierUniversePreCreate(dbPath: string): Promise<void> {
+  const { DuckDBInstance } = await import('@duckdb/node-api');
+  const inst = await DuckDBInstance.create(dbPath);
+  inst.closeSync();
+}
+
 function tempPath(suffix: string): string {
   return path.join(
     os.tmpdir(),
@@ -226,10 +233,13 @@ describe('Classifier Mock Pipeline Test', () => {
   let classifier: ClassificationRunner;
   let researcher: SupplierResearcher;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dbPath = tempPath('.c91');
     universePath = tempPath('-universe.db');
     exportPath = tempPath('.csv');
+
+    // Pre-create universe file so DuckDBSupplierUniverse.open() can open it
+    await supplierUniversePreCreate(universePath);
 
     const csvContent = fs.readFileSync(FIXTURE_CSV, 'utf-8').replace(/^\uFEFF/, '');
     csvRowCount = csvContent.trim().split(/\r?\n/).length - 1;
@@ -263,11 +273,11 @@ describe('Classifier Mock Pipeline Test', () => {
     exportSvc = new ExportService(db);
     researcher = new SupplierResearcher(
       supplierUniverse, webSearch, researchAgent, eventBus,
-      suppliers, classificationAgent, db
+      suppliers, classificationAgent, transactions
     );
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
-      transactions, changelog, classificationAgent, eventBus, supplierUniverse
+      transactions, changelog, classificationAgent, eventBus, supplierUniverse, suppliers
     );
 
     console.log(`\n  CSV: ${FIXTURE_CSV} (${csvRowCount} rows)`);
@@ -428,10 +438,10 @@ describe('Classifier Mock Pipeline Test', () => {
       expect(id).toBeTruthy();
     }
 
-    const ruleList = await rules.listRules();
-    expect(ruleList.length).toBe(rulesFixture.length);
+    const ruleList = await rules.listRulesPaginated({ limit: 100, offset: 0 });
+    expect(ruleList.rules.length).toBe(rulesFixture.length);
 
-    console.log(`  Created ${ruleList.length} override rules`);
+    console.log(`  Created ${ruleList.rules.length} override rules`);
   });
 
   // ─── Phase 7: Run classification ────────────────────────────────────────

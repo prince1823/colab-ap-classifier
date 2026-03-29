@@ -762,6 +762,9 @@ export class TransactionStore implements ITransactionStore {
     groupedConditions: GroupedFilter,
     targetTaxonomyNodeId: string
   ): Promise<number> {
+    const rule = await this.db.get<{ id: string }>('SELECT id FROM override_rules WHERE id = ?', ruleId);
+    if (!rule) throw new Error(`Rule not found: ${ruleId}`);
+
     const ids = await this.getIdsByGroupedConditions(groupedConditions);
     if (ids.length === 0) return 0;
 
@@ -773,6 +776,11 @@ export class TransactionStore implements ITransactionStore {
   }
 
     async getSpendByTaxonomy(supplierId: string): Promise<import('../../shared/types/classification').SpendByTaxonomyResult[]> {
+    const columns = await this.getColumns();
+    if (!columns.includes('spend_amount')) {
+      throw new Error("spend_amount column not found in transactions table. Ensure your CSV import maps a column to spend_amount.");
+    }
+
     const CLASSIFIED_STATUSES = `('classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent')`;
     const rows = await this.db.all<{
       taxonomy_node_id: string;
@@ -838,6 +846,45 @@ export class TransactionStore implements ITransactionStore {
       supplierId,
       taxonomyNodeId
     );
+  }
+
+  async queryBySupplier(supplierId: string, statusFilter?: string | string[]): Promise<Record<string, unknown>[]> {
+    let sql = 'SELECT * FROM transactions WHERE project_supplier_id = ?';
+    const params: unknown[] = [supplierId];
+
+    if (statusFilter) {
+      const statuses = Array.isArray(statusFilter) ? statusFilter : [statusFilter];
+      sql += ` AND classification_status IN (${statuses.map(() => '?').join(',')})`;
+      params.push(...statuses);
+    }
+
+    return this.db.all<Record<string, unknown>>(sql, ...params);
+  }
+
+  async getIdsBySupplier(supplierId: string, options?: {
+    statuses?: string[];
+    excludeTaxonomyNodeId?: string;
+    requireTaxonomyNode?: boolean;
+  }): Promise<string[]> {
+    let sql = 'SELECT CAST(id AS VARCHAR) as id FROM transactions t WHERE CAST(t.project_supplier_id AS VARCHAR) = ?';
+    const params: unknown[] = [supplierId];
+
+    if (options?.statuses && options.statuses.length > 0) {
+      sql += ` AND t.classification_status IN (${options.statuses.map(() => '?').join(',')})`;
+      params.push(...options.statuses);
+    }
+
+    if (options?.excludeTaxonomyNodeId) {
+      sql += ' AND CAST(t.taxonomy_node_id AS VARCHAR) != ?';
+      params.push(options.excludeTaxonomyNodeId);
+    }
+
+    if (options?.requireTaxonomyNode) {
+      sql += ' AND t.taxonomy_node_id IS NOT NULL';
+    }
+
+    const rows = await this.db.all<{ id: string }>(sql, ...params);
+    return rows.map((r) => r.id);
   }
 
   async markAllReviewed(): Promise<number> {

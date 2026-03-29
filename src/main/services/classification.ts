@@ -9,6 +9,7 @@ import type {
   EventBus,
   ClassificationRunner as IClassificationRunner,
   SupplierUniverse,
+  SupplierService as ISupplierService,
 } from '../../shared/types/services';
 import type { TaxonomyNode } from '../../shared/types';
 import type { CompanyContext } from '../../shared/types/project';
@@ -37,7 +38,8 @@ export class ClassificationRunner implements IClassificationRunner {
     private changelog: IChangelogStore,
     private classificationAgent: ClassificationAgent,
     private eventBus: EventBus,
-    private supplierUniverse: SupplierUniverse
+    private supplierUniverse: SupplierUniverse,
+    private suppliers: ISupplierService
   ) {}
 
   private emitProgress(progress: ClassificationProgress): void {
@@ -511,15 +513,9 @@ export class ClassificationRunner implements IClassificationRunner {
     const txnRows = await this.getUnmatchedTransactions(projectSupplierId, scopedTxnIds);
     if (txnRows.length === 0) return;
 
-    // Resolve supplier info
-    const supplierInfo = await this.db.get<{ supplier_name: string; parent_name: string | null }>(
-      `SELECT ps.supplier_name, sp.name AS parent_name
-       FROM project_suppliers ps
-       LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
-       WHERE ps.id = ?`,
-      projectSupplierId
-    );
-    const supplierName = supplierInfo?.supplier_name ?? '';
+    // Resolve supplier info via service (includes parent name via JOIN)
+    const projectSupplier = await this.suppliers.getProjectSupplier(projectSupplierId);
+    const supplierName = projectSupplier?.supplierName ?? '';
 
     let supplierResearch: SupplierInfo | null = null;
     if (supplierName) {
@@ -626,52 +622,36 @@ export class ClassificationRunner implements IClassificationRunner {
     scopedTxnIds: Set<string> | null
   ): Promise<Record<string, unknown>[]> {
     if (scopedTxnIds) {
-      const allTxns = await this.db.all<Record<string, unknown>>(
-        `SELECT * FROM transactions WHERE project_supplier_id = ?`,
-        projectSupplierId
-      );
+      const allTxns = await this.transactions.queryBySupplier(projectSupplierId);
       return allTxns.filter((r) => scopedTxnIds.has(String(r.id)));
     }
-    return this.db.all<Record<string, unknown>>(
-      `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-      projectSupplierId
-    );
+    return this.transactions.queryBySupplier(projectSupplierId, 'unclassified');
   }
 
   private async getUnmatchedTransactions(
     projectSupplierId: string,
     scopedTxnIds?: Set<string>
   ): Promise<Record<string, unknown>[]> {
-    // Get transactions that are still unclassified (after rules have been applied)
+    const allTxns = await this.transactions.queryBySupplier(projectSupplierId, 'unclassified');
     if (scopedTxnIds) {
-      const allTxns = await this.db.all<Record<string, unknown>>(
-        `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-        projectSupplierId
-      );
       return allTxns.filter((r) => scopedTxnIds.has(String(r.id)));
     }
-    return this.db.all<Record<string, unknown>>(
-      `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-      projectSupplierId
-    );
+    return allTxns;
   }
 
   private async markSupplierError(projectSupplierId: string, scopedIds: Set<string> | null): Promise<void> {
-    let failedQuery = `SELECT id FROM transactions WHERE project_supplier_id = ?`;
-    const failedParams: unknown[] = [projectSupplierId];
-
+    let failedIds: string[];
     if (scopedIds) {
-      const supplierScopedIds = Array.from(scopedIds);
-      failedQuery += ` AND id IN (${supplierScopedIds.map(() => '?').join(',')})`;
-      failedParams.push(...supplierScopedIds);
+      // Get all transactions for the supplier, then intersect with scoped IDs
+      const allIds = await this.transactions.getIdsBySupplier(projectSupplierId);
+      failedIds = allIds.filter((id) => scopedIds.has(id));
     } else {
-      failedQuery += ` AND classification_status = 'unclassified'`;
+      failedIds = await this.transactions.getIdsBySupplier(projectSupplierId, { statuses: ['unclassified'] });
     }
 
-    const failedTxns = await this.db.all<{ id: string }>(failedQuery, ...failedParams);
-    if (failedTxns.length > 0) {
+    if (failedIds.length > 0) {
       await this.transactions.updateTransactions(
-        { ids: failedTxns.map((t) => t.id), classificationStatus: 'classification_error' },
+        { ids: failedIds, classificationStatus: 'classification_error' },
         'pipeline'
       );
     }

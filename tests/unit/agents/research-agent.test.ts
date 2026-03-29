@@ -18,10 +18,9 @@ const mockChat = vi.mocked(llmClient.chat);
 
 const SAMPLE_COMPANY_CONTEXT: CompanyContext = {
   industry: 'Manufacturing',
-  sector: 'Industrial Goods',
   description: 'Large-scale steel manufacturer',
-  businessFocus: 'Steel production and distribution',
-  procurementNuances: 'Heavy raw material purchasing',
+  sisterCompanies: 'Acme Distribution, Acme Logistics',
+  additionalDetails: 'Heavy raw material purchasing, industrial goods focus',
 };
 
 const MOCK_LLM_RESPONSE = JSON.stringify({
@@ -182,10 +181,9 @@ describe('buildUserPrompt', () => {
     const prompt = buildUserPrompt('Acme Corporation', SAMPLE_COMPANY_CONTEXT);
     expect(prompt).toContain('## Purchasing Company Context');
     expect(prompt).toContain('Industry: Manufacturing');
-    expect(prompt).toContain('Sector: Industrial Goods');
     expect(prompt).toContain('Description: Large-scale steel manufacturer');
-    expect(prompt).toContain('Business Focus: Steel production and distribution');
-    expect(prompt).toContain('Procurement Nuances: Heavy raw material purchasing');
+    expect(prompt).toContain('Sister Companies: Acme Distribution, Acme Logistics');
+    expect(prompt).toContain('Additional Details: Heavy raw material purchasing, industrial goods focus');
   });
 
   it('should not include company context section when not provided', () => {
@@ -478,7 +476,7 @@ describe('researchSupplier', () => {
     const [, userPrompt] = mockChat.mock.calls[0];
     expect(userPrompt).toContain('## Purchasing Company Context');
     expect(userPrompt).toContain('Industry: Manufacturing');
-    expect(userPrompt).toContain('Sector: Industrial Goods');
+    expect(userPrompt).toContain('Description: Large-scale steel manufacturer');
   });
 
   it('should include supplier address when provided', async () => {

@@ -34,19 +34,23 @@ describe('Integration: Rules', () => {
       {
         id: 'r1',
         name: 'Supplier Rule',
-        conditions: '[{"field":"supplier_name","operator":"equals","value":"Acme"}]',
+        grouped_conditions: JSON.stringify({
+          groupConnector: 'AND',
+          groups: [{ connector: 'AND', conditions: [{ field: 'supplier_name', operator: 'equals', value: 'Acme' }] }],
+        }),
         target_taxonomy_node_id: 'tid1',
-        priority_score: 1,
+        group_id: null,
         is_active: true,
+        source: 'manual',
         created_at: '2026-01-01',
       },
     ]);
 
     const result = await rules.listRules();
     expect(result).toHaveLength(1);
-    expect(result[0].conditions[0].field).toBe('supplier_name');
-    expect(result[0].conditions[0].operator).toBe('equals');
-    expect(result[0].conditions[0].value).toBe('Acme');
+    expect(result[0].groupedConditions.groups[0].conditions[0].field).toBe('supplier_name');
+    expect(result[0].groupedConditions.groups[0].conditions[0].operator).toBe('equals');
+    expect(result[0].groupedConditions.groups[0].conditions[0].value).toBe('Acme');
   });
 
   it('should create rules with auto-assigned priority', async () => {

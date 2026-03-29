@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QCRunner } from '../../../src/main/services/qc';
-import { createMockDatabase, createMockTransactionStore, createMockEventBus } from '../../helpers/mock-services';
-import type { Database, TransactionStore, EventBus } from '../../../src/shared/types/services';
+import {
+  createMockDatabase, createMockTransactionStore, createMockEventBus,
+  createMockQCAgent, createMockSupplierUniverse, createMockProjectStore,
+  createMockTaxonomyStore, createMockSupplierService,
+} from '../../helpers/mock-services';
+import type {
+  Database, TransactionStore, EventBus, QCAgent, SupplierUniverse,
+  ProjectStore, TaxonomyStore, SupplierService,
+} from '../../../src/shared/types/services';
 import type { SpendByTaxonomyResult } from '../../../src/shared/types/classification';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -28,10 +35,9 @@ const makeGroup = (taxonomyNodeId: string, l2: string, spend: number): SpendByTa
 });
 
 /**
- * Wire up db.all and transactions.getSpendByTaxonomy so that:
+ * Wire up db.all, transactions.getIdsBySupplier, and transactions.getSpendByTaxonomy so that:
  *  - the supplier-list query  (contains "DISTINCT") returns `suppliers`
- *  - the outlier-ID query     (contains "!=")        returns `outlierIds`
- *  - the flag-all-IDs query   (fallback)             returns `allIds`
+ *  - transactions.getIdsBySupplier                   returns `outlierIds` or `allIds` based on options
  *  - transactions.getSpendByTaxonomy                 returns `groups`
  */
 function mockDbAll(
@@ -40,13 +46,16 @@ function mockDbAll(
   {
     suppliers = [makeSupplier()],
     groups = [] as SpendByTaxonomyResult[],
-    outlierIds = [] as { id: string }[],
-    allIds = [] as { id: string }[],
+    outlierIds = [] as string[],
+    allIds = [] as string[],
   }
 ) {
   vi.mocked(db.all).mockImplementation(async (sql: string) => {
     if (sql.includes('DISTINCT')) return suppliers;
-    if (sql.includes('!=')) return outlierIds;
+    return [];
+  });
+  vi.mocked(transactions.getIdsBySupplier).mockImplementation(async (_suppId, options) => {
+    if (options?.excludeTaxonomyNodeId) return outlierIds;
     return allIds;
   });
   vi.mocked(transactions.getSpendByTaxonomy).mockResolvedValue(groups);
@@ -58,6 +67,11 @@ describe('QCRunner', () => {
   let db: Database;
   let transactions: TransactionStore;
   let eventBus: EventBus;
+  let qcAgent: QCAgent;
+  let supplierUniverse: SupplierUniverse;
+  let project: ProjectStore;
+  let taxonomy: TaxonomyStore;
+  let suppliers: SupplierService;
   let runner: QCRunner;
 
   beforeEach(() => {
@@ -65,7 +79,16 @@ describe('QCRunner', () => {
     db = createMockDatabase();
     transactions = createMockTransactionStore();
     eventBus = createMockEventBus();
-    runner = new QCRunner(db, transactions, eventBus);
+    qcAgent = createMockQCAgent();
+    supplierUniverse = createMockSupplierUniverse();
+    project = createMockProjectStore();
+    taxonomy = createMockTaxonomyStore();
+    suppliers = createMockSupplierService();
+    // Default: spend_amount column exists
+    vi.mocked(transactions.getColumns).mockResolvedValue([
+      'id', 'row_index', 'spend_amount', 'classification_status',
+    ]);
+    runner = new QCRunner(db, transactions, eventBus, qcAgent, supplierUniverse, project, taxonomy, suppliers);
   });
 
   // ── No classified transactions ──────────────────────────────────────────────
@@ -95,7 +118,7 @@ describe('QCRunner', () => {
         makeGroup('node-software', 'IT', 9_700),
         makeGroup('node-hardware', 'IT', 300),
       ],
-      outlierIds: [{ id: 'txn-hardware-1' }, { id: 'txn-hardware-2' }],
+      outlierIds: ['txn-hardware-1', 'txn-hardware-2'],
     });
 
     await runner.runQC();
@@ -119,7 +142,7 @@ describe('QCRunner', () => {
         makeGroup('node-software', 'IT', 9_500),
         makeGroup('node-hardware', 'IT', 500),
       ],
-      outlierIds: [{ id: 'txn-hardware-1' }],
+      outlierIds: ['txn-hardware-1'],
     });
 
     await runner.runQC();
@@ -139,7 +162,7 @@ describe('QCRunner', () => {
         makeGroup('node-software', 'IT', 9_000),
         makeGroup('node-hardware', 'IT', 1_000),
       ],
-      allIds: [{ id: 'txn-1' }, { id: 'txn-2' }],
+      allIds: ['txn-1', 'txn-2'],
     });
 
     await runner.runQC();
@@ -161,7 +184,7 @@ describe('QCRunner', () => {
         makeGroup('node-hardware', 'IT', 300),
         makeGroup('node-facilities', 'Facilities', 300),
       ],
-      outlierIds: [{ id: 'txn-hardware-1' }, { id: 'txn-facilities-1' }],
+      outlierIds: ['txn-hardware-1', 'txn-facilities-1'],
     });
 
     await runner.runQC();
@@ -187,7 +210,7 @@ describe('QCRunner', () => {
         makeGroup('node-hardware', 'IT', 4_700),
         makeGroup('node-facilities', 'Facilities', 300),
       ],
-      allIds: [{ id: 'txn-1' }, { id: 'txn-2' }, { id: 'txn-3' }],
+      allIds: ['txn-1', 'txn-2', 'txn-3'],
     });
 
     await runner.runQC();
@@ -205,7 +228,7 @@ describe('QCRunner', () => {
         makeGroup('node-software', 'IT', 6_000),
         makeGroup('node-facilities', 'Facilities', 4_000),
       ],
-      allIds: [{ id: 'txn-1' }, { id: 'txn-2' }],
+      allIds: ['txn-1', 'txn-2'],
     });
 
     await runner.runQC();
@@ -224,7 +247,7 @@ describe('QCRunner', () => {
         makeGroup('node-a', 'L2-A', 5_000),
         makeGroup('node-b', 'L2-B', 5_000),
       ],
-      allIds: [{ id: 'txn-1' }, { id: 'txn-2' }, { id: 'txn-3' }],
+      allIds: ['txn-1', 'txn-2', 'txn-3'],
     });
 
     await runner.runQC();
@@ -251,12 +274,17 @@ describe('QCRunner', () => {
   // ── Multiple suppliers processed independently ─────────────────────────────
 
   it('processes each supplier independently', async () => {
-    const suppliers = [makeSupplier('sup-1', 'Acme'), makeSupplier('sup-2', 'Globex')];
+    const supplierRows = [makeSupplier('sup-1', 'Acme'), makeSupplier('sup-2', 'Globex')];
 
     vi.mocked(db.all).mockImplementation(async (sql: string) => {
-      if (sql.includes('DISTINCT')) return suppliers;
-      if (sql.includes('!=')) return [{ id: 'txn-hardware-1' }]; // Acme outliers
-      return [{ id: 'txn-globex-1' }, { id: 'txn-globex-2' }];   // Globex all IDs
+      if (sql.includes('DISTINCT')) return supplierRows;
+      return [];
+    });
+
+    vi.mocked(transactions.getIdsBySupplier).mockImplementation(async (suppId, options) => {
+      if (suppId === 'sup-1' && options?.excludeTaxonomyNodeId) return ['txn-hardware-1']; // Acme outliers
+      if (suppId === 'sup-2') return ['txn-globex-1', 'txn-globex-2']; // Globex all IDs
+      return [];
     });
 
     vi.mocked(transactions.getSpendByTaxonomy).mockImplementation(async (supplierId) => {
@@ -366,5 +394,21 @@ describe('QCRunner', () => {
     ]);
     const count = await runner.getSupplierCount([{ field: 'is_tail_spend', operator: 'is_true' }]);
     expect(count).toBe(0);
+  });
+
+  it('getSupplierCount — throws when spend_amount column is missing', async () => {
+    vi.mocked(transactions.getColumns).mockResolvedValue(['id', 'row_index']);
+    await expect(runner.getSupplierCount()).rejects.toThrow('spend_amount');
+  });
+
+  // ── spend_amount guard ──────────────────────────────────────────────────────
+
+  it('emits failed when spend_amount column is missing', async () => {
+    vi.mocked(transactions.getColumns).mockResolvedValue(['id', 'row_index']);
+    await runner.runQC();
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      'qc:progress',
+      expect.objectContaining({ status: 'failed', currentStep: expect.stringContaining('spend_amount') })
+    );
   });
 });

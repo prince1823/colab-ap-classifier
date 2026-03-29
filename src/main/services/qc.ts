@@ -7,6 +7,7 @@ import type {
   QCAgent as IQCAgent,
   SupplierUniverse,
   TaxonomyStore as ITaxonomyStore,
+  SupplierService as ISupplierService,
 } from '../../shared/types/services';
 import type { QCProgress, QCOutcome, QCConfig, FilterConditionQC, SpendByTaxonomyResult } from '../../shared/types/classification';
 import { buildDedupGroups } from '../utils/dedup-groups';
@@ -15,6 +16,7 @@ import { DEFAULT_QC_RULES } from '../agents/qc-agent';
 import { debugLog } from '../utils/debug-log';
 
 const CLASSIFIED_STATUSES = `('classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent')`;
+const CLASSIFIED_STATUS_LIST = ['classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent'];
 
 export const DEFAULT_QC_CONFIG: QCConfig = {
   scope: [],
@@ -48,7 +50,8 @@ export class QCRunner implements IQCRunner {
     private qcAgent: IQCAgent,
     private supplierUniverse: SupplierUniverse,
     private project: IProjectStore,
-    private taxonomy: ITaxonomyStore
+    private taxonomy: ITaxonomyStore,
+    private suppliers: ISupplierService
   ) {}
 
   getIsRunning(): boolean {
@@ -60,6 +63,10 @@ export class QCRunner implements IQCRunner {
   }
 
   async getSupplierCount(scope?: FilterConditionQC[]): Promise<number> {
+    const columns = await this.transactions.getColumns();
+    if (!columns.includes('spend_amount')) {
+      throw new Error("QC requires the 'spend_amount' column but it was not found in the transactions table. Ensure your CSV import maps a column to spend_amount.");
+    }
     const suppliers = await this.resolveScopedSuppliers(scope ?? []);
     return suppliers.length;
   }
@@ -68,6 +75,18 @@ export class QCRunner implements IQCRunner {
     if (this.isRunningFlag) return;
     this.isRunningFlag = true;
     this.isStopped = false;
+
+    // Guard: spend_amount column must exist for QC spend calculations
+    const columns = await this.transactions.getColumns();
+    if (!columns.includes('spend_amount')) {
+      this.isRunningFlag = false;
+      this.emitProgress({
+        status: 'failed', totalSuppliers: 0, processedSuppliers: 0,
+        percentage: 0, currentSupplier: null,
+        currentStep: "QC requires the 'spend_amount' column but it was not found in the transactions table. Ensure your CSV import maps a column to spend_amount.",
+      });
+      return;
+    }
 
     const cfg = this.mergeWithDefaults(config);
 
@@ -374,14 +393,8 @@ export class QCRunner implements IQCRunner {
   private async buildSupplierSummary(supplier: SupplierQCData): Promise<string> {
     const sections: string[] = [];
 
-    // Supplier context
-    const supplierInfo = await this.db.get<{ parent_name: string | null }>(
-      `SELECT sp.name AS parent_name
-       FROM project_suppliers ps
-       LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
-       WHERE ps.id = ?`,
-      supplier.id
-    );
+    // Supplier context — delegate to SupplierService for parent name resolution
+    const projectSupplier = await this.suppliers.getProjectSupplier(supplier.id);
 
     let research = null;
     if (supplier.supplierName) {
@@ -393,7 +406,7 @@ export class QCRunner implements IQCRunner {
     if (research?.supplierType) contextParts.push(`Type: ${research.supplierType}`);
     if (research?.industry) contextParts.push(`Industry: ${research.industry}`);
     if (research?.productsServices) contextParts.push(`Products/Services: ${research.productsServices}`);
-    if (supplierInfo?.parent_name) contextParts.push(`Parent Company: ${supplierInfo.parent_name}`);
+    if (projectSupplier?.parentName) contextParts.push(`Parent Company: ${projectSupplier.parentName}`);
     contextParts.push(`Tail Spend: ${supplier.isTailSpend ? 'yes' : 'no'}`);
     contextParts.push(`Total Spend: $${supplier.totalSpend.toLocaleString()}`);
     contextParts.push(`Transaction Count: ${supplier.transactionCount}`);
@@ -462,16 +475,10 @@ export class QCRunner implements IQCRunner {
   }
 
   private async pullOutliersTo(projectSupplierId: string, winnerNodeId: string): Promise<void> {
-    const rows = await this.db.all<{ id: string }>(
-      `SELECT CAST(id AS VARCHAR) as id
-       FROM transactions t
-       WHERE CAST(t.project_supplier_id AS VARCHAR) = ?
-         AND CAST(t.taxonomy_node_id AS VARCHAR) != ?
-         AND t.classification_status IN ${CLASSIFIED_STATUSES}`,
-      projectSupplierId,
-      winnerNodeId
-    );
-    const outlierIds = rows.map((r) => r.id);
+    const outlierIds = await this.transactions.getIdsBySupplier(projectSupplierId, {
+      statuses: CLASSIFIED_STATUS_LIST,
+      excludeTaxonomyNodeId: winnerNodeId,
+    });
     if (outlierIds.length === 0) return;
 
     await this.transactions.updateTransactions(
@@ -481,15 +488,10 @@ export class QCRunner implements IQCRunner {
   }
 
   private async getSupplierTxnIds(projectSupplierId: string): Promise<string[]> {
-    const rows = await this.db.all<{ id: string }>(
-      `SELECT CAST(id AS VARCHAR) as id
-       FROM transactions t
-       WHERE CAST(t.project_supplier_id AS VARCHAR) = ?
-         AND t.classification_status IN ${CLASSIFIED_STATUSES}
-         AND t.taxonomy_node_id IS NOT NULL`,
-      projectSupplierId
-    );
-    return rows.map((r) => r.id);
+    return this.transactions.getIdsBySupplier(projectSupplierId, {
+      statuses: CLASSIFIED_STATUS_LIST,
+      requireTaxonomyNode: true,
+    });
   }
 
   private emitProgress(progress: QCProgress): void {

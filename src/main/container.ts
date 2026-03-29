@@ -106,13 +106,13 @@ export function createContainer(): ServiceContainer {
   // Orchestrators
   const researcher = new SupplierResearcher(
     supplierUniverse, webSearch, researchAgent, eventBus, suppliers,
-    classificationAgent, db
+    classificationAgent, transactions
   );
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,
-    transactions, changelog, classificationAgent, eventBus, supplierUniverse
+    transactions, changelog, classificationAgent, eventBus, supplierUniverse, suppliers
   );
-  const qc = new QCRunner(db, transactions, eventBus, qcAgent, supplierUniverse, project, taxonomy);
+  const qc = new QCRunner(db, transactions, eventBus, qcAgent, supplierUniverse, project, taxonomy, suppliers);
 
   return {
     db, supplierUniverse, eventBus, llm, appConfig, webSearch, license,

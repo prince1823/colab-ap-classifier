@@ -10,26 +10,36 @@ import type { ClassificationProgress } from '../../shared/types/classification'
 import type { FieldDefinition, GroupedFilter, FilterOperator } from '../../shared/types/transactions'
 
 type ActiveTab = 'classification' | 'qc'
-type ScopePreset = 'unclassified_researched' | 'unclassified_not_researched' | 'all' | 'custom'
+type ScopePreset = 'actionable' | 'needs_research' | 'all' | 'custom'
 
 const PRESET_GROUPED: Record<Exclude<ScopePreset, 'custom'>, GroupedFilter> = {
-  unclassified_researched: {
+  actionable: {
     groupConnector: 'AND',
-    groups: [{
-      connector: 'AND',
-      conditions: [
-        { field: 'classification_status', operator: 'equals', value: 'unclassified' },
-        { field: 'is_researched', operator: 'is_true', value: '' },
-      ],
-    }],
+    groups: [
+      {
+        connector: 'AND',
+        conditions: [
+          { field: 'classification_status', operator: 'equals', value: 'unclassified' },
+        ],
+      },
+      {
+        connector: 'OR',
+        conditions: [
+          { field: 'is_researched', operator: 'is_true', value: '' },
+          { field: 'is_tail_spend', operator: 'is_true', value: '' },
+        ],
+        groupConnector: 'AND',
+      },
+    ],
   },
-  unclassified_not_researched: {
+  needs_research: {
     groupConnector: 'AND',
     groups: [{
       connector: 'AND',
       conditions: [
         { field: 'classification_status', operator: 'equals', value: 'unclassified' },
         { field: 'is_researched', operator: 'is_false', value: '' },
+        { field: 'is_tail_spend', operator: 'is_false', value: '' },
       ],
     }],
   },
@@ -37,8 +47,8 @@ const PRESET_GROUPED: Record<Exclude<ScopePreset, 'custom'>, GroupedFilter> = {
 }
 
 const PRESET_LABELS: Record<ScopePreset, string> = {
-  unclassified_researched: 'Unclassified (with research)',
-  unclassified_not_researched: 'Unclassified (no research)',
+  actionable: 'Ready to classify',
+  needs_research: 'Needs research',
   all: 'All rows',
   custom: 'Custom filter',
 }
@@ -55,7 +65,7 @@ export default function ClassificationPage() {
   const [error, setError] = useState<string | null>(null)
 
   // Scope state
-  const [preset, setPreset] = useState<ScopePreset>('unclassified_researched')
+  const [preset, setPreset] = useState<ScopePreset>('actionable')
   const [customGrouped, setCustomGrouped] = useState<GroupedFilter | null>(null)
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
   const [filterModalOpen, setFilterModalOpen] = useState(false)

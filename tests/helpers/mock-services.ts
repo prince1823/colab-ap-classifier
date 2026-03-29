@@ -146,6 +146,8 @@ export function createMockTransactionStore(): TransactionStore {
     applyRule: vi.fn().mockResolvedValue(0),
     getSpendByTaxonomy: vi.fn().mockResolvedValue([]),
     getTransactionsByTaxonomy: vi.fn().mockResolvedValue([]),
+    queryBySupplier: vi.fn().mockResolvedValue([]),
+    getIdsBySupplier: vi.fn().mockResolvedValue([]),
   };
 }
 

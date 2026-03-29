@@ -163,6 +163,12 @@ export interface TransactionStore {
   applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
   getSpendByTaxonomy(supplierId: string): Promise<SpendByTaxonomyResult[]>;
   getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string, columnPriorities: string[]): Promise<Array<Record<string, unknown>>>;
+  queryBySupplier(supplierId: string, statusFilter?: string | string[]): Promise<Record<string, unknown>[]>;
+  getIdsBySupplier(supplierId: string, options?: {
+    statuses?: string[];
+    excludeTaxonomyNodeId?: string;
+    requireTaxonomyNode?: boolean;
+  }): Promise<string[]>;
 }
 
 export interface TaxonomyStore {

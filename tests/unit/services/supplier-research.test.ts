@@ -7,11 +7,11 @@ import {
   createMockEventBus,
   createMockSupplierService,
   createMockClassificationAgent,
-  createMockDatabase,
+  createMockTransactionStore,
 } from '../../helpers/mock-services';
 import type {
   SupplierUniverse, WebSearch, ResearchAgent, EventBus,
-  SupplierService, ClassificationAgent, Database,
+  SupplierService, ClassificationAgent, TransactionStore,
 } from '../../../src/shared/types/services';
 
 describe('SupplierResearcher', () => {
@@ -21,7 +21,7 @@ describe('SupplierResearcher', () => {
   let eventBus: EventBus;
   let supplierService: SupplierService;
   let classificationAgent: ClassificationAgent;
-  let db: Database;
+  let transactions: TransactionStore;
   let researcher: SupplierResearcher;
 
   beforeEach(() => {
@@ -32,10 +32,10 @@ describe('SupplierResearcher', () => {
     eventBus = createMockEventBus();
     supplierService = createMockSupplierService();
     classificationAgent = createMockClassificationAgent();
-    db = createMockDatabase();
+    transactions = createMockTransactionStore();
     researcher = new SupplierResearcher(
       supplierUniverse, webSearch, researchAgent, eventBus,
-      supplierService, classificationAgent, db
+      supplierService, classificationAgent, transactions
     );
   });
 
@@ -185,7 +185,7 @@ describe('SupplierResearcher', () => {
         supplierInfo: null, mappedTaxonomyPaths: null,
         l1L2Path: null, universeMatch: false, isResearched: false, createdAt: '',
       });
-      vi.mocked(db.all).mockResolvedValue([
+      vi.mocked(transactions.queryBySupplier).mockResolvedValue([
         { id: 'tx1', project_supplier_id: 'sup1', spend_amount: 25, gl_description: 'Office supplies' },
         { id: 'tx2', project_supplier_id: 'sup1', spend_amount: 25, gl_description: 'Pens' },
       ]);

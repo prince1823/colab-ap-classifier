@@ -15,6 +15,7 @@ import {
   createMockClassificationAgent,
   createMockEventBus,
   createMockSupplierUniverse,
+  createMockSupplierService,
 } from '../../helpers/mock-services';
 import type {
   Database,
@@ -26,6 +27,7 @@ import type {
   ClassificationAgent,
   EventBus,
   SupplierUniverse,
+  SupplierService,
 } from '../../../src/shared/types/services';
 
 describe('ClassificationRunner', () => {
@@ -38,6 +40,7 @@ describe('ClassificationRunner', () => {
   let classificationAgent: ClassificationAgent;
   let eventBus: EventBus;
   let supplierUniverse: SupplierUniverse;
+  let suppliers: SupplierService;
   let runner: ClassificationRunner;
 
   beforeEach(() => {
@@ -51,9 +54,10 @@ describe('ClassificationRunner', () => {
     classificationAgent = createMockClassificationAgent();
     eventBus = createMockEventBus();
     supplierUniverse = createMockSupplierUniverse();
+    suppliers = createMockSupplierService();
     runner = new ClassificationRunner(
       db, taxonomy, project, rules, transactions, changelog,
-      classificationAgent, eventBus, supplierUniverse
+      classificationAgent, eventBus, supplierUniverse, suppliers
     );
   });
 
@@ -83,18 +87,22 @@ describe('ClassificationRunner', () => {
 
     vi.mocked(db.all).mockImplementation(async (sql: string) => {
       if (sql.includes('DISTINCT')) return [{ id: 'sup1', supplier_name: supplierName }];
-      if (sql.includes('FROM transactions')) return txns;
       return [];
     });
     vi.mocked(db.get).mockImplementation(async (sql: string) => {
       if (sql.includes('supplier_name, is_tail_spend, l1_l2_path')) {
         return { supplier_name: supplierName, is_tail_spend: isTailSpend, l1_l2_path: l1L2Path };
       }
-      if (sql.includes('supplier_parents') || sql.includes('supplier_name')) {
-        return { supplier_name: supplierName, parent_name: null };
-      }
       if (sql.includes('COUNT')) return { cnt: txns.length };
       return undefined;
+    });
+    vi.mocked(transactions.queryBySupplier).mockResolvedValue(txns);
+    vi.mocked(transactions.getIdsBySupplier).mockResolvedValue(txns.map((t) => String(t.id)));
+    vi.mocked(suppliers.getProjectSupplier).mockResolvedValue({
+      id: 'sup1', supplierName, parentName: null, parentSupplierId: null,
+      isTailSpend, isResearched: false, confirmationStatus: 'pending',
+      supplierInfo: null, mappedTaxonomyPaths: null, l1L2Path: l1L2Path,
+      universeMatch: false, createdAt: '',
     });
     vi.mocked(taxonomy.getNodes).mockResolvedValue(taxonomyNodes);
     vi.mocked(project.getSetting).mockImplementation(async (key: string) => {
@@ -415,16 +423,19 @@ describe('ClassificationRunner', () => {
           { id: 'sup1', supplier_name: 'FailSupplier' },
           { id: 'sup2', supplier_name: 'GoodSupplier' },
         ];
-        if (sql.includes('FROM transactions')) {
-          return [{ id: 'tx1', project_supplier_id: 'sup1', spend_amount: 1000, classification_status: 'unclassified' }];
-        }
         return [];
       });
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_parents')) return { supplier_name: 'FailSupplier', parent_name: null, is_researched: false };
+        if (sql.includes('supplier_name, is_tail_spend, l1_l2_path')) {
+          return { supplier_name: 'FailSupplier', is_tail_spend: false, l1_l2_path: 'Indirect|IT' };
+        }
         if (sql.includes('COUNT')) return { cnt: 2 };
         return undefined;
       });
+      vi.mocked(transactions.queryBySupplier).mockResolvedValue([
+        { id: 'tx1', project_supplier_id: 'sup1', spend_amount: 1000, classification_status: 'unclassified' },
+      ]);
+      vi.mocked(transactions.getIdsBySupplier).mockResolvedValue(['tx1']);
 
       // Call 2 fails for first supplier, and markSupplierError also fails
       let classifyCallCount = 0;
@@ -485,7 +496,7 @@ describe('ClassificationRunner', () => {
 
       expect(eventBus.emit).toHaveBeenCalledWith(
         'classification:progress',
-        expect.objectContaining({ status: 'stopped' })
+        expect.objectContaining({ status: 'cancelled' })
       );
 
       resolveQuery([]);

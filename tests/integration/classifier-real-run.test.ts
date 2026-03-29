@@ -163,10 +163,10 @@ describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
     suppliers = new SupplierService(db, supplierUniverse);
     ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
     exportSvc = new ExportService(db);
-    researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus);
+    researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus, suppliers, classificationAgent, transactions);
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
-      transactions, changelog, classificationAgent, eventBus, supplierUniverse
+      transactions, changelog, classificationAgent, eventBus, supplierUniverse, suppliers
     );
 
     console.log(`\n  CSV: ${FIXTURE_CSV} (${csvRowCount} rows)`);

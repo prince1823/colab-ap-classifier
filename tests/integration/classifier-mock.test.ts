@@ -263,11 +263,11 @@ describe('Classifier Mock Pipeline Test', () => {
     exportSvc = new ExportService(db);
     researcher = new SupplierResearcher(
       supplierUniverse, webSearch, researchAgent, eventBus,
-      suppliers, classificationAgent, db
+      suppliers, classificationAgent, transactions
     );
     classifier = new ClassificationRunner(
       db, taxonomy, project, rules,
-      transactions, changelog, classificationAgent, eventBus, supplierUniverse
+      transactions, changelog, classificationAgent, eventBus, supplierUniverse, suppliers
     );
 
     console.log(`\n  CSV: ${FIXTURE_CSV} (${csvRowCount} rows)`);

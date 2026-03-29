@@ -313,13 +313,13 @@ async function main() {
   const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent, eventBus as any);
   const researcher = new SupplierResearcher(
     supplierUniverse, webSearch, researchAgent, eventBus as any,
-    suppliers, classificationAgent, db
+    suppliers, classificationAgent, transactions
   );
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,
-    transactions, changelog, classificationAgent, eventBus as any, supplierUniverse
+    transactions, changelog, classificationAgent, eventBus as any, supplierUniverse, suppliers
   );
-  const qc = new QCRunner(db, transactions, eventBus as any, qcAgent, supplierUniverse, project, taxonomy);
+  const qc = new QCRunner(db, transactions, eventBus as any, qcAgent, supplierUniverse, project, taxonomy, suppliers);
 
   try {
     // ─── Phase 1: Create project ──────────────────────────────────────────

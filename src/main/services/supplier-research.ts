@@ -6,7 +6,7 @@ import type {
   SupplierResearcher as ISupplierResearcher,
   SupplierService,
   ClassificationAgent,
-  Database,
+  TransactionStore as ITransactionStore,
 } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import type { TaxonomyNode } from '../../shared/types/taxonomy';
@@ -33,7 +33,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     private eventBus: EventBus,
     private supplierService: SupplierService,
     private classificationAgent: ClassificationAgent,
-    private db: Database
+    private transactions: ITransactionStore
   ) {}
 
   async researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>): Promise<SupplierInfo> {
@@ -389,10 +389,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     supplierId: string,
     columnPriorities: string[]
   ): Promise<Array<Record<string, unknown>>> {
-    const txns = await this.db.all<Record<string, unknown>>(
-      'SELECT * FROM transactions WHERE project_supplier_id = ?',
-      supplierId
-    );
+    const txns = await this.transactions.queryBySupplier(supplierId);
 
     // Clean descriptions and inject supplier name
     const supplier = await this.supplierService.getProjectSupplier(supplierId);

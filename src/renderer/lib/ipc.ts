@@ -163,6 +163,7 @@ export const ipc = {
     renameParent: (parentId: string, newName: string) => invoke('suppliers:renameParent', parentId, newName),
     deleteParent: (parentId: string) => invoke('suppliers:deleteParent', parentId),
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
+    syncToUniverse: (supplierIds: string[]) => invoke('suppliers:syncToUniverse', supplierIds),
   },
 
   // ── Rules (12 channels) ──

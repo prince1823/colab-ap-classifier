@@ -1,5 +1,5 @@
 import type { LicenseStatus, LicenseActivationResult } from './license';
-import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput, SupplierParent } from './suppliers';
+import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
@@ -192,6 +192,9 @@ export interface SupplierService {
   deleteParent(parentId: string): Promise<void>;
   mergeParents(survivorId: string, losingIds: string[]): Promise<void>;
   importSupplierCSV(filePath: string, supplierNameColumn: string): Promise<{ created: number; skipped: number }>;
+  // CSV Apply (diff-based)
+  computeCsvDiff(rows: CsvApplyRow[]): Promise<CsvApplyDiff>;
+  applyCsvDiff(diff: CsvApplyDiff): Promise<CsvApplyResult>;
 }
 
 export interface RuleStore {

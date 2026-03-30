@@ -1,6 +1,6 @@
 import { registerHandler } from './register';
 import type { SupplierService, SupplierResearcher, IngestService } from '../../shared/types/services';
-import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
+import type { SupplierConfirmationStatus, SupplierUpdateInput, CsvApplyRow, CsvApplyDiff } from '../../shared/types/suppliers';
 import type { FilterCondition, GroupedFilter } from '../../shared/types/transactions';
 
 export function registerSuppliersHandlers(
@@ -91,5 +91,13 @@ export function registerSuppliersHandlers(
 
   registerHandler('suppliers:importCSV', async (_event, filePath: unknown, supplierNameColumn: unknown) => {
     return suppliers.importSupplierCSV(filePath as string, supplierNameColumn as string);
+  });
+
+  registerHandler('suppliers:computeCsvDiff', async (_event, rows: unknown) => {
+    return suppliers.computeCsvDiff(rows as CsvApplyRow[]);
+  });
+
+  registerHandler('suppliers:applyCsvDiff', async (_event, diff: unknown) => {
+    return suppliers.applyCsvDiff(diff as CsvApplyDiff);
   });
 }

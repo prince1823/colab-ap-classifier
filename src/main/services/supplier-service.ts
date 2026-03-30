@@ -13,6 +13,9 @@ import type {
   SupplierConfirmationStatus,
   SupplierUpdateInput,
   SupplierParent,
+  CsvApplyRow,
+  CsvApplyDiff,
+  CsvApplyResult,
 } from '../../shared/types/suppliers';
 import type { FilterCondition, GroupedFilter, FieldDefinition } from '../../shared/types/transactions';
 import { buildWhereClause, buildGroupedWhereClause, type ColumnResolver } from '../utils/query-builder';
@@ -683,5 +686,339 @@ export class SupplierService implements ISupplierService {
     }
 
     return { created, skipped };
+  }
+
+  // ─── CSV Apply: Diff-based bulk update ──────────────────────────────────────
+
+  async computeCsvDiff(rows: CsvApplyRow[]): Promise<CsvApplyDiff> {
+    // Phase 1: Snapshot current DB state
+    const aliasRows = await this.db.all<{
+      original_supplier_name: string;
+      project_supplier_id: string;
+      supplier_name: string;
+      parent_supplier_id: string | null;
+      parent_name: string | null;
+    }>(
+      `SELECT DISTINCT t.original_supplier_name, t.project_supplier_id,
+              ps.supplier_name, ps.parent_supplier_id, sp.name as parent_name
+       FROM transactions t
+       JOIN project_suppliers ps ON ps.id = t.project_supplier_id
+       LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
+       WHERE t.original_supplier_name IS NOT NULL
+         AND t.project_supplier_id IS NOT NULL`
+    );
+
+    const dbParentRows = await this.db.all<{ id: string; name: string }>(
+      'SELECT id, name FROM supplier_parents'
+    );
+
+    // Build lookup maps
+    const dbAliasToSupplier = new Map<string, {
+      supplierId: string; supplierName: string;
+      parentId: string | null; parentName: string | null;
+    }>();
+    const dbSupplierAliases = new Map<string, Set<string>>();
+    const dbSupplierNames = new Map<string, string>(); // id → name
+    const dbSupplierSpend = new Map<string, number>(); // id → rough spend proxy (alias count)
+
+    for (const r of aliasRows) {
+      dbAliasToSupplier.set(r.original_supplier_name, {
+        supplierId: r.project_supplier_id,
+        supplierName: r.supplier_name,
+        parentId: r.parent_supplier_id,
+        parentName: r.parent_name,
+      });
+      if (!dbSupplierAliases.has(r.project_supplier_id)) {
+        dbSupplierAliases.set(r.project_supplier_id, new Set());
+      }
+      dbSupplierAliases.get(r.project_supplier_id)!.add(r.original_supplier_name);
+      dbSupplierNames.set(r.project_supplier_id, r.supplier_name);
+      dbSupplierSpend.set(r.project_supplier_id, (dbSupplierSpend.get(r.project_supplier_id) ?? 0) + 1);
+    }
+
+    const dbParentsByName = new Map<string, { id: string; name: string }>();
+    for (const p of dbParentRows) {
+      dbParentsByName.set(p.name.toLowerCase(), { id: p.id, name: p.name });
+    }
+
+    // Phase 2 & 3: Validate CSV
+    const csvAliasToRowIndex = new Map<string, number>();
+    const warnings: CsvApplyDiff['warnings'] = { unknownAliases: [], unmatchableRows: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row.supplierName || row.supplierName.trim().length === 0) {
+        warnings.unmatchableRows.push({ supplierName: `(row ${i + 1})`, reason: 'Empty supplier name' });
+        continue;
+      }
+      for (const alias of row.aliases) {
+        if (csvAliasToRowIndex.has(alias)) {
+          const otherIdx = csvAliasToRowIndex.get(alias)!;
+          throw new Error(
+            `Alias "${alias}" appears in both "${rows[otherIdx].supplierName}" and "${row.supplierName}". Each alias must belong to exactly one supplier.`
+          );
+        }
+        if (!dbAliasToSupplier.has(alias)) {
+          warnings.unknownAliases.push({ alias, csvSupplierName: row.supplierName });
+        } else {
+          csvAliasToRowIndex.set(alias, i);
+        }
+      }
+    }
+
+    // Phase 4: Compute diff
+    // For each CSV row, find which DB suppliers it maps to via shared aliases
+    const csvRowToDbSuppliers = new Map<number, Set<string>>(); // rowIndex → Set<supplierId>
+    const dbSupplierToCsvRow = new Map<string, number>(); // supplierId → rowIndex
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const knownAliases = row.aliases.filter(a => dbAliasToSupplier.has(a));
+      if (knownAliases.length === 0) {
+        if (row.aliases.length > 0) {
+          warnings.unmatchableRows.push({ supplierName: row.supplierName, reason: 'No aliases match existing transactions' });
+        }
+        continue;
+      }
+
+      const supplierIds = new Set<string>();
+      for (const alias of knownAliases) {
+        supplierIds.add(dbAliasToSupplier.get(alias)!.supplierId);
+      }
+
+      // Check no DB supplier is claimed by two CSV rows
+      for (const sid of supplierIds) {
+        if (dbSupplierToCsvRow.has(sid)) {
+          const otherIdx = dbSupplierToCsvRow.get(sid)!;
+          throw new Error(
+            `Supplier "${dbSupplierNames.get(sid)}" is claimed by both "${rows[otherIdx].supplierName}" and "${row.supplierName}" via different aliases. Resolve the conflict.`
+          );
+        }
+        dbSupplierToCsvRow.set(sid, i);
+      }
+
+      csvRowToDbSuppliers.set(i, supplierIds);
+    }
+
+    // Derive operations
+    const diff: CsvApplyDiff = {
+      renames: [],
+      merges: [],
+      aliasReassignments: [],
+      parentCreations: [],
+      parentRenames: [],
+      parentMerges: [],
+      parentChanges: [],
+      warnings,
+    };
+
+    // Track which supplier ID is the "survivor" for each CSV row (after merges)
+    const csvRowSurvivor = new Map<number, string>(); // rowIndex → survivorId
+
+    for (const [rowIdx, supplierIds] of csvRowToDbSuppliers) {
+      const row = rows[rowIdx];
+      const ids = [...supplierIds];
+
+      if (ids.length === 1) {
+        csvRowSurvivor.set(rowIdx, ids[0]);
+      } else {
+        // MERGE: pick survivor — prefer the one whose name matches CSV, else highest alias count
+        let survivorId = ids.find(id => dbSupplierNames.get(id) === row.supplierName)
+          ?? ids.sort((a, b) => (dbSupplierSpend.get(b) ?? 0) - (dbSupplierSpend.get(a) ?? 0))[0];
+        const loserIds = ids.filter(id => id !== survivorId);
+
+        diff.merges.push({
+          survivorId,
+          survivorName: dbSupplierNames.get(survivorId) ?? row.supplierName,
+          loserIds,
+          loserNames: loserIds.map(id => dbSupplierNames.get(id) ?? '(unknown)'),
+        });
+
+        csvRowSurvivor.set(rowIdx, survivorId);
+      }
+
+      // Check for rename
+      const survivorId = csvRowSurvivor.get(rowIdx)!;
+      const currentName = dbSupplierNames.get(survivorId) ?? '';
+      if (currentName !== row.supplierName) {
+        diff.renames.push({ supplierId: survivorId, oldName: currentName, newName: row.supplierName });
+      }
+    }
+
+    // Derive alias reassignments: compare each alias's current DB owner vs intended CSV owner
+    for (const [alias, rowIdx] of csvAliasToRowIndex) {
+      const intendedSurvivor = csvRowSurvivor.get(rowIdx);
+      if (!intendedSurvivor) continue;
+
+      const currentOwner = dbAliasToSupplier.get(alias)!;
+      // After merges, the "effective owner" is the survivor if the current owner is a loser
+      let effectiveOwner = currentOwner.supplierId;
+      for (const merge of diff.merges) {
+        if (merge.loserIds.includes(effectiveOwner)) {
+          effectiveOwner = merge.survivorId;
+          break;
+        }
+      }
+
+      if (effectiveOwner !== intendedSurvivor) {
+        diff.aliasReassignments.push({
+          alias,
+          fromSupplierId: effectiveOwner,
+          fromName: dbSupplierNames.get(effectiveOwner) ?? '(unknown)',
+          toSupplierId: intendedSurvivor,
+          toName: rows[rowIdx].supplierName,
+        });
+      }
+    }
+
+    // Derive parent operations
+    // Collect all CSV parent names and which DB parents they map to
+    const csvParentToDbParents = new Map<string, Set<string>>(); // csvParentName(lower) → Set<dbParentId>
+    const csvParentOriginalCase = new Map<string, string>(); // lower → original case
+
+    for (const [rowIdx, survivorId] of csvRowSurvivor) {
+      const row = rows[rowIdx];
+      const csvParent = row.parentName?.trim() || null;
+      const currentInfo = dbAliasToSupplier.get(rows[rowIdx].aliases.find(a => dbAliasToSupplier.has(a))!);
+      const currentParentName = currentInfo?.parentName ?? null;
+      const currentParentId = currentInfo?.parentId ?? null;
+
+      if (csvParent) {
+        const key = csvParent.toLowerCase();
+        csvParentOriginalCase.set(key, csvParent);
+        if (!csvParentToDbParents.has(key)) {
+          csvParentToDbParents.set(key, new Set());
+        }
+        if (currentParentId) {
+          csvParentToDbParents.get(key)!.add(currentParentId);
+        }
+      }
+
+      // Track parent change per supplier
+      if ((csvParent ?? null) !== (currentParentName ?? null)) {
+        diff.parentChanges.push({
+          supplierId: survivorId,
+          supplierName: row.supplierName,
+          oldParentName: currentParentName,
+          newParentName: csvParent,
+        });
+      }
+    }
+
+    // Determine parent creations, renames, and merges
+    for (const [lowerName, dbParentIds] of csvParentToDbParents) {
+      const csvName = csvParentOriginalCase.get(lowerName)!;
+      const existingParent = dbParentsByName.get(lowerName);
+
+      if (dbParentIds.size === 0 && !existingParent) {
+        // New parent needed
+        diff.parentCreations.push({ name: csvName });
+      } else if (dbParentIds.size === 1 && !existingParent) {
+        // The only DB parent under this CSV name doesn't match by name → rename
+        const dbParentId = [...dbParentIds][0];
+        const dbParent = dbParentRows.find(p => p.id === dbParentId);
+        if (dbParent && dbParent.name.toLowerCase() !== lowerName) {
+          // Only rename if all suppliers under this old parent are now under the new name
+          diff.parentRenames.push({ parentId: dbParentId, oldName: dbParent.name, newName: csvName });
+        }
+      } else if (dbParentIds.size > 1) {
+        // Multiple DB parents mapping to same CSV parent name → merge
+        const survivorParent = existingParent
+          ?? dbParentRows.find(p => [...dbParentIds].includes(p.id))!;
+        const loserIds = [...dbParentIds].filter(id => id !== survivorParent.id);
+        if (loserIds.length > 0) {
+          diff.parentMerges.push({
+            survivorId: survivorParent.id,
+            survivorName: survivorParent.name,
+            loserIds,
+            loserNames: loserIds.map(id => dbParentRows.find(p => p.id === id)?.name ?? '(unknown)'),
+          });
+        }
+        // If survivor name doesn't match CSV name, also rename
+        if (survivorParent.name.toLowerCase() !== lowerName) {
+          diff.parentRenames.push({ parentId: survivorParent.id, oldName: survivorParent.name, newName: csvName });
+        }
+      } else if (existingParent && existingParent.name !== csvName) {
+        // Existing parent with different casing — rename
+        diff.parentRenames.push({ parentId: existingParent.id, oldName: existingParent.name, newName: csvName });
+      }
+    }
+
+    return diff;
+  }
+
+  async applyCsvDiff(diff: CsvApplyDiff): Promise<CsvApplyResult> {
+    const hasChanges =
+      diff.renames.length > 0 ||
+      diff.merges.length > 0 ||
+      diff.aliasReassignments.length > 0 ||
+      diff.parentCreations.length > 0 ||
+      diff.parentRenames.length > 0 ||
+      diff.parentMerges.length > 0 ||
+      diff.parentChanges.length > 0;
+
+    if (!hasChanges) {
+      return { applied: false, diff, noChanges: true };
+    }
+
+    // Apply in correct order to avoid cascading issues
+
+    // 1. Create new parents
+    const newParentIds = new Map<string, string>(); // lower(name) → id
+    for (const pc of diff.parentCreations) {
+      const parent = await this.addParent(pc.name);
+      newParentIds.set(pc.name.toLowerCase(), parent.id);
+    }
+
+    // 2. Rename parents
+    for (const pr of diff.parentRenames) {
+      await this.renameParent(pr.parentId, pr.newName);
+    }
+
+    // 3. Merge parents
+    for (const pm of diff.parentMerges) {
+      await this.mergeParents(pm.survivorId, pm.loserIds);
+    }
+
+    // 4. Merge suppliers
+    for (const m of diff.merges) {
+      await this.mergeSuppliers(m.survivorId, m.loserIds);
+    }
+
+    // 5. Rename suppliers
+    for (const r of diff.renames) {
+      await this.renameSupplier(r.supplierId, r.newName);
+    }
+
+    // 6. Reassign aliases
+    for (const a of diff.aliasReassignments) {
+      await this.assignAlias(a.toSupplierId, a.alias);
+    }
+
+    // 7. Assign/change parents on suppliers
+    // Build a map: parentName → parentId (including newly created ones)
+    const allParents = await this.listParents();
+    const parentNameToId = new Map<string, string>();
+    for (const p of allParents) {
+      parentNameToId.set(p.name.toLowerCase(), p.id);
+    }
+
+    for (const pc of diff.parentChanges) {
+      let targetParentId: string | null = null;
+      if (pc.newParentName) {
+        targetParentId = parentNameToId.get(pc.newParentName.toLowerCase())
+          ?? newParentIds.get(pc.newParentName.toLowerCase())
+          ?? null;
+        // If parent still doesn't exist (edge case), create it
+        if (!targetParentId) {
+          const created = await this.addParent(pc.newParentName);
+          targetParentId = created.id;
+          parentNameToId.set(pc.newParentName.toLowerCase(), created.id);
+        }
+      }
+      await this.assignParent([pc.supplierId], targetParentId);
+    }
+
+    return { applied: true, diff, noChanges: false };
   }
 }

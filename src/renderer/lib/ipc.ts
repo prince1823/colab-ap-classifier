@@ -2,7 +2,7 @@ import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
-import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
+import type { SupplierConfirmationStatus, SupplierUpdateInput, CsvApplyRow, CsvApplyDiff } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition, GroupedFilter } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
@@ -161,6 +161,8 @@ export const ipc = {
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
     parseCSV: (filePath: string) => invoke('suppliers:parseCSV', filePath),
     importCSV: (filePath: string, supplierNameColumn: string) => invoke('suppliers:importCSV', filePath, supplierNameColumn),
+    computeCsvDiff: (rows: CsvApplyRow[]) => invoke('suppliers:computeCsvDiff', rows),
+    applyCsvDiff: (diff: CsvApplyDiff) => invoke('suppliers:applyCsvDiff', diff),
   },
 
   // ── Rules (6 channels) ──

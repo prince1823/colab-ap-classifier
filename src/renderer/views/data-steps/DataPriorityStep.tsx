@@ -133,6 +133,30 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
     setDragOverIndex(null)
   }, [])
 
+  // Resizable split panel state (percentage for top panel)
+  const [splitPercent, setSplitPercent] = useState(50)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const isDraggingSplit = useRef(false)
+
+  const handleSplitMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isDraggingSplit.current = true
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDraggingSplit.current || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const pct = ((ev.clientY - rect.top) / rect.height) * 100
+      setSplitPercent(Math.min(80, Math.max(20, pct)))
+    }
+    const onMouseUp = () => {
+      isDraggingSplit.current = false
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [])
+
   const removeFromLlm = (canonical: string) => {
     setLlmOrder((prev) => prev.filter((c) => c !== canonical))
     setNonLlm((prev) => [...prev, canonical])
@@ -144,81 +168,92 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
   }
 
   return (
-    <div className="flex flex-col h-full gap-4">
-      {/* Top: Transaction preview */}
-      <div className="flex-shrink-0">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-gray-700">Transaction Preview</h3>
-            <button
-              onClick={loadPreview}
-              className="rounded border border-blue-300 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
-              title="Refresh with random rows"
-            >
-              Refresh
-            </button>
-          </div>
-          {totalRows > 0 && (
-            <span className="text-xs text-gray-500">
-              Showing {Math.min(previewRows.length, 100)} of {totalRows.toLocaleString()} rows
-            </span>
-          )}
-        </div>
-        {previewRows.length > 0 ? (
-          <div className="max-h-[400px] overflow-auto rounded-md border border-gray-200">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="sticky top-0 z-10 bg-gray-50">
-                <tr>
-                  <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-400">#</th>
-                  {previewColumns.map((col) => (
-                    <th key={col} className="whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 bg-white">
-                {previewRows.map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
-                    <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-400">{i + 1}</td>
-                    {previewColumns.map((col) => (
-                      <td key={col} className="max-w-xs truncate whitespace-nowrap px-3 py-2 text-gray-700">
-                        {String(row[col] ?? '')}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center py-8 text-sm text-gray-400">
-            Loading transaction preview...
-          </div>
-        )}
-      </div>
-
+    <div className="flex flex-col h-full">
       {/* Warning: saved priorities reference unmapped columns */}
       {missingColumns.length > 0 && (
-        <div className="flex-shrink-0 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+        <div className="flex-shrink-0 mb-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
           <span className="font-semibold">Warning:</span> Previously saved priorities include columns not in current mappings:{' '}
           <span className="font-mono">{missingColumns.join(', ')}</span>.
           These columns will be removed from priorities on save.
         </div>
       )}
 
-      {/* Column priority heading */}
-      <div className="flex-shrink-0 flex items-baseline gap-3">
-        <h3 className="text-sm font-medium text-gray-700">Column Priority</h3>
-        <p className="text-xs text-gray-400">
-          {loadedFromSaved
-            ? 'Loaded from saved priorities. Drag and drop to adjust before classification.'
-            : 'Drag and drop rows to set priority. Higher position = more weight for LLM classification.'}
-        </p>
-      </div>
+      {/* Resizable split container */}
+      <div ref={containerRef} className="flex-1 min-h-0 flex flex-col">
+        {/* Top: Transaction preview */}
+        <div className="flex flex-col min-h-0" style={{ height: `${splitPercent}%` }}>
+          <div className="mb-2 flex items-center justify-between flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-gray-700">Transaction Preview</h3>
+              <button
+                onClick={loadPreview}
+                className="rounded border border-blue-300 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                title="Refresh with random rows"
+              >
+                Refresh
+              </button>
+            </div>
+            {totalRows > 0 && (
+              <span className="text-xs text-gray-500">
+                Showing {Math.min(previewRows.length, 100)} of {totalRows.toLocaleString()} rows
+              </span>
+            )}
+          </div>
+          {previewRows.length > 0 ? (
+            <div className="flex-1 min-h-0 overflow-auto rounded-md border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="sticky top-0 z-10 bg-gray-50">
+                  <tr>
+                    <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-400">#</th>
+                    {previewColumns.map((col) => (
+                      <th key={col} className="whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {previewRows.map((row, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-400">{i + 1}</td>
+                      {previewColumns.map((col) => (
+                        <td key={col} className="max-w-xs truncate whitespace-nowrap px-3 py-2 text-gray-700">
+                          {String(row[col] ?? '')}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-8 text-sm text-gray-400">
+              Loading transaction preview...
+            </div>
+          )}
+        </div>
 
-      {/* Column priority table */}
-      <div ref={priorityContainerRef} className="flex-1 min-h-0 overflow-auto rounded-md border border-gray-200">
+        {/* Resize handle */}
+        <div
+          onMouseDown={handleSplitMouseDown}
+          className="flex-shrink-0 flex items-center justify-center h-3 cursor-row-resize group hover:bg-blue-50 border-y border-gray-200 my-1"
+        >
+          <div className="w-8 h-0.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+        </div>
+
+        {/* Bottom: Column priority */}
+        <div className="flex flex-col min-h-0" style={{ height: `${100 - splitPercent}%` }}>
+          <div className="flex-shrink-0 flex items-baseline gap-3 mb-2">
+            <h3 className="text-sm font-medium text-gray-700">Column Priority</h3>
+            <p className="text-xs text-gray-400">
+              {loadedFromSaved
+                ? 'Loaded from saved priorities. Drag and drop to adjust before classification.'
+                : 'Drag and drop rows to set priority. Higher position = more weight for LLM classification.'}
+            </p>
+          </div>
+
+          {/* Column priority table */}
+          <div ref={priorityContainerRef} className="flex-1 min-h-0 overflow-auto rounded-md border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50 sticky top-0 z-10">
             <tr>
@@ -297,6 +332,8 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
             )}
           </tbody>
         </table>
+          </div>
+        </div>
       </div>
 
       {/* Bottom bar */}

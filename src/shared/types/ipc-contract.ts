@@ -142,7 +142,8 @@ export interface IPCInvokeMap {
   'feedback:apply':   { args: [input: FeedbackApplyInput]; result: void };
 
   // Export
-  'export:csv': { args: [filters?: TransactionFilter]; result: { rowsExported: number } | null };
+  'export:columns': { args: []; result: string[] };
+  'export:csv': { args: [filters?: TransactionFilter, selectedColumns?: string[]]; result: { rowsExported: number } | null };
   'export:saveContent': { args: [content: string, defaultFilename: string]; result: boolean };
 
   // Settings — LLM

@@ -7,8 +7,9 @@ import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
-import { Filter, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { Filter, X, ChevronDown, ChevronRight, Download, ArrowUpCircle } from 'lucide-react'
 import { fmtAbbrev } from '../utils/formatSpend'
+import ExportCSVPanel from '../components/ExportCSVPanel'
 
 type FilterMode = 'researched' | 'custom'
 
@@ -84,7 +85,10 @@ function SummarySection({
   )
 }
 
+type ViewMode = 'sync' | 'export'
+
 export default function SyncToUniversePage() {
+  const [viewMode, setViewMode] = useState<ViewMode>('sync')
   const [filterMode, setFilterMode] = useState<FilterMode>('researched')
   const [customGrouped, setCustomGrouped] = useState<GroupedFilter | null>(null)
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
@@ -197,13 +201,39 @@ export default function SyncToUniversePage() {
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-gray-200 bg-white">
-        <h1 className="text-lg font-semibold text-gray-900">Sync to Supplier Universe</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Select suppliers to sync to the shared Supplier Universe database.
-        </p>
+      <div className="px-6 py-5 border-b border-gray-200 bg-white flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">
+            {viewMode === 'sync' ? 'Sync to Supplier Universe' : 'Export CSV Data'}
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {viewMode === 'sync'
+              ? 'Select suppliers to sync to the shared Supplier Universe database.'
+              : 'Select and reorder columns for your CSV export.'
+            }
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setViewMode(viewMode === 'sync' ? 'export' : 'sync')}
+          className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          {viewMode === 'sync' ? (
+            <>
+              <Download size={14} />
+              Export CSV Data
+            </>
+          ) : (
+            <>
+              <ArrowUpCircle size={14} />
+              Sync to Universe
+            </>
+          )}
+        </button>
       </div>
 
+      {viewMode === 'sync' ? (
+        <>
       {/* Filter chip bar + Sync button */}
       <div className="px-6 py-3 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-2">
@@ -283,9 +313,9 @@ export default function SyncToUniversePage() {
         )}
       </div>
 
-      {/* Main area */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="flex items-center justify-center py-16">
+      {/* Main area — Sync status */}
+      <div className="flex-1 overflow-y-auto flex items-center justify-center">
+        <div className="px-6">
           {loading ? (
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
           ) : filterMode === 'custom' && filterConditions.length === 0 ? (
@@ -302,6 +332,13 @@ export default function SyncToUniversePage() {
           ) : null}
         </div>
       </div>
+        </>
+      ) : (
+        /* Export CSV view */
+        <div className="flex-1 overflow-hidden p-4">
+          <ExportCSVPanel />
+        </div>
+      )}
 
       {/* Sync modal — 3 stages: summary → syncing → result */}
       {syncModalOpen && createPortal(

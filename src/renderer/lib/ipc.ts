@@ -205,7 +205,8 @@ export const ipc = {
 
   // ── Export ──
   export: {
-    csv: (filters?: TransactionFilter) => invoke('export:csv', filters),
+    columns: () => invoke('export:columns'),
+    csv: (filters?: TransactionFilter, selectedColumns?: string[]) => invoke('export:csv', filters, selectedColumns),
     saveContent: (content: string, defaultFilename: string) => invoke('export:saveContent', content, defaultFilename),
   },
 

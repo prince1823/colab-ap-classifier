@@ -52,19 +52,13 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
   const loadPreview = useCallback(async () => {
     setPreviewColumns(allCanonicals)
     try {
-      // Fetch all rows, then pick 100 at random
-      const result = await ipc.transactions.query()
+      const result = await ipc.transactions.query({ pageSize: 100, randomize: true })
       setTotalRows(result.totalCount)
-      const all = result.rows.map((r) => ({
+      const flat = result.rows.map((r) => ({
         ...r,
         ...r.canonicalFields,
       })) as TransactionPreviewRow[]
-      // Fisher-Yates shuffle and take first 100
-      for (let i = all.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        ;[all[i], all[j]] = [all[j], all[i]]
-      }
-      setPreviewRows(all.slice(0, 100))
+      setPreviewRows(flat)
     } catch (e) {
       showError('Failed to load transaction preview', e)
     }

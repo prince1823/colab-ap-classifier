@@ -25,7 +25,6 @@ interface SupplierListPanelProps {
   onResearch?: (supplier: ProjectSupplierView) => void
   onResearchSelected?: () => void
   onConfirmSelected?: () => void
-  onSyncToUniverse?: () => void
 }
 
 function ConfirmedChip({ supplier }: { supplier: ProjectSupplierView }) {
@@ -70,7 +69,6 @@ export default function SupplierListPanel({
   onResearch,
   onResearchSelected,
   onConfirmSelected,
-  onSyncToUniverse,
 }: SupplierListPanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -255,15 +253,6 @@ export default function SupplierListPanel({
               className={`px-2 py-0.5 rounded text-[10px] font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors ${actionFocused === 'confirm' ? 'ring-2 ring-green-300 ring-offset-1' : ''}`}
             >
               Confirm
-            </button>
-          )}
-          {onSyncToUniverse && (
-            <button
-              type="button"
-              onClick={onSyncToUniverse}
-              className="px-2 py-0.5 rounded text-[10px] font-semibold bg-violet-600 text-white hover:bg-violet-700 transition-colors"
-            >
-              Sync to Universe
             </button>
           )}
         </div>

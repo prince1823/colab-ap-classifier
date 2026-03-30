@@ -13,6 +13,7 @@ import {
   MagnifyingGlassCircleIcon,
   DocumentDuplicateIcon,
   ClockIcon,
+  CloudArrowUpIcon,
   Cog6ToothIcon,
   ArrowsRightLeftIcon,
   ExclamationTriangleIcon,
@@ -35,6 +36,7 @@ const navItems = [
   { path: '/review', label: 'Review', icon: MagnifyingGlassCircleIcon, gateKey: 'hasClassifiedRows' as const },
   { path: '/override-rules', label: 'Override Rules', icon: DocumentDuplicateIcon, gateKey: 'hasUploadedData' as const },
   { path: '/version-history', label: 'Version History', icon: ClockIcon, gateKey: null },
+  { path: '/sync-to-universe', label: 'Sync to Universe', icon: CloudArrowUpIcon, gateKey: 'hasUploadedData' as const },
 ]
 
 export default function Sidebar({ collapsed, onToggle, onSwitchProject }: SidebarProps) {

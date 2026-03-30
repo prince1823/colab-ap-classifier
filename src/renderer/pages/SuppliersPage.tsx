@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { createPortal } from 'react-dom'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
@@ -262,44 +261,6 @@ export default function SuppliersPage() {
       setSaving(false)
     }
   }, [tailSpendThreshold, loadData])
-
-  // --- Sync to Supplier Universe ---
-  const [syncModalOpen, setSyncModalOpen] = useState(false)
-  const [syncing, setSyncing] = useState(false)
-  const [syncResult, setSyncResult] = useState<{ synced: number; failed: number; errors: string[] } | null>(null)
-
-  const syncSummary = useMemo(() => {
-    const selected = suppliers.filter(s => selectedIds.has(s.id))
-    const researched = selected.filter(s => s.isResearched)
-    const unconfirmed = researched.filter(s => s.confirmationStatus !== 'confirmed')
-    const notResearched = selected.filter(s => !s.isResearched)
-    return { researched, unconfirmed, notResearched, total: selected.length }
-  }, [suppliers, selectedIds])
-
-  const handleSyncClick = useCallback(() => {
-    setSyncResult(null)
-    setSyncModalOpen(true)
-  }, [])
-
-  const handleSyncConfirm = useCallback(async () => {
-    const idsToSync = syncSummary.researched.map(s => s.id)
-    if (idsToSync.length === 0) return
-    setSyncing(true)
-    try {
-      const result = await ipc.suppliers.syncToUniverse(idsToSync)
-      setSyncResult(result)
-    } catch (e) {
-      setSyncResult({ synced: 0, failed: idsToSync.length, errors: [e instanceof Error ? e.message : 'Sync failed'] })
-    } finally {
-      setSyncing(false)
-    }
-  }, [syncSummary])
-
-  const handleSyncClose = useCallback(() => {
-    setSyncModalOpen(false)
-    setSyncResult(null)
-    if (syncResult && syncResult.synced > 0) setSelectedIds(new Set())
-  }, [syncResult])
 
   /** Toggle tail spend filter on/off */
   const toggleTailSpendFilter = useCallback(async (enable: boolean) => {
@@ -702,7 +663,6 @@ export default function SuppliersPage() {
               onResearch={researchSupplier}
               onResearchSelected={hasResearchable ? researchSelected : undefined}
               onConfirmSelected={hasConfirmable ? confirmSelected : undefined}
-              onSyncToUniverse={handleSyncClick}
             />
             <SupplierDetailPanel
               ref={detailPanelRef}
@@ -736,98 +696,6 @@ export default function SuppliersPage() {
         subtitle="Build conditions to filter suppliers"
       />
 
-      {/* Sync to Supplier Universe modal */}
-      {syncModalOpen && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={handleSyncClose} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-[440px] p-6">
-            {!syncResult ? (
-              <>
-                <h3 className="text-base font-semibold text-gray-900">
-                  Sync to Supplier Universe
-                </h3>
-                <p className="mt-2 text-sm text-gray-500">
-                  {syncSummary.total} supplier{syncSummary.total !== 1 ? 's' : ''} selected
-                </p>
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-between rounded-md bg-green-50 px-3 py-2">
-                    <span className="text-sm text-green-800">Researched</span>
-                    <span className="text-sm font-semibold text-green-700">{syncSummary.researched.length}</span>
-                  </div>
-                  {syncSummary.unconfirmed.length > 0 && (
-                    <div className="flex items-center justify-between rounded-md bg-amber-50 px-3 py-2">
-                      <span className="text-sm text-amber-800">Unconfirmed (will still sync)</span>
-                      <span className="text-sm font-semibold text-amber-700">{syncSummary.unconfirmed.length}</span>
-                    </div>
-                  )}
-                  {syncSummary.notResearched.length > 0 && (
-                    <div className="flex items-center justify-between rounded-md bg-gray-100 px-3 py-2">
-                      <span className="text-sm text-gray-500">Not researched — will not be sent</span>
-                      <span className="text-sm font-semibold text-gray-400">{syncSummary.notResearched.length}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="mt-5 flex items-center justify-end gap-2">
-                  <button
-                    onClick={handleSyncClose}
-                    className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSyncConfirm}
-                    disabled={syncing || syncSummary.researched.length === 0}
-                    className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {syncing ? 'Syncing...' : `Sync ${syncSummary.researched.length} Supplier${syncSummary.researched.length !== 1 ? 's' : ''}`}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <h3 className="text-base font-semibold text-gray-900">
-                  {syncResult.failed === 0 ? 'Sync Complete' : 'Sync Finished'}
-                </h3>
-                <div className="mt-4 space-y-2">
-                  {syncResult.synced > 0 && (
-                    <div className="flex items-center justify-between rounded-md bg-green-50 px-3 py-2">
-                      <span className="text-sm text-green-800">Synced successfully</span>
-                      <span className="text-sm font-semibold text-green-700">{syncResult.synced}</span>
-                    </div>
-                  )}
-                  {syncResult.failed > 0 && (
-                    <div className="rounded-md bg-red-50 px-3 py-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-red-800">Failed</span>
-                        <span className="text-sm font-semibold text-red-700">{syncResult.failed}</span>
-                      </div>
-                      {syncResult.errors.length > 0 && (
-                        <ul className="mt-1.5 space-y-0.5">
-                          {syncResult.errors.slice(0, 5).map((err, i) => (
-                            <li key={i} className="text-xs text-red-600 truncate" title={err}>{err}</li>
-                          ))}
-                          {syncResult.errors.length > 5 && (
-                            <li className="text-xs text-red-400">...and {syncResult.errors.length - 5} more</li>
-                          )}
-                        </ul>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="mt-5 flex items-center justify-end">
-                  <button
-                    onClick={handleSyncClose}
-                    className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-                  >
-                    Done
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   )
 }

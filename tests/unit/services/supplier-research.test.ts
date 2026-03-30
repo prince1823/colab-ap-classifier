@@ -80,6 +80,63 @@ describe('SupplierResearcher', () => {
       expect(webSearch.searchSupplier).not.toHaveBeenCalled();
       expect(researchAgent.researchSupplier).toHaveBeenCalled();
     });
+
+    it('should pass transaction address to web search and research agent when supplierId provided', async () => {
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(null);
+      vi.mocked(transactions.getSupplierAddress).mockResolvedValue('123 Main St, Springfield');
+      vi.mocked(researchAgent.researchSupplier).mockResolvedValue({
+        supplierType: 'Corporation',
+        industry: 'Software',
+      });
+
+      await researcher.researchSingle('Acme Corp', undefined, 'supplier-123');
+
+      expect(transactions.getSupplierAddress).toHaveBeenCalledWith('supplier-123');
+      expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', '123 Main St, Springfield');
+      expect(researchAgent.researchSupplier).toHaveBeenCalledWith(
+        'Acme Corp',
+        undefined,
+        '123 Main St, Springfield',
+        expect.any(Array)
+      );
+    });
+
+    it('should pass undefined address when supplierId not provided', async () => {
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(null);
+      vi.mocked(researchAgent.researchSupplier).mockResolvedValue({
+        supplierType: 'Corporation',
+      });
+
+      await researcher.researchSingle('Acme Corp');
+
+      expect(transactions.getSupplierAddress).not.toHaveBeenCalled();
+      expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', undefined);
+      expect(researchAgent.researchSupplier).toHaveBeenCalledWith(
+        'Acme Corp',
+        undefined,
+        undefined,
+        expect.any(Array)
+      );
+    });
+
+    it('should pass undefined address when transaction has no supplier_address column', async () => {
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(null);
+      vi.mocked(transactions.getSupplierAddress).mockResolvedValue(undefined);
+      vi.mocked(researchAgent.researchSupplier).mockResolvedValue({
+        supplierType: 'Corporation',
+      });
+
+      await researcher.researchSingle('Acme Corp', undefined, 'supplier-123');
+
+      expect(transactions.getSupplierAddress).toHaveBeenCalledWith('supplier-123');
+      expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', undefined);
+      expect(researchAgent.researchSupplier).toHaveBeenCalledWith(
+        'Acme Corp',
+        undefined,
+        undefined,
+        expect.any(Array)
+      );
+    });
   });
 
   describe('researchAll', () => {

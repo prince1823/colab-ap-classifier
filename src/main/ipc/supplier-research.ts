@@ -80,7 +80,7 @@ export function registerSupplierResearchHandlers(
       return null;
     }
 
-    const info = await researcher.researchSingle(supplier.supplierName);
+    const info = await researcher.researchSingle(supplier.supplierName, undefined, id);
 
     // Assign parent if the research extracted one
     if (info.parentCompanyName) {

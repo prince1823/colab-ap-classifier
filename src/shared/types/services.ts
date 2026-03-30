@@ -161,6 +161,7 @@ export interface TransactionStore {
   getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
   markAllReviewed(): Promise<number>;
   applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
+  getSupplierAddress(supplierId: string): Promise<string | undefined>;
   getSpendByTaxonomy(supplierId: string): Promise<SpendByTaxonomyResult[]>;
   getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string, columnPriorities: string[]): Promise<Array<Record<string, unknown>>>;
   queryBySupplier(supplierId: string, statusFilter?: string | string[]): Promise<Record<string, unknown>[]>;
@@ -259,7 +260,7 @@ export interface ExportService {
 export type ResearchProgressCallback = (progress: ResearchProgress) => void;
 
 export interface SupplierResearcher {
-  researchSingle(supplierName: string): Promise<SupplierInfo>;
+  researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>, supplierId?: string): Promise<SupplierInfo>;
   researchAll(supplierIds?: string[], options?: { suppressTerminal?: boolean }): Promise<void>;
   categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void>;
   categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[]): Promise<void>;

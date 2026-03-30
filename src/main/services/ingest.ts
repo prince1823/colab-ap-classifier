@@ -15,6 +15,7 @@ import type {
 import { toEnrichedMapping, toSimpleMapping } from '../../shared/types/column-mapping';
 import type { ColumnMappingWithPriority } from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS, REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns';
+import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import type {
   Database,
   IngestService as IIngestService,
@@ -337,12 +338,14 @@ export class IngestService implements IIngestService {
       csvColsSeen.add(csvCol);
     }
 
-    // supplier_name maps to the original_supplier_name DB column (audit trail).
-    // The canonical supplier_name is resolved via JOIN to project_suppliers after normalization.
-    // We remap at the SQL level only — the mapping object stays unmutated so it's
-    // stored correctly in the uploads table for reuse.
-    const dbColumn = (canonical: string) =>
-      canonical === 'supplier_name' ? 'original_supplier_name' : canonical;
+    // Virtual column names (supplier_name, parent_name, etc.) must never become physical
+    // columns on transactions — they shadow JOIN-resolved columns in queries and exports.
+    // Remap any virtual name to original_<name> at the SQL level only — the mapping object
+    // stays unmutated so it's stored correctly in the uploads table for reuse.
+    // Primary case: supplier_name → original_supplier_name (required canonical).
+    // Guard case: any other virtual name a user manually enters (e.g. parent_name).
+    const dbColumn = (canonical: string): string =>
+      VIRTUAL_COLUMN_NAMES.has(canonical) ? `original_${canonical}` : canonical;
 
     const canonicalNames = Object.keys(mapping);
 

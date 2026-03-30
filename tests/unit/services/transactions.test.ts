@@ -27,8 +27,8 @@ describe('TransactionStore', () => {
       const columns = await store.getColumns();
       expect(columns).toEqual([
         'id', 'row_index', 'project_supplier_id',
-        // virtual columns appended by getColumns()
-        'supplier_name', 'is_tail_spend',
+        // virtual columns appended from VIRTUAL_COLUMN_REGISTRY
+        'supplier_name', 'is_tail_spend', 'is_researched', 'parent_name',
         'classification_l1', 'classification_l2', 'classification_l3',
         'classification_path', 'applied_rule_name',
       ]);

@@ -367,22 +367,28 @@ describe('ClassificationRunner', () => {
   });
 
   describe('supplier_name as column priority', () => {
-    it('should send canonical supplier_name to LLM', async () => {
+    it('should strip supplier_name from column_priorities and not inject it onto transaction rows', async () => {
+      // supplier_name is a virtual column — it must be stripped from priorities before dedup
+      // grouping. The canonical name reaches the LLM as a top-level parameter, not per-row.
       setupBasicMocks({
         supplierName: 'Acme Inc',
         txns: [
-          { id: 'tx1', project_supplier_id: 'sup1', supplier_name: 'ACME Corp', spend_amount: 1000, gl_description: 'Software', classification_status: 'unclassified' },
-          { id: 'tx2', project_supplier_id: 'sup1', supplier_name: 'Acme Corporation', spend_amount: 2000, gl_description: 'Software', classification_status: 'unclassified' },
+          { id: 'tx1', project_supplier_id: 'sup1', spend_amount: 1000, gl_description: 'Software', classification_status: 'unclassified' },
+          { id: 'tx2', project_supplier_id: 'sup1', spend_amount: 2000, gl_description: 'Hardware', classification_status: 'unclassified' },
         ],
         columnPriorities: ['supplier_name', 'gl_description'],
       });
 
       await runner.classifyAll();
 
+      // Classification should still proceed (supplier_name stripped silently)
+      expect(classificationAgent.classifyL3).toHaveBeenCalled();
       const call2Args = vi.mocked(classificationAgent.classifyL3).mock.calls[0][0];
-      // Both transactions should carry the canonical name
-      expect(call2Args.transactions[0]).toHaveProperty('supplier_name', 'Acme Inc');
-      expect(call2Args.transactions[1]).toHaveProperty('supplier_name', 'Acme Inc');
+      // supplier_name must NOT be injected onto transaction rows
+      expect(call2Args.transactions[0]).not.toHaveProperty('supplier_name');
+      expect(call2Args.transactions[1]).not.toHaveProperty('supplier_name');
+      // The supplier name is passed as a top-level parameter to the agent instead
+      expect(call2Args).toHaveProperty('supplierName', 'Acme Inc');
     });
   });
 

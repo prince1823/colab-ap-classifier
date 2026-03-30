@@ -220,4 +220,52 @@ describe('IngestService', () => {
       });
     });
   });
+
+  describe('importCSV — virtual column name guard', () => {
+    const CSV_PATH = path.join(FIXTURES_DIR, 'standard.csv');
+
+    const BASE_MAPPING = {
+      supplier_name: 'Supplier',
+      spend_amount: 'Amount',
+      invoice_date: 'Date',
+    };
+
+    it('should remap parent_name to original_parent_name in SQL, not store it as a physical column', async () => {
+      // A user manually maps their CSV "Description" column to the canonical name "parent_name".
+      // parent_name is a virtual column (JOIN-resolved) — it must never become a physical column.
+      const mappingWithParentName = {
+        ...BASE_MAPPING,
+        parent_name: 'Description',
+      };
+
+      await service.importCSV(CSV_PATH, mappingWithParentName);
+
+      // The ALTER TABLE call should use "original_parent_name", not "parent_name"
+      const alterCalls = vi.mocked(db.run).mock.calls
+        .filter(([sql]) => typeof sql === 'string' && sql.includes('ALTER TABLE'));
+
+      const columnNames = alterCalls.map(([sql]) => {
+        const match = (sql as string).match(/ADD COLUMN "([^"]+)"/);
+        return match?.[1];
+      });
+
+      expect(columnNames).toContain('original_parent_name');
+      expect(columnNames).not.toContain('parent_name');
+    });
+
+    it('should also remap supplier_name to original_supplier_name (existing behaviour preserved)', async () => {
+      await service.importCSV(CSV_PATH, BASE_MAPPING);
+
+      const alterCalls = vi.mocked(db.run).mock.calls
+        .filter(([sql]) => typeof sql === 'string' && sql.includes('ALTER TABLE'));
+
+      const columnNames = alterCalls.map(([sql]) => {
+        const match = (sql as string).match(/ADD COLUMN "([^"]+)"/);
+        return match?.[1];
+      });
+
+      expect(columnNames).toContain('original_supplier_name');
+      expect(columnNames).not.toContain('supplier_name');
+    });
+  });
 });

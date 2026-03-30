@@ -8,6 +8,7 @@ import { ipc } from '../lib/ipc'
 import { showError } from '../lib/toast-errors'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns'
+import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns'
 import type {
   CSVPreview,
   ColumnMapping,
@@ -118,13 +119,16 @@ export default function DataView() {
 
       const result = await ipc.ingest.importCSV(activeFilePath, columnMapping)
 
-      // Merge new mapped columns into column_priorities (preserving existing order)
+      // Merge new mapped columns into column_priorities (preserving existing order).
+      // Virtual columns are excluded — they have no physical presence on transaction rows
+      // and must never appear in column_priorities (see VIRTUAL_COLUMN_NAMES).
       const existingPriorities = await ipc.project.getSetting('column_priorities') as string[] | null
-      const mappedCols = rows.filter((r) => r.csvColumn).map((r) => r.canonical)
+      const mappedCols = rows
+        .filter((r) => r.csvColumn)
+        .map((r) => r.canonical)
+        .filter((c) => !VIRTUAL_COLUMN_NAMES.has(c))
       if (!existingPriorities || existingPriorities.length === 0) {
-        const supplierFirst = mappedCols.filter((c) => c === 'supplier_name')
-        const rest = mappedCols.filter((c) => c !== 'supplier_name')
-        await ipc.project.setSetting('column_priorities', [...supplierFirst, ...rest])
+        await ipc.project.setSetting('column_priorities', mappedCols)
       } else {
         const existingSet = new Set(existingPriorities)
         const newCols = mappedCols.filter((c) => !existingSet.has(c))
@@ -159,7 +163,9 @@ export default function DataView() {
   const handleSavePriorities = async (llmOrder: string[], _nonLlm: string[]) => {
     setError(null)
     try {
-      await ipc.project.setSetting('column_priorities', llmOrder)
+      // Filter virtual columns at write time — they must never appear in column_priorities
+      const filtered = llmOrder.filter((c) => !VIRTUAL_COLUMN_NAMES.has(c))
+      await ipc.project.setSetting('column_priorities', filtered)
       // Save separately so Priority step knows this is user-curated (not auto-default)
       await ipc.project.setSetting('column_priorities_saved', llmOrder)
       await refreshMetadata()

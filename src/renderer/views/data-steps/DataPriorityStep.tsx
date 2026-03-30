@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ipc } from '../../lib/ipc'
 import { showError } from '../../lib/toast-errors'
 import type { MappingRow } from '../../../shared/types/column-mapping'
+import { VIRTUAL_COLUMN_NAMES } from '../../../shared/virtual-columns'
 
 interface Props {
   allMappings: MappingRow[]
@@ -14,7 +15,11 @@ interface TransactionPreviewRow {
 }
 
 export default function DataPriorityStep({ allMappings, onSave, onBack }: Props) {
-  const allCanonicals = [...new Set(allMappings.filter((m) => m.csvColumn).map((m) => m.canonical))]
+  // Virtual columns (supplier_name, parent_name, etc.) are resolved via JOINs and cannot
+  // contribute to LLM dedup groups — exclude them from the priority UI entirely.
+  const allCanonicals = [...new Set(
+    allMappings.filter((m) => m.csvColumn).map((m) => m.canonical).filter((c) => !VIRTUAL_COLUMN_NAMES.has(c))
+  )]
 
   const [llmOrder, setLlmOrder] = useState<string[]>([])
   const [nonLlm, setNonLlm] = useState<string[]>(() => [...allCanonicals])

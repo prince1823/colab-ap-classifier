@@ -18,6 +18,7 @@ import type { GroupedFilter } from '../../shared/types/transactions';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import { cleanDescription } from '../utils/text';
 import { buildDedupGroups, batchDedupGroups, extractSubBatch, extractFields } from '../utils/dedup-groups';
+import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import { runPool } from '../utils/concurrency-pool';
 import { debugLog } from '../utils/debug-log';
 
@@ -162,10 +163,14 @@ export class ClassificationRunner implements IClassificationRunner {
         companyContext = { industry: 'Unknown' };
       }
 
-      const columnPriorities = await this.project.getSetting('column_priorities') as string[] | null;
-      if (!columnPriorities || columnPriorities.length === 0) {
+      const rawColumnPriorities = await this.project.getSetting('column_priorities') as string[] | null;
+      if (!rawColumnPriorities || rawColumnPriorities.length === 0) {
         throw new Error('Column priorities must be configured before classification. Set column_priorities in project settings.');
       }
+
+      // Strip virtual columns — they have no physical presence on transaction rows and cannot
+      // contribute to dedup groups. This is a safety net for projects saved before this fix.
+      const columnPriorities = rawColumnPriorities.filter((col) => !VIRTUAL_COLUMN_NAMES.has(col));
 
       const availableColumns = await this.transactions.getColumns();
       const invalidColumns = columnPriorities.filter((col) => !availableColumns.includes(col));
@@ -360,7 +365,6 @@ export class ClassificationRunner implements IClassificationRunner {
                 if (typeof cleaned.gl_description === 'string') {
                   cleaned.gl_description = cleanDescription(cleaned.gl_description);
                 }
-                cleaned.supplier_name = supplier.supplier_name;
                 return cleaned;
               });
 
@@ -522,13 +526,12 @@ export class ClassificationRunner implements IClassificationRunner {
       supplierResearch = await this.supplierUniverse.getSupplier(supplierName);
     }
 
-    // Clean descriptions and inject canonical supplier_name
+    // Clean descriptions — supplier name is passed separately to the agent, not via row data
     const cleanedTxns = txnRows.map((txn) => {
       const cleaned = { ...txn };
       if (typeof cleaned.gl_description === 'string') {
         cleaned.gl_description = cleanDescription(cleaned.gl_description);
       }
-      if (supplierName) cleaned.supplier_name = supplierName;
       return cleaned;
     });
 

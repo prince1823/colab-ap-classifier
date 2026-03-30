@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactionStore, ProjectStore as IProjectStore } from '../../shared/types/services';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types/rules';
 import type { GroupedFilter } from '../../shared/types/transactions';
+import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 
 interface RuleRow {
   id: string;
@@ -349,10 +350,11 @@ export class RuleStore implements IRuleStore {
       throw new Error('Column priorities must be configured before generating rules.');
     }
 
-    // 2. Check which columns actually exist on transactions table
-    const VIRTUAL_COLS = new Set(['supplier_name']);
+    // 2. Check which columns actually exist on transactions table.
+    // Exclude virtual columns — they're resolved via JOINs and have no physical presence
+    // on transaction rows, so referencing them as t."col" in SQL would silently return NULL.
     const availableColumns = await this.transactions.getColumns();
-    const validPriorities = columnPriorities.filter(col => availableColumns.includes(col) && !VIRTUAL_COLS.has(col));
+    const validPriorities = columnPriorities.filter(col => availableColumns.includes(col) && !VIRTUAL_COLUMN_NAMES.has(col));
     const hasSpendAmount = availableColumns.includes('spend_amount');
 
     // 3. Build query for eligible transactions

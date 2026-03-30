@@ -216,12 +216,6 @@ export default function SupplierListPanel({
                     <span className="text-[10px] text-gray-400">{fmtAbbrev(s.totalSpend)}</span>
                     <span className="text-[10px] text-gray-300">·</span>
                     <span className="text-[10px] text-gray-400">{s.transactionCount} txns</span>
-                    {s.l1L2Path && (
-                      <>
-                        <span className="text-[10px] text-gray-300">·</span>
-                        <span className="text-[10px] text-blue-500 truncate max-w-[120px]" title={s.l1L2Path}>{s.l1L2Path}</span>
-                      </>
-                    )}
                     <span className="flex-1" />
                     <ResearchButton supplier={s} onResearch={onResearch} />
                   </div>
@@ -234,8 +228,8 @@ export default function SupplierListPanel({
 
       {/* Batch actions footer */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 px-3 py-2.5 border-t border-blue-200 bg-blue-50">
-          <span className="text-[11px] font-semibold text-blue-700">{selectedIds.size} selected</span>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-blue-200 bg-blue-50">
+          <span className="text-[10px] font-semibold text-blue-700">{selectedIds.size} selected</span>
           <div className="flex-1" />
           {onResearchSelected && (
             <button
@@ -244,7 +238,7 @@ export default function SupplierListPanel({
               onClick={onResearchSelected}
               onKeyDown={handleActionKeyDown}
               onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
-              className={`px-3 py-1 rounded-md text-[11px] font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm ${actionFocused === 'research' ? 'ring-2 ring-blue-300 ring-offset-1' : ''}`}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors ${actionFocused === 'research' ? 'ring-2 ring-blue-300 ring-offset-1' : ''}`}
             >
               Research
             </button>
@@ -256,7 +250,7 @@ export default function SupplierListPanel({
               onClick={onConfirmSelected}
               onKeyDown={handleActionKeyDown}
               onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
-              className={`px-3 py-1 rounded-md text-[11px] font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-sm ${actionFocused === 'confirm' ? 'ring-2 ring-green-300 ring-offset-1' : ''}`}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors ${actionFocused === 'confirm' ? 'ring-2 ring-green-300 ring-offset-1' : ''}`}
             >
               Confirm
             </button>

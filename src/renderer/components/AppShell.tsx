@@ -11,6 +11,7 @@ import ClassificationView from '../views/ClassificationView'
 import ReviewView from '../views/ReviewView'
 import OverrideRulesView from '../views/OverrideRulesView'
 import VersionHistoryView from '../views/VersionHistoryView'
+import SyncToUniverseView from '../views/SyncToUniverseView'
 
 /** Route config for keep-alive rendering */
 const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
@@ -22,6 +23,7 @@ const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
   { path: '/review', element: <ReviewView /> },
   { path: '/override-rules', element: <OverrideRulesView /> },
   { path: '/version-history', element: <VersionHistoryView /> },
+  { path: '/sync-to-universe', element: <SyncToUniverseView /> },
 ]
 
 export default function AppShell() {

@@ -163,6 +163,7 @@ export const ipc = {
     renameParent: (parentId: string, newName: string) => invoke('suppliers:renameParent', parentId, newName),
     deleteParent: (parentId: string) => invoke('suppliers:deleteParent', parentId),
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
+    syncToUniverse: (supplierIds: string[]) => invoke('suppliers:syncToUniverse', supplierIds),
   },
 
   // ── Rules (12 channels) ──
@@ -204,7 +205,8 @@ export const ipc = {
 
   // ── Export ──
   export: {
-    csv: (filters?: TransactionFilter) => invoke('export:csv', filters),
+    columns: () => invoke('export:columns'),
+    csv: (filters?: TransactionFilter, selectedColumns?: string[]) => invoke('export:csv', filters, selectedColumns),
     saveContent: (content: string, defaultFilename: string) => invoke('export:saveContent', content, defaultFilename),
   },
 

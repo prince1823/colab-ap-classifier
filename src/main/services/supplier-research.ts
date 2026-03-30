@@ -83,9 +83,6 @@ export class SupplierResearcher implements ISupplierResearcher {
       if (heuristicType) result.supplierType = heuristicType;
     }
 
-    // Store results
-    await this.supplierUniverse.upsertSupplier(supplierName, result);
-
     return result;
   }
 
@@ -143,13 +140,24 @@ export class SupplierResearcher implements ISupplierResearcher {
           const info = await this.researchSingle(supplier.supplierName, universeCache, supplier.id);
 
           try {
-            if (info.parentCompanyName) {
-              const existing = await this.supplierService.findParentByName(info.parentCompanyName);
-              const parent = existing ?? (await this.supplierService.addParent(info.parentCompanyName));
+            // Check universe for richer data (taxonomy, parent) beyond just SupplierInfo
+            const universeRecord = await this.supplierUniverse.getSupplierRecord(supplier.supplierName);
+            const parentName = info.parentCompanyName || universeRecord?.parentName;
+
+            if (parentName) {
+              const existing = await this.supplierService.findParentByName(parentName);
+              const parent = existing ?? (await this.supplierService.addParent(parentName));
               await this.supplierService.assignParent([supplier.id], parent.id);
             }
             // Merge supplierInfo write + markResearched into a single UPDATE
-            await this.supplierService.updateSupplier(supplier.id, { supplierInfo: info, markResearched: true });
+            const updatePayload: { supplierInfo: SupplierInfo; markResearched: true; mappedTaxonomyPaths?: string[] } = {
+              supplierInfo: info,
+              markResearched: true,
+            };
+            if (universeRecord?.mappedTaxonomyPaths?.length) {
+              updatePayload.mappedTaxonomyPaths = universeRecord.mappedTaxonomyPaths;
+            }
+            await this.supplierService.updateSupplier(supplier.id, updatePayload);
           } catch (updateErr) {
             console.error(`[Research] Failed to persist info for "${supplier.supplierName}":`, updateErr);
             // Still mark researched even if info write failed

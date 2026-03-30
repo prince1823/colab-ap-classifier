@@ -75,6 +75,18 @@ export interface SupplierUniverse {
   getSupplier(name: string): Promise<SupplierInfo | null>;
   getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>>;
   upsertSupplier(name: string, data: Partial<SupplierInfo>): Promise<void>;
+  upsertSupplierFull(name: string, data: {
+    supplierInfo?: Partial<SupplierInfo>;
+    aliases?: string[];
+    parentName?: string | null;
+    mappedTaxonomyPaths?: string[];
+  }): Promise<void>;
+  getSupplierRecord(name: string): Promise<{
+    supplierInfo: SupplierInfo;
+    aliases: string[];
+    parentName: string | null;
+    mappedTaxonomyPaths: string[];
+  } | null>;
   searchVariants(name: string): Promise<string[]>;
 }
 
@@ -209,6 +221,8 @@ export interface SupplierService {
   renameParent(parentId: string, newName: string): Promise<void>;
   deleteParent(parentId: string): Promise<void>;
   mergeParents(survivorId: string, losingIds: string[]): Promise<void>;
+  // Supplier universe sync
+  syncToUniverse(supplierIds: string[]): Promise<{ synced: number; failed: number; errors: string[] }>;
 }
 
 export interface RuleStore {
@@ -252,7 +266,8 @@ export interface IngestService {
 }
 
 export interface ExportService {
-  exportCSV(filters?: TransactionFilter): Promise<{ rowsExported: number } | null>;
+  getExportColumns(): Promise<string[]>;
+  exportCSV(filters?: TransactionFilter, selectedColumns?: string[]): Promise<{ rowsExported: number } | null>;
 }
 
 // ─── Orchestrators ───────────────────────────────────────────────────────────

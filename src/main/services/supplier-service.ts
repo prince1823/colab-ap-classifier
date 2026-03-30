@@ -604,4 +604,41 @@ export class SupplierService implements ISupplierService {
       supplierId
     );
   }
+
+  async syncToUniverse(supplierIds: string[]): Promise<{ synced: number; failed: number; errors: string[] }> {
+    if (!this.supplierUniverse.isOpen()) {
+      return { synced: 0, failed: 0, errors: ['Supplier universe not configured'] };
+    }
+
+    let synced = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const id of supplierIds) {
+      try {
+        const supplier = await this.getProjectSupplier(id);
+        if (!supplier) {
+          failed++;
+          errors.push(`Supplier ${id} not found`);
+          continue;
+        }
+
+        const aliases = await this.getProjectAliases(id);
+
+        await this.supplierUniverse.upsertSupplierFull(supplier.supplierName, {
+          supplierInfo: supplier.supplierInfo ?? undefined,
+          aliases,
+          parentName: supplier.parentName,
+          mappedTaxonomyPaths: supplier.mappedTaxonomyPaths ?? undefined,
+        });
+
+        synced++;
+      } catch (err) {
+        failed++;
+        errors.push(`Failed to sync supplier ${id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    return { synced, failed, errors };
+  }
 }

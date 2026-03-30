@@ -6,6 +6,17 @@ import { buildWhereClause, buildGroupedWhereClause } from '../utils/query-builde
 
 const EXPORT_BATCH_SIZE = 10000;
 
+/** Computed columns that are derived from JOINs, not directly on the transactions table */
+const COMPUTED_COLUMNS = [
+  'supplier_name',
+  'parent_name',
+  'classification_path',
+  'classification_l1',
+  'classification_l2',
+  'classification_l3',
+  'classification_status',
+];
+
 function escapeCSV(value: string): string {
   if (value.includes(',') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
     return `"${value.replace(/"/g, '""')}"`;
@@ -71,7 +82,35 @@ function buildExportFilterSQL(filters?: TransactionFilter): { whereSQL: string; 
 export class ExportService implements IExportService {
   constructor(private db: Database) {}
 
-  async exportCSV(filters?: TransactionFilter): Promise<{ rowsExported: number } | null> {
+  /**
+   * Returns the list of all available export column names in default order.
+   * Source columns from the transactions table + computed columns from JOINs.
+   */
+  async getExportColumns(): Promise<string[]> {
+    const colRows = await this.db.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' ORDER BY ordinal_position"
+    );
+    const allColumns = colRows.map((r) => r.column_name);
+
+    const metaColumns = ['id', 'row_index', 'upload_id', 'taxonomy_node_id',
+      'classification_status', 'human_reviewed',
+      'original_supplier_name', 'project_supplier_id', 'created_at', 'updated_at'];
+
+    const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
+
+    return [...canonicalColumns, ...COMPUTED_COLUMNS];
+  }
+
+  /**
+   * Export transactions as CSV.
+   * @param filters Optional filter to narrow the exported rows.
+   * @param selectedColumns Optional ordered list of column names to include.
+   *   If omitted, all available columns are exported in default order.
+   */
+  async exportCSV(
+    filters?: TransactionFilter,
+    selectedColumns?: string[],
+  ): Promise<{ rowsExported: number } | null> {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
     const result = await dialog.showSaveDialog(win!, {
       title: 'Export Classified Transactions',
@@ -94,18 +133,16 @@ export class ExportService implements IExportService {
 
     const canonicalColumns = allColumns.filter((c) => !metaColumns.includes(c));
 
-    const { whereSQL, params } = buildExportFilterSQL(filters);
+    const allHeaders = [...canonicalColumns, ...COMPUTED_COLUMNS];
 
-    const headers = [
-      ...canonicalColumns,
-      'supplier_name',
-      'parent_name',
-      'classification_path',
-      'classification_l1',
-      'classification_l2',
-      'classification_l3',
-      'classification_status',
-    ];
+    // Use selectedColumns if provided; otherwise export all in default order
+    const headers = selectedColumns && selectedColumns.length > 0
+      ? selectedColumns.filter(c => allHeaders.includes(c))
+      : allHeaders;
+
+    if (headers.length === 0) return null;
+
+    const { whereSQL, params } = buildExportFilterSQL(filters);
 
     // Stream export in batches to avoid loading all rows into memory
     const ws = fs.createWriteStream(filePath, { encoding: 'utf-8' });
@@ -138,18 +175,22 @@ export class ExportService implements IExportService {
         const classificationPath = (row.classification_path as string) || '';
         const parts = classificationPath.split('|');
 
-        const values = [
-          ...canonicalColumns.map((col) => row[col] ?? ''),
-          row.supplier_name ?? '',
-          row.parent_name ?? '',
-          classificationPath,
-          parts[0] || '',
-          parts[1] || '',
-          parts[2] || '',
-          row.classification_status ?? 'unclassified',
-        ];
+        // Build a lookup for all possible column values
+        const rowValues: Record<string, string> = {};
+        for (const col of canonicalColumns) {
+          rowValues[col] = String(row[col] ?? '');
+        }
+        rowValues['supplier_name'] = String(row.supplier_name ?? '');
+        rowValues['parent_name'] = String(row.parent_name ?? '');
+        rowValues['classification_path'] = classificationPath;
+        rowValues['classification_l1'] = parts[0] || '';
+        rowValues['classification_l2'] = parts[1] || '';
+        rowValues['classification_l3'] = parts[2] || '';
+        rowValues['classification_status'] = String(row.classification_status ?? 'unclassified');
 
-        const line = values.map((v) => escapeCSV(String(v))).join(',') + '\r\n';
+        const values = headers.map(h => rowValues[h] ?? '');
+
+        const line = values.map((v) => escapeCSV(v)).join(',') + '\r\n';
 
         // Handle backpressure — if internal buffer is full, wait for drain
         if (!ws.write(line)) {

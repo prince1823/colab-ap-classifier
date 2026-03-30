@@ -50,15 +50,10 @@ function SummarySection({
       {/* Supplier list — always visible */}
       <div className="divide-y divide-gray-50 bg-white">
         {suppliers.map(s => (
-          <div key={s.id} className={`flex items-center gap-2 px-4 py-2 ${s.universeMatch ? 'bg-gray-50/50' : ''}`}>
+          <div key={s.id} className="flex items-center gap-2 px-4 py-2">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <span className={`text-xs font-medium truncate ${s.universeMatch ? 'text-gray-500' : 'text-gray-800'}`}>{s.supplierName}</span>
-                {s.universeMatch && (
-                  <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-violet-50 text-violet-600 flex-shrink-0">
-                    already synced
-                  </span>
-                )}
+                <span className="text-xs font-medium text-gray-800 truncate">{s.supplierName}</span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-[10px] text-gray-400">{fmtAbbrev(s.totalSpend)}</span>
@@ -143,11 +138,7 @@ export default function SyncToUniversePage() {
     return { researched, unconfirmed, notResearched, total: suppliers.length }
   }, [suppliers])
 
-  // How many suppliers still need syncing
-  const unsyncedCount = useMemo(() => {
-    const pool = filterMode === 'researched' ? syncSummary.researched : suppliers
-    return pool.filter(s => !s.universeMatch).length
-  }, [filterMode, syncSummary, suppliers])
+
 
   // Handle chip switching
   const handleResearchedChip = useCallback(() => {
@@ -372,7 +363,7 @@ export default function SyncToUniversePage() {
               <button
                 type="button"
                 onClick={handleSyncNow}
-                disabled={syncing || unsyncedCount === 0}
+                disabled={syncing || (filterMode === 'researched' ? syncSummary.researched.length === 0 : suppliers.length === 0)}
                 className="rounded-lg bg-violet-600 px-5 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
               >
                 {syncing ? (

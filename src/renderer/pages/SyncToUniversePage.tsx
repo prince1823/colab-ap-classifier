@@ -102,19 +102,27 @@ export default function SyncToUniversePage() {
       .catch(() => {})
   }, [])
 
+  // Whether the custom filter has valid conditions
+  const hasCustomFilter = customGrouped && customGrouped.groups.some(g => g.conditions.some(c => c.field))
+
   // Build the active filter based on mode
   const activeFilter = useMemo(() => {
     if (filterMode === 'researched') {
       return { groupedConditions: RESEARCHED_FILTER }
     }
-    if (filterMode === 'custom' && customGrouped && customGrouped.groups.some(g => g.conditions.some(c => c.field))) {
+    if (filterMode === 'custom' && hasCustomFilter) {
       return { groupedConditions: customGrouped }
     }
     return undefined
-  }, [filterMode, customGrouped])
+  }, [filterMode, customGrouped, hasCustomFilter])
 
-  // Load suppliers when filter changes
+  // Load suppliers when filter changes — skip when custom mode has no filter
   const loadData = useCallback(async () => {
+    if (filterMode === 'custom' && !hasCustomFilter) {
+      setSuppliers([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setSyncResult(null)
     try {
@@ -125,7 +133,7 @@ export default function SyncToUniversePage() {
     } finally {
       setLoading(false)
     }
-  }, [activeFilter])
+  }, [activeFilter, filterMode, hasCustomFilter])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -150,10 +158,8 @@ export default function SyncToUniversePage() {
 
   const handleCustomChip = useCallback(() => {
     setFilterMode('custom')
-    if (!customGrouped || !customGrouped.groups.some(g => g.conditions.some(c => c.field))) {
-      setShowAdvancedFilter(true)
-    }
-  }, [customGrouped])
+    setShowAdvancedFilter(true)
+  }, [])
 
   // Open summary modal for review
   const handleSyncClick = useCallback(() => {
@@ -217,21 +223,13 @@ export default function SyncToUniversePage() {
           </button>
           {/* Right-aligned sync button */}
           <div className="flex-1" />
-          {!loading && (
-            <span className="text-xs text-gray-400 mr-2">
-              {syncSummary.total} supplier{syncSummary.total !== 1 ? 's' : ''} matching
-            </span>
-          )}
           <button
             type="button"
             onClick={handleSyncClick}
             disabled={loading || syncSummary.researched.length === 0}
             className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
-            {loading
-              ? 'Loading...'
-              : `Sync ${syncSummary.researched.length} Supplier${syncSummary.researched.length !== 1 ? 's' : ''}`
-            }
+            {loading ? 'Loading...' : 'Sync'}
           </button>
         </div>
 
@@ -285,29 +283,24 @@ export default function SyncToUniversePage() {
         )}
       </div>
 
-      {/* Empty main area — page content is minimal; action happens via the modal */}
+      {/* Main area */}
       <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
+        <div className="flex items-center justify-center py-16">
+          {loading ? (
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
-          </div>
-        ) : suppliers.length === 0 ? (
-          <div className="flex items-center justify-center py-16">
+          ) : filterMode === 'custom' && filterConditions.length === 0 ? (
+            <p className="text-sm text-gray-400">Set up a custom filter to select suppliers for sync.</p>
+          ) : suppliers.length === 0 ? (
             <p className="text-sm text-gray-400">No suppliers match the current filter.</p>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center py-16">
-            <div className="text-center">
-              <p className="text-sm text-gray-500">
-                <span className="font-semibold text-gray-700">{syncSummary.researched.length}</span> researched supplier{syncSummary.researched.length !== 1 ? 's' : ''} ready to sync
-                {syncSummary.notResearched.length > 0 && (
-                  <span className="text-gray-400"> &middot; {syncSummary.notResearched.length} not researched (will be skipped)</span>
-                )}
-              </p>
-              <p className="text-xs text-gray-400 mt-1">Click the Sync button above to review and confirm.</p>
-            </div>
-          </div>
-        )}
+          ) : filterMode === 'researched' ? (
+            <p className="text-sm text-gray-500">
+              <span className="font-semibold text-gray-700">{syncSummary.researched.length}</span> researched supplier{syncSummary.researched.length !== 1 ? 's' : ''} ready to sync
+              {syncSummary.notResearched.length > 0 && (
+                <span className="text-gray-400"> &middot; {syncSummary.notResearched.length} not researched (will be skipped)</span>
+              )}
+            </p>
+          ) : null}
+        </div>
       </div>
 
       {/* Sync modal — 3 stages: summary → syncing → result */}

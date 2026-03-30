@@ -24,6 +24,15 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
   const [previewColumns, setPreviewColumns] = useState<string[]>([])
   const [previewRows, setPreviewRows] = useState<TransactionPreviewRow[]>([])
   const [totalRows, setTotalRows] = useState(0)
+  // Map each canonical column to its original CSV column name(s)
+  const csvNamesByCanonical: Record<string, string[]> = {}
+  for (const m of allMappings) {
+    if (!m.csvColumn) continue
+    if (!csvNamesByCanonical[m.canonical]) csvNamesByCanonical[m.canonical] = []
+    if (!csvNamesByCanonical[m.canonical].includes(m.csvColumn)) {
+      csvNamesByCanonical[m.canonical].push(m.csvColumn)
+    }
+  }
 
   // Fetch existing column_priorities from a previous user-saved session
   // Only pre-populate if the user previously saved a curated (non-default) priority list
@@ -59,6 +68,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
       setTotalRows(result.total)
     }).catch((e) => showError('Failed to load transaction preview', e))
   }, [])
+
 
   // Drag state for LLM rows
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -176,6 +186,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
             <tr>
               <th className="w-8 px-2 py-2 text-center text-[10px] font-medium uppercase tracking-wider text-gray-400">#</th>
               <th className="px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500">Column</th>
+              <th className="px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500">CSV Column Names</th>
               <th className="w-28 px-3 py-2 text-center text-[10px] font-medium uppercase tracking-wider text-gray-500">Sent to LLM</th>
               <th className="w-20 px-3 py-2 text-center text-[10px] font-medium uppercase tracking-wider text-gray-500">Action</th>
             </tr>
@@ -200,6 +211,15 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
                   </span>
                 </td>
                 <td className="px-3 py-2 text-sm font-medium text-gray-800">{canonical}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+                    {(csvNamesByCanonical[canonical] || []).map((name, ni) => (
+                      <span key={ni} className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 whitespace-nowrap">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </td>
                 <td className="px-3 py-2 text-center">
                   <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">Yes</span>
                 </td>
@@ -219,6 +239,15 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
               <tr key={canonical} className="bg-gray-50/50 hover:bg-gray-50">
                 <td className="px-2 py-2 text-center text-xs text-gray-300">&mdash;</td>
                 <td className="px-3 py-2 text-sm text-gray-500">{canonical}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+                    {(csvNamesByCanonical[canonical] || []).map((name, ni) => (
+                      <span key={ni} className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 whitespace-nowrap">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </td>
                 <td className="px-3 py-2 text-center">
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-400">No</span>
                 </td>
@@ -235,7 +264,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
 
             {llmOrder.length === 0 && nonLlm.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-3 py-4 text-center text-xs text-gray-400 italic">
+                <td colSpan={5} className="px-3 py-4 text-center text-xs text-gray-400 italic">
                   No columns available
                 </td>
               </tr>

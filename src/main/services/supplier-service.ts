@@ -632,6 +632,12 @@ export class SupplierService implements ISupplierService {
           mappedTaxonomyPaths: supplier.mappedTaxonomyPaths ?? undefined,
         });
 
+        // Mark as synced in the project DB
+        await this.db.run(
+          `UPDATE project_suppliers SET universe_match = true, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          id,
+        );
+
         synced++;
       } catch (err) {
         failed++;

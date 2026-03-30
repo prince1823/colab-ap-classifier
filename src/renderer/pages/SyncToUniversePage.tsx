@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView } from '../../shared/types/suppliers'
@@ -7,7 +7,7 @@ import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
-import { Filter, X, ChevronDown, ChevronRight, Download, ArrowUpCircle } from 'lucide-react'
+import { Filter, X, Download, ArrowUpCircle } from 'lucide-react'
 import { fmtAbbrev } from '../utils/formatSpend'
 import ExportCSVPanel from '../components/ExportCSVPanel'
 
@@ -38,49 +38,37 @@ function SummarySection({
   textClass: string
   badgeClass: string
 }) {
-  const [expanded, setExpanded] = useState(false)
-
   if (count === 0) return null
 
   return (
     <div className="rounded-lg border border-gray-100 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className={`w-full flex items-center justify-between px-4 py-2.5 ${bgClass} transition-colors hover:opacity-90`}
-      >
-        <span className="flex items-center gap-2">
-          {expanded
-            ? <ChevronDown size={14} className={textClass} />
-            : <ChevronRight size={14} className={textClass} />
-          }
-          <span className={`text-sm font-medium ${textClass}`}>{label}</span>
-        </span>
+      {/* Section header */}
+      <div className={`flex items-center justify-between px-4 py-2.5 ${bgClass}`}>
+        <span className={`text-sm font-medium ${textClass}`}>{label}</span>
         <span className={`text-sm font-semibold ${badgeClass}`}>{count}</span>
-      </button>
-      {expanded && (
-        <div className="max-h-60 overflow-y-auto divide-y divide-gray-50 bg-white">
-          {suppliers.map(s => (
-            <div key={s.id} className="flex items-center gap-2 px-4 py-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium text-gray-800 truncate">{s.supplierName}</span>
-                  {s.confirmationStatus === 'confirmed' && (
-                    <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-green-50 text-green-600 flex-shrink-0">
-                      confirmed
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-gray-400">{fmtAbbrev(s.totalSpend)}</span>
-                  <span className="text-[10px] text-gray-300">&middot;</span>
-                  <span className="text-[10px] text-gray-400">{s.transactionCount} txns</span>
-                </div>
+      </div>
+      {/* Supplier list — always visible */}
+      <div className="divide-y divide-gray-50 bg-white">
+        {suppliers.map(s => (
+          <div key={s.id} className="flex items-center gap-2 px-4 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-gray-800 truncate">{s.supplierName}</span>
+                {s.confirmationStatus === 'confirmed' && (
+                  <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-green-50 text-green-600 flex-shrink-0">
+                    confirmed
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-[10px] text-gray-400">{fmtAbbrev(s.totalSpend)}</span>
+                <span className="text-[10px] text-gray-300">&middot;</span>
+                <span className="text-[10px] text-gray-400">{s.transactionCount} txns</span>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -95,9 +83,10 @@ export default function SyncToUniversePage() {
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [loading, setLoading] = useState(true)
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
-  const [syncModalOpen, setSyncModalOpen] = useState(false)
+  const [showReview, setShowReview] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<{ synced: number; failed: number; errors: string[] } | null>(null)
+  const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Load filter fields once
   useEffect(() => {
@@ -165,30 +154,53 @@ export default function SyncToUniversePage() {
     setShowAdvancedFilter(true)
   }, [])
 
-  // Open summary modal for review
-  const handleSyncClick = useCallback(() => {
+  // Show inline review panel
+  const handleReviewClick = useCallback(() => {
     setSyncResult(null)
-    setSyncModalOpen(true)
+    setShowReview(true)
   }, [])
 
-  // Confirm sync inside modal — fires the actual sync
-  const handleSyncConfirm = useCallback(async () => {
-    const idsToSync = syncSummary.researched.map(s => s.id)
+  // Back to filter view
+  const handleBackToFilter = useCallback(() => {
+    setShowReview(false)
+    setSyncResult(null)
+  }, [])
+
+  // Confirm sync — fires the actual sync
+  const handleSyncNow = useCallback(async () => {
+    const idsToSync = filterMode === 'researched'
+      ? syncSummary.researched.map(s => s.id)
+      : suppliers.map(s => s.id)
     if (idsToSync.length === 0) return
     setSyncing(true)
     try {
       const result = await ipc.suppliers.syncToUniverse(idsToSync)
       setSyncResult(result)
+      // Auto-close success modal after 3 seconds (only if no failures)
+      if (result.failed === 0) {
+        autoCloseTimer.current = setTimeout(() => {
+          setSyncResult(null)
+          setShowReview(false)
+        }, 3000)
+      }
     } catch (e) {
       setSyncResult({ synced: 0, failed: idsToSync.length, errors: [e instanceof Error ? e.message : 'Sync failed'] })
     } finally {
       setSyncing(false)
     }
-  }, [syncSummary])
+  }, [syncSummary, filterMode, suppliers])
 
-  const handleSyncClose = useCallback(() => {
-    setSyncModalOpen(false)
+  const handleResultClose = useCallback(() => {
+    if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current)
     setSyncResult(null)
+    setShowReview(false)
+  }, [])
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current)
+    }
   }, [])
 
   const chipClass = (active: boolean) =>
@@ -251,16 +263,26 @@ export default function SyncToUniversePage() {
               )}
             </span>
           </button>
-          {/* Right-aligned sync button */}
+          {/* Right-aligned review & sync button */}
           <div className="flex-1" />
-          <button
-            type="button"
-            onClick={handleSyncClick}
-            disabled={loading || syncSummary.researched.length === 0}
-            className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? 'Loading...' : 'Sync'}
-          </button>
+          {!showReview ? (
+            <button
+              type="button"
+              onClick={handleReviewClick}
+              disabled={loading || (filterMode === 'researched' ? syncSummary.researched.length === 0 : suppliers.length === 0)}
+              className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            >
+              {loading ? 'Loading...' : 'Review & Sync'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleBackToFilter}
+              className="rounded-lg border border-gray-200 bg-white px-4 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              Back
+            </button>
+          )}
         </div>
 
         {/* Active filter condition badges — grouped with parentheses, AND/OR, horizontal scroll */}
@@ -313,57 +335,35 @@ export default function SyncToUniversePage() {
         )}
       </div>
 
-      {/* Main area — Sync status */}
-      <div className="flex-1 overflow-y-auto flex items-center justify-center">
-        <div className="px-6">
-          {loading ? (
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
-          ) : filterMode === 'custom' && filterConditions.length === 0 ? (
-            <p className="text-sm text-gray-400">Set up a custom filter to select suppliers for sync.</p>
-          ) : suppliers.length === 0 ? (
-            <p className="text-sm text-gray-400">No suppliers match the current filter.</p>
-          ) : filterMode === 'researched' ? (
-            <p className="text-sm text-gray-500">
-              <span className="font-semibold text-gray-700">{syncSummary.researched.length}</span> researched supplier{syncSummary.researched.length !== 1 ? 's' : ''} ready to sync
-              {syncSummary.notResearched.length > 0 && (
-                <span className="text-gray-400"> &middot; {syncSummary.notResearched.length} not researched (will be skipped)</span>
-              )}
-            </p>
-          ) : null}
-        </div>
-      </div>
-        </>
-      ) : (
-        /* Export CSV view */
-        <div className="flex-1 overflow-hidden p-4">
-          <ExportCSVPanel />
-        </div>
-      )}
-
-      {/* Sync modal — 3 stages: summary → syncing → result */}
-      {syncModalOpen && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={!syncing ? handleSyncClose : undefined} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-[500px] max-h-[80vh] flex flex-col">
-
-            {/* ── Stage 1: Summary for confirmation ── */}
-            {!syncing && !syncResult && (
-              <>
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                  <div>
-                    <h3 className="text-base font-semibold text-gray-900">Sync to Supplier Universe</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Review the summary below, then confirm. Click a row to expand.
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleSyncClose}
-                    className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-                <div className="px-5 py-4 overflow-y-auto flex-1 space-y-2">
+      {/* Main area */}
+      <div className="flex-1 overflow-y-auto">
+        {!showReview ? (
+          /* ── Default: status text ── */
+          <div className="flex items-center justify-center h-full">
+            <div className="px-6">
+              {loading ? (
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+              ) : filterMode === 'custom' && filterConditions.length === 0 ? (
+                <p className="text-sm text-gray-400">Set up a custom filter to select suppliers for sync.</p>
+              ) : suppliers.length === 0 ? (
+                <p className="text-sm text-gray-400">No suppliers match the current filter.</p>
+              ) : filterMode === 'researched' ? (
+                <p className="text-sm text-gray-500">
+                  <span className="font-semibold text-gray-700">{syncSummary.researched.length}</span> researched supplier{syncSummary.researched.length !== 1 ? 's' : ''} ready to sync
+                  {syncSummary.notResearched.length > 0 && (
+                    <span className="text-gray-400"> &middot; {syncSummary.notResearched.length} not researched (will be skipped)</span>
+                  )}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          /* ── Inline review panel ── */
+          <div className="flex flex-col h-full">
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
+              {filterMode === 'researched' ? (
+                /* Researched mode — categorised breakdown */
+                <>
                   <SummarySection
                     label="Researched — will be synced"
                     count={syncSummary.researched.length}
@@ -390,38 +390,55 @@ export default function SyncToUniversePage() {
                     textClass="text-gray-500"
                     badgeClass="text-gray-400"
                   />
-                </div>
-                <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50/50 rounded-b-xl">
-                  <button
-                    onClick={handleSyncClose}
-                    className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSyncConfirm}
-                    disabled={syncSummary.researched.length === 0}
-                    className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Sync {syncSummary.researched.length} Supplier{syncSummary.researched.length !== 1 ? 's' : ''}
-                  </button>
-                </div>
-              </>
-            )}
+                </>
+              ) : (
+                /* Custom filter — flat list of all matched suppliers */
+                <SummarySection
+                  label="Suppliers to sync"
+                  count={suppliers.length}
+                  suppliers={suppliers}
+                  bgClass="bg-blue-50"
+                  textClass="text-blue-800"
+                  badgeClass="text-blue-700"
+                />
+              )}
+            </div>
 
-            {/* ── Stage 2: Syncing in progress ── */}
-            {syncing && (
-              <div className="flex flex-col items-center py-10 px-6">
-                <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-violet-200 border-t-violet-600 mb-4" />
-                <h3 className="text-base font-semibold text-gray-900">Syncing to Universe...</h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Syncing {syncSummary.researched.length} supplier{syncSummary.researched.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-            )}
+            {/* Bottom bar with Sync Now */}
+            <div className="border-t border-gray-200 bg-white px-6 py-3 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={handleSyncNow}
+                disabled={syncing || (filterMode === 'researched' ? syncSummary.researched.length === 0 : suppliers.length === 0)}
+                className="rounded-lg bg-violet-600 px-5 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+              >
+                {syncing ? (
+                  <>
+                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Syncing...
+                  </>
+                ) : (
+                  'Sync Now'
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+        </>
+      ) : (
+        /* Export CSV view */
+        <div className="flex-1 overflow-hidden p-4">
+          <ExportCSVPanel />
+        </div>
+      )}
 
-            {/* ── Stage 3: Result ── */}
-            {!syncing && syncResult && syncResult.failed === 0 && (
+      {/* Success/failure modal — auto-closes after 3s on success */}
+      {syncResult && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={handleResultClose} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-[420px]">
+            {syncResult.failed === 0 ? (
               <div className="text-center py-8 px-6">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
                   <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -432,16 +449,9 @@ export default function SyncToUniversePage() {
                 <p className="text-sm text-gray-500 mt-1">
                   Successfully synced <span className="font-semibold text-green-700">{syncResult.synced}</span> supplier{syncResult.synced !== 1 ? 's' : ''} to the Supplier Universe.
                 </p>
-                <button
-                  onClick={handleSyncClose}
-                  className="mt-5 w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 transition-colors"
-                >
-                  Done
-                </button>
+                <p className="text-[10px] text-gray-300 mt-3">Closing automatically...</p>
               </div>
-            )}
-
-            {!syncing && syncResult && syncResult.failed > 0 && (
+            ) : (
               <div className="py-6 px-6">
                 <div className="text-center mb-4">
                   <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
@@ -476,14 +486,13 @@ export default function SyncToUniversePage() {
                   </div>
                 </div>
                 <button
-                  onClick={handleSyncClose}
+                  onClick={handleResultClose}
                   className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
                 >
                   Done
                 </button>
               </div>
             )}
-
           </div>
         </div>,
         document.body

@@ -31,7 +31,7 @@ const navItems = [
   { path: '/project', label: 'Project', icon: BuildingOfficeIcon, gateKey: null },
   { path: '/taxonomy', label: 'Taxonomy', icon: BookOpenIcon, gateKey: null },
   { path: '/data', label: 'Data', icon: ArrowUpTrayIcon, gateKey: null },
-  { path: '/suppliers', label: 'Suppliers', icon: TruckIcon, gateKey: 'hasUploadedData' as const },
+  { path: '/suppliers', label: 'Suppliers', icon: TruckIcon, gateKey: 'hasSupplierDeps' as const },
   { path: '/classification', label: 'Classification', icon: CpuChipIcon, gateKey: 'hasClassificationDeps' as const },
   { path: '/review', label: 'Review', icon: MagnifyingGlassCircleIcon, gateKey: 'hasClassifiedRows' as const },
   { path: '/override-rules', label: 'Override Rules', icon: DocumentDuplicateIcon, gateKey: 'hasUploadedData' as const },
@@ -50,6 +50,7 @@ export default function Sidebar({ collapsed, onToggle, onSwitchProject }: Sideba
 
   const gatesMet: Record<string, boolean> = {
     hasUploadedData,
+    hasSupplierDeps: hasTaxonomy && hasUploadedData,
     hasClassificationDeps: hasTaxonomy && hasConfirmedSuppliers,
     hasClassifiedRows,
   }

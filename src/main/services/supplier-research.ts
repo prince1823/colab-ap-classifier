@@ -33,10 +33,10 @@ export class SupplierResearcher implements ISupplierResearcher {
     private eventBus: EventBus,
     private supplierService: SupplierService,
     private classificationAgent: ClassificationAgent,
-    private transactions: ITransactionStore
+    private transactions: ITransactionStore,
   ) {}
 
-  async researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>): Promise<SupplierInfo> {
+  async researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>, supplierId?: string): Promise<SupplierInfo> {
     // Check if already researched with substantive info
     const existing = universeCache
       ? (universeCache.get(supplierName) ?? null)
@@ -48,8 +48,10 @@ export class SupplierResearcher implements ISupplierResearcher {
       }
     }
 
-    // Get supplier address if available
-    const address = existing?.supplierAddress;
+    // Get supplier address from transactions (CSV-imported, authoritative)
+    const address = supplierId
+      ? await this.transactions.getSupplierAddress(supplierId)
+      : undefined;
 
     // Search web for enrichment
     let searchResults: Array<{ title: string; url: string; text: string }> = [];
@@ -135,7 +137,7 @@ export class SupplierResearcher implements ISupplierResearcher {
         if (!supplier) break;
 
         try {
-          const info = await this.researchSingle(supplier.supplierName, universeCache);
+          const info = await this.researchSingle(supplier.supplierName, universeCache, supplier.id);
 
           try {
             // Check universe for richer data (taxonomy, parent) beyond just SupplierInfo

@@ -28,7 +28,7 @@ const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
 
 export default function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const { subscribeToClassificationProgress, subscribeToResearchProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress } = useWorkflowStore()
+  const { subscribeToClassificationProgress, subscribeToResearchProgress, subscribeToQCProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress } = useWorkflowStore()
   const location = useLocation()
   // Track which routes have been visited so we mount them once and keep them alive
   const [visitedRoutes, setVisitedRoutes] = useState<Set<string>>(new Set([location.pathname]))
@@ -85,6 +85,13 @@ export default function AppShell() {
     const unsubscribe = subscribeToResearchProgress()
     return unsubscribe
   }, [hasProject, subscribeToResearchProgress])
+
+  // Subscribe to QC progress events when a project is open
+  useEffect(() => {
+    if (!hasProject) return
+    const unsubscribe = subscribeToQCProgress()
+    return unsubscribe
+  }, [hasProject, subscribeToQCProgress])
 
   // Show research progress on non-supplier pages
   const showGlobalResearchProgress = researchProgress?.status === 'running' && location.pathname !== '/suppliers'

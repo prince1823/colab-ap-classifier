@@ -57,16 +57,29 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
     }).catch((e) => showError('Failed to load saved column priorities', e))
   }, [])
 
-  useEffect(() => {
+  const loadPreview = useCallback(async () => {
     setPreviewColumns(allCanonicals)
-    ipc.transactions.query().then((result) => {
-      const flat = result.rows.slice(0, 10).map((r) => ({
+    try {
+      // Fetch all rows, then pick 100 at random
+      const result = await ipc.transactions.query()
+      setTotalRows(result.totalCount)
+      const all = result.rows.map((r) => ({
         ...r,
         ...r.canonicalFields,
       })) as TransactionPreviewRow[]
-      setPreviewRows(flat)
-      setTotalRows(result.total)
-    }).catch((e) => showError('Failed to load transaction preview', e))
+      // Fisher-Yates shuffle and take first 100
+      for (let i = all.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[all[i], all[j]] = [all[j], all[i]]
+      }
+      setPreviewRows(all.slice(0, 100))
+    } catch (e) {
+      showError('Failed to load transaction preview', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadPreview()
   }, [])
 
 
@@ -119,15 +132,24 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
       {/* Top: Transaction preview */}
       <div className="flex-shrink-0">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-gray-700">Transaction Preview</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-gray-700">Transaction Preview</h3>
+            <button
+              onClick={loadPreview}
+              className="rounded border border-blue-300 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+              title="Refresh with random rows"
+            >
+              Refresh
+            </button>
+          </div>
           {totalRows > 0 && (
             <span className="text-xs text-gray-500">
-              Showing {Math.min(previewRows.length, 10)} of {totalRows.toLocaleString()} rows
+              Showing {Math.min(previewRows.length, 100)} of {totalRows.toLocaleString()} rows
             </span>
           )}
         </div>
         {previewRows.length > 0 ? (
-          <div className="max-h-[240px] overflow-auto rounded-md border border-gray-200">
+          <div className="max-h-[400px] overflow-auto rounded-md border border-gray-200">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="sticky top-0 z-10 bg-gray-50">
                 <tr>

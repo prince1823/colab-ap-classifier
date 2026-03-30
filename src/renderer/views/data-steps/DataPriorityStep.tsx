@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ipc } from '../../lib/ipc'
 import { showError } from '../../lib/toast-errors'
 import type { MappingRow } from '../../../shared/types/column-mapping'
@@ -86,6 +86,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
   // Drag state for LLM rows
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const priorityContainerRef = useRef<HTMLDivElement>(null)
 
   const handleDragStart = useCallback((index: number) => {
     setDragIndex(index)
@@ -94,6 +95,18 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
   const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
     e.preventDefault()
     setDragOverIndex(index)
+
+    // Auto-scroll the priority container when dragging near edges
+    const container = priorityContainerRef.current
+    if (!container) return
+    const rect = container.getBoundingClientRect()
+    const scrollZone = 40
+    const y = e.clientY
+    if (y - rect.top < scrollZone) {
+      container.scrollBy({ top: -10 })
+    } else if (rect.bottom - y < scrollZone) {
+      container.scrollBy({ top: 10 })
+    }
   }, [])
 
   const handleDrop = useCallback((index: number) => {
@@ -202,7 +215,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
       </div>
 
       {/* Column priority table */}
-      <div className="flex-1 min-h-0 overflow-auto rounded-md border border-gray-200">
+      <div ref={priorityContainerRef} className="flex-1 min-h-0 overflow-auto rounded-md border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50 sticky top-0 z-10">
             <tr>

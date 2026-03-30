@@ -26,7 +26,7 @@ import type {
 } from '../../shared/types/services';
 import type { IngestProgress } from '../../shared/types/classification';
 
-const SAMPLE_ROW_LIMIT = 10;
+const SAMPLE_ROW_LIMIT = 100;
 const IMPORT_BATCH_SIZE = 5000;
 const PREVIEW_BUFFER_SIZE = 65536; // 64KB for preview/detection
 const DELIMITERS = [',', ';', '\t'] as const;

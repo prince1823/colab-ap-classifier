@@ -1,9 +1,14 @@
 import { registerHandler } from './register';
-import type { RuleStore } from '../../shared/types/services';
+import type { RuleStore, SupplierService, TaxonomyStore, SupplierUniverse } from '../../shared/types/services';
 import type { OverrideRuleCreate, OverrideRuleUpdate, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types';
 import type { GroupedFilter } from '../../shared/types/transactions';
 
-export function registerRulesHandlers(rules: RuleStore): void {
+export function registerRulesHandlers(
+  rules: RuleStore,
+  suppliers: SupplierService,
+  taxonomy: TaxonomyStore,
+  supplierUniverse: SupplierUniverse,
+): void {
   registerHandler('rules:list', async () => {
     return rules.listRules();
   });
@@ -71,5 +76,57 @@ export function registerRulesHandlers(rules: RuleStore): void {
 
   registerHandler('rules:apply', async (_event, ruleIds: unknown) => {
     return rules.applyRules(ruleIds as string[]);
+  });
+
+  /**
+   * Toggle category_a_supplier on a rule (supplier-only rules only).
+   * Also syncs the flag to the project supplier and updates universe mapped_taxonomy_paths.
+   */
+  registerHandler('rules:setCategoryA', async (_event, ruleId: unknown, value: unknown) => {
+    const id = ruleId as string;
+    const categoryA = value as boolean;
+
+    const rule = await rules.getRule(id);
+    if (!rule) throw new Error(`Rule not found: ${id}`);
+
+    // Extract supplier name from the single supplier_name condition
+    const conditions = rule.groupedConditions.groups.flatMap((g) => g.conditions);
+    const supplierCondition = conditions.find((c) => c.field === 'supplier_name' && c.operator === 'equals');
+    if (!supplierCondition) throw new Error('rules:setCategoryA only applies to supplier-only rules');
+
+    const supplierName = String(supplierCondition.value);
+
+    // Update rule
+    await rules.updateRule(id, { categoryASupplier: categoryA });
+
+    // Find the project supplier and update its flag
+    const allSuppliers = await suppliers.listProjectSuppliers();
+    const projectSupplier = allSuppliers.find(
+      (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
+    );
+    if (projectSupplier) {
+      await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: categoryA });
+    }
+
+    // Sync mapped_taxonomy_paths to supplier universe
+    if (supplierUniverse.isOpen()) {
+      const nodes = await taxonomy.getNodes();
+      const node = nodes.find((n) => n.id === rule.targetTaxonomyNodeId);
+      if (node) {
+        const universeRecord = await supplierUniverse.getSupplierRecord(supplierName);
+        const currentPaths: string[] = universeRecord?.mappedTaxonomyPaths ?? [];
+
+        let updatedPaths: string[];
+        if (categoryA) {
+          updatedPaths = currentPaths.includes(node.fullPath)
+            ? currentPaths
+            : [...currentPaths, node.fullPath];
+        } else {
+          updatedPaths = currentPaths.filter((p) => p !== node.fullPath);
+        }
+
+        await supplierUniverse.upsertSupplierFull(supplierName, { mappedTaxonomyPaths: updatedPaths });
+      }
+    }
   });
 }

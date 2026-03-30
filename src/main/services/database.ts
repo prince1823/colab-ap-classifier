@@ -155,6 +155,22 @@ export class DuckDBDatabase implements Database {
       await this.exec('ALTER TABLE project_suppliers ADD COLUMN l1_l2_path VARCHAR');
     }
 
+    // Migrate: ensure category_a_supplier column exists on project_suppliers
+    const catASupCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'project_suppliers' AND column_name = 'category_a_supplier'"
+    );
+    if (catASupCol.length === 0) {
+      await this.exec('ALTER TABLE project_suppliers ADD COLUMN category_a_supplier BOOLEAN DEFAULT FALSE');
+    }
+
+    // Migrate: ensure category_a_supplier column exists on override_rules
+    const catARuleCol = await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'category_a_supplier'"
+    );
+    if (catARuleCol.length === 0) {
+      await this.exec('ALTER TABLE override_rules ADD COLUMN category_a_supplier BOOLEAN DEFAULT FALSE');
+    }
+
     // Migrate: drop classification_reasoning column from transactions if it exists
     try {
       await this.exec('ALTER TABLE transactions DROP COLUMN classification_reasoning');
@@ -484,6 +500,7 @@ export class DuckDBDatabase implements Database {
         group_id VARCHAR,
         is_active BOOLEAN DEFAULT TRUE,
         source VARCHAR DEFAULT 'manual',
+        category_a_supplier BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -529,6 +546,7 @@ export class DuckDBDatabase implements Database {
         supplier_info JSON,
         mapped_taxonomy_paths JSON,
         l1_l2_path VARCHAR,
+        category_a_supplier BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );

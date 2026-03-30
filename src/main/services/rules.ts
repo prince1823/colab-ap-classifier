@@ -13,6 +13,7 @@ interface RuleRow {
   group_priority: number | null;
   is_active: boolean;
   source: string;
+  category_a_supplier: boolean;
   created_at: string;
 }
 
@@ -45,6 +46,7 @@ function rowToRule(row: RuleRow): OverrideRule {
     groupId: row.group_id ?? null,
     isActive: row.is_active,
     source: (row.source ?? 'manual') as RuleSource,
+    categoryASupplier: Boolean(row.category_a_supplier),
     createdAt: row.created_at,
   };
 }
@@ -227,16 +229,25 @@ export class RuleStore implements IRuleStore {
     return { rules: rows.map(rowToRule), total };
   }
 
+  async getRule(id: string): Promise<OverrideRule | null> {
+    const row = await this.db.get<RuleRow>(
+      'SELECT r.*, NULL AS group_priority FROM override_rules r WHERE r.id = ?',
+      id
+    );
+    return row ? rowToRule(row) : null;
+  }
+
   async createRule(input: OverrideRuleCreate): Promise<{ id: string }> {
     const id = uuidv4();
     const groupId = input.groupId ?? null;
     const source = input.source ?? 'manual';
+    const categoryASupplier = input.categoryASupplier ?? false;
 
     await this.db.run(
-      `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, group_id, is_active, source, created_at)
-       VALUES (?, ?, ?, ?, CAST(? AS VARCHAR), TRUE, ?, CURRENT_TIMESTAMP)`,
+      `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, group_id, is_active, source, category_a_supplier, created_at)
+       VALUES (?, ?, ?, ?, CAST(? AS VARCHAR), TRUE, ?, ?, CURRENT_TIMESTAMP)`,
       id, input.name, JSON.stringify(input.groupedConditions ?? { groupConnector: 'AND', groups: [] }),
-      input.targetTaxonomyNodeId, groupId, source
+      input.targetTaxonomyNodeId, groupId, source, categoryASupplier
     );
 
     return { id };
@@ -257,6 +268,7 @@ export class RuleStore implements IRuleStore {
     if (updates.targetTaxonomyNodeId !== undefined) { setClauses.push('target_taxonomy_node_id = ?'); params.push(updates.targetTaxonomyNodeId); }
     if (updates.isActive !== undefined) { setClauses.push('is_active = ?'); params.push(updates.isActive); }
     if ('groupId' in updates) { setClauses.push('group_id = ?'); params.push(updates.groupId ?? null); }
+    if (updates.categoryASupplier !== undefined) { setClauses.push('category_a_supplier = ?'); params.push(updates.categoryASupplier); }
 
     if (setClauses.length === 0) return;
 

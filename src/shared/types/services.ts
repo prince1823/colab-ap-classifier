@@ -141,6 +141,10 @@ export interface QCAgent {
   review(input: { supplierSummary: string; rules: string }): Promise<QCResult>;
 }
 
+export interface CatAAgent {
+  resolve(mappedPath: string, taxonomyNodes: TaxonomyNode[]): Promise<{ resolvedPath: string }>;
+}
+
 // ─── Data Services ───────────────────────────────────────────────────────────
 
 export interface ProjectStore {
@@ -228,6 +232,7 @@ export interface SupplierService {
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
   listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
+  getRule(id: string): Promise<OverrideRule | null>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
   createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;

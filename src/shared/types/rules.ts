@@ -1,6 +1,6 @@
 import type { GroupedFilter } from './transactions';
 
-export type RuleSource = 'manual' | 'auto_generated';
+export type RuleSource = 'manual' | 'auto_generated' | 'supplier_universe';
 
 export interface OverrideRule {
   id: string;
@@ -10,6 +10,7 @@ export interface OverrideRule {
   groupId: string | null;
   isActive: boolean;
   source: RuleSource;
+  categoryASupplier: boolean;
   createdAt: string;
 }
 
@@ -19,6 +20,7 @@ export interface OverrideRuleCreate {
   targetTaxonomyNodeId: string;
   groupId?: string | null;
   source?: RuleSource;
+  categoryASupplier?: boolean;
 }
 
 export interface OverrideRuleUpdate {
@@ -27,6 +29,7 @@ export interface OverrideRuleUpdate {
   targetTaxonomyNodeId?: string;
   groupId?: string | null;
   isActive?: boolean;
+  categoryASupplier?: boolean;
 }
 
 export interface GenerateRulesResult {

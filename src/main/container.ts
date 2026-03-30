@@ -8,6 +8,7 @@ import type {
   ResearchAgent,
   ColumnMappingAgent,
   FeedbackAgent,
+  CatAAgent,
   IAppConfigService,
   ILicenseService,
   ChangelogStore as IChangelogStore,
@@ -34,6 +35,7 @@ import { LLMClassificationAgent } from './agents/classification-agent';
 import { LLMResearchAgent } from './agents/research-agent';
 import { LLMColumnMappingAgent } from './agents/column-mapping-agent';
 import { LLMFeedbackAgent } from './agents/feedback-agent';
+import { LLMCatAAgent } from './agents/cat-a-agent';
 import { LLMQCAgent } from './agents/qc-agent';
 import { ChangelogStore } from './services/changelog';
 import { TransactionStore } from './services/transactions';
@@ -62,6 +64,7 @@ export interface ServiceContainer {
   researchAgent: ResearchAgent;
   columnMappingAgent: ColumnMappingAgent;
   feedbackAgent: FeedbackAgent;
+  catAAgent: CatAAgent;
   // Data
   changelog: IChangelogStore;
   transactions: ITransactionStore;
@@ -91,6 +94,7 @@ export function createContainer(): ServiceContainer {
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
   const feedbackAgent = new LLMFeedbackAgent(llm);
+  const catAAgent: CatAAgent = new LLMCatAAgent(llm);
   const qcAgent: IQCAgent = new LLMQCAgent(llm);
 
   // Data layer (order matters — respect dependency graph)
@@ -106,7 +110,7 @@ export function createContainer(): ServiceContainer {
   // Orchestrators
   const researcher = new SupplierResearcher(
     supplierUniverse, webSearch, researchAgent, eventBus, suppliers,
-    classificationAgent, transactions
+    classificationAgent, transactions, catAAgent, taxonomy, rules
   );
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,
@@ -116,7 +120,7 @@ export function createContainer(): ServiceContainer {
 
   return {
     db, supplierUniverse, eventBus, llm, appConfig, webSearch, license,
-    classificationAgent, researchAgent, columnMappingAgent, feedbackAgent,
+    classificationAgent, researchAgent, columnMappingAgent, feedbackAgent, catAAgent,
     changelog, transactions, project, taxonomy, suppliers, rules,
     ingest, export: exportSvc, researcher, classifier, qc,
   };

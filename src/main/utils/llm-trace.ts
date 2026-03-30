@@ -7,7 +7,8 @@ export type TraceAgentType =
   | 'classification-tailspend-l3'
   | 'research'
   | 'column-mapping'
-  | 'qc';
+  | 'qc'
+  | 'cat-a';
 
 export interface TraceEntry {
   timestamp: string;

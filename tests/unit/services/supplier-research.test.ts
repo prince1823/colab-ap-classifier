@@ -8,10 +8,14 @@ import {
   createMockSupplierService,
   createMockClassificationAgent,
   createMockTransactionStore,
+  createMockCatAAgent,
+  createMockTaxonomyStore,
+  createMockRuleStore,
 } from '../../helpers/mock-services';
 import type {
   SupplierUniverse, WebSearch, ResearchAgent, EventBus,
   SupplierService, ClassificationAgent, TransactionStore,
+  CatAAgent, TaxonomyStore, RuleStore,
 } from '../../../src/shared/types/services';
 
 describe('SupplierResearcher', () => {
@@ -22,6 +26,9 @@ describe('SupplierResearcher', () => {
   let supplierService: SupplierService;
   let classificationAgent: ClassificationAgent;
   let transactions: TransactionStore;
+  let catAAgent: CatAAgent;
+  let taxonomyStore: TaxonomyStore;
+  let ruleStore: RuleStore;
   let researcher: SupplierResearcher;
 
   beforeEach(() => {
@@ -33,9 +40,13 @@ describe('SupplierResearcher', () => {
     supplierService = createMockSupplierService();
     classificationAgent = createMockClassificationAgent();
     transactions = createMockTransactionStore();
+    catAAgent = createMockCatAAgent();
+    taxonomyStore = createMockTaxonomyStore();
+    ruleStore = createMockRuleStore();
     researcher = new SupplierResearcher(
       supplierUniverse, webSearch, researchAgent, eventBus,
-      supplierService, classificationAgent, transactions
+      supplierService, classificationAgent, transactions,
+      catAAgent, taxonomyStore, ruleStore
     );
   });
 

@@ -56,6 +56,7 @@ export interface ProjectSupplier {
   l1L2Path: string | null;
   universeMatch: boolean;
   isResearched: boolean;
+  categoryASupplier: boolean;
   createdAt: string;
 }
 
@@ -71,4 +72,5 @@ export interface SupplierUpdateInput {
   mappedTaxonomyPaths?: string[] | null;
   l1L2Path?: string;
   markResearched?: boolean;
+  categoryASupplier?: boolean;
 }

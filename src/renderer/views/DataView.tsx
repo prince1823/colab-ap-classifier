@@ -34,6 +34,7 @@ export default function DataView() {
   const [step, setStep] = useState<Step>('upload')
   const [completedUploads, setCompletedUploads] = useState<CompletedUpload[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [uploadStats, setUploadStats] = useState<Record<string, { classifiedCount: number }>>({})
 
   // Active upload/mapping cycle state
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
@@ -45,7 +46,7 @@ export default function DataView() {
   // Preserved column states so going back from priority doesn't lose edits
   const [preservedColumnStates, setPreservedColumnStates] = useState<ColumnState[] | null>(null)
 
-  // Load existing uploads on mount
+  // Load existing uploads and stats on mount
   useEffect(() => {
     ipc.ingest.getUploadHistory().then((uploads) => {
       setCompletedUploads(
@@ -63,7 +64,24 @@ export default function DataView() {
     }).catch((e) => {
       showError('Failed to load upload history', e)
     })
+    ipc.ingest.getUploadStatsBatch().then(setUploadStats).catch(() => {})
   }, [])
+
+  const handleDeleteUpload = async (uploadId: string) => {
+    try {
+      await ipc.ingest.deleteUpload(uploadId)
+      setCompletedUploads((prev) => prev.filter((u) => u.uploadId !== uploadId))
+      setUploadStats((prev) => {
+        const next = { ...prev }
+        delete next[uploadId]
+        return next
+      })
+      await refreshGateState()
+    } catch (e) {
+      showError('Failed to delete upload', e)
+      throw e
+    }
+  }
 
   const handleFileReady = async (
     path: string,
@@ -244,7 +262,9 @@ export default function DataView() {
         {step === 'upload' && (
           <DataUploadStep
             completedUploads={completedUploads}
+            uploadStats={uploadStats}
             onFileReady={handleFileReady}
+            onDeleteUpload={handleDeleteUpload}
             onProceedToPriority={() => setStep('priority')}
             derivingMappings={derivingMappings}
             derivedMappings={activeDerivedMappings}

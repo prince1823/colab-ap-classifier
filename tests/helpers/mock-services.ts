@@ -9,6 +9,7 @@ import type {
   ResearchAgent,
   ColumnMappingAgent,
   QCAgent,
+  CatAAgent,
   ProjectStore,
   TransactionStore,
   TaxonomyStore,
@@ -49,7 +50,13 @@ export function createMockSupplierUniverse(): SupplierUniverse {
     getSuppliersByNames: vi.fn().mockResolvedValue(new Map()),
     upsertSupplier: vi.fn(),
     upsertSupplierFull: vi.fn(),
-    getSupplierRecord: vi.fn().mockResolvedValue(null),
+    getSupplierRecord: vi.fn().mockResolvedValue(null as {
+      supplierInfo: import('../../src/shared/types/suppliers').SupplierInfo;
+      aliases: string[];
+      parentName: string | null;
+      mappedTaxonomyPaths: string[];
+      categoryASupplier: boolean;
+    } | null),
     searchVariants: vi.fn().mockResolvedValue([]),
   };
 }
@@ -116,6 +123,12 @@ export function createMockColumnMappingAgent(): ColumnMappingAgent {
 export function createMockQCAgent(): QCAgent {
   return {
     review: vi.fn().mockResolvedValue({ recommendations: [], noChangeNeeded: true }),
+  };
+}
+
+export function createMockCatAAgent(): CatAAgent {
+  return {
+    resolve: vi.fn().mockResolvedValue({ resolvedPath: 'L1|L2|L3' }),
   };
 }
 
@@ -194,18 +207,32 @@ export function createMockSupplierService(): SupplierService {
     renameParent: vi.fn(),
     deleteParent: vi.fn(),
     mergeParents: vi.fn(),
+    syncToUniverse: vi.fn().mockResolvedValue({ synced: 0, failed: 0, errors: [] }),
   };
 }
 
 export function createMockRuleStore(): RuleStore {
   return {
     listRules: vi.fn().mockResolvedValue([]),
+    listRulesPaginated: vi.fn().mockResolvedValue({ rules: [], total: 0 }),
+    getRule: vi.fn().mockResolvedValue(null),
     createRule: vi.fn().mockResolvedValue({ id: 'rule-1' }),
     createAndApplyRule: vi.fn().mockResolvedValue({ id: 'rule-1', matchedCount: 0 }),
     updateRule: vi.fn(),
     deleteRule: vi.fn(),
     evaluateRules: vi.fn().mockResolvedValue(new Map()),
-    generate_rules_preview: vi.fn().mockResolvedValue({ rules: [] }),
+    previewRules: vi.fn().mockResolvedValue({ affectedRowCount: 0, matchingRuleCount: 0 }),
+    applyRules: vi.fn().mockResolvedValue({ matchedCount: 0, ruleCount: 0 }),
+    generate_rules_preview: vi.fn().mockResolvedValue({ rulesCreated: 0, suppliersProcessed: 0 }),
+    listGroups: vi.fn().mockResolvedValue([]),
+    createGroup: vi.fn().mockResolvedValue({ id: 'group-1' }),
+    updateGroup: vi.fn(),
+    deleteGroup: vi.fn(),
+    reorderGroups: vi.fn(),
+    moveRuleToGroup: vi.fn(),
+    assignToGroup: vi.fn(),
+    filterAndAssignToGroup: vi.fn().mockResolvedValue({ matched: 0 }),
+    getCatARuleForSupplier: vi.fn().mockResolvedValue(null),
   };
 }
 

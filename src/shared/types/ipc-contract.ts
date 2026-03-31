@@ -132,6 +132,7 @@ export interface IPCInvokeMap {
   'rules:moveRule':         { args: [ruleId: string, targetGroupId: string | null]; result: void };
   'rules:assignToGroup':    { args: [ruleIds: string[], groupId: string | null]; result: void };
   'rules:filterAssign':     { args: [filter: GroupedFilter, targetGroupId: string | null]; result: { matched: number } };
+  'rules:setCategoryA':     { args: [ruleId: string, value: boolean]; result: void };
 
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };

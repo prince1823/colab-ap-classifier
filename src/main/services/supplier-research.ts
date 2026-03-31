@@ -7,6 +7,9 @@ import type {
   SupplierService,
   ClassificationAgent,
   TransactionStore as ITransactionStore,
+  CatAAgent,
+  RuleStore as IRuleStore,
+  TaxonomyStore as ITaxonomyStore,
 } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import type { TaxonomyNode } from '../../shared/types/taxonomy';
@@ -34,6 +37,9 @@ export class SupplierResearcher implements ISupplierResearcher {
     private supplierService: SupplierService,
     private classificationAgent: ClassificationAgent,
     private transactions: ITransactionStore,
+    private catAAgent: CatAAgent,
+    private taxonomyStore: ITaxonomyStore,
+    private ruleStore: IRuleStore,
   ) {}
 
   async researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>, supplierId?: string): Promise<SupplierInfo> {
@@ -103,7 +109,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     };
 
     // Gather candidates
-    let candidates: Array<{ id: string; supplierName: string }>;
+    let candidates: Array<{ id: string; supplierName: string; categoryASupplier: boolean; mappedTaxonomyPaths: string[] | null }>;
     if (supplierIds && supplierIds.length > 0) {
       const fetched = await Promise.all(supplierIds.map((id) => this.supplierService.getProjectSupplier(id)));
       candidates = fetched.filter(
@@ -126,6 +132,9 @@ export class SupplierResearcher implements ISupplierResearcher {
     const universeCache = await this.supplierUniverse.getSuppliersByNames(
       candidates.map((c) => c.supplierName)
     );
+
+    // Pre-fetch taxonomy nodes once for cat A resolution
+    const taxonomyNodes = await this.taxonomyStore.getNodes();
 
     let completed = 0;
     const queue = [...candidates];
@@ -158,6 +167,14 @@ export class SupplierResearcher implements ISupplierResearcher {
               updatePayload.mappedTaxonomyPaths = universeRecord.mappedTaxonomyPaths;
             }
             await this.supplierService.updateSupplier(supplier.id, updatePayload);
+
+            // Resolve cat A mappings if supplier is flagged (check both project and universe)
+            if (supplier.categoryASupplier || universeRecord?.categoryASupplier) {
+              const paths = updatePayload.mappedTaxonomyPaths ?? supplier.mappedTaxonomyPaths ?? [];
+              if (paths.length > 0) {
+                await this.resolveCatASupplier(supplier.id, supplier.supplierName, paths, taxonomyNodes);
+              }
+            }
           } catch (updateErr) {
             console.error(`[Research] Failed to persist info for "${supplier.supplierName}":`, updateErr);
             // Still mark researched even if info write failed
@@ -411,6 +428,55 @@ export class SupplierResearcher implements ISupplierResearcher {
       if (supplier) cleaned.supplier_name = supplier.supplierName;
       return cleaned;
     });
+  }
+
+  /**
+   * For each mapped taxonomy path on a cat A supplier, resolve it to a project taxonomy node
+   * and create an override rule with source 'supplier_universe' and category_a_supplier = true.
+   */
+  private async resolveCatASupplier(
+    supplierId: string,
+    supplierName: string,
+    mappedPaths: string[],
+    taxonomyNodes: import('../../shared/types/taxonomy').TaxonomyNode[],
+  ): Promise<void> {
+    // One cat A rule per supplier — skip silently if one already exists
+    const existingCatARule = await this.ruleStore.getCatARuleForSupplier(supplierName);
+    if (existingCatARule) {
+      return;
+    }
+
+    // Try each mapped path in order; create a rule for the first successful resolution
+    for (const mappedPath of mappedPaths) {
+      try {
+        const { resolvedPath } = await this.catAAgent.resolve(mappedPath, taxonomyNodes);
+        const node = taxonomyNodes.find((n) => n.fullPath === resolvedPath);
+        if (!node) {
+          console.warn(`[CatA] Resolved path "${resolvedPath}" not found in taxonomy for supplier "${supplierName}" — skipping`);
+          continue;
+        }
+        await this.ruleStore.createRule({
+          name: `[Cat A] ${supplierName}`,
+          groupedConditions: {
+            groupConnector: 'AND',
+            groups: [{
+              connector: 'AND',
+              conditions: [{ field: 'supplier_name', operator: 'equals', value: supplierName }],
+            }],
+          },
+          targetTaxonomyNodeId: node.id,
+          source: 'supplier_universe',
+          categoryASupplier: true,
+        });
+        // Stop after first successful rule creation
+        break;
+      } catch (err) {
+        console.error(`[CatA] Failed to resolve path "${mappedPath}" for supplier "${supplierName}":`, err);
+      }
+    }
+
+    // Mark the project supplier as category A
+    await this.supplierService.updateSupplier(supplierId, { categoryASupplier: true });
   }
 
   cancel(): void {

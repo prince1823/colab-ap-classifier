@@ -254,6 +254,10 @@ export class SupplierService implements ISupplierService {
     if (updates.markResearched) {
       setClauses.push('is_researched = TRUE');
     }
+    if (updates.categoryASupplier !== undefined) {
+      setClauses.push('category_a_supplier = ?');
+      params.push(updates.categoryASupplier);
+    }
 
     if (setClauses.length === 0) return;
 
@@ -381,7 +385,7 @@ export class SupplierService implements ISupplierService {
     // Build inner query
     const innerSQL = `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
         ps.parent_supplier_id, sp.name AS parent_name,
-        ps.data_source, ps.universe_match, ps.is_researched,
+        ps.data_source, ps.universe_match, ps.is_researched, ps.category_a_supplier,
         ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at, ps.updated_at,
         COUNT(t.id) as transaction_count,
         ${spendExpr} as total_spend
@@ -409,6 +413,7 @@ export class SupplierService implements ISupplierService {
       parent_name: string | null;
       universe_match: boolean;
       is_researched: boolean;
+      category_a_supplier: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
       l1_l2_path: string | null;
@@ -443,6 +448,7 @@ export class SupplierService implements ISupplierService {
       l1L2Path: row.l1_l2_path ?? null,
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
+      categoryASupplier: Boolean(row.category_a_supplier),
       createdAt: String(row.created_at),
       transactionCount: Number(row.transaction_count),
       totalSpend: Number(row.total_spend),
@@ -460,6 +466,7 @@ export class SupplierService implements ISupplierService {
       parent_name: string | null;
       universe_match: boolean;
       is_researched: boolean;
+      category_a_supplier: boolean;
       supplier_info: string | null;
       mapped_taxonomy_paths: string | null;
       l1_l2_path: string | null;
@@ -467,7 +474,7 @@ export class SupplierService implements ISupplierService {
     }>(
       `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
               ps.parent_supplier_id, sp.name AS parent_name,
-              ps.universe_match, ps.is_researched,
+              ps.universe_match, ps.is_researched, ps.category_a_supplier,
               ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at
        FROM project_suppliers ps
        LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
@@ -489,6 +496,7 @@ export class SupplierService implements ISupplierService {
       l1L2Path: row.l1_l2_path ?? null,
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
+      categoryASupplier: Boolean(row.category_a_supplier),
       createdAt: String(row.created_at),
     };
   }
@@ -630,6 +638,7 @@ export class SupplierService implements ISupplierService {
           aliases,
           parentName: supplier.parentName,
           mappedTaxonomyPaths: supplier.mappedTaxonomyPaths ?? undefined,
+          categoryASupplier: supplier.categoryASupplier,
         });
 
         synced++;

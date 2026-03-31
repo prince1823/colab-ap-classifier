@@ -21,7 +21,8 @@ export function cancelResearch(): void {
  * Returns the SupplierInfo on success, or null on failure.
  */
 export async function researchSingle(supplier: ProjectSupplierView): Promise<SupplierInfo | null> {
-  if (!isResearchRunning()) {
+  const ownsProgress = !isResearchRunning()
+  if (ownsProgress) {
     useWorkflowStore.getState().setResearchProgress({
       status: 'running',
       totalSuppliers: 1,
@@ -33,7 +34,7 @@ export async function researchSingle(supplier: ProjectSupplierView): Promise<Sup
   }
   try {
     const info = await ipc.suppliers.researchSingle(supplier.id)
-    if (!isResearchRunning()) {
+    if (ownsProgress) {
       useWorkflowStore.getState().setResearchProgress({
         status: 'completed',
         totalSuppliers: 1,
@@ -46,7 +47,7 @@ export async function researchSingle(supplier: ProjectSupplierView): Promise<Sup
     }
     return info as SupplierInfo
   } catch (e) {
-    if (!isResearchRunning()) {
+    if (ownsProgress) {
       useWorkflowStore.getState().setResearchProgress({
         status: 'failed',
         totalSuppliers: 1,

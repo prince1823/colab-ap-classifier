@@ -29,7 +29,7 @@ export function registerAllHandlers(services: ServiceContainer): void {
   registerSuppliersHandlers(services.suppliers, services.researcher);
   registerSupplierResearchHandlers(services.researcher, services.suppliers, services.taxonomy, services.project, services.eventBus);
   registerClassificationHandlers(services.classifier, services.eventBus);
-  registerRulesHandlers(services.rules, services.suppliers, services.taxonomy, services.supplierUniverse);
+  registerRulesHandlers(services.rules, services.suppliers, services.taxonomy);
   registerTransactionsHandlers(services.transactions);
   registerExportHandlers(services.export);
   registerSettingsHandlers(services.appConfig);

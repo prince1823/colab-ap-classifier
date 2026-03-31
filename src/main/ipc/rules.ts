@@ -1,5 +1,5 @@
 import { registerHandler } from './register';
-import type { RuleStore, SupplierService, TaxonomyStore, SupplierUniverse } from '../../shared/types/services';
+import type { RuleStore, SupplierService, TaxonomyStore } from '../../shared/types/services';
 import type { OverrideRuleCreate, OverrideRuleUpdate, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types';
 import type { GroupedFilter } from '../../shared/types/transactions';
 
@@ -7,7 +7,6 @@ export function registerRulesHandlers(
   rules: RuleStore,
   suppliers: SupplierService,
   taxonomy: TaxonomyStore,
-  supplierUniverse: SupplierUniverse,
 ): void {
   registerHandler('rules:list', async () => {
     return rules.listRules();
@@ -41,15 +40,18 @@ export function registerRulesHandlers(
       if (supplierCondition) {
         const supplierName = String(supplierCondition.value);
 
-        // Remove this rule's taxonomy path from universe mapped_taxonomy_paths
-        if (supplierUniverse.isOpen()) {
+        // Remove this rule's taxonomy path from project supplier's mappedTaxonomyPaths
+        const allSuppliers = await suppliers.listProjectSuppliers();
+        const projectSupplier = allSuppliers.find(
+          (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
+        );
+        if (projectSupplier) {
           const nodes = await taxonomy.getNodes();
           const node = nodes.find((n) => n.id === rule.targetTaxonomyNodeId);
           if (node) {
-            const universeRecord = await supplierUniverse.getSupplierRecord(supplierName);
-            const currentPaths = universeRecord?.mappedTaxonomyPaths ?? [];
+            const currentPaths: string[] = projectSupplier.mappedTaxonomyPaths ?? [];
             const updatedPaths = currentPaths.filter((p) => p !== node.fullPath);
-            await supplierUniverse.upsertSupplierFull(supplierName, { mappedTaxonomyPaths: updatedPaths });
+            await suppliers.updateSupplier(projectSupplier.id, { mappedTaxonomyPaths: updatedPaths });
           }
         }
 
@@ -57,19 +59,9 @@ export function registerRulesHandlers(
         await rules.deleteRule(id);
 
         const remainingCatARule = await rules.getCatARuleForSupplier(supplierName);
-        if (!remainingCatARule) {
-          // No cat A rules remain — clear supplier flags
-          const allSuppliers = await suppliers.listProjectSuppliers();
-          const projectSupplier = allSuppliers.find(
-            (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
-          );
-          if (projectSupplier) {
-            await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: false });
-          }
-
-          if (supplierUniverse.isOpen()) {
-            await supplierUniverse.upsertSupplierFull(supplierName, { categoryASupplier: false });
-          }
+        if (!remainingCatARule && projectSupplier) {
+          // No cat A rules remain — clear project supplier flag
+          await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: false });
         }
 
         return;
@@ -127,7 +119,7 @@ export function registerRulesHandlers(
 
   /**
    * Toggle category_a_supplier on a rule (supplier-only rules only).
-   * Also syncs the flag to the project supplier and updates universe mapped_taxonomy_paths.
+   * Updates the rule and project supplier; universe is updated via suppliers:syncToUniverse.
    */
   registerHandler('rules:setCategoryA', async (_event, ruleId: unknown, value: unknown) => {
     const id = ruleId as string;
@@ -154,23 +146,18 @@ export function registerRulesHandlers(
     // Update rule
     await rules.updateRule(id, { categoryASupplier: categoryA });
 
-    // Find the project supplier and update its flag
+    // Find the project supplier and update its flag and mappedTaxonomyPaths
     const allSuppliers = await suppliers.listProjectSuppliers();
     const projectSupplier = allSuppliers.find(
       (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
     );
     if (projectSupplier) {
       await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: categoryA });
-    }
 
-    // Sync mapped_taxonomy_paths to supplier universe
-    if (supplierUniverse.isOpen()) {
       const nodes = await taxonomy.getNodes();
       const node = nodes.find((n) => n.id === rule.targetTaxonomyNodeId);
       if (node) {
-        const universeRecord = await supplierUniverse.getSupplierRecord(supplierName);
-        const currentPaths: string[] = universeRecord?.mappedTaxonomyPaths ?? [];
-
+        const currentPaths: string[] = projectSupplier.mappedTaxonomyPaths ?? [];
         let updatedPaths: string[];
         if (categoryA) {
           updatedPaths = currentPaths.includes(node.fullPath)
@@ -179,11 +166,7 @@ export function registerRulesHandlers(
         } else {
           updatedPaths = currentPaths.filter((p) => p !== node.fullPath);
         }
-
-        await supplierUniverse.upsertSupplierFull(supplierName, {
-          mappedTaxonomyPaths: updatedPaths,
-          categoryASupplier: categoryA,
-        });
+        await suppliers.updateSupplier(projectSupplier.id, { mappedTaxonomyPaths: updatedPaths });
       }
     }
   });

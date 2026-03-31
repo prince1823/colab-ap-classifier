@@ -130,7 +130,7 @@ describe('resolveCatASupplier (via researchAll)', () => {
     }));
   });
 
-  it('does not create cat A rules for suppliers with category_a_supplier=false', async () => {
+  it('does not create cat A rules for suppliers with category_a_supplier=false on both project and universe', async () => {
     const supplier = makeSupplier({
       categoryASupplier: false,
       mappedTaxonomyPaths: ['Corporate Services|IT|Software'],
@@ -141,6 +141,30 @@ describe('resolveCatASupplier (via researchAll)', () => {
     await researcher.researchAll();
 
     expect(ruleStore.createRule).not.toHaveBeenCalled();
+  });
+
+  it('creates cat A rule when project supplier has categoryASupplier=false but universe record has it true', async () => {
+    const supplier = makeSupplier({
+      categoryASupplier: false,
+      mappedTaxonomyPaths: null,
+    });
+    vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([supplier]);
+    vi.mocked(supplierUniverse.getSupplierRecord).mockResolvedValue({
+      supplierInfo: { supplierType: 'Corporation' },
+      aliases: [],
+      parentName: null,
+      mappedTaxonomyPaths: ['Corporate Services|IT|Software'],
+      categoryASupplier: true,
+    });
+    vi.mocked(catAAgent.resolve).mockResolvedValue({ resolvedPath: 'Corporate Services|IT|Software' });
+
+    await researcher.researchAll();
+
+    expect(ruleStore.createRule).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'supplier_universe',
+      categoryASupplier: true,
+      targetTaxonomyNodeId: 'node-it-sw',
+    }));
   });
 
   it('does not create rules when mappedTaxonomyPaths is empty', async () => {

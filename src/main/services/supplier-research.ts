@@ -168,8 +168,8 @@ export class SupplierResearcher implements ISupplierResearcher {
             }
             await this.supplierService.updateSupplier(supplier.id, updatePayload);
 
-            // Resolve cat A mappings if supplier is flagged
-            if (supplier.categoryASupplier) {
+            // Resolve cat A mappings if supplier is flagged (check both project and universe)
+            if (supplier.categoryASupplier || universeRecord?.categoryASupplier) {
               const paths = updatePayload.mappedTaxonomyPaths ?? supplier.mappedTaxonomyPaths ?? [];
               if (paths.length > 0) {
                 await this.resolveCatASupplier(supplier.id, supplier.supplierName, paths, taxonomyNodes);

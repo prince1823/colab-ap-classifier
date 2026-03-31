@@ -197,4 +197,77 @@ describe('SupplierService', () => {
       );
     });
   });
+
+  describe('syncToUniverse', () => {
+    it('should pass categoryASupplier to upsertSupplierFull', async () => {
+      // getProjectSupplier query
+      vi.mocked(db.get).mockResolvedValue({
+        id: 'sup1',
+        supplier_name: 'Acme',
+        confirmation_status: 'pending',
+        is_tail_spend: false,
+        parent_supplier_id: null,
+        parent_name: null,
+        universe_match: true,
+        is_researched: true,
+        category_a_supplier: true,
+        supplier_info: JSON.stringify({ industry: 'Tech' }),
+        mapped_taxonomy_paths: JSON.stringify(['Corporate Services|IT|Software']),
+        l1_l2_path: null,
+        created_at: '2026-01-01',
+      });
+      // getProjectAliases query
+      vi.mocked(db.all).mockResolvedValue([]);
+
+      const result = await service.syncToUniverse(['sup1']);
+
+      expect(result.synced).toBe(1);
+      expect(supplierUniverse.upsertSupplierFull).toHaveBeenCalledWith(
+        'Acme',
+        expect.objectContaining({
+          categoryASupplier: true,
+          mappedTaxonomyPaths: ['Corporate Services|IT|Software'],
+        })
+      );
+    });
+
+    it('should pass categoryASupplier=false when supplier is not cat A', async () => {
+      vi.mocked(db.get).mockResolvedValue({
+        id: 'sup2',
+        supplier_name: 'RegularCo',
+        confirmation_status: 'pending',
+        is_tail_spend: false,
+        parent_supplier_id: null,
+        parent_name: null,
+        universe_match: false,
+        is_researched: true,
+        category_a_supplier: false,
+        supplier_info: null,
+        mapped_taxonomy_paths: null,
+        l1_l2_path: null,
+        created_at: '2026-01-01',
+      });
+      vi.mocked(db.all).mockResolvedValue([]);
+
+      const result = await service.syncToUniverse(['sup2']);
+
+      expect(result.synced).toBe(1);
+      expect(supplierUniverse.upsertSupplierFull).toHaveBeenCalledWith(
+        'RegularCo',
+        expect.objectContaining({
+          categoryASupplier: false,
+        })
+      );
+    });
+
+    it('should return error when universe not configured', async () => {
+      vi.mocked(supplierUniverse.isOpen).mockReturnValue(false);
+
+      const result = await service.syncToUniverse(['sup1']);
+
+      expect(result.synced).toBe(0);
+      expect(result.errors).toContain('Supplier universe not configured');
+      expect(supplierUniverse.upsertSupplierFull).not.toHaveBeenCalled();
+    });
+  });
 });

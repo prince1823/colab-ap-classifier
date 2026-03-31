@@ -638,6 +638,7 @@ export class SupplierService implements ISupplierService {
           aliases,
           parentName: supplier.parentName,
           mappedTaxonomyPaths: supplier.mappedTaxonomyPaths ?? undefined,
+          categoryASupplier: supplier.categoryASupplier,
         });
 
         synced++;

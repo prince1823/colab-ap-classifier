@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if git diff --name-only HEAD 2>/dev/null | grep -q '^src/renderer/'; then entire hooks claude-code stop; fi"
+            "command": "if (git diff --name-only; git diff --name-only --cached) 2>/dev/null | grep -q '^src/renderer/'; then entire hooks claude-code stop; fi"
           }
         ]
       }

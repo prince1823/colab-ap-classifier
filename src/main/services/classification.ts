@@ -17,14 +17,14 @@ import type { ClassificationProgress, ClassificationResult } from '../../shared/
 import type { GroupedFilter } from '../../shared/types/transactions';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import { cleanDescription } from '../utils/text';
-import { buildDedupGroups, batchDedupGroups, extractSubBatch, extractFields } from '../utils/dedup-groups';
+import { buildDedupGroups, batchDedupGroups, extractSubBatch, DEFAULT_SAMPLE_COUNT } from '../utils/dedup-groups';
 import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import { runPool } from '../utils/concurrency-pool';
 import { debugLog } from '../utils/debug-log';
 
 const DEFAULT_CONCURRENCY = 5;
-const TAIL_SPEND_BATCH_SUPPLIERS = 10;
-const TAIL_SPEND_BATCH_GROUPS = 300;
+const TAIL_SPEND_BATCH_SUPPLIERS = 5;
+const TAIL_SPEND_BATCH_GROUPS = 150;
 
 export class ClassificationRunner implements IClassificationRunner {
   private isRunningFlag = false;
@@ -168,6 +168,8 @@ export class ClassificationRunner implements IClassificationRunner {
         throw new Error('Column priorities must be configured before classification. Set column_priorities in project settings.');
       }
 
+      const sampleCount = (await this.project.getSetting('classification_sample_count') as number | null) ?? DEFAULT_SAMPLE_COUNT;
+
       // Strip virtual columns — they have no physical presence on transaction rows and cannot
       // contribute to dedup groups. This is a safety net for projects saved before this fix.
       const columnPriorities = rawColumnPriorities.filter((col) => !VIRTUAL_COLUMN_NAMES.has(col));
@@ -182,8 +184,8 @@ export class ClassificationRunner implements IClassificationRunner {
 
       // ── Phase 1: Apply override rules per supplier ──
       // First pass: apply rules and collect non-tail-spend suppliers that still have unclassified txns
-      const nonTailSpendSuppliers: Array<{ id: string; supplier_name: string; l1_l2_path: string | null }> = [];
-      const tailSpendSuppliers: Array<{ id: string; supplier_name: string; l1_l2_path: string | null }> = [];
+      const nonTailSpendSuppliers: Array<{ id: string; supplier_name: string; l1_l2_paths: string[] | null }> = [];
+      const tailSpendSuppliers: Array<{ id: string; supplier_name: string; l1_l2_paths: string[] | null }> = [];
 
       for (const supplier of supplierRows) {
         if (this.isStopped) break;
@@ -227,23 +229,16 @@ export class ClassificationRunner implements IClassificationRunner {
           continue;
         }
 
-        // Read l1_l2_path and is_tail_spend from project_suppliers
-        const supplierRow = await this.db.get<{
-          supplier_name: string;
-          is_tail_spend: boolean;
-          l1_l2_path: string | null;
-        }>(
-          'SELECT supplier_name, is_tail_spend, l1_l2_path FROM project_suppliers WHERE id = ?',
-          supplier.id
-        );
-        const supplierName = supplierRow?.supplier_name ?? supplier.supplier_name;
-        const isTailSpend = Boolean(supplierRow?.is_tail_spend);
-        const l1L2Path = supplierRow?.l1_l2_path ?? null;
+        // Read l1_l2_path and is_tail_spend via SupplierService
+        const supplierRecord = await this.suppliers.getProjectSupplier(supplier.id);
+        const supplierName = supplierRecord?.supplierName ?? supplier.supplier_name;
+        const isTailSpend = Boolean(supplierRecord?.isTailSpend);
+        const l1L2Paths: string[] | null = supplierRecord?.l1L2Path ?? null;
 
         if (isTailSpend) {
-          tailSpendSuppliers.push({ id: supplier.id, supplier_name: supplierName, l1_l2_path: l1L2Path });
+          tailSpendSuppliers.push({ id: supplier.id, supplier_name: supplierName, l1_l2_paths: l1L2Paths });
         } else {
-          nonTailSpendSuppliers.push({ id: supplier.id, supplier_name: supplierName, l1_l2_path: l1L2Path });
+          nonTailSpendSuppliers.push({ id: supplier.id, supplier_name: supplierName, l1_l2_paths: l1L2Paths });
         }
       }
 
@@ -266,12 +261,12 @@ export class ClassificationRunner implements IClassificationRunner {
           });
 
           try {
-            if (!supplier.l1_l2_path) {
-              debugLog('WARN', `[Classification] l1_l2_path missing for "${supplier.supplier_name}" — marking as error`);
+            if (!supplier.l1_l2_paths || supplier.l1_l2_paths.length === 0) {
+              debugLog('WARN', `[Classification] l1_l2_paths missing for "${supplier.supplier_name}" — marking as error`);
               await this.markSupplierError(supplier.id, scopedIds);
             } else {
               await this.classifySupplierTransactions(
-                supplier.id, supplier.l1_l2_path, taxonomyNodes, companyContext, columnPriorities, scopedIds ?? undefined
+                supplier.id, supplier.l1_l2_paths, taxonomyNodes, companyContext, columnPriorities, sampleCount, scopedIds ?? undefined
               );
             }
           } catch (err) {
@@ -296,26 +291,26 @@ export class ClassificationRunner implements IClassificationRunner {
 
       // ── Phase 3: Tail spend L3 classification (grouped by L2) ──
       if (tailSpendSuppliers.length > 0) {
-        // Mark suppliers with no l1_l2_path as error
+        // Mark suppliers with no l1_l2_paths as error
         const validTailSpend = tailSpendSuppliers.filter((s) => {
-          if (!s.l1_l2_path) {
-            debugLog('WARN', `[Classification] l1_l2_path missing for tail spend "${s.supplier_name}" — marking as error`);
+          if (!s.l1_l2_paths || s.l1_l2_paths.length === 0) {
+            debugLog('WARN', `[Classification] l1_l2_paths missing for tail spend "${s.supplier_name}" — marking as error`);
             return false;
           }
           return true;
         });
 
         // Mark invalid ones as errors
-        for (const supplier of tailSpendSuppliers.filter((s) => !s.l1_l2_path)) {
+        for (const supplier of tailSpendSuppliers.filter((s) => !s.l1_l2_paths || s.l1_l2_paths.length === 0)) {
           await this.markSupplierError(supplier.id, scopedIds);
           processedSuppliers++;
         }
 
         if (validTailSpend.length > 0) {
-          // Group by L2 (the full l1_l2_path, which is L1|L2)
+          // Group by L2 (tail spend always has a single l1_l2_path)
           const byL2 = new Map<string, typeof validTailSpend>();
           for (const supplier of validTailSpend) {
-            const l2Key = supplier.l1_l2_path!;
+            const l2Key = supplier.l1_l2_paths![0];
             const group = byL2.get(l2Key) ?? [];
             group.push(supplier);
             byL2.set(l2Key, group);
@@ -332,7 +327,7 @@ export class ClassificationRunner implements IClassificationRunner {
 
           // Preparation: build all batches across all L2 categories (sequential — CPU/DB only)
           type TailSpendEntry = {
-            supplier: { id: string; supplier_name: string; l1_l2_path: string | null };
+            supplier: { id: string; supplier_name: string; l1_l2_paths: string[] | null };
             groups: Array<{ fields: Array<[string, string]>; count: number }>;
             groupCount: number;
           };
@@ -368,19 +363,8 @@ export class ClassificationRunner implements IClassificationRunner {
                 return cleaned;
               });
 
-              const dedupResult = buildDedupGroups(cleanedTxns, columnPriorities);
-              const groups: Array<{ fields: Array<[string, string]>; count: number }> = [];
-
-              for (let g = 1; g <= dedupResult.groupCount; g++) {
-                const ids = dedupResult.groupToTransactionIds.get(g);
-                if (!ids) continue;
-                const firstTxn = cleanedTxns.find((t) => String(t.id) === ids[0]);
-                if (!firstTxn) continue;
-                const fields = extractFields(firstTxn, columnPriorities);
-                groups.push({ fields, count: ids.length });
-              }
-
-              supplierGroupData.push({ supplier, groups, groupCount: groups.length });
+              const dedupResult = buildDedupGroups(cleanedTxns, columnPriorities, sampleCount);
+              supplierGroupData.push({ supplier, groups: dedupResult.groups, groupCount: dedupResult.groupCount });
             }
 
             // Batch: max 10 suppliers, max 300 groups per call
@@ -503,14 +487,15 @@ export class ClassificationRunner implements IClassificationRunner {
   }
 
   /**
-   * Call 2 only: classify a supplier's transactions into L3 under the given categoryPath.
+   * Call 2 only: classify a supplier's transactions into L3 under the given categoryPaths (merges L3 from all branches).
    */
   async classifySupplierTransactions(
     projectSupplierId: string,
-    categoryPath: string,
+    categoryPaths: string[],
     taxonomy: TaxonomyNode[],
     companyContext: CompanyContext,
     columnPriorities: string[],
+    sampleCount: number,
     scopedTxnIds?: Set<string>
   ): Promise<void> {
     // Get unmatched transactions (after rules)
@@ -535,17 +520,22 @@ export class ClassificationRunner implements IClassificationRunner {
       return cleaned;
     });
 
-    // Filter taxonomy to L3 nodes under the chosen L1|L2
-    const [l1, l2] = categoryPath.split('|');
-    const l3Taxonomy = taxonomy.filter(
-      (n) => n.depth === 3 && n.l1 === l1 && n.l2 === l2
-    );
+    // Merge L3 taxonomy from all candidate L2 branches
+    const seen = new Set<string>();
+    const l3Taxonomy = categoryPaths.flatMap((catPath) => {
+      const [l1, l2] = catPath.split('|');
+      return taxonomy.filter((n) => n.depth === 3 && n.l1 === l1 && n.l2 === l2);
+    }).filter((n) => {
+      if (seen.has(n.fullPath)) return false;
+      seen.add(n.fullPath);
+      return true;
+    });
 
     // Build dedup groups and split into batches
-    const dedupResult = buildDedupGroups(cleanedTxns, columnPriorities);
+    const dedupResult = buildDedupGroups(cleanedTxns, columnPriorities, sampleCount);
     const batches = batchDedupGroups(dedupResult);
 
-    debugLog('INFO', `Supplier ${supplierName || projectSupplierId}: ${dedupResult.groupCount} groups in ${batches.length} batch(es), category: ${categoryPath}`);
+    debugLog('INFO', `Supplier ${supplierName || projectSupplierId}: ${dedupResult.groupCount} groups in ${batches.length} batch(es), categories: ${categoryPaths.join(', ')}`);
 
     for (const batch of batches) {
       if (this.isStopped) return;
@@ -569,19 +559,23 @@ export class ClassificationRunner implements IClassificationRunner {
 
         try {
           const result = await this.classificationAgent.classifyL3({
-            categoryPath,
+            categoryPaths,
             l3Taxonomy,
             transactions: currentTxns,
             columnPriorities,
             companyContext,
             supplierName,
             supplierType: supplierResearch?.supplierType ?? null,
+            sampleCount,
           });
 
+          debugLog('INFO', `[L3] ${supplierName} attempt ${attempt}: classifyL3 returned ${result.classifications.length} classifications, ${Object.keys(result.assignments).length} assignment keys, groupCount=${remainingBatch.groupCount}`);
           const { validResult, missedGroups } = this.extractValidAssignments(result, remainingBatch.groupCount);
+          debugLog('INFO', `[L3] ${supplierName} attempt ${attempt}: extractValidAssignments → ${Object.keys(validResult.assignments).length} valid assignment keys, ${missedGroups.length} missed groups`);
 
           if (Object.keys(validResult.assignments).length > 0) {
             await this.applyMultiClassification(validResult, remainingBatch.groupToTransactionIds, taxonomy);
+            debugLog('INFO', `[L3] ${supplierName} attempt ${attempt}: applyMultiClassification completed`);
           }
 
           if (missedGroups.length === 0) break;
@@ -594,14 +588,17 @@ export class ClassificationRunner implements IClassificationRunner {
             const failedTxnIds: string[] = [];
             for (const g of missedGroups) {
               const ids = remainingBatch.groupToTransactionIds.get(g);
-              if (ids) failedTxnIds.push(...ids);
+              if (ids) { for (const id of ids) failedTxnIds.push(id); }
             }
             if (failedTxnIds.length > 0) {
               debugLog('ERROR', `All ${MAX_ATTEMPTS} attempts exhausted for supplier ${supplierName || projectSupplierId}`);
-              await this.transactions.updateTransactions({
-                ids: failedTxnIds,
-                classificationStatus: 'classification_error',
-              }, 'pipeline');
+              const BATCH_SIZE = 10_000;
+              for (let i = 0; i < failedTxnIds.length; i += BATCH_SIZE) {
+                await this.transactions.updateTransactions({
+                  ids: failedTxnIds.slice(i, i + BATCH_SIZE),
+                  classificationStatus: 'classification_error',
+                }, 'pipeline');
+              }
             }
           }
         } catch (err) {
@@ -610,10 +607,13 @@ export class ClassificationRunner implements IClassificationRunner {
           if (attempt === MAX_ATTEMPTS) {
             debugLog('ERROR', `All ${MAX_ATTEMPTS} classification attempts failed for supplier ${supplierName || projectSupplierId}`);
             const failedIds = Array.from(allBatchTxnIds);
-            await this.transactions.updateTransactions({
-              ids: failedIds,
-              classificationStatus: 'classification_error',
-            }, 'pipeline');
+            const BATCH_SIZE = 10_000;
+            for (let i = 0; i < failedIds.length; i += BATCH_SIZE) {
+              await this.transactions.updateTransactions({
+                ids: failedIds.slice(i, i + BATCH_SIZE),
+                classificationStatus: 'classification_error',
+              }, 'pipeline');
+            }
           }
         }
       }
@@ -653,10 +653,13 @@ export class ClassificationRunner implements IClassificationRunner {
     }
 
     if (failedIds.length > 0) {
-      await this.transactions.updateTransactions(
-        { ids: failedIds, classificationStatus: 'classification_error' },
-        'pipeline'
-      );
+      const BATCH_SIZE = 10_000;
+      for (let i = 0; i < failedIds.length; i += BATCH_SIZE) {
+        await this.transactions.updateTransactions(
+          { ids: failedIds.slice(i, i + BATCH_SIZE), classificationStatus: 'classification_error' },
+          'pipeline'
+        );
+      }
     }
   }
 
@@ -673,14 +676,22 @@ export class ClassificationRunner implements IClassificationRunner {
 
     for (const [classIdStr, groupNumbers] of Object.entries(result.assignments)) {
       const classId = Number(classIdStr);
-      if (!classificationIds.has(classId)) continue;
+      if (!classificationIds.has(classId)) {
+        debugLog('WARN', `[extractValid] classId=${classId} not in classificationIds=${JSON.stringify([...classificationIds])}`);
+        continue;
+      }
 
       const validGroups: number[] = [];
+      let outOfRange = 0;
+      let duplicates = 0;
       for (const g of groupNumbers) {
-        if (g < 1 || g > groupCount) continue;
-        if (assignedGroups.has(g)) continue;
+        if (g < 1 || g > groupCount) { outOfRange++; continue; }
+        if (assignedGroups.has(g)) { duplicates++; continue; }
         assignedGroups.add(g);
         validGroups.push(g);
+      }
+      if (outOfRange > 0 || duplicates > 0) {
+        debugLog('WARN', `[extractValid] classId=${classId}: ${outOfRange} out-of-range, ${duplicates} duplicates, ${validGroups.length} valid out of ${groupNumbers.length}`);
       }
       if (validGroups.length > 0) {
         cleanedAssignments[classIdStr] = validGroups;
@@ -713,20 +724,30 @@ export class ClassificationRunner implements IClassificationRunner {
       const txnIds: string[] = [];
       for (const groupNum of assignedGroups) {
         const ids = groupToTransactionIds.get(groupNum);
-        if (ids) txnIds.push(...ids);
+        if (ids) {
+          for (const id of ids) txnIds.push(id);
+        }
       }
+      debugLog('INFO', `[applyMulti] classification id=${classification.id}, path="${classification.classificationPath}", ${assignedGroups.length} groups → ${txnIds.length} txnIds`);
       if (txnIds.length === 0) continue;
 
       const taxonomyNode = taxonomy.find((n) => n.fullPath === classification.classificationPath);
       if (!taxonomyNode) {
-        debugLog('WARN', `Taxonomy node not found for path "${classification.classificationPath}"`);
+        debugLog('WARN', `Taxonomy node not found for path "${classification.classificationPath}" — available: ${taxonomy.filter(n => n.depth === 3).map(n => n.fullPath).slice(0, 5).join(', ')}...`);
       }
 
-      await this.transactions.updateTransactions({
-        ids: txnIds,
-        taxonomyNodeId: taxonomyNode?.id ?? undefined,
-        classificationStatus: 'classified_by_ai',
-      }, 'pipeline');
+      debugLog('INFO', `[applyMulti] updating ${txnIds.length} txns with taxonomyNodeId=${taxonomyNode?.id ?? 'undefined'}, status=classified_by_ai`);
+      // Batch updates to avoid stack overflow from spread operators in updateTransactions
+      const BATCH_SIZE = 10_000;
+      for (let i = 0; i < txnIds.length; i += BATCH_SIZE) {
+        const chunk = txnIds.slice(i, i + BATCH_SIZE);
+        await this.transactions.updateTransactions({
+          ids: chunk,
+          taxonomyNodeId: taxonomyNode?.id ?? undefined,
+          classificationStatus: 'classified_by_ai',
+        }, 'pipeline');
+      }
+      debugLog('INFO', `[applyMulti] updateTransactions completed for classification id=${classification.id}`);
     }
   }
 }

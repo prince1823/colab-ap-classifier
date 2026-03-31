@@ -96,6 +96,7 @@ interface RunConfig {
   columnMapping: Record<string, string>;
   taxonomy?: string;
   columnPriorities?: string[];
+  sampleCount?: number;
   skipSupplierResearch?: boolean;
   skipRules?: boolean;
 }
@@ -133,6 +134,15 @@ const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const outputDir = path.join(resolvedDir, 'output', `run-${timestamp}`);
 fs.mkdirSync(outputDir, { recursive: true });
 
+// Set LLM_TRACE_FILE before any service module is imported.
+// llm-trace.ts captures process.env.LLM_TRACE_FILE at evaluation time (module-level const),
+// so this must be set before the first dynamic import of any service that transitively uses it.
+const TRACE_PATH = path.join(outputDir, 'trace.jsonl');
+process.env.LLM_TRACE_FILE = TRACE_PATH;
+
+const DEBUG_LOG_PATH = path.join(outputDir, 'debug.log');
+process.env.LOG_FILE = DEBUG_LOG_PATH;
+
 const DB_PATH = path.join(outputDir, 'project.c91');
 const UNIVERSE_PATH = path.join(outputDir, 'universe.db');
 const EXPORT_PATH = path.join(outputDir, 'classified.csv');
@@ -157,26 +167,71 @@ function log(msg: string) {
   logStream.write(line + '\n');
 }
 
-// ─── Service imports ────────────────────────────────────────────────────────
+// Service imports are done dynamically inside main() so that LLM_TRACE_FILE is set
+// before llm-trace.ts is first evaluated (it captures the env var at module load time).
 
-import { DuckDBDatabase } from '../src/main/services/database';
-import { DuckDBSupplierUniverse } from '../src/main/services/supplier-universe';
-import { OpenRouterLLMClient } from '../src/main/services/llm-client';
-import { ExaWebSearch } from '../src/main/services/exa-search';
-import { LLMClassificationAgent } from '../src/main/agents/classification-agent';
-import { LLMResearchAgent } from '../src/main/agents/research-agent';
-import { LLMColumnMappingAgent } from '../src/main/agents/column-mapping-agent';
-import { LLMQCAgent } from '../src/main/agents/qc-agent';
-import { ChangelogStore } from '../src/main/services/changelog';
-import { TransactionStore } from '../src/main/services/transactions';
-import { ProjectStore } from '../src/main/services/project';
-import { TaxonomyStore } from '../src/main/services/taxonomy';
-import { RuleStore } from '../src/main/services/rules';
-import { IngestService } from '../src/main/services/ingest';
-import { SupplierService } from '../src/main/services/supplier-service';
-import { SupplierResearcher } from '../src/main/services/supplier-research';
-import { ClassificationRunner } from '../src/main/services/classification';
-import { QCRunner } from '../src/main/services/qc';
+// ─── Trace tail (mirrors trace.jsonl summaries into run.log) ─────────────────
+//
+// Polls trace.jsonl by byte position at a fixed interval. Completely external to
+// the agent/LLM hot path — no changes to llm-trace.ts or any agent.
+
+type TraceEntry = import('../src/main/utils/llm-trace').TraceEntry;
+
+function formatTraceSummary(entry: TraceEntry): string | null {
+  if (entry.agent === 'research') return null; // already logged in research loop
+  const ms = `(${entry.elapsedMs}ms)`;
+  const err = entry.error ? ` ⚠ ${entry.error}` : '';
+  switch (entry.agent) {
+    case 'classification-l3':
+      // supplier omitted on legacy single-supplier path — falls back to '?'
+      return `    [LLM] l3: ${entry.supplier ?? '?'} — ${entry.groupCount ?? 0} groups ${ms}${err}`;
+    case 'classification-category':
+      // groupCount not populated for category calls
+      return `    [LLM] category: ${entry.supplier ?? `${entry.supplierCount ?? 0} suppliers`} ${ms}${err}`;
+    case 'classification-tailspend-category':
+      return `    [LLM] tailspend-category: ${entry.supplierCount ?? 0} suppliers, ${entry.groupCount ?? 0} groups ${ms}${err}`;
+    case 'classification-tailspend-l3':
+      return `    [LLM] tailspend-l3: ${entry.supplierCount ?? 0} suppliers, ${entry.groupCount ?? 0} groups ${ms}${err}`;
+    case 'column-mapping':
+      return `    [LLM] column-mapping ${ms}${err}`;
+    case 'qc':
+      return `    [LLM] qc ${ms}${err}`;
+    default:
+      return `    [LLM] ${entry.agent} ${ms}${err}`;
+  }
+}
+
+function startTraceTail(tracePath: string): () => void {
+  let lastPos = 0;
+
+  const processNewLines = () => {
+    let stat: fs.Stats;
+    try { stat = fs.statSync(tracePath); } catch { return; }
+    if (stat.size <= lastPos) return;
+
+    const buf = Buffer.alloc(stat.size - lastPos);
+    const fd = fs.openSync(tracePath, 'r');
+    fs.readSync(fd, buf, 0, buf.length, lastPos);
+    fs.closeSync(fd);
+    lastPos = stat.size;
+
+    const lines = buf.toString('utf-8').split('\n').filter(Boolean);
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as TraceEntry;
+        const summary = formatTraceSummary(entry);
+        if (summary) log(summary);
+      } catch { /* skip malformed lines */ }
+    }
+  };
+
+  const interval = setInterval(processNewLines, 200);
+
+  return () => {
+    clearInterval(interval);
+    processNewLines(); // flush any lines written since last tick
+  };
+}
 
 // ─── CSV export (inline, no Electron dependency) ────────────────────────────
 
@@ -256,18 +311,32 @@ async function main() {
     };
   }
 
+  // ─── Dynamic service imports (after LLM_TRACE_FILE is set) ────────────────
+  const { DuckDBDatabase } = await import('../src/main/services/database');
+  const { DuckDBSupplierUniverse } = await import('../src/main/services/supplier-universe');
+  const { OpenRouterLLMClient } = await import('../src/main/services/llm-client');
+  const { ExaWebSearch } = await import('../src/main/services/exa-search');
+  const { LLMClassificationAgent } = await import('../src/main/agents/classification-agent');
+  const { LLMResearchAgent } = await import('../src/main/agents/research-agent');
+  const { LLMColumnMappingAgent } = await import('../src/main/agents/column-mapping-agent');
+  const { ChangelogStore } = await import('../src/main/services/changelog');
+  const { TransactionStore } = await import('../src/main/services/transactions');
+  const { ProjectStore } = await import('../src/main/services/project');
+  const { TaxonomyStore } = await import('../src/main/services/taxonomy');
+  const { RuleStore } = await import('../src/main/services/rules');
+  const { IngestService } = await import('../src/main/services/ingest');
+  const { SupplierService } = await import('../src/main/services/supplier-service');
+  const { SupplierResearcher } = await import('../src/main/services/supplier-research');
+  const { ClassificationRunner } = await import('../src/main/services/classification');
+
   log(`Full run: ${config.projectName}`);
   log(`  Input:    ${csvPath}`);
   log(`  Taxonomy: ${taxonomyPath}`);
   log(`  Rules:    ${hasRules ? rulesPath : '(none)'}`);
   log(`  Universe: ${seedUniverse ? `seeded from ${seedUniverse}` : '(fresh)'}`);
   log(`  Output:   ${outputDir}`);
+  log(`  Trace:    ${TRACE_PATH}`);
   log('');
-
-  // Count CSV rows
-  const csvContent = fs.readFileSync(csvPath, 'utf-8').replace(/^\uFEFF/, '');
-  const csvRowCount = csvContent.trim().split(/\r?\n/).length - 1;
-  log(`Input CSV: ${csvRowCount} rows`);
 
   // ─── Bootstrap services ─────────────────────────────────────────────────
 
@@ -302,7 +371,6 @@ async function main() {
   const classificationAgent = new LLMClassificationAgent(llm);
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
-  const qcAgent = new LLMQCAgent(llm);
 
   const changelog = new ChangelogStore(db);
   const transactions = new TransactionStore(db, changelog);
@@ -319,7 +387,6 @@ async function main() {
     db, taxonomy, project, rules,
     transactions, changelog, classificationAgent, eventBus as any, supplierUniverse, suppliers
   );
-  const qc = new QCRunner(db, transactions, eventBus as any, qcAgent, supplierUniverse, project, taxonomy, suppliers);
 
   try {
     // ─── Phase 1: Create project ──────────────────────────────────────────
@@ -329,6 +396,9 @@ async function main() {
     await project.setSetting('company_context', config.companyContext);
     if (config.columnPriorities) {
       await project.setSetting('column_priorities', config.columnPriorities);
+    }
+    if (config.sampleCount !== undefined) {
+      await project.setSetting('classification_sample_count', config.sampleCount);
     }
     timings.push({ phase: 'Create project', ms: Date.now() - start });
     log('  ✓ Create project');
@@ -343,6 +413,8 @@ async function main() {
     log(`  ✓ Load taxonomy: ${taxResult.nodeCount} nodes (${l3Count} L3)`);
 
     // ─── Phase 3: Import CSV ──────────────────────────────────────────────
+    // Start trace tail here — covers all LLM calls from column-mapping through classification.
+    const stopTraceTail = startTraceTail(TRACE_PATH);
 
     start = Date.now();
     await ingest.importCSV(csvPath, columnMapping);
@@ -370,7 +442,9 @@ async function main() {
         // Write back research results to project_suppliers (mirrors IPC handler logic)
         await suppliers.updateSupplier(ps.id, { supplierInfo: info, markResearched: true });
         const source = hadSubstantiveInfo ? 'universe (cached)' : 'LLM';
-        log(`    ${ps.supplierName} → ${source}`);
+        const industry = info.industry ? ` [${info.industry}]` : '';
+        const desc = info.description ? ` — ${info.description.slice(0, 100)}` : '';
+        log(`    ${ps.supplierName} → ${source}${industry}${desc}`);
       }
       timings.push({ phase: 'Supplier research', ms: Date.now() - start });
       log(`  ✓ Supplier research: ${nonTailSpend.length} suppliers (${projectSuppliers.length - nonTailSpend.length} tail-spend skipped)`);
@@ -451,39 +525,14 @@ async function main() {
     });
     await classifier.classifyAll();
     eventBus.removeAllListeners('classification:progress');
+    stopTraceTail(); // flush any remaining trace lines before logging summary
     const stats = await transactions.getStats();
     timings.push({ phase: 'Classification', ms: Date.now() - start });
     log(`  ✓ Classification complete: ${stats.classifiedRows}/${stats.totalRows} classified`);
 
-    // ─── Phase 8: QC ──────────────────────────────────────────────────────
-
-    start = Date.now();
-    log('  Running QC consolidation:');
-    await new Promise<void>((resolve, reject) => {
-      eventBus.on('qc:progress', (progress: any) => {
-        if (progress.outcome) {
-          const outcomeLabel: Record<string, string> = {
-            clean: '✓ clean',
-            consolidated: `→ consolidated to ${progress.consolidatedTo ?? '?'}`,
-            flagged: '⚑ flagged for review',
-            skipped: '⊘ skipped (zero spend)',
-          };
-          log(`    [${progress.processedSuppliers}/${progress.totalSuppliers}] ${progress.currentSupplier}  ${outcomeLabel[progress.outcome] ?? progress.outcome}`);
-        }
-        if (progress.status === 'completed' || progress.status === 'cancelled') {
-          eventBus.removeAllListeners('qc:progress');
-          resolve();
-        }
-        if (progress.status === 'failed') {
-          eventBus.removeAllListeners('qc:progress');
-          reject(new Error(progress.currentStep));
-        }
-      });
-      qc.runQC().catch(reject);
-    });
-    const qcStats = await transactions.getStats();
-    timings.push({ phase: 'QC consolidation', ms: Date.now() - start });
-    log(`  ✓ QC complete: ${qcStats.classifiedRows}/${qcStats.totalRows} classified after QC`);
+    // ─── Phase 8: QC (not run in full-run script) ─────────────────────────
+    // QC consolidation is omitted here intentionally — it is run interactively
+    // in the app after the user reviews raw classification results.
 
     // ─── Phase 9: Export CSV ──────────────────────────────────────────────
 
@@ -506,6 +555,8 @@ async function main() {
     log(`  project.c91:    ${DB_PATH}`);
     log(`  classified.csv: ${EXPORT_PATH}`);
     log(`  run.log:        ${LOG_PATH}`);
+    log(`  trace.jsonl:    ${TRACE_PATH}`);
+    log(`  debug.log:      ${DEBUG_LOG_PATH}`);
 
   } finally {
     // ─── Cleanup ────────────────────────────────────────────────────────

@@ -182,9 +182,10 @@ export default function SuppliersPage() {
   const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
     setSaving(true)
     try {
-      await ipc.suppliers.update(supplier.id, { l1L2Path: newValue || undefined })
+      const paths = newValue ? newValue.split(',').map(s => s.trim()).filter(Boolean) : undefined
+      await ipc.suppliers.update(supplier.id, { l1L2Path: paths })
       updateSuppliers(prev => prev.map(s =>
-        s.id === supplier.id ? { ...s, l1L2Path: newValue || null } : s
+        s.id === supplier.id ? { ...s, l1L2Path: paths || null } : s
       ))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to update')

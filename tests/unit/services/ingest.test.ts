@@ -111,9 +111,9 @@ describe('IngestService', () => {
   });
 
   describe('parseCSVPreview — large file', () => {
-    it('should return only 10 sample rows', async () => {
+    it('should return only 50 sample rows', async () => {
       const result = await service.parseCSVPreview(path.join(FIXTURES_DIR, 'large.csv'));
-      expect(result.sampleRows).toHaveLength(10);
+      expect(result.sampleRows).toHaveLength(50);
     });
 
     it('should report accurate totalRows count', async () => {
@@ -325,8 +325,9 @@ describe('IngestService — importCSV (real DB)', () => {
     await realDb.openDatabase(dbPath);
     const transactions = createMockTransactionStore();
     const suppliers = createMockSupplierService();
+    const project = createMockProjectStore();
     const agent = createMockColumnMappingAgent();
-    realService = new IngestService(realDb, transactions, suppliers, agent);
+    realService = new IngestService(realDb, transactions, suppliers, project, agent);
   });
 
   afterEach(async () => {
@@ -339,7 +340,7 @@ describe('IngestService — importCSV (real DB)', () => {
     const { uploadId } = await realService.importCSV(csvPath, {
       supplier_name: 'Supplier',
       spend_amount: 'Amount',
-      invoice_date: 'Date',
+      master_date: 'Date',
     });
 
     const nullRows = await realDb.all<{ cnt: number | bigint }>(
@@ -367,8 +368,9 @@ describe('IngestService — deleteUpload (real DB)', () => {
     await realDb.openDatabase(dbPath);
     const transactions = createMockTransactionStore();
     const suppliers = createMockSupplierService();
+    const project = createMockProjectStore();
     const agent = createMockColumnMappingAgent();
-    realService = new IngestService(realDb, transactions, suppliers, agent);
+    realService = new IngestService(realDb, transactions, suppliers, project, agent);
   });
 
   afterEach(async () => {

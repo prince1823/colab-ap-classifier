@@ -308,3 +308,35 @@ Task 4 (IPC handler) — after Task 3
 Task 5 (classification changes) — after Task 1; independent of Tasks 2–4
 Task 6 (frontend) — after Task 1; can be done last
 ```
+
+---
+
+## Primary-Group Sampling (2026-03-29)
+
+### Problem
+Grouping by all priority columns (gl_description + memo + line_description) produced up to 540K
+groups across 99 suppliers. `line_description` is nearly unique per transaction for high-volume
+suppliers (amerisource bergen: 164K groups from 695K txns), causing excessive LLM calls and cost.
+
+### Solution
+Modified `buildDedupGroups` in-place to use primary-group sampling:
+- Group by the **highest-priority column only** (primary key)
+- Sample up to X values from each lower-priority column using **frequency weighting** (most-common
+  first) as supporting context per group
+- One classification per primary group — all transactions sharing that primary value get the result
+- Applied uniformly to all callers: classification (Phase 2 + Phase 3), QC, and supplier research
+
+### Result (03-29 test dataset, 99 suppliers)
+- Before: 540,901 groups
+- After (gl_description primary): 8,036 groups — 67× reduction
+
+### Key design decisions
+- **In-place modification of `buildDedupGroups`**: All callers automatically get the new behavior.
+  No new function added.
+- **`groups: { fields, count }[]` added to `DedupGroupResult`**: Allows tail-spend formatters to
+  consume structured group data directly, replacing the manual `extractFields(firstTxn)` reconstruction.
+- **Frequency-weighted sampling**: Full pass over group transactions, sort by occurrence count desc,
+  take top X. Surfaces most representative values.
+- **`DEFAULT_SAMPLE_COUNT = 3`**: Configurable per run via `config.json` → `sampleCount` →
+  project setting `classification_sample_count`.
+- **Fallback**: If `columnPriorities` is empty, original full-combination keying is preserved.

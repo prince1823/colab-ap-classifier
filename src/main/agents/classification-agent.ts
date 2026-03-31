@@ -11,7 +11,7 @@ import type {
 } from '../../shared/types/classification';
 import type { ClassificationAgent, LLMClient } from '../../shared/types/services';
 import type { CompanyContext } from '../../shared/types/project';
-import { extractFields, buildDedupGroups } from '../utils/dedup-groups';
+import { extractFields, buildDedupGroups, DEFAULT_SAMPLE_COUNT } from '../utils/dedup-groups';
 import { traceLog } from '../utils/llm-trace';
 
 // ─── Call 1: Category Selection ─────────────────────────────────────────────
@@ -20,10 +20,11 @@ import { traceLog } from '../utils/llm-trace';
  * Build the system prompt for Call 1 (category selection).
  */
 export function buildCategorySelectionSystemPrompt(): string {
-  return `You are a supplier category classifier. Given supplier identities and research, determine which L1|L2 spend category each supplier belongs to.
+  return `You are a supplier category classifier. Given supplier identities and research, determine which L1|L2 spend categories each supplier could belong to.
 
 Rules:
-- Return exactly one L1|L2 path per supplier
+- Return up to two L1|L2 paths per supplier, ordered by confidence (best first)
+- If you are highly confident in a single category, omit categoryPath2
 - Government supplier type is a strong signal for Exempt classification
   - EXCEPTION: Government utility payments (electricity, water, gas) → appropriate Utilities category, NOT Exempt
 - Intercompany/subsidiary suppliers → Exempt
@@ -33,7 +34,7 @@ Rules:
 
 Response format (JSON only, no markdown fencing):
 {"categories": [
-  {"supplierIndex": 1, "categoryPath": "L1|L2"},
+  {"supplierIndex": 1, "categoryPath": "L1|L2", "categoryPath2": "L1|L2"},
   {"supplierIndex": 2, "categoryPath": "L1|L2"}
 ]}`;
 }
@@ -74,13 +75,14 @@ ${contextParts.join('\n')}
 ## Suppliers
 ${supplierSections.join('\n\n')}
 
-For each supplier, select the single best L1|L2 category. Respond with JSON only.`;
+For each supplier, select the best one or two L1|L2 categories in order of confidence. Respond with JSON only.`;
 }
 
 /**
- * Parse the Call 1 response into a Map of supplierIndex → categoryPath.
+ * Parse the Call 1 response into a Map of supplierIndex → categoryPath[].
+ * Returns up to 2 paths per supplier (primary + optional secondary candidate).
  */
-export function parseCategorySelectionResponse(responseText: string): Map<number, string> {
+export function parseCategorySelectionResponse(responseText: string): Map<number, string[]> {
   let cleaned = responseText.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenceMatch) cleaned = fenceMatch[1].trim();
@@ -94,23 +96,34 @@ export function parseCategorySelectionResponse(responseText: string): Map<number
 
   const obj = parsed as Record<string, unknown>;
 
-  // Handle both {"categories": [...]} and {"categoryPath": "..."} (single supplier)
+  // Handle {"categoryPath": "..."} (single supplier)
   if (obj.categoryPath && typeof obj.categoryPath === 'string') {
-    return new Map([[1, obj.categoryPath]]);
+    const paths = [obj.categoryPath];
+    if (typeof obj.categoryPath2 === 'string' && obj.categoryPath2 !== obj.categoryPath) {
+      paths.push(obj.categoryPath2);
+    }
+    return new Map([[1, paths]]);
   }
 
   if (!Array.isArray(obj.categories)) {
     throw new Error(`Expected "categories" array in response`);
   }
 
-  const result = new Map<number, string>();
+  const result = new Map<number, string[]>();
   for (const entry of obj.categories) {
     if (!entry || typeof entry !== 'object') continue;
     const idx = Number(entry.supplierIndex);
     let path = entry.categoryPath;
     if (Array.isArray(path) && path.length === 1) path = path[0];
     if (typeof path === 'string' && path && !isNaN(idx)) {
-      result.set(idx, path);
+      const paths = [path];
+      // Check for secondary candidate
+      let path2 = entry.categoryPath2;
+      if (Array.isArray(path2) && path2.length === 1) path2 = path2[0];
+      if (typeof path2 === 'string' && path2 && path2 !== path) {
+        paths.push(path2);
+      }
+      result.set(idx, paths);
     }
   }
 
@@ -128,7 +141,8 @@ export function buildL3ClassificationSystemPrompt(): string {
 Rules:
 - Must return exactly L1|L2|L3 (3 levels)
 - Transaction fields are in priority order (most important first)
-- Prefer specific categories over "Other"
+- Choose the L3 category whose description best matches the supplier and transaction context
+- "Other" categories are valid when the supplier or transaction is broad and doesn't match a specific L3 description
 - Tax/adjustment lines for non-government suppliers: classify with primary spend
 
 Response format (JSON only, no markdown fencing):
@@ -153,7 +167,7 @@ Rules:
  * Build the user prompt for Call 2 (L3 classification).
  */
 export function buildL3ClassificationUserPrompt(input: L3ClassificationInput): string {
-  const { categoryPath, l3Taxonomy, transactions, columnPriorities, companyContext, supplierName, supplierType } = input;
+  const { categoryPaths, l3Taxonomy, transactions, columnPriorities, companyContext, supplierName, supplierType } = input;
 
   const contextParts: string[] = [];
   contextParts.push(`Industry: ${companyContext.industry}`);
@@ -161,19 +175,34 @@ export function buildL3ClassificationUserPrompt(input: L3ClassificationInput): s
   if (companyContext.sisterCompanies) contextParts.push(`Sister Companies: ${companyContext.sisterCompanies}`);
   if (companyContext.additionalDetails) contextParts.push(`Additional Details: ${companyContext.additionalDetails}`);
 
-  const taxonomyLines = l3Taxonomy.map((n) => {
-    const desc = n.description ? ` - ${n.description}` : '';
-    return `  ${n.fullPath}${desc}`;
-  });
+  // When multiple category paths, group L3 nodes under their L2 parent
+  let taxonomySection: string;
+  if (categoryPaths.length > 1) {
+    const groups: string[] = [];
+    for (const catPath of categoryPaths) {
+      const [l1, l2] = catPath.split('|');
+      const branchNodes = l3Taxonomy.filter((n) => n.l1 === l1 && n.l2 === l2);
+      if (branchNodes.length === 0) continue;
+      const lines = branchNodes.map((n) => {
+        const desc = n.description ? ` - ${n.description}` : '';
+        return `  ${n.fullPath}${desc}`;
+      });
+      groups.push(`### ${catPath}\n${lines.join('\n')}`);
+    }
+    taxonomySection = `## Category Branches\n\n${groups.join('\n\n')}`;
+  } else {
+    const taxonomyLines = l3Taxonomy.map((n) => {
+      const desc = n.description ? ` - ${n.description}` : '';
+      return `  ${n.fullPath}${desc}`;
+    });
+    taxonomySection = `## Category Branch: ${categoryPaths[0]}\n\n## Available L3 Categories\n${taxonomyLines.join('\n')}`;
+  }
 
   const supplierContext = supplierType
     ? `Supplier: ${supplierName} (${supplierType})`
     : `Supplier: ${supplierName}`;
 
-  return `## Category Branch: ${categoryPath}
-
-## Available L3 Categories
-${taxonomyLines.join('\n')}
+  return `${taxonomySection}
 
 ## Company Context
 ${contextParts.join('\n')}
@@ -182,9 +211,9 @@ ${contextParts.join('\n')}
 ${supplierContext}
 
 ## Transactions
-Transaction fields are listed in order of classification priority (most important first). Identical rows are grouped with a count.
+Rows are grouped by their primary field; lower-priority fields show up to N representative sample values.
 
-${formatTransactions(transactions, columnPriorities)}
+${formatTransactions(transactions, columnPriorities, input.sampleCount)}
 
 Classify the above transactions into the L3 categories. Respond with JSON only.`;
 }
@@ -201,8 +230,8 @@ export function buildTailSpendCategorySelectionSystemPrompt(): string {
 Rules:
 - Return exactly one L1|L2 path per supplier
 - Use the transaction groups (GL descriptions, account codes, etc.) as the primary classification signal
+- When the supplier name indicates a business type, use it as a strong classification signal alongside transaction fields
 - Company context helps interpret domain-specific suppliers
-- Prefer specific categories over generic ones
 
 Response format (JSON only, no markdown fencing):
 {"categories": [
@@ -262,7 +291,9 @@ Rules:
 - Must return exactly L1|L2|L3 (3 levels) per supplier
 - Each supplier gets ONE best-fit L3 based on all their transaction groups
 - Transaction fields are in priority order (most important first)
-- Prefer specific categories over "Other"
+- Choose the L3 category whose description best matches the supplier and transaction context
+- "Other" categories are valid when the supplier or transaction is broad and doesn't match a specific L3 description
+- When the supplier name indicates a business type, use it as a strong classification signal alongside transaction fields
 
 Response format (JSON only, no markdown fencing):
 {"assignments": [
@@ -538,14 +569,15 @@ export function formatSupplierResearch(supplier: SupplierInfo | null, parentName
  */
 export function formatTransactions(
   transactions: Array<Record<string, unknown>>,
-  columnPriorities?: string[]
+  columnPriorities?: string[],
+  sampleCount?: number
 ): string {
   if (transactions.length === 0) {
     return '(No transactions provided)';
   }
 
   if (columnPriorities && columnPriorities.length > 0) {
-    const result = buildDedupGroups(transactions, columnPriorities);
+    const result = buildDedupGroups(transactions, columnPriorities, sampleCount ?? DEFAULT_SAMPLE_COUNT);
     return result.promptText;
   }
 
@@ -572,7 +604,7 @@ export function buildUserPrompt(input: ClassificationInput): string {
   if (companyContext.additionalDetails) contextParts.push(`Additional Details: ${companyContext.additionalDetails}`);
 
   const columnPriorityNote = columnPriorities && columnPriorities.length > 0
-    ? '\nTransaction fields are listed in order of classification priority (most important first). Identical rows are grouped with a count.\n'
+    ? '\nRows are grouped by their primary field; lower-priority fields show up to N representative sample values.\n'
     : '';
 
   return `## Taxonomy
@@ -585,7 +617,7 @@ ${contextParts.join('\n')}
 ${formatSupplierResearch(supplierResearch, parentName)}
 
 ## Transactions
-${columnPriorityNote}${formatTransactions(transactions, columnPriorities)}
+${columnPriorityNote}${formatTransactions(transactions, columnPriorities, input.sampleCount)}
 
 Classify the above transactions into the taxonomy. Respond with JSON only.`;
 }
@@ -775,9 +807,9 @@ export class LLMClassificationAgent implements ClassificationAgent {
 
   /**
    * Call 1: Select L1|L2 categories for a batch of suppliers.
-   * Returns Map of 1-based supplier index → categoryPath.
+   * Returns Map of 1-based supplier index → categoryPath[] (up to 2 candidates).
    */
-  async selectCategories(input: CategorySelectionInput): Promise<Map<number, string>> {
+  async selectCategories(input: CategorySelectionInput): Promise<Map<number, string[]>> {
     const systemPrompt = buildCategorySelectionSystemPrompt();
     const userPrompt = buildCategorySelectionUserPrompt(input);
 
@@ -792,6 +824,8 @@ export class LLMClassificationAgent implements ClassificationAgent {
       traceLog({
         timestamp: new Date().toISOString(),
         agent: 'classification-category',
+        supplier: input.suppliers.map(s => s.name).join(', '),
+        supplierCount: input.suppliers.length,
         model: 'default',
         systemPrompt,
         userPrompt,
@@ -803,13 +837,15 @@ export class LLMClassificationAgent implements ClassificationAgent {
     }
     const elapsedMs = Date.now() - start;
 
-    let result: Map<number, string>;
+    let result: Map<number, string[]>;
     try {
       result = parseCategorySelectionResponse(responseText);
     } catch (err) {
       traceLog({
         timestamp: new Date().toISOString(),
         agent: 'classification-category',
+        supplier: input.suppliers.map(s => s.name).join(', '),
+        supplierCount: input.suppliers.length,
         model: 'default',
         systemPrompt,
         userPrompt,
@@ -823,6 +859,8 @@ export class LLMClassificationAgent implements ClassificationAgent {
     traceLog({
       timestamp: new Date().toISOString(),
       agent: 'classification-category',
+      supplier: input.suppliers.map(s => s.name).join(', '),
+      supplierCount: input.suppliers.length,
       model: 'default',
       systemPrompt,
       userPrompt,
@@ -831,23 +869,31 @@ export class LLMClassificationAgent implements ClassificationAgent {
     });
 
     // Validate each path against taxonomy
-    const validated = new Map<number, string>();
-    for (const [idx, path] of result) {
-      const match = validateCategoryPath(path, input.taxonomy);
-      if (match) {
-        validated.set(idx, match);
-      } else {
-        // Try fuzzy: find any L3 node matching this L1|L2 prefix
-        const parts = path.split('|');
-        if (parts.length >= 2) {
-          const fuzzy = findClosestTaxonomyMatch(`${parts[0]}|${parts[1]}|_`, input.taxonomy);
-          const fuzzyParts = fuzzy.split('|');
-          if (fuzzyParts.length >= 2) {
-            const l1l2 = `${fuzzyParts[0]}|${fuzzyParts[1]}`;
-            const recheck = validateCategoryPath(l1l2, input.taxonomy);
-            if (recheck) validated.set(idx, recheck);
+    const validated = new Map<number, string[]>();
+    for (const [idx, paths] of result) {
+      const validPaths: string[] = [];
+      for (const path of paths) {
+        const match = validateCategoryPath(path, input.taxonomy);
+        if (match) {
+          validPaths.push(match);
+        } else {
+          // Try fuzzy: find any L3 node matching this L1|L2 prefix
+          const parts = path.split('|');
+          if (parts.length >= 2) {
+            const fuzzy = findClosestTaxonomyMatch(`${parts[0]}|${parts[1]}|_`, input.taxonomy);
+            const fuzzyParts = fuzzy.split('|');
+            if (fuzzyParts.length >= 2) {
+              const l1l2 = `${fuzzyParts[0]}|${fuzzyParts[1]}`;
+              const recheck = validateCategoryPath(l1l2, input.taxonomy);
+              if (recheck) validPaths.push(recheck);
+            }
           }
         }
+      }
+      // Deduplicate
+      const unique = [...new Set(validPaths)];
+      if (unique.length > 0) {
+        validated.set(idx, unique);
       }
     }
 
@@ -860,17 +906,18 @@ export class LLMClassificationAgent implements ClassificationAgent {
   async classifyL3(input: L3ClassificationInput): Promise<ClassificationResult> {
     if (input.transactions.length === 0) {
       return {
-        classifications: [{ id: 1, classificationPath: `${input.categoryPath}|Uncategorized` }],
+        classifications: [{ id: 1, classificationPath: `${input.categoryPaths[0]}|Uncategorized` }],
         assignments: {},
       };
     }
 
     if (input.l3Taxonomy.length === 0) {
-      throw new Error(`No L3 nodes found under category path "${input.categoryPath}"`);
+      throw new Error(`No L3 nodes found under category paths "${input.categoryPaths.join(', ')}"`);
     }
 
     const systemPrompt = buildL3ClassificationSystemPrompt();
     const userPrompt = buildL3ClassificationUserPrompt(input);
+    const groupCount = buildDedupGroups(input.transactions, input.columnPriorities, input.sampleCount ?? DEFAULT_SAMPLE_COUNT).groupCount;
 
     const start = Date.now();
     let responseText: string;
@@ -884,6 +931,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
         timestamp: new Date().toISOString(),
         agent: 'classification-l3',
         supplier: input.supplierName,
+        groupCount,
         model: 'default',
         systemPrompt,
         userPrompt,
@@ -903,6 +951,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
         timestamp: new Date().toISOString(),
         agent: 'classification-l3',
         supplier: input.supplierName,
+        groupCount,
         model: 'default',
         systemPrompt,
         userPrompt,
@@ -917,6 +966,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       timestamp: new Date().toISOString(),
       agent: 'classification-l3',
       supplier: input.supplierName,
+      groupCount,
       model: 'default',
       systemPrompt,
       userPrompt,
@@ -945,6 +995,9 @@ export class LLMClassificationAgent implements ClassificationAgent {
       traceLog({
         timestamp: new Date().toISOString(),
         agent: 'classification-tailspend-category',
+        supplier: input.suppliers.map(s => s.name).join(', '),
+        supplierCount: input.suppliers.length,
+        groupCount: input.suppliers.reduce((sum, s) => sum + s.groups.length, 0),
         model: 'default',
         systemPrompt,
         userPrompt,
@@ -956,13 +1009,16 @@ export class LLMClassificationAgent implements ClassificationAgent {
     }
     const elapsedMs = Date.now() - start;
 
-    let result: Map<number, string>;
+    let parsed: Map<number, string[]>;
     try {
-      result = parseCategorySelectionResponse(responseText);
+      parsed = parseCategorySelectionResponse(responseText);
     } catch (err) {
       traceLog({
         timestamp: new Date().toISOString(),
         agent: 'classification-tailspend-category',
+        supplier: input.suppliers.map(s => s.name).join(', '),
+        supplierCount: input.suppliers.length,
+        groupCount: input.suppliers.reduce((sum, s) => sum + s.groups.length, 0),
         model: 'default',
         systemPrompt,
         userPrompt,
@@ -976,6 +1032,9 @@ export class LLMClassificationAgent implements ClassificationAgent {
     traceLog({
       timestamp: new Date().toISOString(),
       agent: 'classification-tailspend-category',
+      supplier: input.suppliers.map(s => s.name).join(', '),
+      supplierCount: input.suppliers.length,
+      groupCount: input.suppliers.reduce((sum, s) => sum + s.groups.length, 0),
       model: 'default',
       systemPrompt,
       userPrompt,
@@ -983,9 +1042,11 @@ export class LLMClassificationAgent implements ClassificationAgent {
       elapsedMs,
     });
 
-    // Validate each path against taxonomy
+    // Validate first path per supplier against taxonomy (tail spend uses single path)
     const validated = new Map<number, string>();
-    for (const [idx, path] of result) {
+    for (const [idx, paths] of parsed) {
+      const path = paths[0];
+      if (!path) continue;
       const match = validateCategoryPath(path, input.taxonomy);
       if (match) {
         validated.set(idx, match);
@@ -1044,6 +1105,9 @@ export class LLMClassificationAgent implements ClassificationAgent {
         traceLog({
           timestamp: new Date().toISOString(),
           agent: 'classification-tailspend-l3',
+          supplier: remaining.map(r => r.supplier.name).join(', '),
+          supplierCount: remaining.length,
+          groupCount: remaining.reduce((sum, r) => sum + r.supplier.groups.length, 0),
           model: 'default',
           systemPrompt, userPrompt, response: '',
           elapsedMs: Date.now() - start,
@@ -1061,6 +1125,9 @@ export class LLMClassificationAgent implements ClassificationAgent {
         traceLog({
           timestamp: new Date().toISOString(),
           agent: 'classification-tailspend-l3',
+          supplier: remaining.map(r => r.supplier.name).join(', '),
+          supplierCount: remaining.length,
+          groupCount: remaining.reduce((sum, r) => sum + r.supplier.groups.length, 0),
           model: 'default',
           systemPrompt, userPrompt, response: responseText, elapsedMs,
           error: `parse: ${err instanceof Error ? err.message : String(err)}`,
@@ -1072,6 +1139,9 @@ export class LLMClassificationAgent implements ClassificationAgent {
       traceLog({
         timestamp: new Date().toISOString(),
         agent: 'classification-tailspend-l3',
+        supplier: remaining.map(r => r.supplier.name).join(', '),
+        supplierCount: remaining.length,
+        groupCount: remaining.reduce((sum, r) => sum + r.supplier.groups.length, 0),
         model: 'default',
         systemPrompt, userPrompt, response: responseText, elapsedMs,
       });
@@ -1111,34 +1181,41 @@ export class LLMClassificationAgent implements ClassificationAgent {
     // Determine supplier name from transactions
     const supplierName = (transactions[0]?.supplier_name as string) || 'Unknown';
 
-    // Call 1: select category
+    // Call 1: select category (returns up to 2 candidates)
     const categoryMap = await this.selectCategories({
       suppliers: [{ name: supplierName, research: supplierResearch, parentName: parentName ?? null }],
       taxonomy,
       companyContext,
     });
 
-    const categoryPath = categoryMap.get(1);
-    if (!categoryPath) {
+    const categoryPaths = categoryMap.get(1);
+    if (!categoryPaths || categoryPaths.length === 0) {
       // Fallback: use original single-call approach
       return this._legacyClassify(input);
     }
 
-    // Filter taxonomy to L3 nodes under the chosen L1|L2
-    const [l1, l2] = categoryPath.split('|');
-    const l3Taxonomy = taxonomy.filter(
-      (n) => n.depth === 3 && n.l1 === l1 && n.l2 === l2
-    );
+    // Merge L3 taxonomy from all candidate L2 branches
+    const l3Taxonomy = categoryPaths.flatMap((catPath) => {
+      const [l1, l2] = catPath.split('|');
+      return taxonomy.filter((n) => n.depth === 3 && n.l1 === l1 && n.l2 === l2);
+    });
+    // Deduplicate by fullPath
+    const seen = new Set<string>();
+    const uniqueL3 = l3Taxonomy.filter((n) => {
+      if (seen.has(n.fullPath)) return false;
+      seen.add(n.fullPath);
+      return true;
+    });
 
-    if (l3Taxonomy.length === 0) {
-      // No L3 under this L1|L2 — fall back
+    if (uniqueL3.length === 0) {
+      // No L3 under these L1|L2s — fall back
       return this._legacyClassify(input);
     }
 
     // Call 2: classify into L3
     return this.classifyL3({
-      categoryPath,
-      l3Taxonomy,
+      categoryPaths,
+      l3Taxonomy: uniqueL3,
       transactions,
       columnPriorities,
       companyContext,
@@ -1151,6 +1228,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
   private async _legacyClassify(input: ClassificationInput): Promise<ClassificationResult> {
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt(input);
+    const groupCount = buildDedupGroups(input.transactions, input.columnPriorities, input.sampleCount ?? DEFAULT_SAMPLE_COUNT).groupCount;
 
     const start = Date.now();
     let responseText: string;
@@ -1163,6 +1241,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       traceLog({
         timestamp: new Date().toISOString(),
         agent: 'classification-l3',
+        groupCount,
         model: 'default',
         systemPrompt,
         userPrompt,
@@ -1181,6 +1260,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       traceLog({
         timestamp: new Date().toISOString(),
         agent: 'classification-l3',
+        groupCount,
         model: 'default',
         systemPrompt,
         userPrompt,
@@ -1194,6 +1274,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
     traceLog({
       timestamp: new Date().toISOString(),
       agent: 'classification-l3',
+      groupCount,
       model: 'default',
       systemPrompt,
       userPrompt,

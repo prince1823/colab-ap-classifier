@@ -8,6 +8,7 @@
     "dev": "concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
     "dev:log": "LOG_FILE=/tmp/c91-debug.log concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
     "dev:trace": "LOG_FILE=/tmp/c91-debug.log LLM_TRACE_FILE=/tmp/c91-trace.jsonl concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
+    "dev:trace:lifepoint100": "LOG_FILE=/tmp/c91-lifepoint100-debug.log LLM_TRACE_FILE=/tmp/c91-lifepoint100-trace.jsonl concurrently -n main,renderer \"npm run dev:main\" \"npm run dev:renderer\"",
     "dev:main": "tsc -p tsconfig.main.json && electron dist/main/main/index.js",
     "dev:renderer": "vite",
     "build": "npm run build:main && npm run build:renderer",

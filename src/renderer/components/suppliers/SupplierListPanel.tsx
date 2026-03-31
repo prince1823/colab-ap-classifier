@@ -36,6 +36,15 @@ function ConfirmedChip({ supplier }: { supplier: ProjectSupplierView }) {
   )
 }
 
+function CatAChip({ supplier }: { supplier: ProjectSupplierView }) {
+  if (!supplier.categoryASupplier) return null
+  return (
+    <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-amber-50 text-amber-600 flex-shrink-0">
+      Cat A
+    </span>
+  )
+}
+
 function ResearchButton({ supplier, onResearch }: { supplier: ProjectSupplierView; onResearch?: (s: ProjectSupplierView) => void }) {
   if (supplier.isResearched || !onResearch) return null
   return (
@@ -210,6 +219,7 @@ export default function SupplierListPanel({
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-medium text-gray-800 truncate">{s.supplierName}</span>
                     <span className="flex-1" />
+                    <CatAChip supplier={s} />
                     <ConfirmedChip supplier={s} />
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">

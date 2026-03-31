@@ -277,7 +277,14 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       {/* Header */}
       <div className="detail-header">
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold text-gray-900 leading-tight truncate">{supplier.supplierName}</h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="text-lg font-semibold text-gray-900 leading-tight truncate">{supplier.supplierName}</h2>
+            {supplier.categoryASupplier && (
+              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-600 flex-shrink-0">
+                Cat A
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3 text-xs text-gray-500 flex-shrink-0">
             <span><strong className="text-gray-700">{supplier.transactionCount}</strong> transactions</span>
             <span className="text-gray-300">·</span>

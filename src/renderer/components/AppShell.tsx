@@ -49,8 +49,8 @@ export default function AppShell() {
     if (!projectFilePath) return
 
     loadProject(projectFilePath)
-      .then(async () => {
-        await refreshGateState()
+      .then(() => {
+        refreshGateState()
         const target = lastRoute || '/project'
         navigate(target, { replace: true })
       })
@@ -61,17 +61,9 @@ export default function AppShell() {
       .finally(() => setReopening(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Clear keep-alive routes when project closes so stale components unmount
-  useEffect(() => {
-    if (!hasProject) {
-      setVisitedRoutes(new Set())
-    }
-  }, [hasProject])
-
   // Track current route in persisted store + mark as visited for keep-alive
   useEffect(() => {
-    if (!hasProject) return
-    if (location.pathname !== '/') {
+    if (hasProject && location.pathname !== '/') {
       setLastRoute(location.pathname)
     }
     setVisitedRoutes((prev) => {
@@ -128,8 +120,8 @@ export default function AppShell() {
     closeProject()
   }
 
-  const handleProjectReady = async () => {
-    await refreshGateState()
+  const handleProjectReady = () => {
+    refreshGateState()
     navigate('/project', { replace: true })
   }
 

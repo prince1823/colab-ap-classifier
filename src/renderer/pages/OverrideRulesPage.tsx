@@ -1094,7 +1094,7 @@ export default function OverrideRulesPage() {
           {/* Sticky column headers */}
           <thead className="sticky top-0 z-10">
             <tr className="bg-gray-50">
-              <th className="w-8 px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300"></th>
+              <th className="w-14 px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300"></th>
               <th className="w-[14%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Rule Name</th>
               <th className="w-[30%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Condition</th>
               <th className="w-[28%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Target Classification</th>
@@ -1575,9 +1575,9 @@ function RuleRow({
         draggable
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
-        className="px-3 py-2 border border-gray-300 align-top cursor-grab active:cursor-grabbing"
+        className="pl-3 pr-4 py-2 border border-gray-300 align-top cursor-grab active:cursor-grabbing"
       >
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2.5">
           <svg className="h-3.5 w-3.5 shrink-0 text-transparent group-hover:text-gray-400 transition-colors" fill="currentColor" viewBox="0 0 24 24">
             <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
             <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>

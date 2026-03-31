@@ -588,16 +588,6 @@ export default function SuppliersPage() {
           </button>
         )}
 
-        {/* Categorize button — assigns L1/L2 to all uncategorized suppliers */}
-        {viewMode !== 'normalize' && (
-          <button
-            onClick={categorizeAll}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0"
-          >
-            Categorize
-          </button>
-        )}
-
         {/* Tail Spend toggle button */}
         {viewMode !== 'normalize' && (
           <button

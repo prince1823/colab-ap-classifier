@@ -6,7 +6,9 @@ import type { CSVPreview, DeriveMappingsSource, CompletedUpload, DerivedMappings
 
 interface Props {
   completedUploads: CompletedUpload[]
+  uploadStats: Record<string, { classifiedCount: number }>
   onFileReady: (filePath: string, preview: CSVPreview, source: DeriveMappingsSource) => void
+  onDeleteUpload: (uploadId: string) => Promise<void>
   onProceedToPriority: () => void
   derivingMappings: boolean
   derivedMappings: DerivedMappings | null
@@ -17,7 +19,9 @@ interface Props {
 
 export default function DataUploadStep({
   completedUploads,
+  uploadStats,
   onFileReady,
+  onDeleteUpload,
   onProceedToPriority,
   derivingMappings,
   derivedMappings,
@@ -29,6 +33,8 @@ export default function DataUploadStep({
   const [preview, setPreview] = useState<CSVPreview | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<CompletedUpload | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const handleFileSelected = async (path: string) => {
     setFilePath(path)
@@ -218,6 +224,49 @@ export default function DataUploadStep({
         )}
       </div>
 
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-gray-900">Delete Upload</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Are you sure you want to delete <span className="font-medium text-gray-900">{deleteTarget.fileName}</span>?
+            </p>
+            <p className="mt-1 text-sm text-gray-600">
+              This will permanently remove{' '}
+              <span className="font-medium">{deleteTarget.rowCount.toLocaleString()}</span>{' '}
+              <span className="font-medium text-amber-600">unclassified</span> transaction row{deleteTarget.rowCount !== 1 ? 's' : ''}.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setDeleting(true)
+                  try {
+                    await onDeleteUpload(deleteTarget.uploadId)
+                    setDeleteTarget(null)
+                  } catch {
+                    // error handled by parent
+                  } finally {
+                    setDeleting(false)
+                  }
+                }}
+                disabled={deleting}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Upload history table — full width, fills remaining height, scrolls both axes */}
       {hasUploads && (
         <div className="flex-1 min-h-0 flex flex-col">
@@ -250,6 +299,7 @@ export default function DataUploadStep({
                   {hasActiveFile && (
                     <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Mapping</th>
                   )}
+                  <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
@@ -282,6 +332,27 @@ export default function DataUploadStep({
                         </button>
                       </td>
                     )}
+                    <td className="whitespace-nowrap px-4 py-2.5 text-center">
+                      {(() => {
+                        const stats = uploadStats[upload.uploadId]
+                        const classified = stats?.classifiedCount ?? 0
+                        // If stats haven't loaded yet for this upload, disable deletion (safe default)
+                        const isClassified = !stats || classified > 0
+                        return isClassified ? (
+                          <span className="text-xs text-gray-400 italic">Cannot delete — has classified transactions</span>
+                        ) : (
+                          <button
+                            onClick={() => setDeleteTarget(upload)}
+                            title="Delete upload"
+                            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                          >
+                            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        )
+                      })()}
+                    </td>
                   </tr>
                 ))}
               </tbody>

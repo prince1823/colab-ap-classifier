@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { DuckDBDatabase } from '../../../src/main/services/database';
 
 vi.mock('electron', () => ({
   dialog: {
@@ -303,5 +304,188 @@ describe('IngestService', () => {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+// ─── Real DB tests ───────────────────────────────────────────────────────────
+
+function tempDbPath(): string {
+  return path.join(os.tmpdir(), `ingest-test-${Date.now()}-${Math.random().toString(36).slice(2)}.c91`);
+}
+
+describe('IngestService — importCSV (real DB)', () => {
+  let realDb: DuckDBDatabase;
+  let dbPath: string;
+  let realService: IngestService;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    realDb = new DuckDBDatabase();
+    dbPath = tempDbPath();
+    await realDb.openDatabase(dbPath);
+    const transactions = createMockTransactionStore();
+    const suppliers = createMockSupplierService();
+    const agent = createMockColumnMappingAgent();
+    realService = new IngestService(realDb, transactions, suppliers, agent);
+  });
+
+  afterEach(async () => {
+    if (realDb.isOpen()) await realDb.closeDatabase();
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  });
+
+  it('populates upload_id on every inserted transaction row', async () => {
+    const csvPath = path.resolve(__dirname, '../../fixtures/csv/standard.csv');
+    const { uploadId } = await realService.importCSV(csvPath, {
+      supplier_name: 'Supplier',
+      spend_amount: 'Amount',
+      invoice_date: 'Date',
+    });
+
+    const nullRows = await realDb.all<{ cnt: number | bigint }>(
+      'SELECT COUNT(*) AS cnt FROM transactions WHERE upload_id IS NULL'
+    );
+    expect(Number(nullRows[0].cnt)).toBe(0);
+
+    const distinctIds = await realDb.all<{ upload_id: string }>(
+      'SELECT DISTINCT upload_id FROM transactions'
+    );
+    expect(distinctIds).toHaveLength(1);
+    expect(distinctIds[0].upload_id).toBe(uploadId);
+  });
+});
+
+describe('IngestService — deleteUpload (real DB)', () => {
+  let realDb: DuckDBDatabase;
+  let dbPath: string;
+  let realService: IngestService;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    realDb = new DuckDBDatabase();
+    dbPath = tempDbPath();
+    await realDb.openDatabase(dbPath);
+    const transactions = createMockTransactionStore();
+    const suppliers = createMockSupplierService();
+    const agent = createMockColumnMappingAgent();
+    realService = new IngestService(realDb, transactions, suppliers, agent);
+  });
+
+  afterEach(async () => {
+    if (realDb.isOpen()) await realDb.closeDatabase();
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  });
+
+  it('deletes all transactions for the upload and removes orphaned suppliers', async () => {
+    await realDb.run(
+      `INSERT INTO project_suppliers (id, supplier_name) VALUES ('sup-a', 'Supplier A')`
+    );
+    await realDb.run(
+      `INSERT INTO uploads (id, file_name, column_mappings, row_count) VALUES ('upload-1', 'file1.csv', '{}', 2)`
+    );
+    await realDb.run(
+      `INSERT INTO transactions (id, upload_id, project_supplier_id, row_index) VALUES
+       ('tx-1', 'upload-1', 'sup-a', 0),
+       ('tx-2', 'upload-1', 'sup-a', 1)`
+    );
+
+    await realService.deleteUpload('upload-1');
+
+    const txRows = await realDb.all('SELECT * FROM transactions');
+    expect(txRows).toHaveLength(0);
+
+    const supplierRows = await realDb.all('SELECT * FROM project_suppliers');
+    expect(supplierRows).toHaveLength(0);
+
+    const uploadRows = await realDb.all('SELECT * FROM uploads');
+    expect(uploadRows).toHaveLength(0);
+  });
+
+  it('does not delete a supplier that still has transactions from another upload', async () => {
+    await realDb.run(
+      `INSERT INTO project_suppliers (id, supplier_name) VALUES
+       ('sup-a', 'Supplier A'),
+       ('sup-b', 'Supplier B'),
+       ('sup-c', 'Supplier C')`
+    );
+    await realDb.run(
+      `INSERT INTO uploads (id, file_name, column_mappings, row_count) VALUES
+       ('upload-1', 'file1.csv', '{}', 2),
+       ('upload-2', 'file2.csv', '{}', 2)`
+    );
+    // upload-1: supplier-a and supplier-c
+    // upload-2: supplier-a and supplier-b
+    await realDb.run(
+      `INSERT INTO transactions (id, upload_id, project_supplier_id, row_index) VALUES
+       ('tx-1', 'upload-1', 'sup-a', 0),
+       ('tx-2', 'upload-1', 'sup-c', 1),
+       ('tx-3', 'upload-2', 'sup-a', 0),
+       ('tx-4', 'upload-2', 'sup-b', 1)`
+    );
+
+    await realService.deleteUpload('upload-1');
+
+    const txRows = await realDb.all<{ upload_id: string }>('SELECT upload_id FROM transactions');
+    expect(txRows).toHaveLength(2);
+    expect(txRows.every((r) => r.upload_id === 'upload-2')).toBe(true);
+
+    const supplierIds = (await realDb.all<{ id: string }>('SELECT id FROM project_suppliers')).map((r) => r.id);
+    expect(supplierIds).toContain('sup-a');
+    expect(supplierIds).toContain('sup-b');
+    expect(supplierIds).not.toContain('sup-c');
+  });
+
+  it('throws if any transactions in the upload are classified and makes no changes', async () => {
+    await realDb.run(
+      `INSERT INTO project_suppliers (id, supplier_name) VALUES ('sup-a', 'Supplier A')`
+    );
+    await realDb.run(
+      `INSERT INTO uploads (id, file_name, column_mappings, row_count) VALUES ('upload-1', 'file1.csv', '{}', 2)`
+    );
+    await realDb.run(
+      `INSERT INTO transactions (id, upload_id, project_supplier_id, row_index, classification_status) VALUES
+       ('tx-1', 'upload-1', 'sup-a', 0, 'unclassified'),
+       ('tx-2', 'upload-1', 'sup-a', 1, 'classified')`
+    );
+
+    await expect(realService.deleteUpload('upload-1')).rejects.toThrow(
+      'Cannot delete upload'
+    );
+
+    // Verify nothing was deleted
+    const txRows = await realDb.all('SELECT * FROM transactions');
+    expect(txRows).toHaveLength(2);
+  });
+
+  it('only deletes transactions belonging to the specified upload', async () => {
+    await realDb.run(
+      `INSERT INTO project_suppliers (id, supplier_name) VALUES
+       ('sup-a', 'Supplier A'),
+       ('sup-b', 'Supplier B')`
+    );
+    await realDb.run(
+      `INSERT INTO uploads (id, file_name, column_mappings, row_count) VALUES
+       ('upload-1', 'file1.csv', '{}', 1),
+       ('upload-2', 'file2.csv', '{}', 1)`
+    );
+    await realDb.run(
+      `INSERT INTO transactions (id, upload_id, project_supplier_id, row_index) VALUES
+       ('tx-1', 'upload-1', 'sup-a', 0),
+       ('tx-2', 'upload-2', 'sup-b', 0)`
+    );
+
+    await realService.deleteUpload('upload-1');
+
+    const txRows = await realDb.all<{ upload_id: string }>('SELECT upload_id FROM transactions');
+    expect(txRows).toHaveLength(1);
+    expect(txRows[0].upload_id).toBe('upload-2');
+
+    const uploadRows = await realDb.all<{ id: string }>('SELECT id FROM uploads');
+    expect(uploadRows).toHaveLength(1);
+    expect(uploadRows[0].id).toBe('upload-2');
+
+    const supplierIds = (await realDb.all<{ id: string }>('SELECT id FROM project_suppliers')).map((r) => r.id);
+    expect(supplierIds).toContain('sup-b');
+    expect(supplierIds).not.toContain('sup-a');
   });
 });

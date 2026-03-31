@@ -66,6 +66,8 @@ export const ipc = {
       invoke('ingest:importCSV', filePath, mapping),
     getUpload: () => invoke('ingest:getUpload'),
     getUploadHistory: () => invoke('ingest:getUploadHistory'),
+    getUploadStatsBatch: () => invoke('ingest:getUploadStatsBatch'),
+    deleteUpload: (uploadId: string) => invoke('ingest:deleteUpload', uploadId),
     deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
       invoke('ingest:deriveMappings', columns, sampleRows, source),
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),

@@ -49,6 +49,17 @@ export function registerIngestHandlers(ingest: IngestService, eventBus: EventBus
     );
   });
 
+  registerHandler('ingest:getUploadStatsBatch', async () => {
+    return ingest.getUploadStatsBatch();
+  });
+
+  registerHandler('ingest:deleteUpload', async (_event, uploadId: unknown) => {
+    if (typeof uploadId !== 'string' || !uploadId) {
+      throw new Error('uploadId must be a non-empty string');
+    }
+    return ingest.deleteUpload(uploadId);
+  });
+
   registerHandler('ingest:getExistingCanonicals', async () => {
     return ingest.getExistingCanonicals();
   });

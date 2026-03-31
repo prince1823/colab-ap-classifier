@@ -622,7 +622,7 @@ export class RuleStore implements IRuleStore {
 // ─── Server-side rule filter matching ─────────────────────────────────────────
 
 /** Rule property field names — dispatched to property matching instead of condition extraction */
-const RULE_PROPERTY_FIELDS = new Set(['rule_name', 'rule_source', 'rule_is_active', 'rule_group']);
+const RULE_PROPERTY_FIELDS = new Set(['rule_name', 'rule_source', 'rule_is_active', 'rule_group', 'rule_category_a']);
 
 function matchRulePropertyCondition(
   propValue: string | boolean | null,
@@ -630,8 +630,8 @@ function matchRulePropertyCondition(
   filterValue: unknown,
   field: string,
 ): boolean {
-  // Boolean field (rule_is_active)
-  if (field === 'rule_is_active') {
+  // Boolean fields (rule_is_active, rule_category_a)
+  if (field === 'rule_is_active' || field === 'rule_category_a') {
     if (operator === 'is_true')  return propValue === true;
     if (operator === 'is_false') return propValue === false;
     return false;
@@ -701,8 +701,9 @@ function matchesRuleFilter(
       switch (field) {
         case 'rule_name':      propValue = rule.name; break;
         case 'rule_source':    propValue = rule.source; break;
-        case 'rule_is_active': propValue = rule.isActive; break;
-        case 'rule_group':     propValue = rule.groupId ? (groupNameById.get(rule.groupId) ?? null) : null; break;
+        case 'rule_is_active':   propValue = rule.isActive; break;
+        case 'rule_category_a':  propValue = rule.categoryASupplier; break;
+        case 'rule_group':       propValue = rule.groupId ? (groupNameById.get(rule.groupId) ?? null) : null; break;
         default:               propValue = null;
       }
       return matchRulePropertyCondition(propValue, operator, value, field);

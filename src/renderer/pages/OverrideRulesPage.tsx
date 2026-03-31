@@ -11,7 +11,7 @@ import type { TaxonomyNode } from '../../shared/types/taxonomy'
 const UNGROUPED_ID = '__ungrouped__'
 
 /** Rule property field names — must match the backend RULE_PROPERTY_FIELDS set */
-const RULE_PROPERTY_FIELD_NAMES = new Set(['rule_name', 'rule_source', 'rule_is_active', 'rule_group'])
+const RULE_PROPERTY_FIELD_NAMES = new Set(['rule_name', 'rule_source', 'rule_is_active', 'rule_group', 'rule_category_a'])
 
 const UNGROUPED_PAGE_SIZE = 100
 
@@ -88,9 +88,10 @@ export default function OverrideRulesPage() {
     const groupEnumValues = ['Ungrouped', ...groups.map(g => g.name)]
     const rulePropertyFields: FieldDefinition[] = [
       { name: 'rule_name',      label: 'Rule Name', type: 'string',  group: 'Rule Properties' },
-      { name: 'rule_source',    label: 'Source',    type: 'enum',    group: 'Rule Properties', enumValues: ['manual', 'auto_generated'] },
-      { name: 'rule_is_active', label: 'Active',    type: 'boolean', group: 'Rule Properties' },
-      { name: 'rule_group',     label: 'Group',     type: 'enum',    group: 'Rule Properties', enumValues: groupEnumValues },
+      { name: 'rule_source',     label: 'Source',     type: 'enum',    group: 'Rule Properties', enumValues: ['manual', 'auto_generated', 'supplier_universe'] },
+      { name: 'rule_is_active',  label: 'Active',     type: 'boolean', group: 'Rule Properties' },
+      { name: 'rule_group',      label: 'Group',      type: 'enum',    group: 'Rule Properties', enumValues: groupEnumValues },
+      { name: 'rule_category_a', label: 'Category A', type: 'boolean', group: 'Rule Properties' },
     ]
     const conditionFields: FieldDefinition[] = filterFields.map(f => ({ ...f, group: 'Rule Conditions' }))
     return [...rulePropertyFields, ...conditionFields]

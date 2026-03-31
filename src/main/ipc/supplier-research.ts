@@ -42,6 +42,15 @@ export function registerSupplierResearchHandlers(
 
     // Fire-and-forget: categorize non-tail-spend → categorize tail-spend → completed
     (async () => {
+      eventBus.emit('suppliers:research:progress', {
+        status: 'running',
+        totalSuppliers: 0,
+        processedSuppliers: 0,
+        percentage: 0,
+        currentSupplier: null,
+        currentStep: 'Categorizing suppliers...',
+      } satisfies ResearchProgress);
+
       try {
         await researcher.categorizeWithSupplierInfo(taxonomyNodes, context, ids);
       } catch (err) {

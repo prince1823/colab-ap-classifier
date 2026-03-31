@@ -240,10 +240,16 @@ export default function SuppliersPage() {
       alert('Cannot start categorization while another operation is in progress.')
       return
     }
+    // Check if there are any researched, uncategorized suppliers to categorize
+    const categorizable = suppliers.filter(s => !s.l1L2Path && ((!s.isTailSpend && s.isResearched) || s.isTailSpend))
+    if (categorizable.length === 0) {
+      alert('No suppliers ready to categorize. Please research suppliers first.')
+      return
+    }
     ipc.suppliers.categorizeAll().catch((err) => {
       console.error('[Categorize] categorizeAll failed:', err)
     })
-  }, [])
+  }, [suppliers])
 
   /** Categorize selected suppliers without L1/L2 */
   const categorizeSelected = useCallback(() => {
@@ -253,10 +259,22 @@ export default function SuppliersPage() {
     }
     const ids = [...selectedIds]
     if (ids.length === 0) return
+    // Check if any selected suppliers are ready to categorize
+    const selected = suppliers.filter(s => selectedIds.has(s.id))
+    const unresearched = selected.filter(s => !s.isTailSpend && !s.isResearched)
+    const categorizable = selected.filter(s => !s.l1L2Path && ((!s.isTailSpend && s.isResearched) || s.isTailSpend))
+    if (categorizable.length === 0) {
+      if (unresearched.length > 0) {
+        alert(`${unresearched.length} selected supplier${unresearched.length > 1 ? 's have' : ' has'} not been researched yet. Please research them first before categorizing.`)
+      } else {
+        alert('No selected suppliers need categorization.')
+      }
+      return
+    }
     ipc.suppliers.categorizeAll(ids).catch((err) => {
       console.error('[Categorize] categorizeSelected failed:', err)
     })
-  }, [selectedIds])
+  }, [suppliers, selectedIds])
 
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
@@ -652,7 +670,7 @@ export default function SuppliersPage() {
           pointerEvents: viewMode === 'suppliers' ? 'auto' : 'none',
           opacity: viewMode === 'suppliers' ? 1 : 0,
         }}>
-          {/* Research progress bar */}
+          {/* Research / Categorization progress bar */}
           {researchProgress && researchProgress.status === 'running' && (
             <div className="suppliers-progress">
               <div className="flex items-center justify-between mb-1">
@@ -660,12 +678,14 @@ export default function SuppliersPage() {
                   ? <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
                   : <span>{researchProgress.currentStep}</span>
                 }
-                <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+                {researchProgress.totalSuppliers > 0 && (
+                  <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+                )}
               </div>
               <div className="progress-bar">
                 <div
                   className="progress-fill"
-                  style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+                  style={{ width: `${researchProgress.totalSuppliers > 0 ? (researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100 : 0}%` }}
                 />
               </div>
             </div>
@@ -673,8 +693,12 @@ export default function SuppliersPage() {
           {researchProgress && researchProgress.status === 'completed' && (
             <div className="suppliers-progress">
               <div className="flex items-center gap-2 py-1">
-                <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
-                <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''} researched)</span>
+                <span className="text-green-600 font-semibold text-sm">
+                  ✓ {researchProgress.currentStep === 'Complete' ? 'Categorization' : 'Research'} completed
+                </span>
+                {researchProgress.totalSuppliers > 0 && (
+                  <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''})</span>
+                )}
               </div>
               <div className="progress-bar">
                 <div className="progress-fill bg-green-500" style={{ width: '100%' }} />

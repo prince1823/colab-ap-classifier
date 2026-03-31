@@ -157,10 +157,12 @@ export interface ProjectStore {
 }
 
 export interface TransactionStore {
+  setProjectStore(project: ProjectStore): void;
   queryTransactions(filters?: TransactionFilter): Promise<Transaction[]>;
   queryTransactionsPaginated(filters?: TransactionFilter): Promise<PaginatedTransactions>;
   getStats(): Promise<TransactionStats>;
   getColumns(): Promise<string[]>;
+  getColumnsForPivot(): Promise<string[]>;
   getFilterFields(): Promise<FieldDefinition[]>;
   getCount(filters?: TransactionFilter): Promise<number>;
   updateTransactions(update: TransactionUpdate, source?: ChangeSource): Promise<string | undefined>;

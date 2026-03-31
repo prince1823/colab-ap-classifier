@@ -2,6 +2,7 @@ import type {
   Database,
   TransactionStore as ITransactionStore,
   ChangelogStore as IChangelogStore,
+  ProjectStore as IProjectStore,
 } from '../../shared/types/services';
 import { VIRTUAL_COLUMN_REGISTRY, VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import type {
@@ -56,14 +57,38 @@ const FILTER_VIRTUAL_EXPRS: Record<string, string> = {
 
 export class TransactionStore implements ITransactionStore {
   private cachedColumns: string[] | null = null;
+  private cachedMasterDateExpr: string | undefined = undefined;
+  private project?: IProjectStore;
 
   constructor(
     private db: Database,
     private changelog: IChangelogStore
   ) {}
 
+  /** Break circular dependency: ProjectStore depends on TransactionStore, so inject lazily via setter. */
+  setProjectStore(project: IProjectStore): void {
+    this.project = project;
+  }
+
   invalidateColumnCache(): void {
     this.cachedColumns = null;
+    this.cachedMasterDateExpr = undefined;
+  }
+
+  /**
+   * Returns a TRY_STRPTIME expression for master_date using the project's detected format.
+   * Falls back to a multi-format COALESCE for old projects without a stored format.
+   * Result is cached on the instance.
+   */
+  private async getMasterDateExpr(): Promise<string> {
+    if (this.cachedMasterDateExpr !== undefined) return this.cachedMasterDateExpr;
+    const fmt = this.project
+      ? await this.project.getSetting('master_date_format') as string | undefined
+      : undefined;
+    this.cachedMasterDateExpr = fmt
+      ? `TRY_STRPTIME(t.master_date, '${fmt}')`
+      : `COALESCE(TRY_STRPTIME(t.master_date, ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y']), TRY_CAST(t.master_date AS DATE))`;
+    return this.cachedMasterDateExpr;
   }
 
   /** Check if a column is valid (physical on transactions or virtual via JOIN). */
@@ -264,6 +289,19 @@ export class TransactionStore implements ITransactionStore {
     }
     this.cachedColumns = physical;
     return this.cachedColumns;
+  }
+
+  /**
+   * Like getColumns(), but also appends master_year and master_month as virtual dimensions
+   * when master_date is present. Used by the IPC layer (pivot toolbar discovery).
+   * Internal methods use getColumns() directly to avoid SQL resolution issues.
+   */
+  async getColumnsForPivot(): Promise<string[]> {
+    const cols = await this.getColumns();
+    if (cols.includes('master_date')) {
+      return [...cols, 'master_year', 'master_month'];
+    }
+    return cols;
   }
 
   /** Known column types for richer FilterConditionBuilder UI. */
@@ -545,6 +583,7 @@ export class TransactionStore implements ITransactionStore {
       return { dimensionColumns: [], rows: [], totalAmount: 0, totalCount: 0 };
     }
 
+    const masterDateExpr = await this.getMasterDateExpr();
     const PIVOT_VIRTUAL_DIMS: Record<string, string> = {
       classification_l1: "COALESCE(tax.l1, '(Unclassified)')",
       classification_l2: "COALESCE(tax.l2, '(Unclassified)')",
@@ -553,6 +592,8 @@ export class TransactionStore implements ITransactionStore {
       supplier_name: "COALESCE(ps.supplier_name, '')",
       parent_name: "COALESCE(sp.name, '')",
       applied_rule_name: "COALESCE(ar.name, '')",
+      master_year: `YEAR(${masterDateExpr})`,
+      master_month: `strftime('%B', ${masterDateExpr})`,
     };
 
     const validCols = await this.getColumns();

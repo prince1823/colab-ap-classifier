@@ -97,10 +97,11 @@ export function createContainer(): ServiceContainer {
   const changelog = new ChangelogStore(db);
   const transactions = new TransactionStore(db, changelog);
   const project = new ProjectStore(db, transactions, supplierUniverse);
+  transactions.setProjectStore(project); // break circular dep: project → transactions; transactions lazily references project
   const taxonomy = new TaxonomyStore(db, project);
   const suppliers = new SupplierService(db, supplierUniverse);
   const rules = new RuleStore(db, transactions, project);
-  const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent, eventBus);
+  const ingest = new IngestService(db, transactions, suppliers, project, columnMappingAgent, eventBus);
   const exportSvc = new ExportService(db);
 
   // Orchestrators

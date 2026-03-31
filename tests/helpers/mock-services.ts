@@ -136,10 +136,12 @@ export function createMockProjectStore(): ProjectStore {
 
 export function createMockTransactionStore(): TransactionStore {
   return {
+    setProjectStore: vi.fn(),
     queryTransactions: vi.fn().mockResolvedValue([]),
     queryTransactionsPaginated: vi.fn().mockResolvedValue({ rows: [], totalCount: 0, page: 1, pageSize: 50 }),
     getStats: vi.fn().mockResolvedValue({ totalRows: 0, totalSpend: 0, uniqueSuppliers: 0, classifiedRows: 0, unclassifiedRows: 0 }),
     getColumns: vi.fn().mockResolvedValue([]),
+    getColumnsForPivot: vi.fn().mockResolvedValue([]),
     getCount: vi.fn().mockResolvedValue(0),
     updateTransactions: vi.fn(),
     invalidateColumnCache: vi.fn(),

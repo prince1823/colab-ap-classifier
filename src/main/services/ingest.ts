@@ -15,12 +15,14 @@ import type {
 import { toEnrichedMapping, toSimpleMapping } from '../../shared/types/column-mapping';
 import type { ColumnMappingWithPriority } from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS, REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns';
+import { detectMasterDateFormat } from '../utils/date-format';
 import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import type {
   Database,
   IngestService as IIngestService,
   TransactionStore as ITransactionStore,
   SupplierService as ISupplierService,
+  ProjectStore as IProjectStore,
   ColumnMappingAgent,
   EventBus,
   UploadRecord,
@@ -224,6 +226,7 @@ export class IngestService implements IIngestService {
     private db: Database,
     private transactions: ITransactionStore,
     private suppliers: ISupplierService,
+    private project: IProjectStore,
     private columnMappingAgent: ColumnMappingAgent,
     private eventBus: EventBus
   ) {}
@@ -336,6 +339,23 @@ export class IngestService implements IIngestService {
         throw new Error(`CSV column "${csvCol}" is assigned to multiple canonical columns (duplicate at "${canonical}")`);
       }
       csvColsSeen.add(csvCol);
+    }
+
+    // Detect and store master_date format from the first 50 rows
+    if (mapping['master_date']) {
+      const masterDateCsvCol = mapping['master_date'];
+      const dateSamples = await parseSampleRows(filePath, encoding, delimiter, 50);
+      const dateValues = dateSamples
+        .map(row => row[masterDateCsvCol])
+        .filter((v): v is string => v != null && v.trim() !== '');
+      const fmt = detectMasterDateFormat(dateValues);
+      if (fmt === null) {
+        throw new Error(
+          'Could not recognize the date format in the master_date column. ' +
+          'Please upload dates in one of these formats: YYYY-MM-DD, MM/DD/YYYY, DD/MM/YYYY, or DD-Mon-YYYY (e.g. 15-Jan-2024).'
+        );
+      }
+      await this.project.setSetting('master_date_format', fmt);
     }
 
     // Virtual column names (supplier_name, parent_name, etc.) must never become physical
@@ -513,14 +533,9 @@ export class IngestService implements IIngestService {
     await this.suppliers.normalizeAllTransactions();
 
     // Auto-apply tail spend threshold to newly created suppliers
-    const thresholdRow = await this.db.get<{ value: string }>(
-      "SELECT value FROM project_settings WHERE key = 'tail_spend_threshold'"
-    );
-    if (thresholdRow) {
-      const threshold = JSON.parse(thresholdRow.value) as number;
-      if (threshold > 0) {
-        await this.suppliers.filterTailSpend(threshold);
-      }
+    const threshold = await this.project.getSetting('tail_spend_threshold') as number | undefined;
+    if (threshold && threshold > 0) {
+      await this.suppliers.filterTailSpend(threshold);
     }
 
     const result = { rowsInserted, uploadId: finalUploadId };

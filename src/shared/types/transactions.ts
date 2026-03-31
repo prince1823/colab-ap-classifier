@@ -31,6 +31,8 @@ export interface TransactionFilter {
   pageSize?: number;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+  /** When true, returns rows in random order (uses DuckDB ORDER BY RANDOM()) */
+  randomize?: boolean;
 }
 
 export interface FilterCondition {

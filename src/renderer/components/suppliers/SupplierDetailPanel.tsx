@@ -161,6 +161,7 @@ interface SupplierDetailPanelProps {
   onSaveParentName: (supplier: ProjectSupplierView, value: string) => void
   onSaveL1L2Path: (supplier: ProjectSupplierView, value: string) => void
   onResearch: (supplier: ProjectSupplierView) => void
+  onCategorize: (supplier: ProjectSupplierView) => void
   onConfirm: (supplier: ProjectSupplierView) => void
   focusedFieldIndex: number
   onFocusedFieldChange: (index: number) => void
@@ -176,6 +177,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   onSaveParentName,
   onSaveL1L2Path,
   onResearch,
+  onCategorize,
   onConfirm,
   focusedFieldIndex,
   onFocusedFieldChange,
@@ -298,6 +300,11 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
         {!supplier.isResearched && !supplier.isTailSpend && (
           <button type="button" className="action-btn research" onClick={() => onResearch(supplier)}>
             Research
+          </button>
+        )}
+        {!supplier.l1L2Path && (supplier.isResearched || supplier.isTailSpend) && (
+          <button type="button" className="action-btn categorize" onClick={() => onCategorize(supplier)}>
+            Categorize
           </button>
         )}
         {supplier.l1L2Path && supplier.confirmationStatus !== 'confirmed' && (

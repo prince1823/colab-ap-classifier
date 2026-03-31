@@ -276,6 +276,21 @@ export default function SuppliersPage() {
     })
   }, [suppliers, selectedIds])
 
+  /** Categorize a single supplier from the detail panel */
+  const categorizeSupplier = useCallback((supplier: ProjectSupplierView) => {
+    if (isResearchRunning()) {
+      alert('Cannot start categorization while another operation is in progress.')
+      return
+    }
+    if (!supplier.isTailSpend && !supplier.isResearched) {
+      alert('Please research this supplier first before categorizing.')
+      return
+    }
+    ipc.suppliers.categorizeAll([supplier.id]).catch((err) => {
+      console.error('[Categorize] categorizeSupplier failed:', err)
+    })
+  }, [])
+
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
     const selected = suppliers.filter(s => selectedIds.has(s.id) && s.l1L2Path && s.confirmationStatus !== 'confirmed')
@@ -727,6 +742,7 @@ export default function SuppliersPage() {
               onSaveParentName={saveParentName}
               onSaveL1L2Path={saveL1L2Path}
               onResearch={researchSupplier}
+              onCategorize={categorizeSupplier}
               onConfirm={confirmSupplier}
               focusedFieldIndex={detailFieldIndex}
               onFocusedFieldChange={setDetailFieldIndex}

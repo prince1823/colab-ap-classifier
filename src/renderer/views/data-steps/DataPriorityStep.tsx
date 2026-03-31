@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ipc } from '../../lib/ipc'
 import { showError } from '../../lib/toast-errors'
 import type { MappingRow } from '../../../shared/types/column-mapping'
@@ -17,9 +17,9 @@ interface TransactionPreviewRow {
 export default function DataPriorityStep({ allMappings, onSave, onBack }: Props) {
   // Virtual columns (supplier_name, parent_name, etc.) are resolved via JOINs and cannot
   // contribute to LLM dedup groups — exclude them from the priority UI entirely.
-  const allCanonicals = [...new Set(
+  const allCanonicals = useMemo(() => [...new Set(
     allMappings.filter((m) => m.csvColumn).map((m) => m.canonical).filter((c) => !VIRTUAL_COLUMN_NAMES.has(c))
-  )]
+  )], [allMappings])
 
   const [llmOrder, setLlmOrder] = useState<string[]>([])
   const [nonLlm, setNonLlm] = useState<string[]>(() => [...allCanonicals])
@@ -52,7 +52,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
       setNonLlm(remaining)
       setLoadedFromSaved(true)
     }).catch((e) => showError('Failed to load saved column priorities', e))
-  }, [])
+  }, [allCanonicals])
 
   const loadPreview = useCallback(async () => {
     setPreviewColumns(allCanonicals)
@@ -67,14 +67,15 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
     } catch (e) {
       showError('Failed to load transaction preview', e)
     }
-  }, [])
+  }, [allCanonicals])
 
   useEffect(() => {
     loadPreview()
-  }, [])
+  }, [loadPreview])
 
   // Fetch unique value counts for each canonical column
   useEffect(() => {
+    if (allCanonicals.length === 0) return
     Promise.all(
       allCanonicals.map(async (col) => {
         const values = await ipc.transactions.distinctValues(col)
@@ -83,7 +84,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
     ).then((entries) => {
       setValueCounts(Object.fromEntries(entries))
     }).catch((e) => showError('Failed to load value counts', e))
-  }, [])
+  }, [allCanonicals])
 
   // Drag state for LLM rows
   const [dragIndex, setDragIndex] = useState<number | null>(null)

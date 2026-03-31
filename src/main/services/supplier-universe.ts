@@ -80,11 +80,10 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'suppliers'"
     );
 
-    let created = false;
-    if (tables.length === 0) {
-      await this.initializeSchema();
-      created = true;
-    }
+    const created = tables.length === 0;
+    // Always run: CREATE TABLE IF NOT EXISTS is safe, and migrations
+    // (e.g. adding category_a_supplier) must run on existing DBs too.
+    await this.initializeSchema();
 
     return { created };
   }

@@ -80,12 +80,14 @@ export interface SupplierUniverse {
     aliases?: string[];
     parentName?: string | null;
     mappedTaxonomyPaths?: string[];
+    categoryASupplier?: boolean;
   }): Promise<void>;
   getSupplierRecord(name: string): Promise<{
     supplierInfo: SupplierInfo;
     aliases: string[];
     parentName: string | null;
     mappedTaxonomyPaths: string[];
+    categoryASupplier: boolean;
   } | null>;
   searchVariants(name: string): Promise<string[]>;
 }

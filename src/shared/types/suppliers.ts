@@ -34,6 +34,7 @@ export interface Supplier {
   parentName: string | null;
   supplierInfo: SupplierInfo | null;
   mappedTaxonomyPaths: string[] | null;
+  categoryASupplier: boolean;
   createdAt: string;
   updatedAt: string;
 }

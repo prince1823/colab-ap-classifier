@@ -125,7 +125,10 @@ export function registerRulesHandlers(
           updatedPaths = currentPaths.filter((p) => p !== node.fullPath);
         }
 
-        await supplierUniverse.upsertSupplierFull(supplierName, { mappedTaxonomyPaths: updatedPaths });
+        await supplierUniverse.upsertSupplierFull(supplierName, {
+          mappedTaxonomyPaths: updatedPaths,
+          categoryASupplier: categoryA,
+        });
       }
     }
   });

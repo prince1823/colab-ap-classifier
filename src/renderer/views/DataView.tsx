@@ -30,6 +30,7 @@ export default function DataView() {
   const navigate = useNavigate()
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
   const refreshGateState = useWorkflowStore((s) => s.refreshGateState)
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
 
   const [step, setStep] = useState<Step>('upload')
   const [completedUploads, setCompletedUploads] = useState<CompletedUpload[]>([])
@@ -46,8 +47,20 @@ export default function DataView() {
   // Preserved column states so going back from priority doesn't lose edits
   const [preservedColumnStates, setPreservedColumnStates] = useState<ColumnState[] | null>(null)
 
-  // Load existing uploads and stats on mount
+  // Load existing uploads and stats on mount and when project changes
   useEffect(() => {
+    // Reset local state when project switches
+    setCompletedUploads([])
+    setUploadStats({})
+    setActiveFilePath(null)
+    setActivePreview(null)
+    setActiveDerivedMappings(null)
+    setPreservedColumnStates(null)
+    setStep('upload')
+    setError(null)
+
+    if (!projectFilePath) return
+
     ipc.ingest.getUploadHistory().then((uploads) => {
       setCompletedUploads(
         uploads.map((u) => ({
@@ -67,7 +80,7 @@ export default function DataView() {
     ipc.ingest.getUploadStatsBatch().then(setUploadStats).catch((e) => {
       showError('Failed to load upload stats', e)
     })
-  }, [])
+  }, [projectFilePath])
 
   const handleDeleteUpload = async (uploadId: string) => {
     try {

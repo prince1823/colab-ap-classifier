@@ -10,36 +10,26 @@ import type { ClassificationProgress } from '../../shared/types/classification'
 import type { FieldDefinition, GroupedFilter, FilterOperator } from '../../shared/types/transactions'
 
 type ActiveTab = 'classification' | 'qc'
-type ScopePreset = 'actionable' | 'needs_research' | 'all' | 'custom'
+type ScopePreset = 'actionable' | 'needs_confirmation' | 'all' | 'custom'
 
 const PRESET_GROUPED: Record<Exclude<ScopePreset, 'custom'>, GroupedFilter> = {
   actionable: {
-    groupConnector: 'AND',
-    groups: [
-      {
-        connector: 'AND',
-        conditions: [
-          { field: 'classification_status', operator: 'equals', value: 'unclassified' },
-        ],
-      },
-      {
-        connector: 'OR',
-        conditions: [
-          { field: 'is_researched', operator: 'is_true', value: '' },
-          { field: 'is_tail_spend', operator: 'is_true', value: '' },
-        ],
-        groupConnector: 'AND',
-      },
-    ],
-  },
-  needs_research: {
     groupConnector: 'AND',
     groups: [{
       connector: 'AND',
       conditions: [
         { field: 'classification_status', operator: 'equals', value: 'unclassified' },
-        { field: 'is_researched', operator: 'is_false', value: '' },
-        { field: 'is_tail_spend', operator: 'is_false', value: '' },
+        { field: 'confirmation_status', operator: 'equals', value: 'confirmed' },
+      ],
+    }],
+  },
+  needs_confirmation: {
+    groupConnector: 'AND',
+    groups: [{
+      connector: 'AND',
+      conditions: [
+        { field: 'classification_status', operator: 'equals', value: 'unclassified' },
+        { field: 'confirmation_status', operator: 'not_equals', value: 'confirmed' },
       ],
     }],
   },
@@ -47,8 +37,8 @@ const PRESET_GROUPED: Record<Exclude<ScopePreset, 'custom'>, GroupedFilter> = {
 }
 
 const PRESET_LABELS: Record<ScopePreset, string> = {
-  actionable: 'Ready to classify',
-  needs_research: 'Needs research',
+  actionable: 'Confirmed suppliers (all unclassified)',
+  needs_confirmation: 'Not confirmed',
   all: 'All rows',
   custom: 'Custom filter',
 }

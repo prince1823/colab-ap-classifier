@@ -51,6 +51,7 @@ const FILTER_VIRTUAL_EXPRS: Record<string, string> = {
   supplier_name: 'ps.supplier_name',
   is_researched: 'ps.is_researched',
   is_tail_spend: 'ps.is_tail_spend',
+  confirmation_status: 'ps.confirmation_status',
   applied_rule_name: 'ar.name',
   parent_name: 'sp.name',
 };
@@ -314,6 +315,7 @@ export class TransactionStore implements ITransactionStore {
     parent_name: { label: 'Parent Name', type: 'string', group: 'Supplier' },
     is_researched: { label: 'Researched', type: 'boolean', group: 'Supplier' },
     is_tail_spend: { label: 'Tail Spend', type: 'boolean', group: 'Supplier' },
+    confirmation_status: { label: 'Confirmation Status', type: 'enum', enumValues: ['pending', 'confirmed', 'rejected', 'merged'], group: 'Supplier' },
     classification_l1: { label: 'Classification L1', type: 'string' },
     classification_l2: { label: 'Classification L2', type: 'string' },
     classification_l3: { label: 'Classification L3', type: 'string' },

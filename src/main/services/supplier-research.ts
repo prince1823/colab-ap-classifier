@@ -210,13 +210,14 @@ export class SupplierResearcher implements ISupplierResearcher {
    * Categorize non-tail-spend suppliers that have supplier_info but no l1_l2_path.
    * Uses the existing selectCategories agent method.
    */
-  async categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void> {
+  async categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<void> {
     if (this.isCancelled) return;
 
     // Fetch candidates: non-tail-spend, has supplier_info, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
+    const idSet = supplierIds ? new Set(supplierIds) : null;
     const candidates = allSuppliers.filter(
-      (s) => !s.isTailSpend && s.supplierInfo !== null && s.l1L2Path === null
+      (s) => !s.isTailSpend && s.supplierInfo !== null && s.l1L2Path === null && (!idSet || idSet.has(s.id))
     );
 
     if (candidates.length === 0) return;
@@ -286,14 +287,16 @@ export class SupplierResearcher implements ISupplierResearcher {
   async categorizeTailSpend(
     taxonomy: TaxonomyNode[],
     companyContext: CompanyContext,
-    columnPriorities: string[]
+    columnPriorities: string[],
+    supplierIds?: string[]
   ): Promise<void> {
     if (this.isCancelled) return;
 
     // Fetch candidates: tail spend, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
+    const idSet = supplierIds ? new Set(supplierIds) : null;
     const tailSpendSuppliers = allSuppliers.filter(
-      (s) => s.isTailSpend && s.l1L2Path === null
+      (s) => s.isTailSpend && s.l1L2Path === null && (!idSet || idSet.has(s.id))
     );
 
     if (tailSpendSuppliers.length === 0) return;

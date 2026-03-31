@@ -24,6 +24,7 @@ interface SupplierListPanelProps {
   isActive?: boolean
   onResearch?: (supplier: ProjectSupplierView) => void
   onResearchSelected?: () => void
+  onCategorizeSelected?: () => void
   onConfirmSelected?: () => void
 }
 
@@ -46,7 +47,7 @@ function CatAChip({ supplier }: { supplier: ProjectSupplierView }) {
 }
 
 function ResearchButton({ supplier, onResearch }: { supplier: ProjectSupplierView; onResearch?: (s: ProjectSupplierView) => void }) {
-  if (supplier.isResearched || !onResearch) return null
+  if (supplier.isResearched || supplier.isTailSpend || !onResearch) return null
   return (
     <button
       type="button"
@@ -77,13 +78,15 @@ export default function SupplierListPanel({
   isActive = true,
   onResearch,
   onResearchSelected,
+  onCategorizeSelected,
   onConfirmSelected,
 }: SupplierListPanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const researchBtnRef = useRef<HTMLButtonElement>(null)
+  const categorizeBtnRef = useRef<HTMLButtonElement>(null)
   const confirmBtnRef = useRef<HTMLButtonElement>(null)
-  const [actionFocused, setActionFocused] = useState<'research' | 'confirm' | null>(null)
+  const [actionFocused, setActionFocused] = useState<'research' | 'categorize' | 'confirm' | null>(null)
 
   // Auto-focus list for keyboard nav
   useEffect(() => {
@@ -96,36 +99,39 @@ export default function SupplierListPanel({
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && selectedIds.size > 0) {
       e.preventDefault()
       e.stopPropagation()
-      const firstBtn = onResearchSelected ? 'research' : onConfirmSelected ? 'confirm' : null
+      const firstBtn = onResearchSelected ? 'research' : onCategorizeSelected ? 'categorize' : onConfirmSelected ? 'confirm' : null
       if (firstBtn) {
         setActionFocused(firstBtn)
         setTimeout(() => {
           if (firstBtn === 'research') researchBtnRef.current?.focus()
+          else if (firstBtn === 'categorize') categorizeBtnRef.current?.focus()
           else confirmBtnRef.current?.focus()
         }, 0)
       }
       return
     }
     onKeyDown(e)
-  }, [onKeyDown, selectedIds.size, onResearchSelected, onConfirmSelected])
+  }, [onKeyDown, selectedIds.size, onResearchSelected, onCategorizeSelected, onConfirmSelected])
 
   const handleActionKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault()
-      const active = document.activeElement
-      if (active === researchBtnRef.current && onConfirmSelected) {
-        setActionFocused('confirm')
-        confirmBtnRef.current?.focus()
-      } else if (active === confirmBtnRef.current && onResearchSelected) {
-        setActionFocused('research')
-        researchBtnRef.current?.focus()
+      const btns: { key: 'research' | 'categorize' | 'confirm'; ref: React.RefObject<HTMLButtonElement | null> }[] = []
+      if (onResearchSelected) btns.push({ key: 'research', ref: researchBtnRef })
+      if (onCategorizeSelected) btns.push({ key: 'categorize', ref: categorizeBtnRef })
+      if (onConfirmSelected) btns.push({ key: 'confirm', ref: confirmBtnRef })
+      const idx = btns.findIndex(b => b.ref.current === document.activeElement)
+      if (idx >= 0) {
+        const next = e.key === 'ArrowRight' ? (idx + 1) % btns.length : (idx - 1 + btns.length) % btns.length
+        setActionFocused(btns[next].key)
+        btns[next].ref.current?.focus()
       }
     } else if (e.key === 'Escape') {
       e.preventDefault()
       setActionFocused(null)
       listRef.current?.focus()
     }
-  }, [onResearchSelected, onConfirmSelected])
+  }, [onResearchSelected, onCategorizeSelected, onConfirmSelected])
 
   const chipClass = (f: QuickFilter) =>
     `px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer border ${
@@ -247,10 +253,22 @@ export default function SupplierListPanel({
               type="button"
               onClick={onResearchSelected}
               onKeyDown={handleActionKeyDown}
-              onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
+              onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !categorizeBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
               className={`px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors ${actionFocused === 'research' ? 'ring-2 ring-blue-300 ring-offset-1' : ''}`}
             >
               Research
+            </button>
+          )}
+          {onCategorizeSelected && (
+            <button
+              ref={categorizeBtnRef}
+              type="button"
+              onClick={onCategorizeSelected}
+              onKeyDown={handleActionKeyDown}
+              onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !categorizeBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors ${actionFocused === 'categorize' ? 'ring-2 ring-purple-300 ring-offset-1' : ''}`}
+            >
+              Categorize
             </button>
           )}
           {onConfirmSelected && (
@@ -259,7 +277,7 @@ export default function SupplierListPanel({
               type="button"
               onClick={onConfirmSelected}
               onKeyDown={handleActionKeyDown}
-              onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
+              onBlur={(e) => { if (!researchBtnRef.current?.contains(e.relatedTarget as Node) && !categorizeBtnRef.current?.contains(e.relatedTarget as Node) && !confirmBtnRef.current?.contains(e.relatedTarget as Node)) setActionFocused(null) }}
               className={`px-2 py-0.5 rounded text-[10px] font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors ${actionFocused === 'confirm' ? 'ring-2 ring-green-300 ring-offset-1' : ''}`}
             >
               Confirm

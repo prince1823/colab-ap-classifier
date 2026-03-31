@@ -18,6 +18,7 @@ export const VIRTUAL_COLUMN_REGISTRY: Record<string, VirtualColumnDef> = {
   supplier_name:       { selectExpr: 'ps.supplier_name',                          requiredJoin: 'supplier'        },
   is_tail_spend:       { selectExpr: 'ps.is_tail_spend',                          requiredJoin: 'supplier'        },
   is_researched:       { selectExpr: 'ps.is_researched',                          requiredJoin: 'supplier'        },
+  confirmation_status: { selectExpr: 'ps.confirmation_status',                     requiredJoin: 'supplier'        },
   parent_name:         { selectExpr: 'sp.name',                                   requiredJoin: 'supplier_parent' },
   classification_l1:   { selectExpr: 'tax.l1',                                    requiredJoin: 'taxonomy'        },
   classification_l2:   { selectExpr: 'tax.l2',                                    requiredJoin: 'taxonomy'        },

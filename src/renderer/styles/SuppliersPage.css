@@ -110,6 +110,8 @@
 
 .action-btn.research { color: #7c3aed; border-color: #c4b5fd; }
 .action-btn.research:hover { background: #ede9fe; }
+.action-btn.categorize { color: #9333ea; border-color: #d8b4fe; }
+.action-btn.categorize:hover { background: #f3e8ff; }
 .action-btn.confirm { color: #16a34a; border-color: #86efac; }
 .action-btn.confirm:hover { background: #dcfce7; }
 

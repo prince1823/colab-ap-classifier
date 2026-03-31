@@ -96,6 +96,7 @@ export interface IPCInvokeMap {
   'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: [supplierIds?: string[]]; result: void };
+  'suppliers:categorizeAll':  { args: [supplierIds?: string[]]; result: void };
   'suppliers:cancelResearch': { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierId: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };

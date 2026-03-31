@@ -220,7 +220,10 @@ export default function SuppliersPage() {
 
   /** Batch research selected — delegates entirely to the backend */
   const researchSelected = useCallback(() => {
-    if (isResearchRunning()) return
+    if (isResearchRunning()) {
+      alert('Cannot start research while another operation is in progress.')
+      return
+    }
     const selectedIds_ = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched).map(s => s.id)
     if (selectedIds_.length === 0) return
     // Fire-and-forget: progress is streamed via EventBus → workflowStore.
@@ -231,9 +234,66 @@ export default function SuppliersPage() {
     setSelectedIds(new Set())
   }, [suppliers, selectedIds])
 
+  /** Categorize all suppliers without L1/L2 */
+  const categorizeAll = useCallback(() => {
+    if (isResearchRunning()) {
+      alert('Cannot start categorization while another operation is in progress.')
+      return
+    }
+    // Check if there are any researched, uncategorized suppliers to categorize
+    const categorizable = suppliers.filter(s => !s.l1L2Path && ((!s.isTailSpend && s.isResearched) || s.isTailSpend))
+    if (categorizable.length === 0) {
+      alert('No suppliers ready to categorize. Please research suppliers first.')
+      return
+    }
+    ipc.suppliers.categorizeAll().catch((err) => {
+      console.error('[Categorize] categorizeAll failed:', err)
+    })
+  }, [suppliers])
+
+  /** Categorize selected suppliers without L1/L2 */
+  const categorizeSelected = useCallback(() => {
+    if (isResearchRunning()) {
+      alert('Cannot start categorization while another operation is in progress.')
+      return
+    }
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    // Check if any selected suppliers are ready to categorize
+    const selected = suppliers.filter(s => selectedIds.has(s.id))
+    const unresearched = selected.filter(s => !s.isTailSpend && !s.isResearched)
+    const categorizable = selected.filter(s => !s.l1L2Path && ((!s.isTailSpend && s.isResearched) || s.isTailSpend))
+    if (categorizable.length === 0) {
+      if (unresearched.length > 0) {
+        alert(`${unresearched.length} selected supplier${unresearched.length > 1 ? 's have' : ' has'} not been researched yet. Please research them first before categorizing.`)
+      } else {
+        alert('No selected suppliers need categorization.')
+      }
+      return
+    }
+    ipc.suppliers.categorizeAll(ids).catch((err) => {
+      console.error('[Categorize] categorizeSelected failed:', err)
+    })
+  }, [suppliers, selectedIds])
+
+  /** Categorize a single supplier from the detail panel */
+  const categorizeSupplier = useCallback((supplier: ProjectSupplierView) => {
+    if (isResearchRunning()) {
+      alert('Cannot start categorization while another operation is in progress.')
+      return
+    }
+    if (!supplier.isTailSpend && !supplier.isResearched) {
+      alert('Please research this supplier first before categorizing.')
+      return
+    }
+    ipc.suppliers.categorizeAll([supplier.id]).catch((err) => {
+      console.error('[Categorize] categorizeSupplier failed:', err)
+    })
+  }, [])
+
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
-    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.isResearched && s.confirmationStatus !== 'confirmed')
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.l1L2Path && s.confirmationStatus !== 'confirmed')
     if (selected.length === 0) return
     const confirmedIds = new Set(selected.map(s => s.id))
     for (const s of selected) {
@@ -338,11 +398,15 @@ export default function SuppliersPage() {
 
   /** Check if any selected suppliers have actionable bulk operations */
   const hasConfirmable = useMemo(() =>
-    suppliers.some(s => selectedIds.has(s.id) && s.isResearched && s.confirmationStatus !== 'confirmed'),
+    suppliers.some(s => selectedIds.has(s.id) && s.l1L2Path && s.confirmationStatus !== 'confirmed'),
     [suppliers, selectedIds]
   )
   const hasResearchable = useMemo(() =>
     suppliers.some(s => selectedIds.has(s.id) && !s.isResearched),
+    [suppliers, selectedIds]
+  )
+  const hasCategorizable = useMemo(() =>
+    suppliers.some(s => selectedIds.has(s.id) && s.l1L2Path === null),
     [suppliers, selectedIds]
   )
 
@@ -611,7 +675,7 @@ export default function SuppliersPage() {
           pointerEvents: viewMode === 'suppliers' ? 'auto' : 'none',
           opacity: viewMode === 'suppliers' ? 1 : 0,
         }}>
-          {/* Research progress bar */}
+          {/* Research / Categorization progress bar */}
           {researchProgress && researchProgress.status === 'running' && (
             <div className="suppliers-progress">
               <div className="flex items-center justify-between mb-1">
@@ -619,12 +683,14 @@ export default function SuppliersPage() {
                   ? <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
                   : <span>{researchProgress.currentStep}</span>
                 }
-                <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+                {researchProgress.totalSuppliers > 0 && (
+                  <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+                )}
               </div>
               <div className="progress-bar">
                 <div
                   className="progress-fill"
-                  style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+                  style={{ width: `${researchProgress.totalSuppliers > 0 ? (researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100 : 0}%` }}
                 />
               </div>
             </div>
@@ -632,8 +698,12 @@ export default function SuppliersPage() {
           {researchProgress && researchProgress.status === 'completed' && (
             <div className="suppliers-progress">
               <div className="flex items-center gap-2 py-1">
-                <span className="text-green-600 font-semibold text-sm">✓ Research completed</span>
-                <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''} researched)</span>
+                <span className="text-green-600 font-semibold text-sm">
+                  ✓ {researchProgress.currentStep === 'Complete' ? 'Categorization' : 'Research'} completed
+                </span>
+                {researchProgress.totalSuppliers > 0 && (
+                  <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''})</span>
+                )}
               </div>
               <div className="progress-bar">
                 <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
@@ -662,6 +732,7 @@ export default function SuppliersPage() {
               isActive={activePanel === 'list'}
               onResearch={researchSupplier}
               onResearchSelected={hasResearchable ? researchSelected : undefined}
+              onCategorizeSelected={hasCategorizable ? categorizeSelected : undefined}
               onConfirmSelected={hasConfirmable ? confirmSelected : undefined}
             />
             <SupplierDetailPanel
@@ -671,6 +742,7 @@ export default function SuppliersPage() {
               onSaveParentName={saveParentName}
               onSaveL1L2Path={saveL1L2Path}
               onResearch={researchSupplier}
+              onCategorize={categorizeSupplier}
               onConfirm={confirmSupplier}
               focusedFieldIndex={detailFieldIndex}
               onFocusedFieldChange={setDetailFieldIndex}

@@ -154,13 +154,15 @@ export default function AppShell() {
                   : researchProgress.currentStep
                 }
               </span>
-              <span className="text-blue-600">
-                {researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}
-              </span>
+              {researchProgress.totalSuppliers > 0 && (
+                <span className="text-blue-600">
+                  {researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}
+                </span>
+              )}
               <div className="ml-auto h-1.5 w-32 overflow-hidden rounded-full bg-blue-200">
                 <div
                   className="h-full rounded-full bg-blue-600 transition-all"
-                  style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+                  style={{ width: `${researchProgress.totalSuppliers > 0 ? (researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100 : 0}%` }}
                 />
               </div>
             </div>

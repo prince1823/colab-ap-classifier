@@ -1,20 +1,27 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import StatsCards from '../components/data-review/StatsCards'
 import SupplierTable from '../components/data-review/SupplierTable'
 import { ipc } from '../lib/ipc'
+import { useWorkflowStore } from '../stores/workflowStore'
 import type { TransactionStats } from '../../shared/types/transactions'
 import type { ProjectSupplierView } from '../../shared/types/suppliers'
 
 export default function DataReviewPage() {
   const navigate = useNavigate()
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
+  const totalRows = useWorkflowStore((s) => s.totalRows)
+  const classifiedRows = useWorkflowStore((s) => s.classifiedRows)
+  const confirmedSupplierCount = useWorkflowStore((s) => s.confirmedSupplierCount)
+
   const [stats, setStats] = useState<TransactionStats | null>(null)
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [taxonomyNodeCount, setTaxonomyNodeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    if (!projectFilePath) return
     setLoading(true)
     setError(null)
     try {
@@ -31,11 +38,17 @@ export default function DataReviewPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [projectFilePath])
 
   useEffect(() => {
+    if (!projectFilePath) {
+      setStats(null)
+      setSuppliers([])
+      setTaxonomyNodeCount(0)
+      return
+    }
     loadData()
-  }, [])
+  }, [projectFilePath, totalRows, classifiedRows, confirmedSupplierCount, loadData])
 
   if (loading) {
     return (

@@ -5,6 +5,7 @@ import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import { makeEmptyGroup, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import QCPanel from '../components/qc/QCPanel'
 import type { ClassificationProgress } from '../../shared/types/classification'
 import type { FieldDefinition, GroupedFilter, FilterOperator } from '../../shared/types/transactions'
@@ -45,6 +46,8 @@ const PRESET_LABELS: Record<ScopePreset, string> = {
 
 export default function ClassificationPage() {
   const storeProgress = useWorkflowStore((s) => s.classificationProgress)
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
+  const columnsLength = useWorkflowStore((s) => s.columns.length)
   // Tab state
   const [activeTab, setActiveTab] = useState<ActiveTab>('classification')
 
@@ -58,10 +61,11 @@ export default function ClassificationPage() {
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
   const [filterModalOpen, setFilterModalOpen] = useState(false)
 
-  // Load filter fields on mount
+  // Load filter fields on mount and when project/columns change
   useEffect(() => {
-    ipc.transactions.getFilterFields().then(setFilterFields).catch(console.error)
-  }, [])
+    if (!projectFilePath) { setFilterFields([]); return }
+    ipc.transactions.getFilterFields().then(setFilterFields).catch((e) => showError('Failed to load filter fields', e))
+  }, [projectFilePath, columnsLength])
 
   // Sync local state from the store.
   useEffect(() => {

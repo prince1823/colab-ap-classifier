@@ -8,6 +8,7 @@ import type {
   ResearchAgent,
   ColumnMappingAgent,
   FeedbackAgent,
+  CatAAgent,
   IAppConfigService,
   ILicenseService,
   ChangelogStore as IChangelogStore,
@@ -34,6 +35,7 @@ import { LLMClassificationAgent } from './agents/classification-agent';
 import { LLMResearchAgent } from './agents/research-agent';
 import { LLMColumnMappingAgent } from './agents/column-mapping-agent';
 import { LLMFeedbackAgent } from './agents/feedback-agent';
+import { LLMCatAAgent } from './agents/cat-a-agent';
 import { LLMQCAgent } from './agents/qc-agent';
 import { ChangelogStore } from './services/changelog';
 import { TransactionStore } from './services/transactions';
@@ -62,6 +64,7 @@ export interface ServiceContainer {
   researchAgent: ResearchAgent;
   columnMappingAgent: ColumnMappingAgent;
   feedbackAgent: FeedbackAgent;
+  catAAgent: CatAAgent;
   // Data
   changelog: IChangelogStore;
   transactions: ITransactionStore;
@@ -91,32 +94,34 @@ export function createContainer(): ServiceContainer {
   const researchAgent = new LLMResearchAgent(llm);
   const columnMappingAgent = new LLMColumnMappingAgent(llm);
   const feedbackAgent = new LLMFeedbackAgent(llm);
+  const catAAgent: CatAAgent = new LLMCatAAgent(llm);
   const qcAgent: IQCAgent = new LLMQCAgent(llm);
 
   // Data layer (order matters — respect dependency graph)
   const changelog = new ChangelogStore(db);
   const transactions = new TransactionStore(db, changelog);
   const project = new ProjectStore(db, transactions, supplierUniverse);
+  transactions.setProjectStore(project); // break circular dep: project → transactions; transactions lazily references project
   const taxonomy = new TaxonomyStore(db, project);
   const suppliers = new SupplierService(db, supplierUniverse);
   const rules = new RuleStore(db, transactions, project);
-  const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent, eventBus);
+  const ingest = new IngestService(db, transactions, suppliers, project, columnMappingAgent, eventBus);
   const exportSvc = new ExportService(db);
 
   // Orchestrators
   const researcher = new SupplierResearcher(
     supplierUniverse, webSearch, researchAgent, eventBus, suppliers,
-    classificationAgent, db
+    classificationAgent, transactions, catAAgent, taxonomy, rules
   );
   const classifier = new ClassificationRunner(
     db, taxonomy, project, rules,
-    transactions, changelog, classificationAgent, eventBus, supplierUniverse
+    transactions, changelog, classificationAgent, eventBus, supplierUniverse, suppliers
   );
-  const qc = new QCRunner(db, transactions, eventBus, qcAgent, supplierUniverse, project, taxonomy);
+  const qc = new QCRunner(db, transactions, eventBus, qcAgent, supplierUniverse, project, taxonomy, suppliers);
 
   return {
     db, supplierUniverse, eventBus, llm, appConfig, webSearch, license,
-    classificationAgent, researchAgent, columnMappingAgent, feedbackAgent,
+    classificationAgent, researchAgent, columnMappingAgent, feedbackAgent, catAAgent,
     changelog, transactions, project, taxonomy, suppliers, rules,
     ingest, export: exportSvc, researcher, classifier, qc,
   };

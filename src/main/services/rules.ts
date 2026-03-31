@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactionStore, ProjectStore as IProjectStore } from '../../shared/types/services';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types/rules';
 import type { GroupedFilter } from '../../shared/types/transactions';
+import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 
 interface RuleRow {
   id: string;
@@ -12,6 +13,7 @@ interface RuleRow {
   group_priority: number | null;
   is_active: boolean;
   source: string;
+  category_a_supplier: boolean;
   created_at: string;
 }
 
@@ -44,6 +46,7 @@ function rowToRule(row: RuleRow): OverrideRule {
     groupId: row.group_id ?? null,
     isActive: row.is_active,
     source: (row.source ?? 'manual') as RuleSource,
+    categoryASupplier: Boolean(row.category_a_supplier),
     createdAt: row.created_at,
   };
 }
@@ -226,16 +229,25 @@ export class RuleStore implements IRuleStore {
     return { rules: rows.map(rowToRule), total };
   }
 
+  async getRule(id: string): Promise<OverrideRule | null> {
+    const row = await this.db.get<RuleRow>(
+      'SELECT r.*, NULL AS group_priority FROM override_rules r WHERE r.id = ?',
+      id
+    );
+    return row ? rowToRule(row) : null;
+  }
+
   async createRule(input: OverrideRuleCreate): Promise<{ id: string }> {
     const id = uuidv4();
     const groupId = input.groupId ?? null;
     const source = input.source ?? 'manual';
+    const categoryASupplier = input.categoryASupplier ?? false;
 
     await this.db.run(
-      `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, group_id, is_active, source, created_at)
-       VALUES (?, ?, ?, ?, CAST(? AS VARCHAR), TRUE, ?, CURRENT_TIMESTAMP)`,
+      `INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, group_id, is_active, source, category_a_supplier, created_at)
+       VALUES (?, ?, ?, ?, CAST(? AS VARCHAR), TRUE, ?, ?, CURRENT_TIMESTAMP)`,
       id, input.name, JSON.stringify(input.groupedConditions ?? { groupConnector: 'AND', groups: [] }),
-      input.targetTaxonomyNodeId, groupId, source
+      input.targetTaxonomyNodeId, groupId, source, categoryASupplier
     );
 
     return { id };
@@ -256,6 +268,7 @@ export class RuleStore implements IRuleStore {
     if (updates.targetTaxonomyNodeId !== undefined) { setClauses.push('target_taxonomy_node_id = ?'); params.push(updates.targetTaxonomyNodeId); }
     if (updates.isActive !== undefined) { setClauses.push('is_active = ?'); params.push(updates.isActive); }
     if ('groupId' in updates) { setClauses.push('group_id = ?'); params.push(updates.groupId ?? null); }
+    if (updates.categoryASupplier !== undefined) { setClauses.push('category_a_supplier = ?'); params.push(updates.categoryASupplier); }
 
     if (setClauses.length === 0) return;
 
@@ -268,6 +281,10 @@ export class RuleStore implements IRuleStore {
 
   async deleteRule(ruleId: string): Promise<void> {
     await this.db.run('DELETE FROM override_rules WHERE id = ?', ruleId);
+  }
+
+  async setCategoryA(ruleId: string, value: boolean): Promise<void> {
+    await this.updateRule(ruleId, { categoryASupplier: value });
   }
 
   private async listAllRules(): Promise<OverrideRule[]> {
@@ -349,10 +366,11 @@ export class RuleStore implements IRuleStore {
       throw new Error('Column priorities must be configured before generating rules.');
     }
 
-    // 2. Check which columns actually exist on transactions table
-    const VIRTUAL_COLS = new Set(['supplier_name']);
+    // 2. Check which columns actually exist on transactions table.
+    // Exclude virtual columns — they're resolved via JOINs and have no physical presence
+    // on transaction rows, so referencing them as t."col" in SQL would silently return NULL.
     const availableColumns = await this.transactions.getColumns();
-    const validPriorities = columnPriorities.filter(col => availableColumns.includes(col) && !VIRTUAL_COLS.has(col));
+    const validPriorities = columnPriorities.filter(col => availableColumns.includes(col) && !VIRTUAL_COLUMN_NAMES.has(col));
     const hasSpendAmount = availableColumns.includes('spend_amount');
 
     // 3. Build query for eligible transactions
@@ -568,6 +586,21 @@ export class RuleStore implements IRuleStore {
     );
   }
 
+  async getCatARuleForSupplier(supplierName: string): Promise<OverrideRule | null> {
+    const rows = await this.db.all<RuleRow>(
+      'SELECT r.*, NULL AS group_priority FROM override_rules r WHERE r.category_a_supplier = TRUE'
+    );
+    for (const row of rows) {
+      const rule = rowToRule(row);
+      const conditions = rule.groupedConditions.groups.flatMap((g) => g.conditions);
+      const supplierCondition = conditions.find((c) => c.field === 'supplier_name' && c.operator === 'equals');
+      if (supplierCondition && String(supplierCondition.value).toLowerCase() === supplierName.toLowerCase()) {
+        return rule;
+      }
+    }
+    return null;
+  }
+
   async filterAndAssignToGroup(filter: GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }> {
     // Load ALL rules, match server-side, then assign
     const allRules = await this.listAllRules();
@@ -593,7 +626,7 @@ export class RuleStore implements IRuleStore {
 // ─── Server-side rule filter matching ─────────────────────────────────────────
 
 /** Rule property field names — dispatched to property matching instead of condition extraction */
-const RULE_PROPERTY_FIELDS = new Set(['rule_name', 'rule_source', 'rule_is_active', 'rule_group']);
+const RULE_PROPERTY_FIELDS = new Set(['rule_name', 'rule_source', 'rule_is_active', 'rule_group', 'rule_category_a']);
 
 function matchRulePropertyCondition(
   propValue: string | boolean | null,
@@ -601,8 +634,8 @@ function matchRulePropertyCondition(
   filterValue: unknown,
   field: string,
 ): boolean {
-  // Boolean field (rule_is_active)
-  if (field === 'rule_is_active') {
+  // Boolean fields (rule_is_active, rule_category_a)
+  if (field === 'rule_is_active' || field === 'rule_category_a') {
     if (operator === 'is_true')  return propValue === true;
     if (operator === 'is_false') return propValue === false;
     return false;
@@ -672,8 +705,9 @@ function matchesRuleFilter(
       switch (field) {
         case 'rule_name':      propValue = rule.name; break;
         case 'rule_source':    propValue = rule.source; break;
-        case 'rule_is_active': propValue = rule.isActive; break;
-        case 'rule_group':     propValue = rule.groupId ? (groupNameById.get(rule.groupId) ?? null) : null; break;
+        case 'rule_is_active':   propValue = rule.isActive; break;
+        case 'rule_category_a':  propValue = rule.categoryASupplier; break;
+        case 'rule_group':       propValue = rule.groupId ? (groupNameById.get(rule.groupId) ?? null) : null; break;
         default:               propValue = null;
       }
       return matchRulePropertyCondition(propValue, operator, value, field);

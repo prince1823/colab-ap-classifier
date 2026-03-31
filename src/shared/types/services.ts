@@ -1,5 +1,5 @@
 import type { LicenseStatus, LicenseActivationResult } from './license';
-import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput, SupplierParent } from './suppliers';
+import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
@@ -75,6 +75,20 @@ export interface SupplierUniverse {
   getSupplier(name: string): Promise<SupplierInfo | null>;
   getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>>;
   upsertSupplier(name: string, data: Partial<SupplierInfo>): Promise<void>;
+  upsertSupplierFull(name: string, data: {
+    supplierInfo?: Partial<SupplierInfo>;
+    aliases?: string[];
+    parentName?: string | null;
+    mappedTaxonomyPaths?: string[];
+    categoryASupplier?: boolean;
+  }): Promise<void>;
+  getSupplierRecord(name: string): Promise<{
+    supplierInfo: SupplierInfo;
+    aliases: string[];
+    parentName: string | null;
+    mappedTaxonomyPaths: string[];
+    categoryASupplier: boolean;
+  } | null>;
   searchVariants(name: string): Promise<string[]>;
 }
 
@@ -129,6 +143,10 @@ export interface QCAgent {
   review(input: { supplierSummary: string; rules: string }): Promise<QCResult>;
 }
 
+export interface CatAAgent {
+  resolve(mappedPath: string, taxonomyNodes: TaxonomyNode[]): Promise<{ resolvedPath: string }>;
+}
+
 // ─── Data Services ───────────────────────────────────────────────────────────
 
 export interface ProjectStore {
@@ -145,10 +163,12 @@ export interface ProjectStore {
 }
 
 export interface TransactionStore {
+  setProjectStore(project: ProjectStore): void;
   queryTransactions(filters?: TransactionFilter): Promise<Transaction[]>;
   queryTransactionsPaginated(filters?: TransactionFilter): Promise<PaginatedTransactions>;
   getStats(): Promise<TransactionStats>;
   getColumns(): Promise<string[]>;
+  getColumnsForPivot(): Promise<string[]>;
   getFilterFields(): Promise<FieldDefinition[]>;
   getCount(filters?: TransactionFilter): Promise<number>;
   updateTransactions(update: TransactionUpdate, source?: ChangeSource): Promise<string | undefined>;
@@ -161,8 +181,15 @@ export interface TransactionStore {
   getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
   markAllReviewed(): Promise<number>;
   applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
+  getSupplierAddress(supplierId: string): Promise<string | undefined>;
   getSpendByTaxonomy(supplierId: string): Promise<SpendByTaxonomyResult[]>;
   getTransactionsByTaxonomy(supplierId: string, taxonomyNodeId: string, columnPriorities: string[]): Promise<Array<Record<string, unknown>>>;
+  queryBySupplier(supplierId: string, statusFilter?: string | string[]): Promise<Record<string, unknown>[]>;
+  getIdsBySupplier(supplierId: string, options?: {
+    statuses?: string[];
+    excludeTaxonomyNodeId?: string;
+    requireTaxonomyNode?: boolean;
+  }): Promise<string[]>;
 }
 
 export interface TaxonomyStore {
@@ -202,15 +229,23 @@ export interface SupplierService {
   renameParent(parentId: string, newName: string): Promise<void>;
   deleteParent(parentId: string): Promise<void>;
   mergeParents(survivorId: string, losingIds: string[]): Promise<void>;
+  importSupplierCSV(filePath: string, supplierNameColumn: string): Promise<{ created: number; skipped: number }>;
+  // CSV Apply (diff-based)
+  computeCsvDiff(rows: CsvApplyRow[]): Promise<CsvApplyDiff>;
+  applyCsvDiff(diff: CsvApplyDiff): Promise<CsvApplyResult>;
+  // Supplier universe sync
+  syncToUniverse(supplierIds: string[]): Promise<{ synced: number; failed: number; errors: string[] }>;
 }
 
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
   listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
+  getRule(id: string): Promise<OverrideRule | null>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
   createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
+  setCategoryA(ruleId: string, value: boolean): Promise<void>;
   evaluateRules(transactionIds?: string[], ruleIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
   previewRules(ruleIds: string[]): Promise<{ affectedRowCount: number; matchingRuleCount: number }>;
   applyRules(ruleIds: string[]): Promise<{ matchedCount: number; ruleCount: number }>;
@@ -224,6 +259,7 @@ export interface RuleStore {
   moveRuleToGroup(ruleId: string, targetGroupId: string | null): Promise<void>;
   assignToGroup(ruleIds: string[], groupId: string | null): Promise<void>;
   filterAndAssignToGroup(filter: import('./transactions').GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }>;
+  getCatARuleForSupplier(supplierName: string): Promise<OverrideRule | null>;
 }
 
 export interface ChangelogStore {
@@ -240,12 +276,15 @@ export interface IngestService {
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
   importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
   getUploadHistory(): Promise<UploadRecord[]>;
+  getUploadStatsBatch(): Promise<Record<string, { classifiedCount: number }>>;
+  deleteUpload(uploadId: string): Promise<{ deletedRows: number }>;
   deriveMappings(columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource): Promise<DerivedMappings>;
   getExistingCanonicals(): Promise<string[]>;
 }
 
 export interface ExportService {
-  exportCSV(filters?: TransactionFilter): Promise<{ rowsExported: number } | null>;
+  getExportColumns(): Promise<string[]>;
+  exportCSV(filters?: TransactionFilter, selectedColumns?: string[]): Promise<{ rowsExported: number } | null>;
 }
 
 // ─── Orchestrators ───────────────────────────────────────────────────────────
@@ -253,10 +292,10 @@ export interface ExportService {
 export type ResearchProgressCallback = (progress: ResearchProgress) => void;
 
 export interface SupplierResearcher {
-  researchSingle(supplierName: string): Promise<SupplierInfo>;
+  researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>, supplierId?: string): Promise<SupplierInfo>;
   researchAll(supplierIds?: string[], options?: { suppressTerminal?: boolean }): Promise<void>;
-  categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void>;
-  categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[]): Promise<void>;
+  categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<void>;
+  categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], supplierIds?: string[]): Promise<void>;
   cancel(): void;
 }
 

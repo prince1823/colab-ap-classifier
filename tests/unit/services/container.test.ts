@@ -1,4 +1,28 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn().mockReturnValue('/tmp/test-user-data'),
+  },
+  safeStorage: {
+    isEncryptionAvailable: vi.fn().mockReturnValue(false),
+    encryptString: vi.fn((s: string) => Buffer.from(s)),
+    decryptString: vi.fn((b: Buffer) => b.toString()),
+  },
+  dialog: {
+    showSaveDialog: vi.fn(),
+    showOpenDialog: vi.fn(),
+  },
+  ipcMain: {
+    handle: vi.fn(),
+    removeHandler: vi.fn(),
+  },
+  BrowserWindow: {
+    getFocusedWindow: vi.fn(() => null),
+    getAllWindows: vi.fn(() => [{ webContents: { send: vi.fn() } }]),
+  },
+}));
+
 import { createContainer } from '../../../src/main/container';
 import type { ServiceContainer } from '../../../src/main/container';
 
@@ -44,6 +68,6 @@ describe('createContainer', () => {
     expect(keys).toContain('db');
     expect(keys).toContain('transactions');
     expect(keys).toContain('project');
-    expect(keys.length).toBe(18);
+    expect(keys.length).toBe(23);
   });
 });

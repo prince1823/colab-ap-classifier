@@ -6,7 +6,10 @@ import type {
   SupplierResearcher as ISupplierResearcher,
   SupplierService,
   ClassificationAgent,
-  Database,
+  TransactionStore as ITransactionStore,
+  CatAAgent,
+  RuleStore as IRuleStore,
+  TaxonomyStore as ITaxonomyStore,
 } from '../../shared/types/services';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import type { TaxonomyNode } from '../../shared/types/taxonomy';
@@ -33,10 +36,13 @@ export class SupplierResearcher implements ISupplierResearcher {
     private eventBus: EventBus,
     private supplierService: SupplierService,
     private classificationAgent: ClassificationAgent,
-    private db: Database
+    private transactions: ITransactionStore,
+    private catAAgent: CatAAgent,
+    private taxonomyStore: ITaxonomyStore,
+    private ruleStore: IRuleStore,
   ) {}
 
-  async researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>): Promise<SupplierInfo> {
+  async researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>, supplierId?: string): Promise<SupplierInfo> {
     // Check if already researched with substantive info
     const existing = universeCache
       ? (universeCache.get(supplierName) ?? null)
@@ -48,8 +54,10 @@ export class SupplierResearcher implements ISupplierResearcher {
       }
     }
 
-    // Get supplier address if available
-    const address = existing?.supplierAddress;
+    // Get supplier address from transactions (CSV-imported, authoritative)
+    const address = supplierId
+      ? await this.transactions.getSupplierAddress(supplierId)
+      : undefined;
 
     // Search web for enrichment
     let searchResults: Array<{ title: string; url: string; text: string }> = [];
@@ -81,9 +89,6 @@ export class SupplierResearcher implements ISupplierResearcher {
       if (heuristicType) result.supplierType = heuristicType;
     }
 
-    // Store results
-    await this.supplierUniverse.upsertSupplier(supplierName, result);
-
     return result;
   }
 
@@ -104,7 +109,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     };
 
     // Gather candidates
-    let candidates: Array<{ id: string; supplierName: string }>;
+    let candidates: Array<{ id: string; supplierName: string; categoryASupplier: boolean; mappedTaxonomyPaths: string[] | null }>;
     if (supplierIds && supplierIds.length > 0) {
       const fetched = await Promise.all(supplierIds.map((id) => this.supplierService.getProjectSupplier(id)));
       candidates = fetched.filter(
@@ -128,6 +133,9 @@ export class SupplierResearcher implements ISupplierResearcher {
       candidates.map((c) => c.supplierName)
     );
 
+    // Pre-fetch taxonomy nodes once for cat A resolution
+    const taxonomyNodes = await this.taxonomyStore.getNodes();
+
     let completed = 0;
     const queue = [...candidates];
 
@@ -138,16 +146,35 @@ export class SupplierResearcher implements ISupplierResearcher {
         if (!supplier) break;
 
         try {
-          const info = await this.researchSingle(supplier.supplierName, universeCache);
+          const info = await this.researchSingle(supplier.supplierName, universeCache, supplier.id);
 
           try {
-            if (info.parentCompanyName) {
-              const existing = await this.supplierService.findParentByName(info.parentCompanyName);
-              const parent = existing ?? (await this.supplierService.addParent(info.parentCompanyName));
+            // Check universe for richer data (taxonomy, parent) beyond just SupplierInfo
+            const universeRecord = await this.supplierUniverse.getSupplierRecord(supplier.supplierName);
+            const parentName = info.parentCompanyName || universeRecord?.parentName;
+
+            if (parentName) {
+              const existing = await this.supplierService.findParentByName(parentName);
+              const parent = existing ?? (await this.supplierService.addParent(parentName));
               await this.supplierService.assignParent([supplier.id], parent.id);
             }
             // Merge supplierInfo write + markResearched into a single UPDATE
-            await this.supplierService.updateSupplier(supplier.id, { supplierInfo: info, markResearched: true });
+            const updatePayload: { supplierInfo: SupplierInfo; markResearched: true; mappedTaxonomyPaths?: string[] } = {
+              supplierInfo: info,
+              markResearched: true,
+            };
+            if (universeRecord?.mappedTaxonomyPaths?.length) {
+              updatePayload.mappedTaxonomyPaths = universeRecord.mappedTaxonomyPaths;
+            }
+            await this.supplierService.updateSupplier(supplier.id, updatePayload);
+
+            // Resolve cat A mappings if supplier is flagged (check both project and universe)
+            if (supplier.categoryASupplier || universeRecord?.categoryASupplier) {
+              const paths = updatePayload.mappedTaxonomyPaths ?? supplier.mappedTaxonomyPaths ?? [];
+              if (paths.length > 0) {
+                await this.resolveCatASupplier(supplier.id, supplier.supplierName, paths, taxonomyNodes);
+              }
+            }
           } catch (updateErr) {
             console.error(`[Research] Failed to persist info for "${supplier.supplierName}":`, updateErr);
             // Still mark researched even if info write failed
@@ -183,13 +210,14 @@ export class SupplierResearcher implements ISupplierResearcher {
    * Categorize non-tail-spend suppliers that have supplier_info but no l1_l2_path.
    * Uses the existing selectCategories agent method.
    */
-  async categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext): Promise<void> {
+  async categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<void> {
     if (this.isCancelled) return;
 
     // Fetch candidates: non-tail-spend, has supplier_info, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
+    const idSet = supplierIds ? new Set(supplierIds) : null;
     const candidates = allSuppliers.filter(
-      (s) => !s.isTailSpend && s.supplierInfo !== null && s.l1L2Path === null
+      (s) => !s.isTailSpend && s.supplierInfo !== null && s.l1L2Path === null && (!idSet || idSet.has(s.id))
     );
 
     if (candidates.length === 0) return;
@@ -259,14 +287,16 @@ export class SupplierResearcher implements ISupplierResearcher {
   async categorizeTailSpend(
     taxonomy: TaxonomyNode[],
     companyContext: CompanyContext,
-    columnPriorities: string[]
+    columnPriorities: string[],
+    supplierIds?: string[]
   ): Promise<void> {
     if (this.isCancelled) return;
 
     // Fetch candidates: tail spend, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
+    const idSet = supplierIds ? new Set(supplierIds) : null;
     const tailSpendSuppliers = allSuppliers.filter(
-      (s) => s.isTailSpend && s.l1L2Path === null
+      (s) => s.isTailSpend && s.l1L2Path === null && (!idSet || idSet.has(s.id))
     );
 
     if (tailSpendSuppliers.length === 0) return;
@@ -389,10 +419,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     supplierId: string,
     columnPriorities: string[]
   ): Promise<Array<Record<string, unknown>>> {
-    const txns = await this.db.all<Record<string, unknown>>(
-      'SELECT * FROM transactions WHERE project_supplier_id = ?',
-      supplierId
-    );
+    const txns = await this.transactions.queryBySupplier(supplierId);
 
     // Clean descriptions and inject supplier name
     const supplier = await this.supplierService.getProjectSupplier(supplierId);
@@ -404,6 +431,55 @@ export class SupplierResearcher implements ISupplierResearcher {
       if (supplier) cleaned.supplier_name = supplier.supplierName;
       return cleaned;
     });
+  }
+
+  /**
+   * For each mapped taxonomy path on a cat A supplier, resolve it to a project taxonomy node
+   * and create an override rule with source 'supplier_universe' and category_a_supplier = true.
+   */
+  private async resolveCatASupplier(
+    supplierId: string,
+    supplierName: string,
+    mappedPaths: string[],
+    taxonomyNodes: import('../../shared/types/taxonomy').TaxonomyNode[],
+  ): Promise<void> {
+    // One cat A rule per supplier — skip silently if one already exists
+    const existingCatARule = await this.ruleStore.getCatARuleForSupplier(supplierName);
+    if (existingCatARule) {
+      return;
+    }
+
+    // Try each mapped path in order; create a rule for the first successful resolution
+    for (const mappedPath of mappedPaths) {
+      try {
+        const { resolvedPath } = await this.catAAgent.resolve(mappedPath, taxonomyNodes);
+        const node = taxonomyNodes.find((n) => n.fullPath === resolvedPath);
+        if (!node) {
+          console.warn(`[CatA] Resolved path "${resolvedPath}" not found in taxonomy for supplier "${supplierName}" — skipping`);
+          continue;
+        }
+        await this.ruleStore.createRule({
+          name: `[Cat A] ${supplierName}`,
+          groupedConditions: {
+            groupConnector: 'AND',
+            groups: [{
+              connector: 'AND',
+              conditions: [{ field: 'supplier_name', operator: 'equals', value: supplierName }],
+            }],
+          },
+          targetTaxonomyNodeId: node.id,
+          source: 'supplier_universe',
+          categoryASupplier: true,
+        });
+        // Stop after first successful rule creation
+        break;
+      } catch (err) {
+        console.error(`[CatA] Failed to resolve path "${mappedPath}" for supplier "${supplierName}":`, err);
+      }
+    }
+
+    // Mark the project supplier as category A
+    await this.supplierService.updateSupplier(supplierId, { categoryASupplier: true });
   }
 
   cancel(): void {

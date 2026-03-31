@@ -9,6 +9,7 @@ import type {
   ResearchAgent,
   ColumnMappingAgent,
   QCAgent,
+  CatAAgent,
   ProjectStore,
   TransactionStore,
   TaxonomyStore,
@@ -40,7 +41,7 @@ export function createMockDatabase(): Database {
 
 export function createMockSupplierUniverse(): SupplierUniverse {
   return {
-    open: vi.fn(),
+    open: vi.fn().mockResolvedValue({ created: false }),
     close: vi.fn(),
     isOpen: vi.fn().mockReturnValue(true),
     configure: vi.fn(),
@@ -48,6 +49,14 @@ export function createMockSupplierUniverse(): SupplierUniverse {
     getSupplier: vi.fn().mockResolvedValue(null),
     getSuppliersByNames: vi.fn().mockResolvedValue(new Map()),
     upsertSupplier: vi.fn(),
+    upsertSupplierFull: vi.fn(),
+    getSupplierRecord: vi.fn().mockResolvedValue(null as {
+      supplierInfo: import('../../src/shared/types/suppliers').SupplierInfo;
+      aliases: string[];
+      parentName: string | null;
+      mappedTaxonomyPaths: string[];
+      categoryASupplier: boolean;
+    } | null),
     searchVariants: vi.fn().mockResolvedValue([]),
   };
 }
@@ -117,6 +126,12 @@ export function createMockQCAgent(): QCAgent {
   };
 }
 
+export function createMockCatAAgent(): CatAAgent {
+  return {
+    resolve: vi.fn().mockResolvedValue({ resolvedPath: 'L1|L2|L3' }),
+  };
+}
+
 export function createMockProjectStore(): ProjectStore {
   return {
     createProject: vi.fn().mockResolvedValue({ filePath: '/test.c91', name: 'Test' }),
@@ -134,18 +149,23 @@ export function createMockProjectStore(): ProjectStore {
 
 export function createMockTransactionStore(): TransactionStore {
   return {
+    setProjectStore: vi.fn(),
     queryTransactions: vi.fn().mockResolvedValue([]),
     queryTransactionsPaginated: vi.fn().mockResolvedValue({ rows: [], totalCount: 0, page: 1, pageSize: 50 }),
     getStats: vi.fn().mockResolvedValue({ totalRows: 0, totalSpend: 0, uniqueSuppliers: 0, classifiedRows: 0, unclassifiedRows: 0 }),
     getColumns: vi.fn().mockResolvedValue([]),
+    getColumnsForPivot: vi.fn().mockResolvedValue([]),
     getCount: vi.fn().mockResolvedValue(0),
     updateTransactions: vi.fn(),
     invalidateColumnCache: vi.fn(),
     getIdsByConditions: vi.fn().mockResolvedValue([]),
     getIdsByGroupedConditions: vi.fn().mockResolvedValue([]),
     applyRule: vi.fn().mockResolvedValue(0),
+    getSupplierAddress: vi.fn().mockResolvedValue(undefined),
     getSpendByTaxonomy: vi.fn().mockResolvedValue([]),
     getTransactionsByTaxonomy: vi.fn().mockResolvedValue([]),
+    queryBySupplier: vi.fn().mockResolvedValue([]),
+    getIdsBySupplier: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -187,18 +207,32 @@ export function createMockSupplierService(): SupplierService {
     renameParent: vi.fn(),
     deleteParent: vi.fn(),
     mergeParents: vi.fn(),
+    syncToUniverse: vi.fn().mockResolvedValue({ synced: 0, failed: 0, errors: [] }),
   };
 }
 
 export function createMockRuleStore(): RuleStore {
   return {
     listRules: vi.fn().mockResolvedValue([]),
+    listRulesPaginated: vi.fn().mockResolvedValue({ rules: [], total: 0 }),
+    getRule: vi.fn().mockResolvedValue(null),
     createRule: vi.fn().mockResolvedValue({ id: 'rule-1' }),
     createAndApplyRule: vi.fn().mockResolvedValue({ id: 'rule-1', matchedCount: 0 }),
     updateRule: vi.fn(),
     deleteRule: vi.fn(),
     evaluateRules: vi.fn().mockResolvedValue(new Map()),
-    generate_rules_preview: vi.fn().mockResolvedValue({ rules: [] }),
+    previewRules: vi.fn().mockResolvedValue({ affectedRowCount: 0, matchingRuleCount: 0 }),
+    applyRules: vi.fn().mockResolvedValue({ matchedCount: 0, ruleCount: 0 }),
+    generate_rules_preview: vi.fn().mockResolvedValue({ rulesCreated: 0, suppliersProcessed: 0 }),
+    listGroups: vi.fn().mockResolvedValue([]),
+    createGroup: vi.fn().mockResolvedValue({ id: 'group-1' }),
+    updateGroup: vi.fn(),
+    deleteGroup: vi.fn(),
+    reorderGroups: vi.fn(),
+    moveRuleToGroup: vi.fn(),
+    assignToGroup: vi.fn(),
+    filterAndAssignToGroup: vi.fn().mockResolvedValue({ matched: 0 }),
+    getCatARuleForSupplier: vi.fn().mockResolvedValue(null),
   };
 }
 
@@ -218,6 +252,8 @@ export function createMockIngestService(): IngestService {
     getStoredMappings: vi.fn().mockResolvedValue(null),
     importCSV: vi.fn().mockResolvedValue({ rowsInserted: 0, uploadId: 'upload-1' }),
     getUploadHistory: vi.fn().mockResolvedValue([]),
+    getUploadStatsBatch: vi.fn().mockResolvedValue({}),
+    deleteUpload: vi.fn().mockResolvedValue({ deletedRows: 0 }),
   };
 }
 

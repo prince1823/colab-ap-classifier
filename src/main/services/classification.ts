@@ -9,6 +9,7 @@ import type {
   EventBus,
   ClassificationRunner as IClassificationRunner,
   SupplierUniverse,
+  SupplierService as ISupplierService,
 } from '../../shared/types/services';
 import type { TaxonomyNode } from '../../shared/types';
 import type { CompanyContext } from '../../shared/types/project';
@@ -17,6 +18,7 @@ import type { GroupedFilter } from '../../shared/types/transactions';
 import type { SupplierInfo } from '../../shared/types/suppliers';
 import { cleanDescription } from '../utils/text';
 import { buildDedupGroups, batchDedupGroups, extractSubBatch, extractFields } from '../utils/dedup-groups';
+import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import { runPool } from '../utils/concurrency-pool';
 import { debugLog } from '../utils/debug-log';
 
@@ -37,7 +39,8 @@ export class ClassificationRunner implements IClassificationRunner {
     private changelog: IChangelogStore,
     private classificationAgent: ClassificationAgent,
     private eventBus: EventBus,
-    private supplierUniverse: SupplierUniverse
+    private supplierUniverse: SupplierUniverse,
+    private suppliers: ISupplierService
   ) {}
 
   private emitProgress(progress: ClassificationProgress): void {
@@ -160,10 +163,14 @@ export class ClassificationRunner implements IClassificationRunner {
         companyContext = { industry: 'Unknown' };
       }
 
-      const columnPriorities = await this.project.getSetting('column_priorities') as string[] | null;
-      if (!columnPriorities || columnPriorities.length === 0) {
+      const rawColumnPriorities = await this.project.getSetting('column_priorities') as string[] | null;
+      if (!rawColumnPriorities || rawColumnPriorities.length === 0) {
         throw new Error('Column priorities must be configured before classification. Set column_priorities in project settings.');
       }
+
+      // Strip virtual columns — they have no physical presence on transaction rows and cannot
+      // contribute to dedup groups. This is a safety net for projects saved before this fix.
+      const columnPriorities = rawColumnPriorities.filter((col) => !VIRTUAL_COLUMN_NAMES.has(col));
 
       const availableColumns = await this.transactions.getColumns();
       const invalidColumns = columnPriorities.filter((col) => !availableColumns.includes(col));
@@ -358,7 +365,6 @@ export class ClassificationRunner implements IClassificationRunner {
                 if (typeof cleaned.gl_description === 'string') {
                   cleaned.gl_description = cleanDescription(cleaned.gl_description);
                 }
-                cleaned.supplier_name = supplier.supplier_name;
                 return cleaned;
               });
 
@@ -511,28 +517,21 @@ export class ClassificationRunner implements IClassificationRunner {
     const txnRows = await this.getUnmatchedTransactions(projectSupplierId, scopedTxnIds);
     if (txnRows.length === 0) return;
 
-    // Resolve supplier info
-    const supplierInfo = await this.db.get<{ supplier_name: string; parent_name: string | null }>(
-      `SELECT ps.supplier_name, sp.name AS parent_name
-       FROM project_suppliers ps
-       LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id
-       WHERE ps.id = ?`,
-      projectSupplierId
-    );
-    const supplierName = supplierInfo?.supplier_name ?? '';
+    // Resolve supplier info via service (includes parent name via JOIN)
+    const projectSupplier = await this.suppliers.getProjectSupplier(projectSupplierId);
+    const supplierName = projectSupplier?.supplierName ?? '';
 
     let supplierResearch: SupplierInfo | null = null;
     if (supplierName) {
       supplierResearch = await this.supplierUniverse.getSupplier(supplierName);
     }
 
-    // Clean descriptions and inject canonical supplier_name
+    // Clean descriptions — supplier name is passed separately to the agent, not via row data
     const cleanedTxns = txnRows.map((txn) => {
       const cleaned = { ...txn };
       if (typeof cleaned.gl_description === 'string') {
         cleaned.gl_description = cleanDescription(cleaned.gl_description);
       }
-      if (supplierName) cleaned.supplier_name = supplierName;
       return cleaned;
     });
 
@@ -626,52 +625,36 @@ export class ClassificationRunner implements IClassificationRunner {
     scopedTxnIds: Set<string> | null
   ): Promise<Record<string, unknown>[]> {
     if (scopedTxnIds) {
-      const allTxns = await this.db.all<Record<string, unknown>>(
-        `SELECT * FROM transactions WHERE project_supplier_id = ?`,
-        projectSupplierId
-      );
+      const allTxns = await this.transactions.queryBySupplier(projectSupplierId);
       return allTxns.filter((r) => scopedTxnIds.has(String(r.id)));
     }
-    return this.db.all<Record<string, unknown>>(
-      `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-      projectSupplierId
-    );
+    return this.transactions.queryBySupplier(projectSupplierId, 'unclassified');
   }
 
   private async getUnmatchedTransactions(
     projectSupplierId: string,
     scopedTxnIds?: Set<string>
   ): Promise<Record<string, unknown>[]> {
-    // Get transactions that are still unclassified (after rules have been applied)
+    const allTxns = await this.transactions.queryBySupplier(projectSupplierId, 'unclassified');
     if (scopedTxnIds) {
-      const allTxns = await this.db.all<Record<string, unknown>>(
-        `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-        projectSupplierId
-      );
       return allTxns.filter((r) => scopedTxnIds.has(String(r.id)));
     }
-    return this.db.all<Record<string, unknown>>(
-      `SELECT * FROM transactions WHERE project_supplier_id = ? AND classification_status = 'unclassified'`,
-      projectSupplierId
-    );
+    return allTxns;
   }
 
   private async markSupplierError(projectSupplierId: string, scopedIds: Set<string> | null): Promise<void> {
-    let failedQuery = `SELECT id FROM transactions WHERE project_supplier_id = ?`;
-    const failedParams: unknown[] = [projectSupplierId];
-
+    let failedIds: string[];
     if (scopedIds) {
-      const supplierScopedIds = Array.from(scopedIds);
-      failedQuery += ` AND id IN (${supplierScopedIds.map(() => '?').join(',')})`;
-      failedParams.push(...supplierScopedIds);
+      // Get all transactions for the supplier, then intersect with scoped IDs
+      const allIds = await this.transactions.getIdsBySupplier(projectSupplierId);
+      failedIds = allIds.filter((id) => scopedIds.has(id));
     } else {
-      failedQuery += ` AND classification_status = 'unclassified'`;
+      failedIds = await this.transactions.getIdsBySupplier(projectSupplierId, { statuses: ['unclassified'] });
     }
 
-    const failedTxns = await this.db.all<{ id: string }>(failedQuery, ...failedParams);
-    if (failedTxns.length > 0) {
+    if (failedIds.length > 0) {
       await this.transactions.updateTransactions(
-        { ids: failedTxns.map((t) => t.id), classificationStatus: 'classification_error' },
+        { ids: failedIds, classificationStatus: 'classification_error' },
         'pipeline'
       );
     }

@@ -11,6 +11,7 @@ import ClassificationView from '../views/ClassificationView'
 import ReviewView from '../views/ReviewView'
 import OverrideRulesView from '../views/OverrideRulesView'
 import VersionHistoryView from '../views/VersionHistoryView'
+import SyncToUniverseView from '../views/SyncToUniverseView'
 
 /** Route config for keep-alive rendering */
 const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
@@ -22,11 +23,12 @@ const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
   { path: '/review', element: <ReviewView /> },
   { path: '/override-rules', element: <OverrideRulesView /> },
   { path: '/version-history', element: <VersionHistoryView /> },
+  { path: '/sync-to-universe', element: <SyncToUniverseView /> },
 ]
 
 export default function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const { subscribeToClassificationProgress, subscribeToResearchProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress } = useWorkflowStore()
+  const { subscribeToClassificationProgress, subscribeToResearchProgress, subscribeToQCProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress } = useWorkflowStore()
   const location = useLocation()
   // Track which routes have been visited so we mount them once and keep them alive
   const [visitedRoutes, setVisitedRoutes] = useState<Set<string>>(new Set([location.pathname]))
@@ -83,6 +85,13 @@ export default function AppShell() {
     const unsubscribe = subscribeToResearchProgress()
     return unsubscribe
   }, [hasProject, subscribeToResearchProgress])
+
+  // Subscribe to QC progress events when a project is open
+  useEffect(() => {
+    if (!hasProject) return
+    const unsubscribe = subscribeToQCProgress()
+    return unsubscribe
+  }, [hasProject, subscribeToQCProgress])
 
   // Show research progress on non-supplier pages
   const showGlobalResearchProgress = researchProgress?.status === 'running' && location.pathname !== '/suppliers'
@@ -145,13 +154,15 @@ export default function AppShell() {
                   : researchProgress.currentStep
                 }
               </span>
-              <span className="text-blue-600">
-                {researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}
-              </span>
+              {researchProgress.totalSuppliers > 0 && (
+                <span className="text-blue-600">
+                  {researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}
+                </span>
+              )}
               <div className="ml-auto h-1.5 w-32 overflow-hidden rounded-full bg-blue-200">
                 <div
                   className="h-full rounded-full bg-blue-600 transition-all"
-                  style={{ width: `${(researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100}%` }}
+                  style={{ width: `${researchProgress.totalSuppliers > 0 ? (researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100 : 0}%` }}
                 />
               </div>
             </div>

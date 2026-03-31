@@ -197,4 +197,362 @@ describe('SupplierService', () => {
       );
     });
   });
+
+  // ── computeCsvDiff ──────────────────────────────────────────────────────────
+  // DB state is set via two sequential db.all calls:
+  //   1st: aliasRows  — transactions JOIN project_suppliers (alias → supplier mapping)
+  //   2nd: parentRows — supplier_parents table
+
+  describe('computeCsvDiff', () => {
+    type AliasRow = {
+      original_supplier_name: string;
+      project_supplier_id: string;
+      supplier_name: string;
+      parent_supplier_id: string | null;
+      parent_name: string | null;
+    };
+    type ParentRow = { id: string; name: string };
+
+    function setupDb(aliasRows: AliasRow[], parentRows: ParentRow[] = []) {
+      vi.mocked(db.all)
+        .mockResolvedValueOnce(aliasRows)
+        .mockResolvedValueOnce(parentRows);
+    }
+
+    it('detects a supplier rename', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corporation', aliases: ['ACME CORP'], parentName: null },
+      ]);
+
+      expect(diff.renames).toHaveLength(1);
+      expect(diff.renames[0]).toMatchObject({ supplierId: 's1', oldName: 'Acme Corp', newName: 'Acme Corporation' });
+      expect(diff.merges).toHaveLength(0);
+      expect(diff.aliasReassignments).toHaveLength(0);
+    });
+
+    it('detects no changes when CSV exactly matches DB', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: null },
+      ]);
+
+      expect(diff.renames).toHaveLength(0);
+      expect(diff.merges).toHaveLength(0);
+      expect(diff.aliasReassignments).toHaveLength(0);
+      expect(diff.parentChanges).toHaveLength(0);
+      expect(diff.warnings.missingAliases).toHaveLength(0);
+    });
+
+    it('detects a supplier merge, picking the name-matching supplier as survivor', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'ACME CORPORATION', project_supplier_id: 's2', supplier_name: 'Acme Corporation', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corporation', aliases: ['ACME CORP', 'ACME CORPORATION'], parentName: null },
+      ]);
+
+      expect(diff.merges).toHaveLength(1);
+      expect(diff.merges[0].survivorId).toBe('s2'); // name matches CSV
+      expect(diff.merges[0].loserIds).toEqual(['s1']);
+      expect(diff.renames).toHaveLength(0);
+    });
+
+    it('emits a retained alias warning when an alias is absent from the CSV', async () => {
+      // DB: s1 has two aliases; CSV row for s1 only lists one
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'ACME CORP LLC', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: null },
+      ]);
+
+      expect(diff.warnings.missingAliases).toHaveLength(1);
+      expect(diff.warnings.missingAliases[0]).toMatchObject({
+        alias: 'ACME CORP LLC',
+        supplierName: 'Acme Corp',
+      });
+    });
+
+    it('does NOT emit a retained alias warning when the absent alias appears on another row (move via merge)', async () => {
+      // DB: s1 "Acme" has one alias ["ACME LEGACY"], s2 "Beta" has ["BETA"]
+      // User moves "ACME LEGACY" to Beta's CSV row; Acme's row has no known aliases (unmatchable)
+      // → Beta's row touches {s2, s1} → merge (s1 loser). "ACME LEGACY" is in csvAliasToRowIndex,
+      //   so no retained alias warning is emitted for it.
+      setupDb([
+        { original_supplier_name: 'ACME LEGACY', project_supplier_id: 's1', supplier_name: 'Acme', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'BETA', project_supplier_id: 's2', supplier_name: 'Beta', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme', aliases: [], parentName: null },           // no known aliases → unmatchable
+        { supplierName: 'Beta', aliases: ['BETA', 'ACME LEGACY'], parentName: null },
+      ]);
+
+      expect(diff.warnings.missingAliases).toHaveLength(0);
+      // The move is captured as a merge (s1 absorbed into s2)
+      expect(diff.merges).toHaveLength(1);
+      expect(diff.merges[0]).toMatchObject({ survivorId: 's2', loserIds: ['s1'] });
+    });
+
+    it('warns about unknown aliases (in CSV but not in DB)', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP', 'ACME NEW ENTITY'], parentName: null },
+      ]);
+
+      expect(diff.warnings.unknownAliases).toHaveLength(1);
+      expect(diff.warnings.unknownAliases[0]).toMatchObject({
+        alias: 'ACME NEW ENTITY',
+        csvSupplierName: 'Acme Corp',
+      });
+    });
+
+    it('warns about unmatchable rows when all aliases are unknown', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'New Supplier', aliases: ['NEW SUPPLIER INC'], parentName: null },
+      ]);
+
+      expect(diff.warnings.unmatchableRows).toHaveLength(1);
+      expect(diff.warnings.unmatchableRows[0].supplierName).toBe('New Supplier');
+    });
+
+    it('throws when the same alias appears in two CSV rows', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'BETA', project_supplier_id: 's2', supplier_name: 'Beta', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      await expect(service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: null },
+        { supplierName: 'Duplicate', aliases: ['ACME CORP'], parentName: null },
+      ])).rejects.toThrow('appears in both');
+    });
+
+    it('detects a parent creation when CSV parent name is new', async () => {
+      setupDb(
+        [{ original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null }],
+        [] // no existing parents
+      );
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: 'Acme Group' },
+      ]);
+
+      expect(diff.parentCreations).toHaveLength(1);
+      expect(diff.parentCreations[0].name).toBe('Acme Group');
+      expect(diff.parentChanges).toHaveLength(1);
+      expect(diff.parentChanges[0]).toMatchObject({
+        supplierId: 's1',
+        oldParentName: null,
+        newParentName: 'Acme Group',
+      });
+    });
+
+    it('detects a parent rename when all suppliers under a DB parent move to a new name', async () => {
+      setupDb(
+        [{ original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: 'p1', parent_name: 'Acme Holdings' }],
+        [{ id: 'p1', name: 'Acme Holdings' }]
+      );
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: 'Acme Group' },
+      ]);
+
+      expect(diff.parentRenames).toHaveLength(1);
+      expect(diff.parentRenames[0]).toMatchObject({ parentId: 'p1', oldName: 'Acme Holdings', newName: 'Acme Group' });
+    });
+
+    it('detects a parent assignment change when supplier parent is updated', async () => {
+      setupDb(
+        [{ original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: 'p1', parent_name: 'Old Group' }],
+        [{ id: 'p1', name: 'Old Group' }, { id: 'p2', name: 'New Group' }]
+      );
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: 'New Group' },
+      ]);
+
+      expect(diff.parentChanges).toHaveLength(1);
+      expect(diff.parentChanges[0]).toMatchObject({
+        supplierId: 's1',
+        oldParentName: 'Old Group',
+        newParentName: 'New Group',
+      });
+    });
+
+    it('detects parent removal when supplier parent is cleared in CSV', async () => {
+      setupDb(
+        [{ original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: 'p1', parent_name: 'Acme Group' }],
+        [{ id: 'p1', name: 'Acme Group' }]
+      );
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: null },
+      ]);
+
+      expect(diff.parentChanges).toHaveLength(1);
+      expect(diff.parentChanges[0]).toMatchObject({
+        supplierId: 's1',
+        oldParentName: 'Acme Group',
+        newParentName: null,
+      });
+    });
+
+    it('detects a parent merge when two DB parents map to the same CSV parent name', async () => {
+      setupDb(
+        [
+          { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: 'p1', parent_name: 'Acme Group' },
+          { original_supplier_name: 'ACME HOLDINGS', project_supplier_id: 's2', supplier_name: 'Acme Holdings', parent_supplier_id: 'p2', parent_name: 'Acme Holdings Group' },
+        ],
+        [{ id: 'p1', name: 'Acme Group' }, { id: 'p2', name: 'Acme Holdings Group' }]
+      );
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: 'Acme Group' },
+        { supplierName: 'Acme Holdings', aliases: ['ACME HOLDINGS'], parentName: 'Acme Group' },
+      ]);
+
+      expect(diff.parentMerges).toHaveLength(1);
+      expect(diff.parentMerges[0].loserIds).toContain('p2');
+    });
+
+    it('emits missingAliases when entire supplier is absent from the CSV', async () => {
+      // DB: s1 and s2 exist; CSV only includes s1 → s2's alias is missing
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'BETA INC', project_supplier_id: 's2', supplier_name: 'Beta Inc', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: null },
+      ]);
+
+      expect(diff.warnings.missingAliases).toHaveLength(1);
+      expect(diff.warnings.missingAliases[0]).toMatchObject({
+        alias: 'BETA INC',
+        supplierName: 'Beta Inc',
+      });
+    });
+
+    it('no missingAliases when all DB aliases are in the CSV', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'BETA INC', project_supplier_id: 's2', supplier_name: 'Beta Inc', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: null },
+        { supplierName: 'Beta Inc', aliases: ['BETA INC'], parentName: null },
+      ]);
+
+      expect(diff.warnings.missingAliases).toHaveLength(0);
+    });
+
+    it('missing alias warning fires even with no diff ops', async () => {
+      // Supplier has two aliases; CSV only lists one → warning fires even though there are no diff ops
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'ACME CORP LLC', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corp', aliases: ['ACME CORP'], parentName: null },
+      ]);
+
+      expect(diff.renames).toHaveLength(0);
+      expect(diff.merges).toHaveLength(0);
+      expect(diff.warnings.missingAliases).toHaveLength(1);
+    });
+  });
+
+  describe('syncToUniverse', () => {
+    it('should pass categoryASupplier to upsertSupplierFull', async () => {
+      // getProjectSupplier query
+      vi.mocked(db.get).mockResolvedValue({
+        id: 'sup1',
+        supplier_name: 'Acme',
+        confirmation_status: 'pending',
+        is_tail_spend: false,
+        parent_supplier_id: null,
+        parent_name: null,
+        universe_match: true,
+        is_researched: true,
+        category_a_supplier: true,
+        supplier_info: JSON.stringify({ industry: 'Tech' }),
+        mapped_taxonomy_paths: JSON.stringify(['Corporate Services|IT|Software']),
+        l1_l2_path: null,
+        created_at: '2026-01-01',
+      });
+      // getProjectAliases query
+      vi.mocked(db.all).mockResolvedValue([]);
+
+      const result = await service.syncToUniverse(['sup1']);
+
+      expect(result.synced).toBe(1);
+      expect(supplierUniverse.upsertSupplierFull).toHaveBeenCalledWith(
+        'Acme',
+        expect.objectContaining({
+          categoryASupplier: true,
+          mappedTaxonomyPaths: ['Corporate Services|IT|Software'],
+        })
+      );
+    });
+
+    it('should pass categoryASupplier=false when supplier is not cat A', async () => {
+      vi.mocked(db.get).mockResolvedValue({
+        id: 'sup2',
+        supplier_name: 'RegularCo',
+        confirmation_status: 'pending',
+        is_tail_spend: false,
+        parent_supplier_id: null,
+        parent_name: null,
+        universe_match: false,
+        is_researched: true,
+        category_a_supplier: false,
+        supplier_info: null,
+        mapped_taxonomy_paths: null,
+        l1_l2_path: null,
+        created_at: '2026-01-01',
+      });
+      vi.mocked(db.all).mockResolvedValue([]);
+
+      const result = await service.syncToUniverse(['sup2']);
+
+      expect(result.synced).toBe(1);
+      expect(supplierUniverse.upsertSupplierFull).toHaveBeenCalledWith(
+        'RegularCo',
+        expect.objectContaining({
+          categoryASupplier: false,
+        })
+      );
+    });
+
+    it('should return error when universe not configured', async () => {
+      vi.mocked(supplierUniverse.isOpen).mockReturnValue(false);
+
+      const result = await service.syncToUniverse(['sup1']);
+
+      expect(result.synced).toBe(0);
+      expect(result.errors).toContain('Supplier universe not configured');
+      expect(supplierUniverse.upsertSupplierFull).not.toHaveBeenCalled();
+    });
+  });
 });

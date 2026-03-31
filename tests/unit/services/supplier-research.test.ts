@@ -7,11 +7,15 @@ import {
   createMockEventBus,
   createMockSupplierService,
   createMockClassificationAgent,
-  createMockDatabase,
+  createMockTransactionStore,
+  createMockCatAAgent,
+  createMockTaxonomyStore,
+  createMockRuleStore,
 } from '../../helpers/mock-services';
 import type {
   SupplierUniverse, WebSearch, ResearchAgent, EventBus,
-  SupplierService, ClassificationAgent, Database,
+  SupplierService, ClassificationAgent, TransactionStore,
+  CatAAgent, TaxonomyStore, RuleStore,
 } from '../../../src/shared/types/services';
 
 describe('SupplierResearcher', () => {
@@ -21,7 +25,10 @@ describe('SupplierResearcher', () => {
   let eventBus: EventBus;
   let supplierService: SupplierService;
   let classificationAgent: ClassificationAgent;
-  let db: Database;
+  let transactions: TransactionStore;
+  let catAAgent: CatAAgent;
+  let taxonomyStore: TaxonomyStore;
+  let ruleStore: RuleStore;
   let researcher: SupplierResearcher;
 
   beforeEach(() => {
@@ -32,10 +39,14 @@ describe('SupplierResearcher', () => {
     eventBus = createMockEventBus();
     supplierService = createMockSupplierService();
     classificationAgent = createMockClassificationAgent();
-    db = createMockDatabase();
+    transactions = createMockTransactionStore();
+    catAAgent = createMockCatAAgent();
+    taxonomyStore = createMockTaxonomyStore();
+    ruleStore = createMockRuleStore();
     researcher = new SupplierResearcher(
       supplierUniverse, webSearch, researchAgent, eventBus,
-      supplierService, classificationAgent, db
+      supplierService, classificationAgent, transactions,
+      catAAgent, taxonomyStore, ruleStore
     );
   });
 
@@ -63,7 +74,7 @@ describe('SupplierResearcher', () => {
       // searchSupplier is called with (name, address) — address may be undefined
       expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', undefined);
       expect(researchAgent.researchSupplier).toHaveBeenCalled();
-      expect(supplierUniverse.upsertSupplier).toHaveBeenCalled();
+      expect(supplierUniverse.upsertSupplier).not.toHaveBeenCalled(); // no auto-push — user-gated
       expect(result).toMatchObject({ supplierType: 'Corporation', industry: 'Software' });
     });
 
@@ -79,6 +90,63 @@ describe('SupplierResearcher', () => {
 
       expect(webSearch.searchSupplier).not.toHaveBeenCalled();
       expect(researchAgent.researchSupplier).toHaveBeenCalled();
+    });
+
+    it('should pass transaction address to web search and research agent when supplierId provided', async () => {
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(null);
+      vi.mocked(transactions.getSupplierAddress).mockResolvedValue('123 Main St, Springfield');
+      vi.mocked(researchAgent.researchSupplier).mockResolvedValue({
+        supplierType: 'Corporation',
+        industry: 'Software',
+      });
+
+      await researcher.researchSingle('Acme Corp', undefined, 'supplier-123');
+
+      expect(transactions.getSupplierAddress).toHaveBeenCalledWith('supplier-123');
+      expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', '123 Main St, Springfield');
+      expect(researchAgent.researchSupplier).toHaveBeenCalledWith(
+        'Acme Corp',
+        undefined,
+        '123 Main St, Springfield',
+        expect.any(Array)
+      );
+    });
+
+    it('should pass undefined address when supplierId not provided', async () => {
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(null);
+      vi.mocked(researchAgent.researchSupplier).mockResolvedValue({
+        supplierType: 'Corporation',
+      });
+
+      await researcher.researchSingle('Acme Corp');
+
+      expect(transactions.getSupplierAddress).not.toHaveBeenCalled();
+      expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', undefined);
+      expect(researchAgent.researchSupplier).toHaveBeenCalledWith(
+        'Acme Corp',
+        undefined,
+        undefined,
+        expect.any(Array)
+      );
+    });
+
+    it('should pass undefined address when transaction has no supplier_address column', async () => {
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue(null);
+      vi.mocked(transactions.getSupplierAddress).mockResolvedValue(undefined);
+      vi.mocked(researchAgent.researchSupplier).mockResolvedValue({
+        supplierType: 'Corporation',
+      });
+
+      await researcher.researchSingle('Acme Corp', undefined, 'supplier-123');
+
+      expect(transactions.getSupplierAddress).toHaveBeenCalledWith('supplier-123');
+      expect(webSearch.searchSupplier).toHaveBeenCalledWith('Acme Corp', undefined);
+      expect(researchAgent.researchSupplier).toHaveBeenCalledWith(
+        'Acme Corp',
+        undefined,
+        undefined,
+        expect.any(Array)
+      );
     });
   });
 
@@ -185,7 +253,7 @@ describe('SupplierResearcher', () => {
         supplierInfo: null, mappedTaxonomyPaths: null,
         l1L2Path: null, universeMatch: false, isResearched: false, createdAt: '',
       });
-      vi.mocked(db.all).mockResolvedValue([
+      vi.mocked(transactions.queryBySupplier).mockResolvedValue([
         { id: 'tx1', project_supplier_id: 'sup1', spend_amount: 25, gl_description: 'Office supplies' },
         { id: 'tx2', project_supplier_id: 'sup1', spend_amount: 25, gl_description: 'Pens' },
       ]);

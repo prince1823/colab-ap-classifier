@@ -13,6 +13,7 @@ import {
   MagnifyingGlassCircleIcon,
   DocumentDuplicateIcon,
   ClockIcon,
+  CloudArrowUpIcon,
   Cog6ToothIcon,
   ArrowsRightLeftIcon,
   ExclamationTriangleIcon,
@@ -30,11 +31,12 @@ const navItems = [
   { path: '/project', label: 'Project', icon: BuildingOfficeIcon, gateKey: null },
   { path: '/taxonomy', label: 'Taxonomy', icon: BookOpenIcon, gateKey: null },
   { path: '/data', label: 'Data', icon: ArrowUpTrayIcon, gateKey: null },
-  { path: '/suppliers', label: 'Suppliers', icon: TruckIcon, gateKey: 'hasUploadedData' as const },
+  { path: '/suppliers', label: 'Suppliers', icon: TruckIcon, gateKey: 'hasSupplierDeps' as const },
   { path: '/classification', label: 'Classification', icon: CpuChipIcon, gateKey: 'hasClassificationDeps' as const },
-  { path: '/review', label: 'Review', icon: MagnifyingGlassCircleIcon, gateKey: 'hasClassifiedRows' as const },
+  { path: '/review', label: 'Review', icon: MagnifyingGlassCircleIcon, gateKey: null },
   { path: '/override-rules', label: 'Override Rules', icon: DocumentDuplicateIcon, gateKey: 'hasUploadedData' as const },
   { path: '/version-history', label: 'Version History', icon: ClockIcon, gateKey: null },
+  { path: '/sync-to-universe', label: 'Sync & Export', icon: CloudArrowUpIcon, gateKey: 'hasUploadedData' as const },
 ]
 
 export default function Sidebar({ collapsed, onToggle, onSwitchProject }: SidebarProps) {
@@ -43,13 +45,12 @@ export default function Sidebar({ collapsed, onToggle, onSwitchProject }: Sideba
   const hasUploadedData = useWorkflowStore((s) => s.hasUploadedData)
   const hasTaxonomy = useWorkflowStore((s) => s.hasTaxonomy)
   const hasConfirmedSuppliers = useWorkflowStore((s) => s.hasConfirmedSuppliers)
-  const hasClassifiedRows = useWorkflowStore((s) => s.hasClassifiedRows)
   const location = useLocation()
 
   const gatesMet: Record<string, boolean> = {
     hasUploadedData,
+    hasSupplierDeps: hasTaxonomy && hasUploadedData,
     hasClassificationDeps: hasTaxonomy && hasConfirmedSuppliers,
-    hasClassifiedRows,
   }
 
   return (

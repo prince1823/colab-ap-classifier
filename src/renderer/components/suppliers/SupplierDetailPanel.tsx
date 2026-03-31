@@ -7,13 +7,14 @@ const SUPPLIER_TYPES: SupplierType[] = ['company', 'individual', 'government']
 
 /** Info fields config — order and layout */
 const DETAIL_FIELDS: {
-  key: keyof SupplierInfo | 'parentName' | 'l1L2Path'
+  key: keyof SupplierInfo | 'parentName' | 'l1L2Path' | 'mappedTaxonomyPaths'
   label: string
   editable: boolean
   type: 'text' | 'select' | 'readonly'
   wide?: boolean
 }[] = [
   { key: 'l1L2Path', label: 'L1|L2 Category', editable: true, type: 'text', wide: true },
+  { key: 'mappedTaxonomyPaths', label: 'Mapped Taxonomy Paths', editable: false, type: 'readonly', wide: true },
   { key: 'supplierType', label: 'Supplier Type', editable: true, type: 'select' },
   { key: 'officialBusinessName', label: 'Official Business Name', editable: true, type: 'text' },
   { key: 'parentName', label: 'Parent Supplier', editable: true, type: 'text' },
@@ -160,6 +161,7 @@ interface SupplierDetailPanelProps {
   onSaveParentName: (supplier: ProjectSupplierView, value: string) => void
   onSaveL1L2Path: (supplier: ProjectSupplierView, value: string) => void
   onResearch: (supplier: ProjectSupplierView) => void
+  onCategorize: (supplier: ProjectSupplierView) => void
   onConfirm: (supplier: ProjectSupplierView) => void
   focusedFieldIndex: number
   onFocusedFieldChange: (index: number) => void
@@ -175,6 +177,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   onSaveParentName,
   onSaveL1L2Path,
   onResearch,
+  onCategorize,
   onConfirm,
   focusedFieldIndex,
   onFocusedFieldChange,
@@ -235,16 +238,22 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   }
 
   const info = supplier.supplierInfo ?? {}
-  const getVal = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path'): string => {
+  const getVal = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path' | 'mappedTaxonomyPaths'): string => {
     if (key === 'parentName') return supplier.parentName || ''
     if (key === 'l1L2Path') return supplier.l1L2Path || ''
+    if (key === 'mappedTaxonomyPaths') {
+      const paths = supplier.mappedTaxonomyPaths
+      if (!paths || paths.length === 0) return ''
+      return paths.join('\n')
+    }
     const v = info[key as keyof SupplierInfo]
     if (v == null) return ''
     if (Array.isArray(v)) return v.join(', ')
     return String(v)
   }
 
-  const handleSave = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path', val: string) => {
+  const handleSave = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path' | 'mappedTaxonomyPaths', val: string) => {
+    if (key === 'mappedTaxonomyPaths') return // readonly
     if (key === 'parentName') {
       onSaveParentName(supplier, val)
     } else if (key === 'l1L2Path') {
@@ -277,7 +286,14 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       {/* Header */}
       <div className="detail-header">
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold text-gray-900 leading-tight truncate">{supplier.supplierName}</h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="text-lg font-semibold text-gray-900 leading-tight truncate">{supplier.supplierName}</h2>
+            {supplier.categoryASupplier && (
+              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-600 flex-shrink-0">
+                Cat A
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3 text-xs text-gray-500 flex-shrink-0">
             <span><strong className="text-gray-700">{supplier.transactionCount}</strong> transactions</span>
             <span className="text-gray-300">·</span>
@@ -288,12 +304,17 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
 
       {/* Actions */}
       <div className="detail-actions">
-        {!supplier.isResearched && (
+        {!supplier.isResearched && !supplier.isTailSpend && (
           <button type="button" className="action-btn research" onClick={() => onResearch(supplier)}>
             Research
           </button>
         )}
-        {supplier.isResearched && supplier.confirmationStatus !== 'confirmed' && (
+        {!supplier.l1L2Path && (supplier.isResearched || supplier.isTailSpend) && (
+          <button type="button" className="action-btn categorize" onClick={() => onCategorize(supplier)}>
+            Categorize
+          </button>
+        )}
+        {supplier.l1L2Path && supplier.confirmationStatus !== 'confirmed' && (
           <button type="button" className="action-btn confirm" onClick={() => onConfirm(supplier)}>
             Confirm
           </button>
@@ -303,6 +324,27 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       {/* Info grid */}
       <div className="detail-info-grid">
         {DETAIL_FIELDS.map((field) => {
+          // Mapped taxonomy paths: readonly display (no nav index)
+          if (field.key === 'mappedTaxonomyPaths') {
+            const paths = supplier.mappedTaxonomyPaths ?? []
+            return (
+              <div key={field.key} className="detail-field detail-field-wide">
+                <label className="detail-field-label">{field.label}</label>
+                <div className="detail-field-value">
+                  {paths.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {paths.map((p, i) => (
+                        <span key={i} className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{p}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-gray-300 italic">—</span>
+                  )}
+                </div>
+              </div>
+            )
+          }
+
           // Editable field with keyboard nav
           const currentNavIdx = navIdx
           navIdx++

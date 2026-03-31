@@ -2,7 +2,7 @@ import type { IPCResponse } from '../../shared/types/ipc';
 import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/types/ipc-contract';
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
-import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
+import type { SupplierConfirmationStatus, SupplierUpdateInput, CsvApplyRow, CsvApplyDiff } from '../../shared/types/suppliers';
 import type { TransactionFilter, TransactionUpdate, FilterCondition, GroupedFilter } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
@@ -66,6 +66,8 @@ export const ipc = {
       invoke('ingest:importCSV', filePath, mapping),
     getUpload: () => invoke('ingest:getUpload'),
     getUploadHistory: () => invoke('ingest:getUploadHistory'),
+    getUploadStatsBatch: () => invoke('ingest:getUploadStatsBatch'),
+    deleteUpload: (uploadId: string) => invoke('ingest:deleteUpload', uploadId),
     deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
       invoke('ingest:deriveMappings', columns, sampleRows, source),
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
@@ -143,6 +145,7 @@ export const ipc = {
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
     researchAll: (supplierIds?: string[]) => invoke('suppliers:researchAll', supplierIds),
+    categorizeAll: (supplierIds?: string[]) => invoke('suppliers:categorizeAll', supplierIds),
     cancelResearch: () => invoke('suppliers:cancelResearch'),
     researchSingle: (supplierId: string) =>
       invoke('suppliers:researchSingle', supplierId),
@@ -163,6 +166,11 @@ export const ipc = {
     renameParent: (parentId: string, newName: string) => invoke('suppliers:renameParent', parentId, newName),
     deleteParent: (parentId: string) => invoke('suppliers:deleteParent', parentId),
     mergeParents: (survivorId: string, losingIds: string[]) => invoke('suppliers:mergeParents', survivorId, losingIds),
+    parseCSV: (filePath: string) => invoke('suppliers:parseCSV', filePath),
+    importCSV: (filePath: string, supplierNameColumn: string) => invoke('suppliers:importCSV', filePath, supplierNameColumn),
+    computeCsvDiff: (rows: CsvApplyRow[]) => invoke('suppliers:computeCsvDiff', rows),
+    applyCsvDiff: (diff: CsvApplyDiff) => invoke('suppliers:applyCsvDiff', diff),
+    syncToUniverse: (supplierIds: string[]) => invoke('suppliers:syncToUniverse', supplierIds),
   },
 
   // ── Rules (12 channels) ──
@@ -188,6 +196,7 @@ export const ipc = {
     filterAssign: (filter: import('../../shared/types/transactions').GroupedFilter, targetGroupId: string | null) => invoke('rules:filterAssign', filter, targetGroupId),
     previewApply: (ruleIds: string[]) => invoke('rules:previewApply', ruleIds),
     apply: (ruleIds: string[]) => invoke('rules:apply', ruleIds),
+    setCategoryA: (ruleId: string, value: boolean) => invoke('rules:setCategoryA', ruleId, value),
   },
 
   // ── Changelog (2 channels) ──
@@ -204,7 +213,8 @@ export const ipc = {
 
   // ── Export ──
   export: {
-    csv: (filters?: TransactionFilter) => invoke('export:csv', filters),
+    columns: () => invoke('export:columns'),
+    csv: (filters?: TransactionFilter, selectedColumns?: string[]) => invoke('export:csv', filters, selectedColumns),
     saveContent: (content: string, defaultFilename: string) => invoke('export:saveContent', content, defaultFilename),
   },
 

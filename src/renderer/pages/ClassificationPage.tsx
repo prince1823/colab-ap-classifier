@@ -10,26 +10,26 @@ import type { ClassificationProgress } from '../../shared/types/classification'
 import type { FieldDefinition, GroupedFilter, FilterOperator } from '../../shared/types/transactions'
 
 type ActiveTab = 'classification' | 'qc'
-type ScopePreset = 'unclassified_researched' | 'unclassified_not_researched' | 'all' | 'custom'
+type ScopePreset = 'actionable' | 'needs_confirmation' | 'all' | 'custom'
 
 const PRESET_GROUPED: Record<Exclude<ScopePreset, 'custom'>, GroupedFilter> = {
-  unclassified_researched: {
+  actionable: {
     groupConnector: 'AND',
     groups: [{
       connector: 'AND',
       conditions: [
         { field: 'classification_status', operator: 'equals', value: 'unclassified' },
-        { field: 'is_researched', operator: 'is_true', value: '' },
+        { field: 'confirmation_status', operator: 'equals', value: 'confirmed' },
       ],
     }],
   },
-  unclassified_not_researched: {
+  needs_confirmation: {
     groupConnector: 'AND',
     groups: [{
       connector: 'AND',
       conditions: [
         { field: 'classification_status', operator: 'equals', value: 'unclassified' },
-        { field: 'is_researched', operator: 'is_false', value: '' },
+        { field: 'confirmation_status', operator: 'not_equals', value: 'confirmed' },
       ],
     }],
   },
@@ -37,16 +37,14 @@ const PRESET_GROUPED: Record<Exclude<ScopePreset, 'custom'>, GroupedFilter> = {
 }
 
 const PRESET_LABELS: Record<ScopePreset, string> = {
-  unclassified_researched: 'Unclassified (with research)',
-  unclassified_not_researched: 'Unclassified (no research)',
+  actionable: 'Confirmed suppliers (all unclassified)',
+  needs_confirmation: 'Not confirmed',
   all: 'All rows',
   custom: 'Custom filter',
 }
 
 export default function ClassificationPage() {
   const storeProgress = useWorkflowStore((s) => s.classificationProgress)
-  const subscribeToClassificationProgress = useWorkflowStore((s) => s.subscribeToClassificationProgress)
-  const subscribeToQCProgress = useWorkflowStore((s) => s.subscribeToQCProgress)
   // Tab state
   const [activeTab, setActiveTab] = useState<ActiveTab>('classification')
 
@@ -55,18 +53,15 @@ export default function ClassificationPage() {
   const [error, setError] = useState<string | null>(null)
 
   // Scope state
-  const [preset, setPreset] = useState<ScopePreset>('unclassified_researched')
+  const [preset, setPreset] = useState<ScopePreset>('actionable')
   const [customGrouped, setCustomGrouped] = useState<GroupedFilter | null>(null)
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
   const [filterModalOpen, setFilterModalOpen] = useState(false)
 
-  // Load filter fields on mount, subscribe to classification + QC progress via store
+  // Load filter fields on mount
   useEffect(() => {
     ipc.transactions.getFilterFields().then(setFilterFields).catch(console.error)
-    const unsubscribeClassification = subscribeToClassificationProgress()
-    const unsubscribeQC = subscribeToQCProgress()
-    return () => { unsubscribeClassification(); unsubscribeQC() }
-  }, [subscribeToClassificationProgress, subscribeToQCProgress])
+  }, [])
 
   // Sync local state from the store.
   useEffect(() => {
@@ -196,60 +191,69 @@ export default function ClassificationPage() {
                 </div>
               </div>
 
-              {/* Custom filter summary */}
-              {preset === 'custom' && (
-                <div
-                  onClick={() => setFilterModalOpen(true)}
-                  className="cursor-pointer rounded-md border border-gray-200 bg-white px-2.5 py-1.5 hover:border-blue-300 hover:bg-blue-50/30 transition-colors overflow-x-auto scrollbar-hide"
-                  style={{ scrollbarWidth: 'none' }}
-                >
-                  {customConditionCount > 0 ? (
-                    <div className="flex items-center gap-0.5 whitespace-nowrap">
-                      {customGrouped!.groups.map((group, gi) => {
-                        const validConditions = group.conditions.filter(c => c.field)
-                        if (validConditions.length === 0) return null
-                        const groupConnector = gi > 0
-                          ? (group.groupConnector ?? customGrouped!.groupConnector)
-                          : null
-                        return (
-                          <span key={gi} className="contents">
-                            {groupConnector && (
-                              <span className="mx-0.5 text-[9px] font-bold text-blue-600">{groupConnector}</span>
-                            )}
-                            {validConditions.length > 1 && <span className="text-[10px] text-gray-400">(</span>}
-                            {validConditions.map((c, ci) => {
-                              const condConnector = ci > 0
-                                ? (validConditions[ci - 1].connector ?? group.connector)
-                                : null
-                              const displayValue = ['is_true', 'is_false', 'is_null'].includes(c.operator)
-                                ? ''
-                                : ` "${Array.isArray(c.value) ? c.value.join(', ') : c.value}"`
-                              return (
-                                <span key={ci} className="contents">
-                                  {condConnector && (
-                                    <span className="mx-0.5 text-[9px] font-bold text-gray-500">{condConnector}</span>
-                                  )}
-                                  <span className="inline-flex items-center rounded bg-gray-100 px-1 py-px text-[10px] text-gray-700">
-                                    <span className="font-medium">{c.field}</span>
-                                    <span className="mx-0.5 text-gray-400">{OPERATOR_LABELS[c.operator as FilterOperator]}</span>
-                                    {displayValue && <span className="text-blue-600">{displayValue}</span>}
+              {/* Filter summary */}
+              {(() => {
+                const isCustom = preset === 'custom'
+                const displayFilter = isCustom ? customGrouped : activeGrouped
+                const hasConditions = displayFilter && displayFilter.groups.some(g => g.conditions.some(c => c.field))
+                return (
+                  <div
+                    onClick={isCustom ? () => setFilterModalOpen(true) : undefined}
+                    className={`rounded-md border border-gray-200 bg-white px-2.5 py-1.5 overflow-x-auto scrollbar-hide ${
+                      isCustom ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/30 transition-colors' : ''
+                    }`}
+                    style={{ scrollbarWidth: 'none' }}
+                  >
+                    {hasConditions ? (
+                      <div className="flex items-center gap-0.5 whitespace-nowrap">
+                        {displayFilter!.groups.map((group, gi) => {
+                          const validConditions = group.conditions.filter(c => c.field)
+                          if (validConditions.length === 0) return null
+                          const groupConnector = gi > 0
+                            ? (group.groupConnector ?? displayFilter!.groupConnector)
+                            : null
+                          return (
+                            <span key={gi} className="contents">
+                              {groupConnector && (
+                                <span className="mx-0.5 text-[9px] font-bold text-blue-600">{groupConnector}</span>
+                              )}
+                              {validConditions.length > 1 && <span className="text-[10px] text-gray-400">(</span>}
+                              {validConditions.map((c, ci) => {
+                                const condConnector = ci > 0
+                                  ? (validConditions[ci - 1].connector ?? group.connector)
+                                  : null
+                                const displayValue = ['is_true', 'is_false', 'is_null'].includes(c.operator)
+                                  ? ''
+                                  : ` "${Array.isArray(c.value) ? c.value.join(', ') : c.value}"`
+                                return (
+                                  <span key={ci} className="contents">
+                                    {condConnector && (
+                                      <span className="mx-0.5 text-[9px] font-bold text-gray-500">{condConnector}</span>
+                                    )}
+                                    <span className="inline-flex items-center rounded bg-gray-100 px-1 py-px text-[10px] text-gray-700">
+                                      <span className="font-medium">{c.field}</span>
+                                      <span className="mx-0.5 text-gray-400">{OPERATOR_LABELS[c.operator as FilterOperator]}</span>
+                                      {displayValue && <span className="text-blue-600">{displayValue}</span>}
+                                    </span>
                                   </span>
-                                </span>
-                              )
-                            })}
-                            {validConditions.length > 1 && <span className="text-[10px] text-gray-400">)</span>}
-                          </span>
-                        )
-                      })}
-                      <span className="ml-1.5 text-[9px] text-gray-400 shrink-0">click to edit</span>
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-gray-400">
-                      No conditions set — click to add filters. All rows will be classified.
-                    </p>
-                  )}
-                </div>
-              )}
+                                )
+                              })}
+                              {validConditions.length > 1 && <span className="text-[10px] text-gray-400">)</span>}
+                            </span>
+                          )
+                        })}
+                        {isCustom && <span className="ml-1.5 text-[9px] text-gray-400 shrink-0">click to edit</span>}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-400">
+                        {isCustom
+                          ? 'No conditions set — click to add filters. All rows will be classified.'
+                          : 'No filters — all rows will be classified.'}
+                      </p>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )}
 

@@ -73,7 +73,7 @@ const ENUM_FIELDS: Record<string, string[]> = {
   classification_status: ['unclassified', 'classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent', 'classification_error'],
 }
 
-const NUMERIC_COLS = new Set(['spend_amount', 'amount', 'invoice_amount'])
+const NUMERIC_COLS = new Set(['spend_amount', 'amount', 'invoice_amount', 'master_year'])
 
 export default function PivotPage() {
   // Persisted state from Zustand store (survives tab switches)

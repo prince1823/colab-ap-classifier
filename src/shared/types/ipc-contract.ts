@@ -23,7 +23,7 @@ import type {
 } from './transactions';
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from './classification';
 import type { TaxonomyNode } from './taxonomy';
-import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
+import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
 import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
@@ -49,6 +49,8 @@ export interface IPCInvokeMap {
   'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: { rowsInserted: number; uploadId: string } };
   'ingest:getUpload':              { args: []; result: { id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null };
   'ingest:getUploadHistory':       { args: []; result: UploadRecord[] };
+  'ingest:getUploadStatsBatch':    { args: []; result: Record<string, { classifiedCount: number }> };
+  'ingest:deleteUpload':           { args: [uploadId: string]; result: { deletedRows: number } };
   'ingest:deriveMappings':         { args: [columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource]; result: DerivedMappings };
   'ingest:getExistingCanonicals':  { args: []; result: string[] };
 
@@ -94,6 +96,7 @@ export interface IPCInvokeMap {
   'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: [supplierIds?: string[]]; result: void };
+  'suppliers:categorizeAll':  { args: [supplierIds?: string[]]; result: void };
   'suppliers:cancelResearch': { args: []; result: void };
   'suppliers:researchSingle': { args: [supplierId: string]; result: SupplierInfo };
   'suppliers:filterTailSpend': { args: [threshold: number]; result: { markedCount: number } };
@@ -110,6 +113,11 @@ export interface IPCInvokeMap {
   'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
   'suppliers:deleteParent':    { args: [parentId: string]; result: void };
   'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
+  'suppliers:importCSV':       { args: [filePath: string, supplierNameColumn: string]; result: { created: number; skipped: number } };
+  'suppliers:parseCSV':        { args: [filePath: string]; result: { columns: string[]; sampleRows: Record<string, string>[]; totalRows: number } };
+  'suppliers:computeCsvDiff':  { args: [rows: CsvApplyRow[]]; result: CsvApplyDiff };
+  'suppliers:applyCsvDiff':    { args: [diff: CsvApplyDiff]; result: CsvApplyResult };
+  'suppliers:syncToUniverse':  { args: [supplierIds: string[]]; result: { synced: number; failed: number; errors: string[] } };
 
   // Rules
   'rules:list':     { args: []; result: OverrideRule[] };
@@ -131,6 +139,7 @@ export interface IPCInvokeMap {
   'rules:moveRule':         { args: [ruleId: string, targetGroupId: string | null]; result: void };
   'rules:assignToGroup':    { args: [ruleIds: string[], groupId: string | null]; result: void };
   'rules:filterAssign':     { args: [filter: GroupedFilter, targetGroupId: string | null]; result: { matched: number } };
+  'rules:setCategoryA':     { args: [ruleId: string, value: boolean]; result: void };
 
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };
@@ -141,7 +150,8 @@ export interface IPCInvokeMap {
   'feedback:apply':   { args: [input: FeedbackApplyInput]; result: void };
 
   // Export
-  'export:csv': { args: [filters?: TransactionFilter]; result: { rowsExported: number } | null };
+  'export:columns': { args: []; result: string[] };
+  'export:csv': { args: [filters?: TransactionFilter, selectedColumns?: string[]]; result: { rowsExported: number } | null };
   'export:saveContent': { args: [content: string, defaultFilename: string]; result: boolean };
 
   // Settings — LLM

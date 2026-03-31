@@ -31,12 +31,12 @@ CRITICAL: Map ALL available fields matching canonical columns. Missing fields br
 ${columnDescriptions}
 
 ## Mapping Strategy
-1. Map supplier_name, spend_amount, and invoice_date first — these are required
+1. Map supplier_name, spend_amount, and master_date first — these are required
 2. Map all other canonical columns if a matching CSV column is available
 3. Skip ONLY system/metadata fields (mapping rules, flags, audit fields, derived indicators)
 
-## Invoice Grouping Fields (Important)
-- invoice_date (Accounting Date) — CRITICAL for invoice grouping
+## Primary Date Field (Required)
+- master_date — CRITICAL. Map the most authoritative date column here (invoice date, transaction date, PO date, etc.). This drives all time-based analysis.
 - company (Company, Legal Entity) — Important for invoice grouping
 - creation_date (Creation Date) — Important for accurate invoice grouping
 

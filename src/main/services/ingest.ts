@@ -15,18 +15,21 @@ import type {
 import { toEnrichedMapping, toSimpleMapping } from '../../shared/types/column-mapping';
 import type { ColumnMappingWithPriority } from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS, REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns';
+import { detectMasterDateFormat } from '../utils/date-format';
+import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import type {
   Database,
   IngestService as IIngestService,
   TransactionStore as ITransactionStore,
   SupplierService as ISupplierService,
+  ProjectStore as IProjectStore,
   ColumnMappingAgent,
   EventBus,
   UploadRecord,
 } from '../../shared/types/services';
 import type { IngestProgress } from '../../shared/types/classification';
 
-const SAMPLE_ROW_LIMIT = 10;
+const SAMPLE_ROW_LIMIT = 100;
 const IMPORT_BATCH_SIZE = 5000;
 const PREVIEW_BUFFER_SIZE = 65536; // 64KB for preview/detection
 const DELIMITERS = [',', ';', '\t'] as const;
@@ -223,6 +226,7 @@ export class IngestService implements IIngestService {
     private db: Database,
     private transactions: ITransactionStore,
     private suppliers: ISupplierService,
+    private project: IProjectStore,
     private columnMappingAgent: ColumnMappingAgent,
     private eventBus: EventBus
   ) {}
@@ -337,12 +341,31 @@ export class IngestService implements IIngestService {
       csvColsSeen.add(csvCol);
     }
 
-    // supplier_name maps to the original_supplier_name DB column (audit trail).
-    // The canonical supplier_name is resolved via JOIN to project_suppliers after normalization.
-    // We remap at the SQL level only — the mapping object stays unmutated so it's
-    // stored correctly in the uploads table for reuse.
-    const dbColumn = (canonical: string) =>
-      canonical === 'supplier_name' ? 'original_supplier_name' : canonical;
+    // Detect and store master_date format from the first 50 rows
+    if (mapping['master_date']) {
+      const masterDateCsvCol = mapping['master_date'];
+      const dateSamples = await parseSampleRows(filePath, encoding, delimiter, 50);
+      const dateValues = dateSamples
+        .map(row => row[masterDateCsvCol])
+        .filter((v): v is string => v != null && v.trim() !== '');
+      const fmt = detectMasterDateFormat(dateValues);
+      if (fmt === null) {
+        throw new Error(
+          'Could not recognize the date format in the master_date column. ' +
+          'Please upload dates in one of these formats: YYYY-MM-DD, MM/DD/YYYY, DD/MM/YYYY, or DD-Mon-YYYY (e.g. 15-Jan-2024).'
+        );
+      }
+      await this.project.setSetting('master_date_format', fmt);
+    }
+
+    // Virtual column names (supplier_name, parent_name, etc.) must never become physical
+    // columns on transactions — they shadow JOIN-resolved columns in queries and exports.
+    // Remap any virtual name to original_<name> at the SQL level only — the mapping object
+    // stays unmutated so it's stored correctly in the uploads table for reuse.
+    // Primary case: supplier_name → original_supplier_name (required canonical).
+    // Guard case: any other virtual name a user manually enters (e.g. parent_name).
+    const dbColumn = (canonical: string): string =>
+      VIRTUAL_COLUMN_NAMES.has(canonical) ? `original_${canonical}` : canonical;
 
     const canonicalNames = Object.keys(mapping);
 
@@ -370,13 +393,14 @@ export class IngestService implements IIngestService {
     this.transactions.invalidateColumnCache();
 
     // Build column list once for all batches
-    const colNames: string[] = ['id', 'row_index'];
+    const colNames: string[] = ['id', 'upload_id', 'row_index'];
     for (const canonical of canonicalNames) {
       colNames.push(`"${dbColumn(canonical)}"`);
     }
 
     // Stream CSV and insert in batches
     let rowsInserted = 0;
+    const finalUploadId = uploadId || randomUUID();
     let rowIndex = 0;
     let batch: Record<string, string>[] = [];
 
@@ -388,7 +412,7 @@ export class IngestService implements IIngestService {
         const rec = records[i];
         const idx = startIndex + i;
         const id = randomUUID();
-        const vals: string[] = [`'${id}'`, `${idx}`];
+        const vals: string[] = [`'${id}'`, `'${finalUploadId}'`, `${idx}`];
 
         for (const canonical of canonicalNames) {
           const rawValue = rec[mapping[canonical]];
@@ -484,8 +508,7 @@ export class IngestService implements IIngestService {
       currentStep: 'Saving upload record...',
     });
 
-    // Save upload record
-    const finalUploadId = uploadId || randomUUID();
+    // Save upload record — mapping is unmutated, stores supplier_name (not original_supplier_name)
     const fileName = path.basename(filePath);
     const enrichedMapping = toEnrichedMapping(mapping);
     await this.db.run(
@@ -510,14 +533,9 @@ export class IngestService implements IIngestService {
     await this.suppliers.normalizeAllTransactions();
 
     // Auto-apply tail spend threshold to newly created suppliers
-    const thresholdRow = await this.db.get<{ value: string }>(
-      "SELECT value FROM project_settings WHERE key = 'tail_spend_threshold'"
-    );
-    if (thresholdRow) {
-      const threshold = JSON.parse(thresholdRow.value) as number;
-      if (threshold > 0) {
-        await this.suppliers.filterTailSpend(threshold);
-      }
+    const threshold = await this.project.getSetting('tail_spend_threshold') as number | undefined;
+    if (threshold && threshold > 0) {
+      await this.suppliers.filterTailSpend(threshold);
     }
 
     const result = { rowsInserted, uploadId: finalUploadId };
@@ -633,5 +651,49 @@ export class IngestService implements IIngestService {
       }
     }
     return [...canonicals].sort();
+  }
+
+  async getUploadStatsBatch(): Promise<Record<string, { classifiedCount: number }>> {
+    const rows = await this.db.all<{ upload_id: string; classified_count: number | bigint }>(
+      `SELECT upload_id,
+         COUNT(CASE WHEN classification_status != 'unclassified' THEN 1 END) AS classified_count
+       FROM transactions
+       WHERE upload_id IS NOT NULL
+       GROUP BY upload_id`
+    );
+    const result: Record<string, { classifiedCount: number }> = {};
+    for (const row of rows) {
+      result[row.upload_id] = { classifiedCount: Number(row.classified_count) };
+    }
+    return result;
+  }
+
+  async deleteUpload(uploadId: string): Promise<{ deletedRows: number }> {
+    const classified = await this.db.get<{ cnt: number | bigint }>(
+      `SELECT COUNT(*) AS cnt FROM transactions
+       WHERE upload_id = ? AND classification_status != 'unclassified'`,
+      uploadId
+    );
+    if (Number(classified?.cnt ?? 0) > 0) {
+      throw new Error(`Cannot delete upload: ${Number(classified!.cnt)} row(s) have already been classified`);
+    }
+
+    const deleted = await this.db.get<{ cnt: number | bigint }>(
+      'SELECT COUNT(*) AS cnt FROM transactions WHERE upload_id = ?',
+      uploadId
+    );
+    const deletedRows = Number(deleted?.cnt ?? 0);
+
+    await this.db.run('DELETE FROM transactions WHERE upload_id = ?', uploadId);
+    await this.db.run('DELETE FROM uploads WHERE id = ?', uploadId);
+    await this.db.run(
+      `DELETE FROM project_suppliers
+       WHERE id NOT IN (
+         SELECT DISTINCT project_supplier_id FROM transactions
+         WHERE project_supplier_id IS NOT NULL
+       )`
+    );
+
+    return { deletedRows };
   }
 }

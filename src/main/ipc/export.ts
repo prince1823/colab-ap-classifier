@@ -4,8 +4,15 @@ import { registerHandler } from './register';
 import type { ExportService } from '../../shared/types/services';
 
 export function registerExportHandlers(exportService: ExportService): void {
-  registerHandler('export:csv', async (_event, filters: unknown) => {
-    return exportService.exportCSV(filters as import('../../shared/types/transactions').TransactionFilter | undefined);
+  registerHandler('export:columns', async () => {
+    return exportService.getExportColumns();
+  });
+
+  registerHandler('export:csv', async (_event, filters: unknown, selectedColumns: unknown) => {
+    return exportService.exportCSV(
+      filters as import('../../shared/types/transactions').TransactionFilter | undefined,
+      selectedColumns as string[] | undefined,
+    );
   });
 
   registerHandler('export:saveContent', async (_event, content: unknown, defaultFilename: unknown) => {

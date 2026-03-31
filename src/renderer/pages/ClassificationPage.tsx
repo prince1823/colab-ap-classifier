@@ -37,7 +37,7 @@ const PRESET_GROUPED: Record<Exclude<ScopePreset, 'custom'>, GroupedFilter> = {
 }
 
 const PRESET_LABELS: Record<ScopePreset, string> = {
-  actionable: 'Ready to classify',
+  actionable: 'Confirmed suppliers (all unclassified)',
   needs_confirmation: 'Not confirmed',
   all: 'All rows',
   custom: 'Custom filter',

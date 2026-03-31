@@ -269,7 +269,7 @@ export default function DataView() {
           <DataPriorityStep
             allMappings={allMappings}
             onSave={handleSavePriorities}
-            onBack={() => setStep('mapping')}
+            onBack={() => setStep(activePreview && activeDerivedMappings ? 'mapping' : 'upload')}
           />
         )}
       </div>

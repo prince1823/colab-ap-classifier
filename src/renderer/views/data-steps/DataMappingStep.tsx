@@ -7,7 +7,7 @@ import type { CSVPreview, DerivedMappings, MappingRow } from '../../../shared/ty
 
 const REQUIRED = new Set(REQUIRED_CANONICAL_COLUMNS as readonly string[])
 const ADDRESS_HINTS = ['address', 'supplier_address', 'vendor_address', 'street', 'city', 'state', 'zip', 'postal']
-const MAX_PREVIEW_ROWS = 8
+const MAX_PREVIEW_ROWS = 100
 const MERGE_ROWS_LIMIT = 5
 
 function isAddressColumn(canonical: string): boolean {
@@ -528,10 +528,17 @@ export default function DataMappingStep({
     return map
   }, [columns])
 
-  const displayRows = useMemo(
-    () => preview.sampleRows.slice(0, MAX_PREVIEW_ROWS),
-    [preview.sampleRows]
-  )
+  const [shuffleKey, setShuffleKey] = useState(0)
+  const displayRows = useMemo(() => {
+    const rows = [...preview.sampleRows]
+    // Fisher-Yates shuffle
+    for (let i = rows.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[rows[i], rows[j]] = [rows[j], rows[i]]
+    }
+    return rows.slice(0, MAX_PREVIEW_ROWS)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview.sampleRows, shuffleKey])
 
   // Filter columns by search query (matches CSV column name or canonical name)
   const filteredColumnIndices = useMemo(() => {
@@ -649,7 +656,17 @@ export default function DataMappingStep({
                 <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
               )}
             </button>
-            <div className="ml-auto px-2 pb-1">
+            <div className="ml-auto flex items-center gap-2 px-2 pb-1">
+              <button
+                onClick={() => setShuffleKey((k) => k + 1)}
+                className="rounded border border-blue-300 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                title="Refresh with random rows"
+              >
+                Refresh
+              </button>
+              <span className="text-[10px] text-gray-400">
+                {displayRows.length} of {preview.totalRows.toLocaleString()} rows
+              </span>
               <input
                 value={columnSearch}
                 onChange={(e) => setColumnSearch(e.target.value)}
@@ -761,10 +778,10 @@ export default function DataMappingStep({
                       })}
                     </tr>
                   ))}
-                  {preview.totalRows > MAX_PREVIEW_ROWS && (
+                  {preview.totalRows > displayRows.length && (
                     <tr>
                       <td colSpan={filteredColumnIndices.length + 1} className="px-3 py-2 text-center text-[11px] text-gray-400 bg-gray-50">
-                        Showing {MAX_PREVIEW_ROWS} of {preview.totalRows.toLocaleString()} rows
+                        Showing {displayRows.length} of {preview.totalRows.toLocaleString()} rows
                       </td>
                     </tr>
                   )}

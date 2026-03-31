@@ -61,7 +61,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
         ...r.canonicalFields,
       })) as TransactionPreviewRow[]
       setPreviewRows(flat)
-      setTotalRows(result.total)
+      setTotalRows(result.totalCount)
     }).catch((e) => showError('Failed to load transaction preview', e))
   }, [])
 

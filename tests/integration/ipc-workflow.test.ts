@@ -103,10 +103,11 @@ describe('IPC Workflow Integration — Full Flow (v2 DI)', () => {
     const changelog = new ChangelogStore(db);
     const transactions = new TransactionStore(db, changelog);
     const project = new ProjectStore(db, transactions, supplierUniverse);
+    transactions.setProjectStore(project);
     const taxonomy = new TaxonomyStore(db, project);
     const suppliers = new SupplierService(db, supplierUniverse);
     const rules = new RuleStore(db, transactions, project);
-    const ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
+    const ingest = new IngestService(db, transactions, suppliers, project, columnMappingAgent, eventBus);
     const exportSvc = new ExportService(db);
     const researcher = createMockSupplierResearcher();
     const classifier = createMockClassificationRunner();

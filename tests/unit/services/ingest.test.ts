@@ -19,8 +19,8 @@ vi.mock('electron', () => ({
 
 import { dialog } from 'electron';
 import { IngestService } from '../../../src/main/services/ingest';
-import { createMockDatabase, createMockTransactionStore, createMockColumnMappingAgent, createMockSupplierService } from '../../helpers/mock-services';
-import type { Database, TransactionStore, ColumnMappingAgent, SupplierService } from '../../../src/shared/types/services';
+import { createMockDatabase, createMockTransactionStore, createMockColumnMappingAgent, createMockSupplierService, createMockProjectStore, createMockEventBus } from '../../helpers/mock-services';
+import type { Database, TransactionStore, ColumnMappingAgent, SupplierService, ProjectStore, EventBus } from '../../../src/shared/types/services';
 import type { ColumnMappingResult } from '../../../src/shared/types/column-mapping';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../../fixtures/csv');
@@ -29,7 +29,7 @@ const MOCK_MAPPING_RESULT: ColumnMappingResult = {
   mappings: {
     supplier_name: 'Supplier',
     spend_amount: 'Amount',
-    invoice_date: 'Date',
+    master_date: 'Date',
     line_description: 'Description',
   },
   confidence: 'high',
@@ -43,7 +43,9 @@ describe('IngestService', () => {
   let db: Database;
   let transactions: TransactionStore;
   let suppliers: SupplierService;
+  let project: ProjectStore;
   let columnMappingAgent: ColumnMappingAgent;
+  let eventBus: EventBus;
   let service: IngestService;
 
   beforeEach(() => {
@@ -51,8 +53,10 @@ describe('IngestService', () => {
     db = createMockDatabase();
     transactions = createMockTransactionStore();
     suppliers = createMockSupplierService();
+    project = createMockProjectStore();
     columnMappingAgent = createMockColumnMappingAgent();
-    service = new IngestService(db, transactions, suppliers, columnMappingAgent);
+    eventBus = createMockEventBus();
+    service = new IngestService(db, transactions, suppliers, project, columnMappingAgent, eventBus);
     vi.mocked(columnMappingAgent.suggestMappings).mockResolvedValue(MOCK_MAPPING_RESULT);
   });
 
@@ -188,7 +192,7 @@ describe('IngestService', () => {
     const VALID_MAPPING = {
       supplier_name: 'Supplier',
       spend_amount: 'Amount',
-      invoice_date: 'Date',
+      master_date: 'Date',
     };
 
     it('should throw when a required canonical column is missing from the mapping', async () => {
@@ -227,7 +231,7 @@ describe('IngestService', () => {
     const BASE_MAPPING = {
       supplier_name: 'Supplier',
       spend_amount: 'Amount',
-      invoice_date: 'Date',
+      master_date: 'Date',
     };
 
     it('should remap parent_name to original_parent_name in SQL, not store it as a physical column', async () => {
@@ -266,6 +270,38 @@ describe('IngestService', () => {
 
       expect(columnNames).toContain('original_supplier_name');
       expect(columnNames).not.toContain('supplier_name');
+    });
+  });
+
+  describe('importCSV — master_date format detection', () => {
+    const CSV_PATH = path.join(FIXTURES_DIR, 'standard.csv');
+    // standard.csv Date column contains ISO dates like 2024-01-15
+
+    const MAPPING = {
+      supplier_name: 'Supplier',
+      spend_amount: 'Amount',
+      master_date: 'Date',
+    };
+
+    it('should store the detected date format via project.setSetting after a successful import', async () => {
+      await service.importCSV(CSV_PATH, MAPPING);
+
+      // standard.csv has ISO dates — should detect %Y-%m-%d, delegated to project.setSetting
+      expect(project.setSetting).toHaveBeenCalledWith('master_date_format', '%Y-%m-%d');
+    });
+
+    it('should throw when date values are unrecognizable', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-date-test-'));
+      const badDatesFile = path.join(tmpDir, 'bad-dates.csv');
+      fs.writeFileSync(badDatesFile, 'Supplier,Amount,Date\nAcme,100,not-a-date\nBeta,200,also-invalid\n');
+
+      try {
+        await expect(
+          service.importCSV(badDatesFile, MAPPING)
+        ).rejects.toThrow('Could not recognize the date format');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
   });
 });

@@ -12,7 +12,7 @@ export function registerTransactionsHandlers(transactions: TransactionStore): vo
   });
 
   registerHandler('transactions:getColumns', async () => {
-    return transactions.getColumns();
+    return transactions.getColumnsForPivot();
   });
 
   registerHandler('transactions:update', async (_event, update: unknown) => {

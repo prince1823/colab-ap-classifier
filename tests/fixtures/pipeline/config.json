@@ -13,7 +13,7 @@
     "line_description": "Line Item Description",
     "spend_amount": "Amount USD",
     "gl_description": "GL Account Name",
-    "invoice_date": "Accounting Date",
+    "master_date": "Accounting Date",
     "creation_date": "Creation Date of Operational Transaction or Accounting Journal",
     "company": "Company",
     "cost_center": "Cost Center Name",
@@ -21,6 +21,6 @@
   },
   "columnPriorities": [
     "supplier_name", "line_description", "spend_amount",
-    "gl_description", "invoice_date", "company", "cost_center", "memo"
+    "gl_description", "master_date", "company", "cost_center", "memo"
   ]
 }

@@ -168,10 +168,11 @@ describe(`Classifier Real Run [fixtures, API key: ${HAS_API_KEY}]`, () => {
     changelog = new ChangelogStore(db);
     transactions = new TransactionStore(db, changelog);
     project = new ProjectStore(db, transactions, supplierUniverse);
+    transactions.setProjectStore(project);
     taxonomy = new TaxonomyStore(db, project);
     rules = new RuleStore(db, transactions, project);
     suppliers = new SupplierService(db, supplierUniverse);
-    ingest = new IngestService(db, transactions, suppliers, columnMappingAgent);
+    ingest = new IngestService(db, transactions, suppliers, project, columnMappingAgent, eventBus);
     exportSvc = new ExportService(db);
     researcher = new SupplierResearcher(supplierUniverse, webSearch, researchAgent, eventBus, suppliers, classificationAgent, transactions);
     classifier = new ClassificationRunner(

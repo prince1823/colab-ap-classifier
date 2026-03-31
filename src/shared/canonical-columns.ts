@@ -2,7 +2,7 @@ import type { CanonicalColumnDefinition } from './types/column-mapping';
 
 /**
  * All known canonical columns for AP classification.
- * The first three (supplier_name, spend_amount, invoice_date) are required —
+ * The first three (supplier_name, spend_amount, master_date) are required —
  * importCSV will throw if any of them are absent from the mapping.
  * The rest are optional but well-known; the LLM will map them when present.
  * Any column the user adds manually beyond this list is stored as-is.
@@ -22,13 +22,19 @@ export const CANONICAL_COLUMNS: CanonicalColumnDefinition[] = [
     description: 'The monetary amount of the transaction',
   },
   {
-    name: 'invoice_date',
+    name: 'master_date',
     type: 'date',
-    aliases: ['Date', 'Invoice Date', 'Transaction Date', 'Accounting Date', 'Posting Date'],
-    description: 'Date of the invoice or transaction',
+    aliases: ['Date', 'Invoice Date', 'Transaction Date', 'Accounting Date', 'Posting Date', 'Voucher Date'],
+    description: 'Primary date for this project — map whichever date column is most authoritative (invoice date, transaction date, PO date, etc.)',
   },
 
   // ── Optional — well-known ─────────────────────────────────────────────────
+  {
+    name: 'invoice_date',
+    type: 'date',
+    aliases: ['Invoice Date', 'Inv Date', 'Bill Date'],
+    description: 'Date of the invoice (use master_date for the primary date column)',
+  },
   {
     name: 'line_description',
     type: 'text',
@@ -98,4 +104,4 @@ export const CANONICAL_COLUMNS: CanonicalColumnDefinition[] = [
 ];
 
 /** The 3 required canonical column names. importCSV throws if any are missing. */
-export const REQUIRED_CANONICAL_COLUMNS = ['supplier_name', 'spend_amount', 'invoice_date'] as const;
+export const REQUIRED_CANONICAL_COLUMNS = ['supplier_name', 'spend_amount', 'master_date'] as const;

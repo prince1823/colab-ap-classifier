@@ -190,6 +190,7 @@ export const ipc = {
     filterAssign: (filter: import('../../shared/types/transactions').GroupedFilter, targetGroupId: string | null) => invoke('rules:filterAssign', filter, targetGroupId),
     previewApply: (ruleIds: string[]) => invoke('rules:previewApply', ruleIds),
     apply: (ruleIds: string[]) => invoke('rules:apply', ruleIds),
+    setCategoryA: (ruleId: string, value: boolean) => invoke('rules:setCategoryA', ruleId, value),
   },
 
   // ── Changelog (2 channels) ──

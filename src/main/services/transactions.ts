@@ -206,7 +206,7 @@ export class TransactionStore implements ITransactionStore {
       LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
       ${RULES_JOIN}
       ${whereSQL}
-      ORDER BY t.${safeSortBy} ${safeOrder}
+      ORDER BY ${filters?.randomize ? 'RANDOM()' : `t.${safeSortBy} ${safeOrder}`}
       ${limitClause}
     `;
 

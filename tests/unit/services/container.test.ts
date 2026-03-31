@@ -68,6 +68,6 @@ describe('createContainer', () => {
     expect(keys).toContain('db');
     expect(keys).toContain('transactions');
     expect(keys).toContain('project');
-    expect(keys.length).toBe(22);
+    expect(keys.length).toBe(23);
   });
 });

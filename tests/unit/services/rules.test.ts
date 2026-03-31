@@ -9,7 +9,7 @@ function makeRuleRow(overrides: Partial<{
   id: string; name: string; grouped_conditions: string;
   target_taxonomy_node_id: string; group_id: string | null;
   group_priority: number | null; is_active: boolean;
-  source: string; created_at: string;
+  source: string; category_a_supplier: boolean; created_at: string;
 }> = {}) {
   return {
     id: 'r1',
@@ -20,6 +20,7 @@ function makeRuleRow(overrides: Partial<{
     group_priority: null,
     is_active: true,
     source: 'manual',
+    category_a_supplier: false,
     created_at: '2026-01-01T00:00:00',
     ...overrides,
   };
@@ -943,6 +944,60 @@ describe('RuleStore', () => {
 
       expect(result.rulesCreated).toBe(2);
       expect(result.suppliersProcessed).toBe(2);
+    });
+  });
+
+  // ─── getCatARuleForSupplier ───────────────────────────────────────────────────
+
+  describe('getCatARuleForSupplier', () => {
+    it('returns null when no cat A rules exist', async () => {
+      vi.mocked(db.all).mockResolvedValue([]);
+
+      const result = await store.getCatARuleForSupplier('Acme Corp');
+      expect(result).toBeNull();
+    });
+
+    it('returns the rule when a cat A rule exists for the supplier', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({
+          id: 'cat-a-rule',
+          grouped_conditions: makeSupplierOnlyConditions('Acme Corp'),
+          source: 'supplier_universe',
+          category_a_supplier: true,
+        }),
+      ]);
+
+      const result = await store.getCatARuleForSupplier('Acme Corp');
+      expect(result).not.toBeNull();
+      expect(result!.id).toBe('cat-a-rule');
+    });
+
+    it('returns null when cat A rules exist for a different supplier', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({
+          id: 'other-rule',
+          grouped_conditions: makeSupplierOnlyConditions('Other Corp'),
+          source: 'supplier_universe',
+          category_a_supplier: true,
+        }),
+      ]);
+
+      const result = await store.getCatARuleForSupplier('Acme Corp');
+      expect(result).toBeNull();
+    });
+
+    it('is case-insensitive when matching supplier name', async () => {
+      vi.mocked(db.all).mockResolvedValue([
+        makeRuleRow({
+          id: 'cat-a-rule',
+          grouped_conditions: makeSupplierOnlyConditions('acme corp'),
+          source: 'supplier_universe',
+          category_a_supplier: true,
+        }),
+      ]);
+
+      const result = await store.getCatARuleForSupplier('Acme Corp');
+      expect(result).not.toBeNull();
     });
   });
 });

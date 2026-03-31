@@ -143,6 +143,7 @@ export const ipc = {
     confirm: (id: string, status: SupplierConfirmationStatus) =>
       invoke('suppliers:confirm', id, status),
     researchAll: (supplierIds?: string[]) => invoke('suppliers:researchAll', supplierIds),
+    categorizeAll: () => invoke('suppliers:categorizeAll'),
     cancelResearch: () => invoke('suppliers:cancelResearch'),
     researchSingle: (supplierId: string) =>
       invoke('suppliers:researchSingle', supplierId),

@@ -288,12 +288,12 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
 
       {/* Actions */}
       <div className="detail-actions">
-        {!supplier.isResearched && (
+        {!supplier.isResearched && !supplier.isTailSpend && (
           <button type="button" className="action-btn research" onClick={() => onResearch(supplier)}>
             Research
           </button>
         )}
-        {supplier.isResearched && supplier.confirmationStatus !== 'confirmed' && (
+        {supplier.l1L2Path && supplier.confirmationStatus !== 'confirmed' && (
           <button type="button" className="action-btn confirm" onClick={() => onConfirm(supplier)}>
             Confirm
           </button>

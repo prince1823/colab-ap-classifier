@@ -220,7 +220,10 @@ export default function SuppliersPage() {
 
   /** Batch research selected — delegates entirely to the backend */
   const researchSelected = useCallback(() => {
-    if (isResearchRunning()) return
+    if (isResearchRunning()) {
+      alert('Cannot start research while another operation is in progress.')
+      return
+    }
     const selectedIds_ = suppliers.filter(s => selectedIds.has(s.id) && !s.isResearched).map(s => s.id)
     if (selectedIds_.length === 0) return
     // Fire-and-forget: progress is streamed via EventBus → workflowStore.
@@ -231,9 +234,20 @@ export default function SuppliersPage() {
     setSelectedIds(new Set())
   }, [suppliers, selectedIds])
 
+  /** Categorize all suppliers without L1/L2 */
+  const categorizeAll = useCallback(() => {
+    if (isResearchRunning()) {
+      alert('Cannot start categorization while another operation is in progress.')
+      return
+    }
+    ipc.suppliers.categorizeAll().catch((err) => {
+      console.error('[Categorize] categorizeAll failed:', err)
+    })
+  }, [])
+
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
-    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.isResearched && s.confirmationStatus !== 'confirmed')
+    const selected = suppliers.filter(s => selectedIds.has(s.id) && s.l1L2Path && s.confirmationStatus !== 'confirmed')
     if (selected.length === 0) return
     const confirmedIds = new Set(selected.map(s => s.id))
     for (const s of selected) {
@@ -338,7 +352,7 @@ export default function SuppliersPage() {
 
   /** Check if any selected suppliers have actionable bulk operations */
   const hasConfirmable = useMemo(() =>
-    suppliers.some(s => selectedIds.has(s.id) && s.isResearched && s.confirmationStatus !== 'confirmed'),
+    suppliers.some(s => selectedIds.has(s.id) && s.l1L2Path && s.confirmationStatus !== 'confirmed'),
     [suppliers, selectedIds]
   )
   const hasResearchable = useMemo(() =>
@@ -536,6 +550,16 @@ export default function SuppliersPage() {
                 {filterConditions.length}
               </span>
             )}
+          </button>
+        )}
+
+        {/* Categorize button — assigns L1/L2 to all uncategorized suppliers */}
+        {viewMode !== 'normalize' && (
+          <button
+            onClick={categorizeAll}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 px-3 py-1.5 text-xs font-medium transition-colors flex-shrink-0"
+          >
+            Categorize
           </button>
         )}
 

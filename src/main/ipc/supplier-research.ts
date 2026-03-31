@@ -9,9 +9,27 @@ export function registerSupplierResearchHandlers(
   project: ProjectStore,
   eventBus: EventBus
 ): void {
+  // Phase 1 only: web research for selected suppliers
   registerHandler('suppliers:researchAll', async (_event, supplierIds?: unknown) => {
     const ids = Array.isArray(supplierIds) ? (supplierIds as string[]) : undefined;
 
+    // Fire-and-forget: researchAll emits its own terminal event
+    (async () => {
+      await researcher.researchAll(ids);
+    })().catch((err) => {
+      eventBus.emit('suppliers:research:progress', {
+        status: 'failed',
+        totalSuppliers: 0,
+        processedSuppliers: 0,
+        percentage: 0,
+        currentSupplier: null,
+        currentStep: err instanceof Error ? err.message : String(err),
+      } satisfies ResearchProgress);
+    });
+  });
+
+  // Categorize all suppliers without L1/L2: non-tail (using research data) + tail (using transactions)
+  registerHandler('suppliers:categorizeAll', async () => {
     const taxonomyNodes = await taxonomy.getNodes();
     let context;
     try {
@@ -21,15 +39,8 @@ export function registerSupplierResearchHandlers(
     }
     const columnPriorities = (await project.getSetting('column_priorities') as string[] | null) ?? [];
 
-    // Fire-and-forget: research → categorize non-tail-spend → categorize tail-spend → completed
-    // Each phase is individually try/caught so one failure doesn't skip subsequent phases.
+    // Fire-and-forget: categorize non-tail-spend → categorize tail-spend → completed
     (async () => {
-      try {
-        await researcher.researchAll(ids, { suppressTerminal: true });
-      } catch (err) {
-        console.error('[IPC] Research failed:', err);
-      }
-
       try {
         await researcher.categorizeWithSupplierInfo(taxonomyNodes, context);
       } catch (err) {

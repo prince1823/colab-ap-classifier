@@ -37,7 +37,7 @@ function ConfirmedChip({ supplier }: { supplier: ProjectSupplierView }) {
 }
 
 function ResearchButton({ supplier, onResearch }: { supplier: ProjectSupplierView; onResearch?: (s: ProjectSupplierView) => void }) {
-  if (supplier.isResearched || !onResearch) return null
+  if (supplier.isResearched || supplier.isTailSpend || !onResearch) return null
   return (
     <button
       type="button"

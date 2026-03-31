@@ -251,13 +251,19 @@ export class SupplierResearcher implements ISupplierResearcher {
           });
 
           for (let i = 0; i < batch.length; i++) {
-            const path = result.get(i + 1);
-            if (path) {
-              const validated = validateCategoryPath(path, taxonomy);
-              if (validated) {
-                await this.supplierService.updateSupplier(batch[i].id, { l1L2Path: validated });
-              } else {
-                console.warn(`[Research] Invalid category path "${path}" for supplier "${batch[i].supplierName}" — skipping`);
+            const paths = result.get(i + 1);
+            if (paths && paths.length > 0) {
+              const validatedPaths: string[] = [];
+              for (const path of paths) {
+                const validated = validateCategoryPath(path, taxonomy);
+                if (validated) {
+                  validatedPaths.push(validated);
+                } else {
+                  console.warn(`[Research] Invalid category path "${path}" for supplier "${batch[i].supplierName}" — skipping`);
+                }
+              }
+              if (validatedPaths.length > 0) {
+                await this.supplierService.updateSupplier(batch[i].id, { l1L2Path: validatedPaths });
               }
             }
           }
@@ -397,7 +403,7 @@ export class SupplierResearcher implements ISupplierResearcher {
             if (path) {
               const validated = validateCategoryPath(path, taxonomy);
               if (validated) {
-                await this.supplierService.updateSupplier(batch[i].id, { l1L2Path: validated });
+                await this.supplierService.updateSupplier(batch[i].id, { l1L2Path: [validated] });
               } else {
                 console.warn(`[Research] Invalid tail spend category path "${path}" for "${batch[i].name}" — skipping`);
               }

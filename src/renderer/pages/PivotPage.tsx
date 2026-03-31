@@ -6,10 +6,10 @@ import CreateRuleModal from '../components/review/CreateRuleModal'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useReclassification } from '../hooks/useReclassification'
-import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
 import { showError } from '../lib/toast-errors'
 import { usePivotStore } from '../stores/pivotStore'
+import { useWorkflowStore } from '../stores/workflowStore'
 import type { FlattenedPivotRow } from '../types/pivot'
 import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
@@ -141,23 +141,30 @@ export default function PivotPage() {
     [advancedGrouped]
   )
 
-  const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
+  const columns = useWorkflowStore((s) => s.columns)
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
+  const confirmedSupplierCount = useWorkflowStore((s) => s.confirmedSupplierCount)
 
   // Load suggestions for string filter fields (supplier names, etc.)
   const [supplierSuggestions, setSupplierSuggestions] = useState<string[]>([])
   useEffect(() => {
+    if (!projectFilePath) { setSupplierSuggestions([]); return }
     ipc.transactions.distinctValues('supplier_name', 5000)
       .then(vals => setSupplierSuggestions(vals.filter(Boolean)))
       .catch((e) => showError('Failed to load supplier suggestions', e))
-  }, [])
+  }, [projectFilePath, confirmedSupplierCount])
 
   // Load rule groups for the bucket selector on the toolbar
   const [ruleGroups, setRuleGroups] = useState<RuleGroup[]>([])
-  useEffect(() => {
+  const loadRuleGroups = useCallback(() => {
     ipc.rules.listGroups()
       .then(groups => setRuleGroups(groups ?? []))
       .catch((e) => showError('Failed to load rule groups', e))
   }, [])
+  useEffect(() => {
+    if (!projectFilePath) { setRuleGroups([]); return }
+    loadRuleGroups()
+  }, [projectFilePath, loadRuleGroups])
 
   const filter = useMemo(() => {
     const pillFilter = buildTransactionFilter(filterState)
@@ -199,13 +206,13 @@ export default function PivotPage() {
   const availableColumns = useMemo(() => [
     'classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
     'applied_rule_name',
-    ...(columns ?? []).filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
+    ...columns.filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
   ], [columns])
 
   /** All columns available for advanced filters (includes boolean virtual cols excluded from pivot). */
   const filterableColumns = useMemo(() => [
     ...availableColumns,
-    ...(columns ?? []).filter(c => PIVOT_ONLY_EXCLUDE.has(c)),
+    ...columns.filter(c => PIVOT_ONLY_EXCLUDE.has(c)),
   ], [availableColumns, columns])
 
   const BOOLEAN_COLS = new Set(['is_tail_spend', 'is_researched', 'human_reviewed'])
@@ -234,12 +241,13 @@ export default function PivotPage() {
       const result = await ipc.rules.generate()
       alert(`Created ${result.rulesCreated} rules for ${result.suppliersProcessed} suppliers.`)
       refetch()
+      loadRuleGroups()
     } catch (err) {
       alert(`Error generating rules: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setGenerating(false)
     }
-  }, [refetch])
+  }, [refetch, loadRuleGroups])
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -381,7 +389,7 @@ export default function PivotPage() {
         isOpen={!!createRuleRows}
         onClose={() => setCreateRuleRows(null)}
         selectedRows={createRuleRows ?? []}
-        onCreated={refetch}
+        onCreated={() => { refetch(); loadRuleGroups() }}
         selectedGroupId={selectedGroupId}
         selectedGroupName={ruleGroups.find(g => g.id === selectedGroupId)?.name ?? null}
       />

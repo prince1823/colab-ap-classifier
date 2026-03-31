@@ -14,6 +14,8 @@ export interface TraceEntry {
   timestamp: string;
   agent: TraceAgentType;
   supplier?: string;
+  supplierCount?: number;
+  groupCount?: number;
   batchIndex?: number;
   model: string;
   systemPrompt: string;

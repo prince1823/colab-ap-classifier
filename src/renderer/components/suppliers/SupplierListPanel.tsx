@@ -232,6 +232,12 @@ export default function SupplierListPanel({
                     <span className="text-[10px] text-gray-400">{fmtAbbrev(s.totalSpend)}</span>
                     <span className="text-[10px] text-gray-300">·</span>
                     <span className="text-[10px] text-gray-400">{s.transactionCount} txns</span>
+                    {s.l1L2Path && s.l1L2Path.length > 0 && (
+                      <>
+                        <span className="text-[10px] text-gray-300">·</span>
+                        <span className="text-[10px] text-blue-500 truncate max-w-[120px]" title={s.l1L2Path.join(', ')}>{s.l1L2Path.join(', ')}</span>
+                      </>
+                    )}
                     <span className="flex-1" />
                     <ResearchButton supplier={s} onResearch={onResearch} />
                   </div>

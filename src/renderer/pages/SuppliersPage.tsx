@@ -61,8 +61,12 @@ export default function SuppliersPage() {
     return undefined
   }, [advancedGrouped])
 
-  // Load settings and filter fields once on mount
+  const projectFilePath = useWorkflowStore(s => s.projectFilePath)
+  const columnsLength = useWorkflowStore(s => s.columns.length)
+
+  // Load settings and filter fields when project or columns change
   useEffect(() => {
+    if (!projectFilePath) return
     async function loadSettings() {
       try {
         const [threshold, fields] = await Promise.all([
@@ -84,7 +88,7 @@ export default function SuppliersPage() {
       g.conditions.some(c => c.field === 'is_tail_spend')
     )
     if (hasTailFilter) setTailSpendActive(true)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectFilePath, columnsLength]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = useCallback(async () => {
     if (suppliers.length === 0) setLoading(true)
@@ -182,9 +186,10 @@ export default function SuppliersPage() {
   const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
     setSaving(true)
     try {
-      await ipc.suppliers.update(supplier.id, { l1L2Path: newValue || undefined })
+      const paths = newValue ? newValue.split(',').map(s => s.trim()).filter(Boolean) : undefined
+      await ipc.suppliers.update(supplier.id, { l1L2Path: paths })
       updateSuppliers(prev => prev.map(s =>
-        s.id === supplier.id ? { ...s, l1L2Path: newValue || null } : s
+        s.id === supplier.id ? { ...s, l1L2Path: paths || null } : s
       ))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to update')

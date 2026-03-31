@@ -236,15 +236,14 @@ describe('buildUserPrompt', () => {
     expect(prompt).not.toContain('Parent Company');
   });
 
-  it('should include column priority and dedup note when columnPriorities is set', () => {
+  it('should include dedup grouping note when columnPriorities is set', () => {
     const prompt = buildUserPrompt(makeInput({ columnPriorities: ['supplier_name', 'spend_amount'] }));
-    expect(prompt).toContain('classification priority');
-    expect(prompt).toContain('Identical rows are grouped');
+    expect(prompt).toContain('grouped by their primary field');
   });
 
-  it('should not include column priority note when columnPriorities is empty', () => {
+  it('should not include grouping note when columnPriorities is empty', () => {
     const prompt = buildUserPrompt(makeInput({ columnPriorities: [] }));
-    expect(prompt).not.toContain('classification priority');
+    expect(prompt).not.toContain('grouped by their primary field');
   });
 });
 
@@ -402,17 +401,18 @@ describe('formatTransactions', () => {
     expect(result).not.toContain('Group 2');
   });
 
-  it('should keep different rows as separate groups', () => {
+  it('should group by primary field with secondary samples', () => {
     const txns = [
       { supplier_name: 'Acme', spend_amount: 500 },
       { supplier_name: 'Acme', spend_amount: 500 },
       { supplier_name: 'Acme', spend_amount: 1200 },
     ];
+    // Primary key is supplier_name; all 3 rows share 'Acme' → 1 group
     const result = formatTransactions(txns, ['supplier_name', 'spend_amount']);
-    expect(result).toContain('Group 1 (2 rows):');
-    expect(result).toContain('Group 2 (1 row):');
-    expect(result).toContain('spend_amount: 500');
-    expect(result).toContain('spend_amount: 1200');
+    expect(result).toContain('Group 1 (3 rows):');
+    expect(result).toContain('supplier_name: Acme');
+    // spend_amount shown as sampled secondary values
+    expect(result).toContain('spend_amount:');
   });
 
   it('should show singular row label for single-row groups', () => {
@@ -862,7 +862,7 @@ describe('LLMClassificationAgent', () => {
       });
 
       expect(mockLLM.chat).toHaveBeenCalledOnce();
-      expect(result.get(1)).toBe('Indirect|IT Services');
+      expect(result.get(1)).toEqual(['Indirect|IT Services']);
     });
 
     it('should validate returned paths against taxonomy', async () => {
@@ -888,7 +888,7 @@ describe('LLMClassificationAgent', () => {
 
       const l3Nodes = SAMPLE_TAXONOMY.filter((n) => n.depth === 3 && n.l1 === 'Indirect' && n.l2 === 'IT Services');
       const result = await agent.classifyL3({
-        categoryPath: 'Indirect|IT Services',
+        categoryPaths: ['Indirect|IT Services'],
         l3Taxonomy: l3Nodes,
         transactions: SAMPLE_TRANSACTIONS,
         columnPriorities: SAMPLE_COLUMN_PRIORITIES,
@@ -903,7 +903,7 @@ describe('LLMClassificationAgent', () => {
 
     it('should throw if no L3 nodes under category', async () => {
       await expect(agent.classifyL3({
-        categoryPath: 'Fake|Category',
+        categoryPaths: ['Fake|Category'],
         l3Taxonomy: [],
         transactions: SAMPLE_TRANSACTIONS,
         columnPriorities: SAMPLE_COLUMN_PRIORITIES,
@@ -916,7 +916,7 @@ describe('LLMClassificationAgent', () => {
     it('should return empty result for empty transactions', async () => {
       const l3Nodes = SAMPLE_TAXONOMY.filter((n) => n.depth === 3 && n.l1 === 'Indirect' && n.l2 === 'IT Services');
       const result = await agent.classifyL3({
-        categoryPath: 'Indirect|IT Services',
+        categoryPaths: ['Indirect|IT Services'],
         l3Taxonomy: l3Nodes,
         transactions: [],
         columnPriorities: [],
@@ -1024,14 +1024,14 @@ describe('parseCategorySelectionResponse', () => {
       ],
     });
     const result = parseCategorySelectionResponse(text);
-    expect(result.get(1)).toBe('Indirect|IT Services');
-    expect(result.get(2)).toBe('Direct|Raw Materials');
+    expect(result.get(1)).toEqual(['Indirect|IT Services']);
+    expect(result.get(2)).toEqual(['Direct|Raw Materials']);
   });
 
   it('should parse single-supplier response', () => {
     const text = JSON.stringify({ categoryPath: 'Indirect|IT Services' });
     const result = parseCategorySelectionResponse(text);
-    expect(result.get(1)).toBe('Indirect|IT Services');
+    expect(result.get(1)).toEqual(['Indirect|IT Services']);
   });
 
   it('should handle markdown fences', () => {
@@ -1039,7 +1039,27 @@ describe('parseCategorySelectionResponse', () => {
       categories: [{ supplierIndex: 1, categoryPath: 'Direct|Raw Materials' }],
     }) + '\n```';
     const result = parseCategorySelectionResponse(text);
-    expect(result.get(1)).toBe('Direct|Raw Materials');
+    expect(result.get(1)).toEqual(['Direct|Raw Materials']);
+  });
+
+  it('should parse two candidates per supplier', () => {
+    const text = JSON.stringify({
+      categories: [
+        { supplierIndex: 1, categoryPath: 'Indirect|IT Services', categoryPath2: 'Direct|Raw Materials' },
+      ],
+    });
+    const result = parseCategorySelectionResponse(text);
+    expect(result.get(1)).toEqual(['Indirect|IT Services', 'Direct|Raw Materials']);
+  });
+
+  it('should deduplicate identical candidates', () => {
+    const text = JSON.stringify({
+      categories: [
+        { supplierIndex: 1, categoryPath: 'Indirect|IT Services', categoryPath2: 'Indirect|IT Services' },
+      ],
+    });
+    const result = parseCategorySelectionResponse(text);
+    expect(result.get(1)).toEqual(['Indirect|IT Services']);
   });
 
   it('should skip entries with missing fields', () => {
@@ -1085,7 +1105,7 @@ describe('buildL3ClassificationUserPrompt', () => {
   it('should include category branch and filtered taxonomy', () => {
     const l3Nodes = SAMPLE_TAXONOMY.filter((n) => n.depth === 3 && n.l1 === 'Indirect' && n.l2 === 'IT Services');
     const prompt = buildL3ClassificationUserPrompt({
-      categoryPath: 'Indirect|IT Services',
+      categoryPaths: ['Indirect|IT Services'],
       l3Taxonomy: l3Nodes,
       transactions: SAMPLE_TRANSACTIONS,
       columnPriorities: SAMPLE_COLUMN_PRIORITIES,

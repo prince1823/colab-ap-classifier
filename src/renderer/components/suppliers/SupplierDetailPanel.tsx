@@ -240,7 +240,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   const info = supplier.supplierInfo ?? {}
   const getVal = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path' | 'mappedTaxonomyPaths'): string => {
     if (key === 'parentName') return supplier.parentName || ''
-    if (key === 'l1L2Path') return supplier.l1L2Path || ''
+    if (key === 'l1L2Path') return supplier.l1L2Path?.join(', ') || ''
     if (key === 'mappedTaxonomyPaths') {
       const paths = supplier.mappedTaxonomyPaths
       if (!paths || paths.length === 0) return ''

@@ -97,13 +97,14 @@ export interface CategorySelectionInput {
 }
 
 export interface L3ClassificationInput {
-  categoryPath: string;
+  categoryPaths: string[];
   l3Taxonomy: TaxonomyNode[];
   transactions: Array<Record<string, unknown>>;
   columnPriorities: string[];
   companyContext: CompanyContext;
   supplierName: string;
   supplierType: string | null;
+  sampleCount?: number;
 }
 
 export interface TailSpendCategorySelectionInput {
@@ -132,6 +133,7 @@ export interface ClassificationInput {
   supplierResearch: SupplierInfo | null;
   parentName?: string | null;
   columnPriorities: string[];
+  sampleCount?: number;
 }
 
 export interface ClassificationEntry {

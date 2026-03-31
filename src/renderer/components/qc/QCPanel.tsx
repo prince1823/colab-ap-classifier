@@ -108,12 +108,12 @@ export default function QCPanel() {
     }, 400)
   }, [])
 
-  // Initial scope count
+  // Initial scope count — runs once config is loaded (and re-runs if config changes externally)
   useEffect(() => {
     if (config) {
       fetchScopeCount(config.scope)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [config, fetchScopeCount])
 
   // Config change handler — update state, debounce save + scope count
   const handleConfigChange = useCallback((newConfig: QCConfig) => {

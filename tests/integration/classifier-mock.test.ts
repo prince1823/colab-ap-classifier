@@ -111,12 +111,12 @@ function createMockClassificationAgentFromFixture(
   db: DuckDBDatabase
 ): ClassificationAgent {
   const selectCategories = vi.fn().mockImplementation(async (input: any) => {
-    const result = new Map<number, string>();
+    const result = new Map<number, string[]>();
     for (let i = 0; i < input.suppliers.length; i++) {
       const name = input.suppliers[i].name.toLowerCase();
       const match = mockClassifications[name] || mockClassifications['_default'];
       const parts = match.classificationPath.split('|');
-      result.set(i + 1, `${parts[0]}|${parts[1]}`);
+      result.set(i + 1, [`${parts[0]}|${parts[1]}`]);
     }
     return result;
   });

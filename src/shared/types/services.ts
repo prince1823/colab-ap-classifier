@@ -118,7 +118,7 @@ export interface WebSearch {
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 export interface ClassificationAgent {
-  selectCategories(input: CategorySelectionInput): Promise<Map<number, string>>;
+  selectCategories(input: CategorySelectionInput): Promise<Map<number, string[]>>;
   selectCategoriesForTailSpend(input: TailSpendCategorySelectionInput): Promise<Map<number, string>>;
   classifyL3(input: L3ClassificationInput): Promise<ClassificationResult>;
   classifyL3ForTailSpend(input: TailSpendL3Input): Promise<Map<number, string>>;
@@ -302,7 +302,7 @@ export interface SupplierResearcher {
 export interface ClassificationRunner {
   classifyAll(groupedFilter?: import('./transactions').GroupedFilter): Promise<void>;
   getScopeCount(groupedFilter?: import('./transactions').GroupedFilter): Promise<number>;
-  classifySupplierTransactions(projectSupplierId: string, categoryPath: string, taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], scopedTxnIds?: Set<string>): Promise<void>;
+  classifySupplierTransactions(projectSupplierId: string, categoryPaths: string[], taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], sampleCount: number, scopedTxnIds?: Set<string>): Promise<void>;
   getIsRunning(): boolean;
   stop(): Promise<void>;
 }

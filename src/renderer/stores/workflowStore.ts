@@ -36,6 +36,9 @@ interface WorkflowState {
   classifiedRows: number
   confirmedSupplierCount: number
 
+  // Cached column list (refreshed alongside gate state after uploads)
+  columns: string[]
+
   // Actions
   createProject: (name: string) => Promise<{ needsSupplierUniverseSetup?: boolean; missingSupplierUniversePath?: string }>
   loadProject: (filePath: string) => Promise<{ needsSupplierUniverseSetup?: boolean; missingSupplierUniversePath?: string }>
@@ -61,6 +64,7 @@ const INITIAL_GATE_STATE = {
   totalRows: 0,
   classifiedRows: 0,
   confirmedSupplierCount: 0,
+  columns: [] as string[],
 }
 
 export const useWorkflowStore = create<WorkflowState>()(
@@ -185,10 +189,11 @@ export const useWorkflowStore = create<WorkflowState>()(
         try {
           const prev = get()
 
-          const [stats, nodeCount, suppliers] = await Promise.all([
+          const [stats, nodeCount, suppliers, cols] = await Promise.all([
             ipc.transactions.stats().catch((e) => { showError('Failed to load transaction stats', e); return null }),
             ipc.taxonomy.getNodeCount().catch((e) => { showError('Failed to load taxonomy count', e); return null }),
             ipc.suppliers.list().catch((e) => { showError('Failed to load suppliers', e); return null }),
+            ipc.transactions.getColumns().catch((e) => { showError('Failed to load columns', e); return null }),
           ])
 
           const totalRows = stats !== null ? (stats.totalRows ?? 0) : prev.totalRows
@@ -197,6 +202,7 @@ export const useWorkflowStore = create<WorkflowState>()(
           const confirmedSupplierCount = suppliers !== null
             ? suppliers.filter((s) => s.confirmationStatus === 'confirmed').length
             : prev.confirmedSupplierCount
+          const columns = cols !== null ? cols : prev.columns
 
           set({
             hasTaxonomy: taxonomyNodeCount > 0,
@@ -207,6 +213,7 @@ export const useWorkflowStore = create<WorkflowState>()(
             totalRows,
             classifiedRows,
             confirmedSupplierCount,
+            columns,
           })
         } catch (e) {
           showError('Failed to refresh workflow state', e)

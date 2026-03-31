@@ -195,12 +195,12 @@ describe('SupplierResearcher', () => {
       const taxonomy = [
         { id: 't1', fullPath: 'L1|L2', l1: 'L1', l2: 'L2', l3: null, depth: 2, description: null, parentPath: 'L1', createdAt: '' },
       ];
-      vi.mocked(classificationAgent.selectCategories).mockResolvedValue(new Map([[1, 'L1|L2']]));
+      vi.mocked(classificationAgent.selectCategories).mockResolvedValue(new Map([[1, ['L1|L2']]]));
 
       await researcher.categorizeWithSupplierInfo(taxonomy as any, { industry: 'Tech' });
 
       expect(classificationAgent.selectCategories).toHaveBeenCalledTimes(1);
-      expect(supplierService.updateSupplier).toHaveBeenCalledWith('sup1', { l1L2Path: 'L1|L2' });
+      expect(supplierService.updateSupplier).toHaveBeenCalledWith('sup1', { l1L2Path: ['L1|L2'] });
     });
 
     it('should skip suppliers that already have l1L2Path', async () => {
@@ -209,7 +209,7 @@ describe('SupplierResearcher', () => {
           id: 'sup1', supplierName: 'Acme', confirmationStatus: 'pending',
           isTailSpend: false, parentSupplierId: null, parentName: null,
           supplierInfo: { industry: 'Tech' }, mappedTaxonomyPaths: null,
-          l1L2Path: 'Already|Set', universeMatch: false, isResearched: true,
+          l1L2Path: ['Already|Set'], universeMatch: false, isResearched: true,
           createdAt: '', transactionCount: 5, totalSpend: 1000, aliases: [],
         },
       ] as any);
@@ -266,7 +266,7 @@ describe('SupplierResearcher', () => {
       await researcher.categorizeTailSpend(taxonomy as any, { industry: 'Tech' }, ['gl_description']);
 
       expect(classificationAgent.selectCategoriesForTailSpend).toHaveBeenCalledTimes(1);
-      expect(supplierService.updateSupplier).toHaveBeenCalledWith('sup1', { l1L2Path: 'L1|L2' });
+      expect(supplierService.updateSupplier).toHaveBeenCalledWith('sup1', { l1L2Path: ['L1|L2'] });
     });
 
     it('should skip suppliers that already have l1L2Path', async () => {
@@ -275,7 +275,7 @@ describe('SupplierResearcher', () => {
           id: 'sup1', supplierName: 'SmallCo', confirmationStatus: 'pending',
           isTailSpend: true, parentSupplierId: null, parentName: null,
           supplierInfo: null, mappedTaxonomyPaths: null,
-          l1L2Path: 'Already|Set', universeMatch: false, isResearched: false,
+          l1L2Path: ['Already|Set'], universeMatch: false, isResearched: false,
           createdAt: '', transactionCount: 2, totalSpend: 50, aliases: [],
         },
       ] as any);

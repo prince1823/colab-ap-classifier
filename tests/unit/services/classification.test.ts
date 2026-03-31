@@ -82,6 +82,7 @@ describe('ClassificationRunner', () => {
     const supplierName = opts?.supplierName ?? 'Acme';
     const txns = opts?.txns ?? [{ id: 'tx1', project_supplier_id: 'sup1', row_index: 0, spend_amount: 1000, classification_status: 'unclassified' }];
     const l1L2Path = opts?.l1L2Path !== undefined ? opts.l1L2Path : 'Indirect|IT';
+    const l1L2Paths = l1L2Path ? [l1L2Path] : null;
     const isTailSpend = opts?.isTailSpend ?? false;
     const columnPriorities = opts?.columnPriorities ?? ['spend_amount'];
 
@@ -90,9 +91,6 @@ describe('ClassificationRunner', () => {
       return [];
     });
     vi.mocked(db.get).mockImplementation(async (sql: string) => {
-      if (sql.includes('supplier_name, is_tail_spend, l1_l2_path')) {
-        return { supplier_name: supplierName, is_tail_spend: isTailSpend, l1_l2_path: l1L2Path };
-      }
       if (sql.includes('COUNT')) return { cnt: txns.length };
       return undefined;
     });
@@ -101,7 +99,7 @@ describe('ClassificationRunner', () => {
     vi.mocked(suppliers.getProjectSupplier).mockResolvedValue({
       id: 'sup1', supplierName, parentName: null, parentSupplierId: null,
       isTailSpend, isResearched: false, confirmationStatus: 'pending',
-      supplierInfo: null, mappedTaxonomyPaths: null, l1L2Path: l1L2Path,
+      supplierInfo: null, mappedTaxonomyPaths: null, l1L2Path: l1L2Paths,
       universeMatch: false, createdAt: '',
     });
     vi.mocked(taxonomy.getNodes).mockResolvedValue(taxonomyNodes);
@@ -301,10 +299,10 @@ describe('ClassificationRunner', () => {
       // selectCategories should NOT be called (removed)
       expect(classificationAgent.selectCategories).not.toHaveBeenCalled();
 
-      // classifyL3 should receive the stored l1_l2_path
+      // classifyL3 should receive the stored l1_l2_paths
       expect(classificationAgent.classifyL3).toHaveBeenCalledWith(
         expect.objectContaining({
-          categoryPath: 'Indirect|IT',
+          categoryPaths: ['Indirect|IT'],
           supplierName: 'Acme',
         })
       );
@@ -333,7 +331,7 @@ describe('ClassificationRunner', () => {
       );
       expect(debugLog).toHaveBeenCalledWith(
         'WARN',
-        expect.stringContaining('l1_l2_path missing')
+        expect.stringContaining('l1_l2_paths missing')
       );
     });
 
@@ -361,7 +359,7 @@ describe('ClassificationRunner', () => {
       );
       expect(debugLog).toHaveBeenCalledWith(
         'WARN',
-        expect.stringContaining('l1_l2_path missing')
+        expect.stringContaining('l1_l2_paths missing')
       );
     });
   });
@@ -432,12 +430,16 @@ describe('ClassificationRunner', () => {
         return [];
       });
       vi.mocked(db.get).mockImplementation(async (sql: string) => {
-        if (sql.includes('supplier_name, is_tail_spend, l1_l2_path')) {
-          return { supplier_name: 'FailSupplier', is_tail_spend: false, l1_l2_path: 'Indirect|IT' };
-        }
         if (sql.includes('COUNT')) return { cnt: 2 };
         return undefined;
       });
+      vi.mocked(suppliers.getProjectSupplier).mockImplementation(async (id: string) => ({
+        id, supplierName: id === 'sup1' ? 'FailSupplier' : 'GoodSupplier',
+        parentName: null, parentSupplierId: null,
+        isTailSpend: false, isResearched: false, confirmationStatus: 'pending' as const,
+        supplierInfo: null, mappedTaxonomyPaths: null, l1L2Path: ['Indirect|IT'],
+        universeMatch: false, createdAt: '',
+      }));
       vi.mocked(transactions.queryBySupplier).mockResolvedValue([
         { id: 'tx1', project_supplier_id: 'sup1', spend_amount: 1000, classification_status: 'unclassified' },
       ]);

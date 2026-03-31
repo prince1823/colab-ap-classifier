@@ -271,7 +271,7 @@ export class SupplierService implements ISupplierService {
     }
     if (updates.l1L2Path !== undefined) {
       setClauses.push('l1_l2_path = ?');
-      params.push(updates.l1L2Path);
+      params.push(JSON.stringify(updates.l1L2Path));
     }
 
     if (updates.markResearched) {
@@ -468,7 +468,7 @@ export class SupplierService implements ISupplierService {
       parentName: row.parent_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
-      l1L2Path: row.l1_l2_path ?? null,
+      l1L2Path: row.l1_l2_path ? JSON.parse(row.l1_l2_path) : null,
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
       categoryASupplier: Boolean(row.category_a_supplier),
@@ -516,7 +516,7 @@ export class SupplierService implements ISupplierService {
       parentName: row.parent_name,
       supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
       mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
-      l1L2Path: row.l1_l2_path ?? null,
+      l1L2Path: row.l1_l2_path ? JSON.parse(row.l1_l2_path) : null,
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
       categoryASupplier: Boolean(row.category_a_supplier),

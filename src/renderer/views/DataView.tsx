@@ -64,7 +64,9 @@ export default function DataView() {
     }).catch((e) => {
       showError('Failed to load upload history', e)
     })
-    ipc.ingest.getUploadStatsBatch().then(setUploadStats).catch(() => {})
+    ipc.ingest.getUploadStatsBatch().then(setUploadStats).catch((e) => {
+      showError('Failed to load upload stats', e)
+    })
   }, [])
 
   const handleDeleteUpload = async (uploadId: string) => {

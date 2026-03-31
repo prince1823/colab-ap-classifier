@@ -334,18 +334,17 @@ export default function DataUploadStep({
                     )}
                     <td className="whitespace-nowrap px-4 py-2.5 text-center">
                       {(() => {
-                        const classified = uploadStats[upload.uploadId]?.classifiedCount ?? 0
-                        const isClassified = classified > 0
-                        return (
+                        const stats = uploadStats[upload.uploadId]
+                        const classified = stats?.classifiedCount ?? 0
+                        // If stats haven't loaded yet for this upload, disable deletion (safe default)
+                        const isClassified = !stats || classified > 0
+                        return isClassified ? (
+                          <span className="text-xs text-gray-400 italic">Cannot delete — has classified transactions</span>
+                        ) : (
                           <button
-                            onClick={() => !isClassified && setDeleteTarget(upload)}
-                            disabled={isClassified}
-                            title={isClassified ? `Cannot delete: ${classified} classified row${classified > 1 ? 's' : ''}` : 'Delete upload'}
-                            className={
-                              isClassified
-                                ? 'cursor-not-allowed rounded p-1 text-gray-300'
-                                : 'rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600'
-                            }
+                            onClick={() => setDeleteTarget(upload)}
+                            title="Delete upload"
+                            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
                           >
                             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                               <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />

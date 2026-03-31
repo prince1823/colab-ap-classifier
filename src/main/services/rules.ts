@@ -582,6 +582,21 @@ export class RuleStore implements IRuleStore {
     );
   }
 
+  async getCatARuleForSupplier(supplierName: string): Promise<OverrideRule | null> {
+    const rows = await this.db.all<RuleRow>(
+      'SELECT r.*, NULL AS group_priority FROM override_rules r WHERE r.category_a_supplier = TRUE'
+    );
+    for (const row of rows) {
+      const rule = rowToRule(row);
+      const conditions = rule.groupedConditions.groups.flatMap((g) => g.conditions);
+      const supplierCondition = conditions.find((c) => c.field === 'supplier_name' && c.operator === 'equals');
+      if (supplierCondition && String(supplierCondition.value).toLowerCase() === supplierName.toLowerCase()) {
+        return rule;
+      }
+    }
+    return null;
+  }
+
   async filterAndAssignToGroup(filter: GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }> {
     // Load ALL rules, match server-side, then assign
     const allRules = await this.listAllRules();

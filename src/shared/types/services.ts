@@ -252,6 +252,7 @@ export interface RuleStore {
   moveRuleToGroup(ruleId: string, targetGroupId: string | null): Promise<void>;
   assignToGroup(ruleIds: string[], groupId: string | null): Promise<void>;
   filterAndAssignToGroup(filter: import('./transactions').GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }>;
+  getCatARuleForSupplier(supplierName: string): Promise<OverrideRule | null>;
 }
 
 export interface ChangelogStore {

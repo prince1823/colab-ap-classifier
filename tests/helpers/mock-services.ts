@@ -230,6 +230,7 @@ export function createMockRuleStore(): RuleStore {
     moveRuleToGroup: vi.fn(),
     assignToGroup: vi.fn(),
     filterAndAssignToGroup: vi.fn().mockResolvedValue({ matched: 0 }),
+    getCatARuleForSupplier: vi.fn().mockResolvedValue(null),
   };
 }
 

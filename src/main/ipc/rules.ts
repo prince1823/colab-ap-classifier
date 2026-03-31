@@ -30,7 +30,53 @@ export function registerRulesHandlers(
   });
 
   registerHandler('rules:delete', async (_event, ruleId: unknown) => {
-    return rules.deleteRule(ruleId as string);
+    const id = ruleId as string;
+    const rule = await rules.getRule(id);
+
+    // Cascade cat A cleanup before deleting
+    if (rule?.categoryASupplier) {
+      const conditions = rule.groupedConditions.groups.flatMap((g) => g.conditions);
+      const supplierCondition = conditions.find((c) => c.field === 'supplier_name' && c.operator === 'equals');
+
+      if (supplierCondition) {
+        const supplierName = String(supplierCondition.value);
+
+        // Remove this rule's taxonomy path from universe mapped_taxonomy_paths
+        if (supplierUniverse.isOpen()) {
+          const nodes = await taxonomy.getNodes();
+          const node = nodes.find((n) => n.id === rule.targetTaxonomyNodeId);
+          if (node) {
+            const universeRecord = await supplierUniverse.getSupplierRecord(supplierName);
+            const currentPaths = universeRecord?.mappedTaxonomyPaths ?? [];
+            const updatedPaths = currentPaths.filter((p) => p !== node.fullPath);
+            await supplierUniverse.upsertSupplierFull(supplierName, { mappedTaxonomyPaths: updatedPaths });
+          }
+        }
+
+        // Delete the rule first, then check remaining cat A rules
+        await rules.deleteRule(id);
+
+        const remainingCatARule = await rules.getCatARuleForSupplier(supplierName);
+        if (!remainingCatARule) {
+          // No cat A rules remain — clear supplier flags
+          const allSuppliers = await suppliers.listProjectSuppliers();
+          const projectSupplier = allSuppliers.find(
+            (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
+          );
+          if (projectSupplier) {
+            await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: false });
+          }
+
+          if (supplierUniverse.isOpen()) {
+            await supplierUniverse.upsertSupplierFull(supplierName, { categoryASupplier: false });
+          }
+        }
+
+        return;
+      }
+    }
+
+    return rules.deleteRule(id);
   });
 
   registerHandler('rules:generate', async () => {
@@ -95,6 +141,14 @@ export function registerRulesHandlers(
     if (!supplierCondition) throw new Error('rules:setCategoryA only applies to supplier-only rules');
 
     const supplierName = String(supplierCondition.value);
+
+    // Enforce one cat A rule per supplier
+    if (categoryA) {
+      const existingCatARule = await rules.getCatARuleForSupplier(supplierName);
+      if (existingCatARule && existingCatARule.id !== id) {
+        throw new Error(`A Cat A rule already exists for "${supplierName}"`);
+      }
+    }
 
     // Update rule
     await rules.updateRule(id, { categoryASupplier: categoryA });

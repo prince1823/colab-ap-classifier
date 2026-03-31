@@ -156,7 +156,7 @@ describe('resolveCatASupplier (via researchAll)', () => {
     expect(ruleStore.createRule).not.toHaveBeenCalled();
   });
 
-  it('creates multiple rules for multiple mapped paths', async () => {
+  it('creates only one rule even with multiple mapped paths (stops after first success)', async () => {
     const supplier = makeSupplier({
       categoryASupplier: true,
       mappedTaxonomyPaths: [
@@ -172,6 +172,59 @@ describe('resolveCatASupplier (via researchAll)', () => {
 
     await researcher.researchAll();
 
-    expect(ruleStore.createRule).toHaveBeenCalledTimes(2);
+    // Only the first successful resolution creates a rule; the second path is never attempted
+    expect(ruleStore.createRule).toHaveBeenCalledTimes(1);
+    expect(ruleStore.createRule).toHaveBeenCalledWith(expect.objectContaining({
+      targetTaxonomyNodeId: 'node-it-sw',
+    }));
+  });
+
+  it('skips silently when a cat A rule already exists for the supplier', async () => {
+    const supplier = makeSupplier({
+      categoryASupplier: true,
+      mappedTaxonomyPaths: ['Corporate Services|IT|Software'],
+    });
+    vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([supplier]);
+    vi.mocked(supplierUniverse.getSupplierRecord).mockResolvedValue(null);
+    vi.mocked(ruleStore.getCatARuleForSupplier).mockResolvedValue({
+      id: 'existing-rule',
+      name: '[Cat A] Acme Software',
+      groupedConditions: {
+        groupConnector: 'AND',
+        groups: [{ connector: 'AND', conditions: [{ field: 'supplier_name', operator: 'equals', value: 'Acme Software' }] }],
+      },
+      targetTaxonomyNodeId: 'node-it-sw',
+      groupId: null,
+      isActive: true,
+      source: 'supplier_universe',
+      categoryASupplier: true,
+      createdAt: '',
+    });
+
+    await researcher.researchAll();
+
+    expect(ruleStore.createRule).not.toHaveBeenCalled();
+  });
+
+  it('tries next path when first path resolves to unknown node', async () => {
+    const supplier = makeSupplier({
+      categoryASupplier: true,
+      mappedTaxonomyPaths: [
+        'Unknown|Path|Here',
+        'Professional Services|Consulting|Strategy',
+      ],
+    });
+    vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([supplier]);
+    vi.mocked(supplierUniverse.getSupplierRecord).mockResolvedValue(null);
+    vi.mocked(catAAgent.resolve)
+      .mockResolvedValueOnce({ resolvedPath: 'Unknown|Path|Here' }) // not in taxonomyNodes
+      .mockResolvedValueOnce({ resolvedPath: 'Professional Services|Consulting|Strategy' });
+
+    await researcher.researchAll();
+
+    expect(ruleStore.createRule).toHaveBeenCalledTimes(1);
+    expect(ruleStore.createRule).toHaveBeenCalledWith(expect.objectContaining({
+      targetTaxonomyNodeId: 'node-consulting',
+    }));
   });
 });

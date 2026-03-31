@@ -440,6 +440,13 @@ export class SupplierResearcher implements ISupplierResearcher {
     mappedPaths: string[],
     taxonomyNodes: import('../../shared/types/taxonomy').TaxonomyNode[],
   ): Promise<void> {
+    // One cat A rule per supplier — skip silently if one already exists
+    const existingCatARule = await this.ruleStore.getCatARuleForSupplier(supplierName);
+    if (existingCatARule) {
+      return;
+    }
+
+    // Try each mapped path in order; create a rule for the first successful resolution
     for (const mappedPath of mappedPaths) {
       try {
         const { resolvedPath } = await this.catAAgent.resolve(mappedPath, taxonomyNodes);
@@ -461,6 +468,8 @@ export class SupplierResearcher implements ISupplierResearcher {
           source: 'supplier_universe',
           categoryASupplier: true,
         });
+        // Stop after first successful rule creation
+        break;
       } catch (err) {
         console.error(`[CatA] Failed to resolve path "${mappedPath}" for supplier "${supplierName}":`, err);
       }

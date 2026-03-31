@@ -245,6 +245,19 @@ export default function SuppliersPage() {
     })
   }, [])
 
+  /** Categorize selected suppliers without L1/L2 */
+  const categorizeSelected = useCallback(() => {
+    if (isResearchRunning()) {
+      alert('Cannot start categorization while another operation is in progress.')
+      return
+    }
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    ipc.suppliers.categorizeAll(ids).catch((err) => {
+      console.error('[Categorize] categorizeSelected failed:', err)
+    })
+  }, [selectedIds])
+
   /** Batch confirm selected */
   const confirmSelected = useCallback(async () => {
     const selected = suppliers.filter(s => selectedIds.has(s.id) && s.l1L2Path && s.confirmationStatus !== 'confirmed')
@@ -357,6 +370,10 @@ export default function SuppliersPage() {
   )
   const hasResearchable = useMemo(() =>
     suppliers.some(s => selectedIds.has(s.id) && !s.isResearched),
+    [suppliers, selectedIds]
+  )
+  const hasCategorizable = useMemo(() =>
+    suppliers.some(s => selectedIds.has(s.id) && s.l1L2Path === null),
     [suppliers, selectedIds]
   )
 
@@ -686,6 +703,7 @@ export default function SuppliersPage() {
               isActive={activePanel === 'list'}
               onResearch={researchSupplier}
               onResearchSelected={hasResearchable ? researchSelected : undefined}
+              onCategorizeSelected={hasCategorizable ? categorizeSelected : undefined}
               onConfirmSelected={hasConfirmable ? confirmSelected : undefined}
             />
             <SupplierDetailPanel

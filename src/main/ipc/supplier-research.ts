@@ -29,7 +29,8 @@ export function registerSupplierResearchHandlers(
   });
 
   // Categorize all suppliers without L1/L2: non-tail (using research data) + tail (using transactions)
-  registerHandler('suppliers:categorizeAll', async () => {
+  registerHandler('suppliers:categorizeAll', async (_event, supplierIds?: unknown) => {
+    const ids = Array.isArray(supplierIds) ? (supplierIds as string[]) : undefined;
     const taxonomyNodes = await taxonomy.getNodes();
     let context;
     try {
@@ -42,14 +43,14 @@ export function registerSupplierResearchHandlers(
     // Fire-and-forget: categorize non-tail-spend → categorize tail-spend → completed
     (async () => {
       try {
-        await researcher.categorizeWithSupplierInfo(taxonomyNodes, context);
+        await researcher.categorizeWithSupplierInfo(taxonomyNodes, context, ids);
       } catch (err) {
         console.error('[IPC] Non-tail-spend categorization failed:', err);
       }
 
       if (columnPriorities.length > 0) {
         try {
-          await researcher.categorizeTailSpend(taxonomyNodes, context, columnPriorities);
+          await researcher.categorizeTailSpend(taxonomyNodes, context, columnPriorities, ids);
         } catch (err) {
           console.error('[IPC] Tail spend categorization failed:', err);
         }

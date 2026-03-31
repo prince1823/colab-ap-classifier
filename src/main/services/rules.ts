@@ -283,6 +283,10 @@ export class RuleStore implements IRuleStore {
     await this.db.run('DELETE FROM override_rules WHERE id = ?', ruleId);
   }
 
+  async setCategoryA(ruleId: string, value: boolean): Promise<void> {
+    await this.updateRule(ruleId, { categoryASupplier: value });
+  }
+
   private async listAllRules(): Promise<OverrideRule[]> {
     // Returns ALL rules (grouped + ungrouped) ordered by group priority DESC, then created_at DESC.
     const rows = await this.db.all<RuleRow>(`

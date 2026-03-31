@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Zap, X, CheckCircle2 } from 'lucide-react'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import { makeEmptyGroup, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import type { OverrideRule, RuleGroup } from '../../shared/types/rules'
@@ -36,7 +37,7 @@ export default function OverrideRulesPage() {
   const [saving, setSaving] = useState(false)
   const [taxonomySearch, setTaxonomySearch] = useState('')
   const [ruleSearch, setRuleSearch] = useState('')
-  type SourceFilter = 'all' | 'manual' | 'auto'
+  type SourceFilter = 'all' | 'manual' | 'auto' | 'universe'
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
   const [taxonomyDropdownOpen, setTaxonomyDropdownOpen] = useState(false)
   const taxonomyDropdownRef = useRef<HTMLDivElement>(null)
@@ -228,6 +229,21 @@ export default function OverrideRulesPage() {
       setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: rule.isActive } : r))
       setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: rule.isActive } : r))
       setError(e instanceof Error ? e.message : 'Failed to toggle rule')
+    }
+  }
+
+  const handleCategoryAToggle = async (rule: OverrideRule) => {
+    const newValue = !rule.categoryASupplier
+    // Optimistic update
+    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, categoryASupplier: newValue } : r))
+    setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, categoryASupplier: newValue } : r))
+    try {
+      await ipc.rules.setCategoryA(rule.id, newValue)
+    } catch (e) {
+      // Revert optimistic update
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, categoryASupplier: rule.categoryASupplier } : r))
+      setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, categoryASupplier: rule.categoryASupplier } : r))
+      showError('Cat A toggle failed', e)
     }
   }
 
@@ -542,14 +558,15 @@ export default function OverrideRulesPage() {
   // Filter grouped rules (client-side — small set)
   const filteredGroupedRules = useMemo(() => {
     let result = rules
-    if (sourceFilter === 'manual') result = result.filter(r => r.source !== 'auto_generated')
+    if (sourceFilter === 'manual') result = result.filter(r => r.source === 'manual')
     else if (sourceFilter === 'auto') result = result.filter(r => r.source === 'auto_generated')
+    else if (sourceFilter === 'universe') result = result.filter(r => r.source === 'supplier_universe')
     if (ruleSearch.trim()) {
       const q = ruleSearch.toLowerCase()
       result = result.filter(r => {
         const target = getNodePath(r.targetTaxonomyNodeId).toLowerCase()
         const conditions = formatConditionSummary(r).toLowerCase()
-        const source = r.source === 'auto_generated' ? 'auto' : 'manual'
+        const source = r.source === 'auto_generated' ? 'auto' : r.source === 'supplier_universe' ? 'universe' : 'manual'
         const status = r.isActive ? 'active' : 'inactive'
         return r.name.toLowerCase().includes(q) || target.includes(q) || conditions.includes(q) || source.includes(q) || status.includes(q)
       })
@@ -560,8 +577,9 @@ export default function OverrideRulesPage() {
   // Filter ungrouped rules (client-side filter on source; search is handled server-side)
   const filteredUngroupedRules = useMemo(() => {
     let result = ungroupedRulesState
-    if (sourceFilter === 'manual') result = result.filter(r => r.source !== 'auto_generated')
+    if (sourceFilter === 'manual') result = result.filter(r => r.source === 'manual')
     else if (sourceFilter === 'auto') result = result.filter(r => r.source === 'auto_generated')
+    else if (sourceFilter === 'universe') result = result.filter(r => r.source === 'supplier_universe')
     return result
   }, [ungroupedRulesState, sourceFilter])
 
@@ -636,19 +654,22 @@ export default function OverrideRulesPage() {
         <div className="flex items-center gap-2">
           {/* Source filter */}
           <button
-            onClick={() => setSourceFilter(prev => prev === 'all' ? 'manual' : prev === 'manual' ? 'auto' : 'all')}
+            onClick={() => setSourceFilter(prev => prev === 'all' ? 'manual' : prev === 'manual' ? 'auto' : prev === 'auto' ? 'universe' : 'all')}
             className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
               sourceFilter === 'all'
                 ? 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'
                 : sourceFilter === 'manual'
                 ? 'border-blue-300 bg-blue-50 text-blue-700'
+                : sourceFilter === 'universe'
+                ? 'border-teal-300 bg-teal-50 text-teal-700'
                 : 'border-purple-300 bg-purple-50 text-purple-700'
             }`}
-            title={`Showing: ${sourceFilter === 'all' ? 'All rules' : sourceFilter === 'manual' ? 'Manual only' : 'Auto-generated only'}`}
+            title={`Showing: ${sourceFilter === 'all' ? 'All rules' : sourceFilter === 'manual' ? 'Manual only' : sourceFilter === 'auto' ? 'Auto-generated only' : 'Universe only'}`}
           >
             {sourceFilter === 'all' && 'All'}
             {sourceFilter === 'manual' && 'Manual'}
             {sourceFilter === 'auto' && 'Auto'}
+            {sourceFilter === 'universe' && 'Universe'}
           </button>
 
           {/* Collapse / Expand all */}
@@ -1078,6 +1099,7 @@ export default function OverrideRulesPage() {
               <th className="w-[30%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Condition</th>
               <th className="w-[28%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Target Classification</th>
               <th className="w-[7%] px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Source</th>
+              <th className="w-[6%] px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Cat A</th>
               <th className="w-[7%] px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Status</th>
               <th className="w-20 px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Actions</th>
             </tr>
@@ -1113,6 +1135,7 @@ export default function OverrideRulesPage() {
                   openEdit={openEdit}
                   handleDelete={handleDelete}
                   handleToggle={handleToggle}
+                  handleCategoryAToggle={handleCategoryAToggle}
                   handleRuleDragStart={handleRuleDragStart}
                   handleRuleDragEnd={handleRuleDragEnd}
                   expandedConditions={expandedConditions}
@@ -1149,7 +1172,7 @@ export default function OverrideRulesPage() {
                   onDragLeave={() => setDragOverGroupId(null)}
                   onDrop={(e) => handleGroupDrop(e, null)}
                 >
-                  <td colSpan={7} className="px-3 py-2.5 border border-gray-300">
+                  <td colSpan={8} className="px-3 py-2.5 border border-gray-300">
                     <div className="flex items-center gap-2">
                       <svg className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${collapsedGroups.has(UNGROUPED_ID) ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -1188,7 +1211,7 @@ export default function OverrideRulesPage() {
                         onDragLeave={() => setDragOverGroupId(null)}
                         onDrop={(e) => handleGroupDrop(e, null)}
                       >
-                        <td colSpan={7} className="px-6 py-6 text-center text-xs text-gray-400 border border-gray-300">
+                        <td colSpan={8} className="px-6 py-6 text-center text-xs text-gray-400 border border-gray-300">
                           No ungrouped rules. Drop rules here to ungroup them.
                         </td>
                       </tr>
@@ -1202,6 +1225,7 @@ export default function OverrideRulesPage() {
                         onEdit={openEdit}
                         onDelete={handleDelete}
                         onToggle={handleToggle}
+                        onCategoryAToggle={handleCategoryAToggle}
                         onDragStart={(e) => handleRuleDragStart(e, rule.id, null)}
                         onDragEnd={handleRuleDragEnd}
                         expandedConditions={expandedConditions}
@@ -1220,7 +1244,7 @@ export default function OverrideRulesPage() {
                     ))}
                     {ungroupedRules.length < ungroupedTotal && (
                       <tr>
-                        <td colSpan={7} className="px-3 py-3 text-center border border-gray-300">
+                        <td colSpan={8} className="px-3 py-3 text-center border border-gray-300">
                           <button
                             onClick={() => loadUngrouped(ungroupedRules.length, ruleSearch.trim() || undefined, true)}
                             disabled={ungroupedLoading}
@@ -1271,6 +1295,7 @@ interface GroupSectionProps {
   openEdit: (rule: OverrideRule) => void
   handleDelete: (id: string) => void
   handleToggle: (rule: OverrideRule) => void
+  handleCategoryAToggle: (rule: OverrideRule) => void
   handleRuleDragStart: (e: React.DragEvent, ruleId: string, sourceGroupId: string | null) => void
   handleRuleDragEnd: (e: React.DragEvent) => void
   expandedConditions: Set<string>
@@ -1290,7 +1315,7 @@ function GroupSection({
   editingGroupId, editingGroupName, setEditingGroupName, handleRenameGroup, setEditingGroupId,
   openCreate, setDeletingGroupId,
   handleGroupDragOver, setDragOverGroupId, handleGroupDrop,
-  getNodePath, formatConditionSummary, openEdit, handleDelete, handleToggle,
+  getNodePath, formatConditionSummary, openEdit, handleDelete, handleToggle, handleCategoryAToggle,
   handleRuleDragStart, handleRuleDragEnd, expandedConditions, setExpandedConditions,
   selectedGroupedIds, onGroupRuleSelect,
   handleGroupDragStart, handleGroupDragEnd, handleGroupReorderDragOver, handleGroupReorderDrop, setDragOverGroupReorderId, isDragOverReorder,
@@ -1316,7 +1341,7 @@ function GroupSection({
           handleGroupDrop(e, group.id)
         }}
       >
-        <td colSpan={7} className={`px-3 py-2.5 border border-gray-300 ${isDragOver ? 'ring-2 ring-inset ring-blue-300' : ''} ${isDragOverReorder ? 'ring-2 ring-inset ring-indigo-300' : ''}`}>
+        <td colSpan={8} className={`px-3 py-2.5 border border-gray-300 ${isDragOver ? 'ring-2 ring-inset ring-blue-300' : ''} ${isDragOverReorder ? 'ring-2 ring-inset ring-indigo-300' : ''}`}>
           <div className="flex items-center gap-2">
             {/* Group drag handle */}
             <svg className="h-4 w-4 shrink-0 text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing transition-colors" fill="currentColor" viewBox="0 0 24 24" onClick={(e) => e.stopPropagation()}>
@@ -1379,7 +1404,7 @@ function GroupSection({
               onDragLeave={() => setDragOverGroupId(null)}
               onDrop={(e) => handleGroupDrop(e, group.id)}
             >
-              <td colSpan={7} className={`px-6 py-6 text-center text-xs text-gray-400 border border-gray-300 ${isDragOver ? 'bg-blue-50/50' : ''}`}>
+              <td colSpan={8} className={`px-6 py-6 text-center text-xs text-gray-400 border border-gray-300 ${isDragOver ? 'bg-blue-50/50' : ''}`}>
                 No rules in this group. Drag rules here or click + to add.
               </td>
             </tr>
@@ -1393,6 +1418,7 @@ function GroupSection({
               onEdit={openEdit}
               onDelete={handleDelete}
               onToggle={handleToggle}
+              onCategoryAToggle={handleCategoryAToggle}
               onDragStart={(e) => handleRuleDragStart(e, rule.id, group.id)}
               onDragEnd={handleRuleDragEnd}
               expandedConditions={expandedConditions}
@@ -1502,6 +1528,18 @@ function ConditionBadges({ rule, expanded, onToggle }: {
   )
 }
 
+/** Returns true if the rule's conditions only reference supplier_name */
+function isSupplierOnlyRule(rule: OverrideRule): boolean {
+  const groups = rule.groupedConditions?.groups ?? []
+  if (groups.length === 0) return false
+  for (const g of groups) {
+    for (const c of g.conditions) {
+      if (c.field && c.field !== 'supplier_name') return false
+    }
+  }
+  return true
+}
+
 interface RuleRowProps {
   rule: OverrideRule
   getNodePath: (id: string) => string
@@ -1509,6 +1547,7 @@ interface RuleRowProps {
   onEdit: (rule: OverrideRule) => void
   onDelete: (id: string) => void
   onToggle: (rule: OverrideRule) => void
+  onCategoryAToggle: (rule: OverrideRule) => void
   onDragStart: (e: React.DragEvent) => void
   onDragEnd: (e: React.DragEvent) => void
   expandedConditions: Set<string>
@@ -1519,7 +1558,7 @@ interface RuleRowProps {
 }
 
 function RuleRow({
-  rule, getNodePath, formatConditionSummary, onEdit, onDelete, onToggle,
+  rule, getNodePath, formatConditionSummary, onEdit, onDelete, onToggle, onCategoryAToggle,
   onDragStart, onDragEnd, expandedConditions, setExpandedConditions,
   selectable, selected, onSelect,
 }: RuleRowProps) {
@@ -1600,10 +1639,32 @@ function RuleRow({
       {/* Source */}
       <td className="px-3 py-2 border border-gray-300 align-top text-center">
         <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-          rule.source === 'auto_generated' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-500'
+          rule.source === 'auto_generated' ? 'bg-purple-50 text-purple-600'
+            : rule.source === 'supplier_universe' ? 'bg-teal-50 text-teal-600'
+            : 'bg-gray-100 text-gray-500'
         }`}>
-          {rule.source === 'auto_generated' ? 'Auto' : 'Manual'}
+          {rule.source === 'auto_generated' ? 'Auto' : rule.source === 'supplier_universe' ? 'Universe' : 'Manual'}
         </span>
+      </td>
+
+      {/* Cat A */}
+      <td className="px-3 py-2 border border-gray-300 align-top text-center">
+        {isSupplierOnlyRule(rule) ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onCategoryAToggle(rule) }}
+            className="relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors"
+            style={{ backgroundColor: rule.categoryASupplier ? '#f59e0b' : '#d1d5db' }}
+            title={rule.categoryASupplier ? 'Category A enabled — click to disable' : 'Click to mark as Category A'}
+          >
+            <span
+              className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
+                rule.categoryASupplier ? 'translate-x-3.5' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        ) : (
+          <span className="text-gray-300 text-[10px]">—</span>
+        )}
       </td>
 
       {/* Status */}

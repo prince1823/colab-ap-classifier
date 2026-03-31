@@ -79,6 +79,7 @@ export function registerRulesHandlers(
     return rules.deleteRule(id);
   });
 
+
   registerHandler('rules:generate', async () => {
     return rules.generate_rules_preview();
   });

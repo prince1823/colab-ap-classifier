@@ -1,11 +1,12 @@
 import { registerHandler } from './register';
-import type { SupplierService, SupplierResearcher } from '../../shared/types/services';
-import type { SupplierConfirmationStatus, SupplierUpdateInput } from '../../shared/types/suppliers';
+import type { SupplierService, SupplierResearcher, IngestService } from '../../shared/types/services';
+import type { SupplierConfirmationStatus, SupplierUpdateInput, CsvApplyRow, CsvApplyDiff } from '../../shared/types/suppliers';
 import type { FilterCondition, GroupedFilter } from '../../shared/types/transactions';
 
 export function registerSuppliersHandlers(
   suppliers: SupplierService,
-  researcher: SupplierResearcher
+  researcher: SupplierResearcher,
+  ingest: IngestService
 ): void {
   registerHandler('suppliers:list', async (_event, filter?: unknown) => {
     if (filter != null) {
@@ -82,6 +83,22 @@ export function registerSuppliersHandlers(
 
   registerHandler('suppliers:mergeParents', async (_event, survivorId: unknown, losingIds: unknown) => {
     await suppliers.mergeParents(survivorId as string, losingIds as string[]);
+  });
+
+  registerHandler('suppliers:parseCSV', async (_event, filePath: unknown) => {
+    return ingest.parseCSVPreview(filePath as string);
+  });
+
+  registerHandler('suppliers:importCSV', async (_event, filePath: unknown, supplierNameColumn: unknown) => {
+    return suppliers.importSupplierCSV(filePath as string, supplierNameColumn as string);
+  });
+
+  registerHandler('suppliers:computeCsvDiff', async (_event, rows: unknown) => {
+    return suppliers.computeCsvDiff(rows as CsvApplyRow[]);
+  });
+
+  registerHandler('suppliers:applyCsvDiff', async (_event, diff: unknown) => {
+    return suppliers.applyCsvDiff(diff as CsvApplyDiff);
   });
 
   registerHandler('suppliers:syncToUniverse', async (_event, supplierIds: unknown) => {

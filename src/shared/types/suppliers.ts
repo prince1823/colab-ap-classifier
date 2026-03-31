@@ -75,3 +75,32 @@ export interface SupplierUpdateInput {
   markResearched?: boolean;
   categoryASupplier?: boolean;
 }
+
+// ─── CSV Apply Types ────────────────────────────────────────────────────────
+
+export interface CsvApplyRow {
+  parentName: string | null;
+  supplierName: string;
+  aliases: string[];
+}
+
+export interface CsvApplyDiff {
+  renames: Array<{ supplierId: string; oldName: string; newName: string }>;
+  merges: Array<{ survivorId: string; survivorName: string; loserIds: string[]; loserNames: string[] }>;
+  aliasReassignments: Array<{ alias: string; fromSupplierId: string; fromName: string; toSupplierId: string; toName: string }>;
+  parentCreations: Array<{ name: string }>;
+  parentRenames: Array<{ parentId: string; oldName: string; newName: string }>;
+  parentMerges: Array<{ survivorId: string; survivorName: string; loserIds: string[]; loserNames: string[] }>;
+  parentChanges: Array<{ supplierId: string; supplierName: string; oldParentName: string | null; newParentName: string | null }>;
+  warnings: {
+    unknownAliases: Array<{ alias: string; csvSupplierName: string }>;
+    unmatchableRows: Array<{ supplierName: string; reason: string }>;
+    missingAliases: Array<{ alias: string; supplierName: string }>;
+  };
+}
+
+export interface CsvApplyResult {
+  applied: boolean;
+  diff: CsvApplyDiff;
+  noChanges: boolean;
+}

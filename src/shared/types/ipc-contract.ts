@@ -23,7 +23,7 @@ import type {
 } from './transactions';
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from './classification';
 import type { TaxonomyNode } from './taxonomy';
-import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent } from './suppliers';
+import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
 import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
@@ -113,6 +113,10 @@ export interface IPCInvokeMap {
   'suppliers:renameParent':    { args: [parentId: string, newName: string]; result: void };
   'suppliers:deleteParent':    { args: [parentId: string]; result: void };
   'suppliers:mergeParents':    { args: [survivorId: string, losingIds: string[]]; result: void };
+  'suppliers:importCSV':       { args: [filePath: string, supplierNameColumn: string]; result: { created: number; skipped: number } };
+  'suppliers:parseCSV':        { args: [filePath: string]; result: { columns: string[]; sampleRows: Record<string, string>[]; totalRows: number } };
+  'suppliers:computeCsvDiff':  { args: [rows: CsvApplyRow[]]; result: CsvApplyDiff };
+  'suppliers:applyCsvDiff':    { args: [diff: CsvApplyDiff]; result: CsvApplyResult };
   'suppliers:syncToUniverse':  { args: [supplierIds: string[]]; result: { synced: number; failed: number; errors: string[] } };
 
   // Rules

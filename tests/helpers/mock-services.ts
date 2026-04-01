@@ -174,7 +174,7 @@ export function createMockTaxonomyStore(): TaxonomyStore {
     getNodes: vi.fn().mockResolvedValue([]),
     addNode: vi.fn().mockResolvedValue({ id: 'node-1', fullPath: 'L1|L2|L3', l1: 'L1', l2: 'L2', l3: 'L3', depth: 3, description: null, parentPath: 'L1|L2', createdAt: '' }),
     updateNode: vi.fn(),
-    deleteNode: vi.fn(),
+    deleteNode: vi.fn().mockResolvedValue({}),
     renameNode: vi.fn(),
     mergeNodes: vi.fn().mockResolvedValue({ transactionsMoved: 0 }),
     importFromFile: vi.fn().mockResolvedValue({ nodeCount: 0 }),

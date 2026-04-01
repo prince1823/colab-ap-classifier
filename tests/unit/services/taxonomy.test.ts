@@ -275,6 +275,131 @@ describe('TaxonomyStore', () => {
     });
   });
 
+  describe('renameNode — supplier path cascade', () => {
+    it('should cascade rename into mapped_taxonomy_paths', async () => {
+      await store.addNode('Direct');
+      await store.addNode('Direct|IT');
+      await store.addNode('Direct|IT|Software', 'Software');
+
+      // Insert a project_supplier with mapped_taxonomy_paths
+      await db.run(
+        "INSERT INTO project_suppliers (id, supplier_name, mapped_taxonomy_paths) VALUES (?, ?, ?)",
+        'sup-1', 'Acme Corp', JSON.stringify(['Direct|IT|Software', 'Direct|IT'])
+      );
+
+      // Rename L1 node
+      const nodes = await store.getNodes();
+      const directNode = nodes.find(n => n.fullPath === 'Direct')!;
+      await store.renameNode(directNode.id, 'Indirect');
+
+      // Verify mapped_taxonomy_paths updated
+      const row = await db.get<{ mapped_taxonomy_paths: string }>(
+        'SELECT mapped_taxonomy_paths FROM project_suppliers WHERE id = ?', 'sup-1'
+      );
+      const paths = JSON.parse(row!.mapped_taxonomy_paths);
+      expect(paths).toEqual(['Indirect|IT|Software', 'Indirect|IT']);
+    });
+
+    it('should cascade rename into l1_l2_path', async () => {
+      await store.addNode('Direct');
+      await store.addNode('Direct|IT');
+      await store.addNode('Direct|IT|Software');
+
+      // Insert a project_supplier with l1_l2_path
+      await db.run(
+        "INSERT INTO project_suppliers (id, supplier_name, l1_l2_path) VALUES (?, ?, ?)",
+        'sup-2', 'Beta Inc', JSON.stringify(['Direct|IT'])
+      );
+
+      const nodes = await store.getNodes();
+      const itNode = nodes.find(n => n.fullPath === 'Direct|IT')!;
+      await store.renameNode(itNode.id, 'Engineering');
+
+      const row = await db.get<{ l1_l2_path: string }>(
+        'SELECT l1_l2_path FROM project_suppliers WHERE id = ?', 'sup-2'
+      );
+      const paths = JSON.parse(row!.l1_l2_path);
+      expect(paths).toEqual(['Direct|Engineering']);
+    });
+
+    it('should not modify unrelated paths in mapped_taxonomy_paths', async () => {
+      await store.addNode('Direct');
+      await store.addNode('Direct|IT');
+      await store.addNode('Direct|IT|Software');
+      await store.addNode('Indirect');
+      await store.addNode('Indirect|HR');
+      await store.addNode('Indirect|HR|Recruiting');
+
+      await db.run(
+        "INSERT INTO project_suppliers (id, supplier_name, mapped_taxonomy_paths) VALUES (?, ?, ?)",
+        'sup-3', 'Gamma LLC', JSON.stringify(['Direct|IT|Software', 'Indirect|HR|Recruiting'])
+      );
+
+      const nodes = await store.getNodes();
+      const directNode = nodes.find(n => n.fullPath === 'Direct')!;
+      await store.renameNode(directNode.id, 'Primary');
+
+      const row = await db.get<{ mapped_taxonomy_paths: string }>(
+        'SELECT mapped_taxonomy_paths FROM project_suppliers WHERE id = ?', 'sup-3'
+      );
+      const paths = JSON.parse(row!.mapped_taxonomy_paths);
+      expect(paths).toEqual(['Primary|IT|Software', 'Indirect|HR|Recruiting']);
+    });
+
+    it('mapped_taxonomy_paths stores path strings not node IDs', async () => {
+      await store.addNode('Direct');
+      await store.addNode('Direct|IT');
+      await store.addNode('Direct|IT|Software');
+
+      const nodes = await store.getNodes();
+      const softwareNode = nodes.find(n => n.fullPath === 'Direct|IT|Software')!;
+
+      // Store paths as pipe-delimited strings (not UUIDs)
+      await db.run(
+        "INSERT INTO project_suppliers (id, supplier_name, mapped_taxonomy_paths) VALUES (?, ?, ?)",
+        'sup-4', 'Delta Co', JSON.stringify(['Direct|IT|Software'])
+      );
+
+      const row = await db.get<{ mapped_taxonomy_paths: string }>(
+        'SELECT mapped_taxonomy_paths FROM project_suppliers WHERE id = ?', 'sup-4'
+      );
+      const paths: string[] = JSON.parse(row!.mapped_taxonomy_paths);
+
+      // Verify they are path strings, not UUIDs
+      expect(paths[0]).toBe('Direct|IT|Software');
+      expect(paths[0]).not.toBe(softwareNode.id);
+      expect(paths[0]).toContain('|');
+    });
+  });
+
+  describe('deleteNode — rule warning', () => {
+    it('should return warning when override rules reference the node', async () => {
+      await store.addNode('Direct');
+      await store.addNode('Direct|IT');
+      const leaf = await store.addNode('Direct|IT|Software');
+
+      // Insert an override rule targeting this node
+      await db.run(
+        "INSERT INTO override_rules (id, name, grouped_conditions, target_taxonomy_node_id, is_active) VALUES (?, ?, ?, ?, ?)",
+        'rule-1', 'Test Rule', '{"groupConnector":"AND","groups":[]}', leaf.id, true
+      );
+
+      const result = await store.deleteNode(leaf.id);
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0]).toContain('1 override rule(s)');
+    });
+
+    it('should return no warnings when no rules reference the node', async () => {
+      await store.addNode('Direct');
+      await store.addNode('Direct|IT');
+      const leaf = await store.addNode('Direct|IT|Software');
+
+      const result = await store.deleteNode(leaf.id);
+      expect(result.warnings).toBeUndefined();
+    });
+  });
+
   describe('getNodes', () => {
     it('should return empty array when no taxonomy is set', async () => {
       const nodes = await store.getNodes();

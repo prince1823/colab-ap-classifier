@@ -86,7 +86,7 @@ export interface IPCInvokeMap {
   'taxonomy:getNodes':       { args: []; result: TaxonomyNode[] };
   'taxonomy:addNode':        { args: [fullPath: string, description?: string]; result: TaxonomyNode };
   'taxonomy:updateNode':     { args: [nodeId: string, updates: Partial<TaxonomyNode>]; result: void };
-  'taxonomy:deleteNode':     { args: [nodeId: string]; result: void };
+  'taxonomy:deleteNode':     { args: [nodeId: string]; result: { warnings?: string[] } };
   'taxonomy:renameNode':     { args: [nodeId: string, newName: string]; result: void };
   'taxonomy:mergeNodes':     { args: [sourceId: string, targetId: string]; result: { transactionsMoved: number } };
   'taxonomy:importFromFile': { args: [filePath: string]; result: { nodeCount: number; fileName: string } };

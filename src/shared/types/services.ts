@@ -197,7 +197,7 @@ export interface TaxonomyStore {
   getNodes(): Promise<TaxonomyNode[]>;
   addNode(fullPath: string, description?: string): Promise<TaxonomyNode>;
   updateNode(nodeId: string, updates: { description?: string }): Promise<void>;
-  deleteNode(nodeId: string, reassignTo?: string): Promise<void>;
+  deleteNode(nodeId: string, reassignTo?: string): Promise<{ warnings?: string[] }>;
   renameNode(nodeId: string, newName: string): Promise<void>;
   mergeNodes(sourceId: string, targetId: string): Promise<{ transactionsMoved: number }>;
   importFromFile(filePath: string): Promise<{ nodeCount: number; fileName: string }>;

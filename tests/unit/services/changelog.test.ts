@@ -158,4 +158,185 @@ describe('ChangelogStore', () => {
       );
     });
   });
+
+  describe('filterContext', () => {
+    it('should store and retrieve filter context as FilterCondition[]', async () => {
+      const filterContext = [
+        { field: 'supplier_name', operator: 'equals' as const, value: 'Acme Corp' },
+        { field: 'classification_l1', operator: 'equals' as const, value: 'Services' },
+        { field: 'gl_description', operator: 'in_list' as const, value: ['Office', 'Supplies'] },
+      ];
+      const id = await store.logChange({
+        source: 'manual', affectedTable: 'transactions', affectedIds: ['txn-1'],
+        affectedCount: 1, oldValues: { taxonomy_node_id: 'old' },
+        newValues: { taxonomy_node_id: 'new' }, description: 'With filters',
+        filterContext,
+      });
+
+      const changes = await store.listChanges();
+      expect(changes).toHaveLength(1);
+      expect(changes[0].filterContext).toEqual(filterContext);
+    });
+
+    it('should handle null filter context', async () => {
+      await store.logChange({
+        source: 'manual', affectedTable: 'transactions', affectedIds: ['txn-1'],
+        affectedCount: 1, oldValues: null, newValues: null, description: 'No filters',
+      });
+
+      const changes = await store.listChanges();
+      expect(changes[0].filterContext).toBeNull();
+    });
+  });
+
+  describe('ruleId', () => {
+    it('should store and retrieve rule ID', async () => {
+      const id = await store.logChange({
+        source: 'rule', affectedTable: 'transactions', affectedIds: ['txn-1', 'txn-2'],
+        affectedCount: 2, oldValues: { taxonomy_node_id: 'old' },
+        newValues: { taxonomy_node_id: 'new' }, description: 'Rule applied',
+        ruleId: 'rule-123',
+      });
+
+      const changes = await store.listChanges();
+      expect(changes).toHaveLength(1);
+      expect(changes[0].ruleId).toBe('rule-123');
+    });
+
+    it('should handle null rule ID', async () => {
+      await store.logChange({
+        source: 'manual', affectedTable: 'transactions', affectedIds: ['txn-1'],
+        affectedCount: 1, oldValues: null, newValues: null, description: 'Manual change',
+      });
+
+      const changes = await store.listChanges();
+      expect(changes[0].ruleId).toBeNull();
+    });
+  });
+
+  describe('listByRuleId', () => {
+    it('should return only entries for the specified rule', async () => {
+      await store.logChange({
+        source: 'rule', affectedTable: 'transactions', affectedIds: ['txn-1'],
+        affectedCount: 1, oldValues: { taxonomy_node_id: 'old' },
+        newValues: { taxonomy_node_id: 'new' }, description: 'Rule 1',
+        ruleId: 'rule-1',
+      });
+      await store.logChange({
+        source: 'rule', affectedTable: 'transactions', affectedIds: ['txn-2'],
+        affectedCount: 1, oldValues: { taxonomy_node_id: 'old' },
+        newValues: { taxonomy_node_id: 'new' }, description: 'Rule 2',
+        ruleId: 'rule-2',
+      });
+
+      // Create transactions so listByRuleId can check ownership
+      await db.run(`INSERT INTO transactions (id, row_index, applied_rule_id) VALUES (?, ?, ?)`, 'txn-1', 0, 'rule-1');
+      await db.run(`INSERT INTO transactions (id, row_index, applied_rule_id) VALUES (?, ?, ?)`, 'txn-2', 1, 'rule-2');
+
+      const result = await store.listByRuleId('rule-1');
+      expect(result).toHaveLength(1);
+      expect(result[0].description).toBe('Rule 1');
+      expect(result[0].ruleId).toBe('rule-1');
+    });
+
+    it('should filter out transactions no longer owned by the rule', async () => {
+      // Rule 1 originally classified txn-1 and txn-2
+      await store.logChange({
+        source: 'rule', affectedTable: 'transactions', affectedIds: ['txn-1', 'txn-2'],
+        affectedCount: 2, oldValues: { taxonomy_node_id: 'old' },
+        newValues: { taxonomy_node_id: 'new' }, description: 'Rule 1 applied',
+        ruleId: 'rule-1',
+      });
+
+      // txn-1 still owned by rule-1, but txn-2 was reclassified by rule-2
+      await db.run(`INSERT INTO transactions (id, row_index, applied_rule_id) VALUES (?, ?, ?)`, 'txn-1', 0, 'rule-1');
+      await db.run(`INSERT INTO transactions (id, row_index, applied_rule_id) VALUES (?, ?, ?)`, 'txn-2', 1, 'rule-2');
+
+      const result = await store.listByRuleId('rule-1');
+      expect(result).toHaveLength(1);
+      expect(result[0].affectedIds).toEqual(['txn-1']); // Only txn-1 still owned
+      expect(result[0].affectedCount).toBe(1);
+    });
+
+    it('should exclude entries where all transactions were reclassified by other rules', async () => {
+      await store.logChange({
+        source: 'rule', affectedTable: 'transactions', affectedIds: ['txn-1'],
+        affectedCount: 1, oldValues: { taxonomy_node_id: 'old' },
+        newValues: { taxonomy_node_id: 'new' }, description: 'Rule 1',
+        ruleId: 'rule-1',
+      });
+
+      // txn-1 reclassified by rule-2
+      await db.run(`INSERT INTO transactions (id, row_index, applied_rule_id) VALUES (?, ?, ?)`, 'txn-1', 0, 'rule-2');
+
+      const result = await store.listByRuleId('rule-1');
+      expect(result).toHaveLength(0); // No entries — all txns reclassified
+    });
+
+    it('should include already-reverted entries as-is', async () => {
+      await db.run(`INSERT INTO transactions (id, row_index, taxonomy_node_id, applied_rule_id) VALUES (?, ?, ?, ?)`, 'txn-1', 0, 'new', 'rule-1');
+
+      const changeId = await store.logChange({
+        source: 'rule', affectedTable: 'transactions', affectedIds: ['txn-1'],
+        affectedCount: 1, oldValues: { taxonomy_node_id: 'old' },
+        newValues: { taxonomy_node_id: 'new' }, description: 'Rule 1',
+        ruleId: 'rule-1',
+      });
+
+      // Revert the change
+      await store.revertChange(changeId);
+
+      const result = await store.listByRuleId('rule-1');
+      expect(result).toHaveLength(1);
+      expect(result[0].isReverted).toBe(true);
+    });
+  });
+
+  describe('server-side search', () => {
+    it('should filter by search term in description', async () => {
+      await store.logChange({
+        source: 'manual', affectedTable: 'transactions', affectedIds: ['txn-1'],
+        affectedCount: 1, oldValues: null, newValues: null,
+        description: 'Reclassified Acme Corp transactions',
+      });
+      await store.logChange({
+        source: 'manual', affectedTable: 'transactions', affectedIds: ['txn-2'],
+        affectedCount: 1, oldValues: null, newValues: null,
+        description: 'Updated Widget Inc supplier',
+      });
+
+      const results = await store.listChanges({ search: 'Acme' });
+      expect(results).toHaveLength(1);
+      expect(results[0].description).toContain('Acme');
+    });
+
+    it('should filter by search term in source', async () => {
+      await store.logChange({
+        source: 'pipeline', affectedTable: 'transactions', affectedIds: ['txn-1'],
+        affectedCount: 1, oldValues: null, newValues: null, description: 'Batch run',
+      });
+      await store.logChange({
+        source: 'manual', affectedTable: 'transactions', affectedIds: ['txn-2'],
+        affectedCount: 1, oldValues: null, newValues: null, description: 'Manual change',
+      });
+
+      const results = await store.listChanges({ search: 'pipeline' });
+      expect(results).toHaveLength(1);
+      expect(results[0].source).toBe('pipeline');
+    });
+
+    it('should return correct paginated count with search', async () => {
+      for (let i = 0; i < 5; i++) {
+        await store.logChange({
+          source: 'manual', affectedTable: 'transactions', affectedIds: [`txn-${i}`],
+          affectedCount: 1, oldValues: null, newValues: null,
+          description: i < 3 ? 'Target match' : 'Other change',
+        });
+      }
+
+      const result = await store.listChangesPaginated({ search: 'Target', pageSize: 10 });
+      expect(result.totalCount).toBe(3);
+      expect(result.rows).toHaveLength(3);
+    });
+  });
 });

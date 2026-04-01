@@ -199,10 +199,11 @@ export const ipc = {
     setCategoryA: (ruleId: string, value: boolean) => invoke('rules:setCategoryA', ruleId, value),
   },
 
-  // ── Changelog (2 channels) ──
+  // ── Changelog (3 channels) ──
   changelog: {
     list: (filter?: ChangelogFilter) => invoke('changelog:list', filter),
     revert: (changeId: string) => invoke('changelog:revert', changeId),
+    listByRule: (ruleId: string) => invoke('changelog:listByRule', ruleId),
   },
 
   // ── Feedback (2 channels) ──

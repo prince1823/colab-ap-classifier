@@ -430,6 +430,14 @@ export class TransactionStore implements ITransactionStore {
       }
 
       const parts: string[] = [];
+      // Include supplier names from query and/or filter context for searchability
+      const supplierNames = supplierRows.map(r => r.supplier_name);
+      if (supplierNames.length > 0) {
+        const displayNames = supplierNames.length <= 3
+          ? supplierNames.join(', ')
+          : `${supplierNames.slice(0, 3).join(', ')} +${supplierNames.length - 3} more`;
+        parts.push(displayNames);
+      }
       parts.push(`${update.ids.length} txn${update.ids.length !== 1 ? 's' : ''}`);
       if (classPath) parts.push(`→ ${classPath}`);
       description = parts.join(' ');
@@ -443,6 +451,8 @@ export class TransactionStore implements ITransactionStore {
       oldValues,
       newValues,
       description,
+      filterContext: update.filterContext ?? null,
+      ruleId: update.appliedRuleId ?? null,
     });
     return changelogId;
   }

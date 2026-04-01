@@ -10,4 +10,8 @@ export function registerChangelogHandlers(changelog: ChangelogStore): void {
   registerHandler('changelog:revert', async (_event, changeId: unknown) => {
     return changelog.revertChange(changeId as string);
   });
+
+  registerHandler('changelog:listByRule', async (_event, ruleId: unknown) => {
+    return changelog.listByRuleId(ruleId as string);
+  });
 }

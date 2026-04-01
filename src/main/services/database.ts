@@ -181,6 +181,16 @@ export class DuckDBDatabase implements Database {
       await this.exec('ALTER TABLE change_log ADD COLUMN is_reverted BOOLEAN DEFAULT FALSE');
     } catch (e) { debugLog('INFO', 'Migration: is_reverted column already exists (expected)', e); }
 
+    // Migrate: add filter_context column to change_log
+    try {
+      await this.exec('ALTER TABLE change_log ADD COLUMN filter_context JSON');
+    } catch (e) { debugLog('INFO', 'Migration: filter_context column already exists (expected)', e); }
+
+    // Migrate: add rule_id column to change_log
+    try {
+      await this.exec('ALTER TABLE change_log ADD COLUMN rule_id VARCHAR');
+    } catch (e) { debugLog('INFO', 'Migration: rule_id column already exists (expected)', e); }
+
     // Migrate: clean up old "Reverted:" entries — mark originals as reverted and delete the revert rows
     try {
       // Mark original entries as reverted if a "Reverted:" entry exists for them
@@ -514,6 +524,8 @@ export class DuckDBDatabase implements Database {
         new_values JSON,
         description TEXT,
         is_reverted BOOLEAN DEFAULT FALSE,
+        filter_context JSON,
+        rule_id VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 

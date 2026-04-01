@@ -77,6 +77,7 @@ export default function OverrideRulesPage() {
   const [applying, setApplying] = useState(false)
   const [applyPreview, setApplyPreview] = useState<{ affectedRowCount: number; matchingRuleCount: number } | null>(null)
   const [applyResult, setApplyResult] = useState<{ matchedCount: number; ruleCount: number } | null>(null)
+  const [inactiveApplyNames, setInactiveApplyNames] = useState<string[] | null>(null)
 
   // Bulk assign modal
   const [showBulkAssignModal, setShowBulkAssignModal] = useState(false)
@@ -487,6 +488,13 @@ export default function OverrideRulesPage() {
 
   const handleApplyClick = async () => {
     if (allSelectedIds.size === 0) return
+    // Check if any selected rules are inactive
+    const allRules = [...rules, ...ungroupedRulesState]
+    const inactiveSelected = allRules.filter(r => allSelectedIds.has(r.id) && !r.isActive)
+    if (inactiveSelected.length > 0) {
+      setInactiveApplyNames(inactiveSelected.map(r => r.name))
+      return
+    }
     setApplying(true)
     setApplyPreview(null)
     setApplyResult(null)
@@ -1300,6 +1308,42 @@ export default function OverrideRulesPage() {
           ruleName={deactivatingRule.name}
           onClose={handleDeactivationClose}
         />
+      )}
+
+      {/* Inactive rules apply warning dialog */}
+      {inactiveApplyNames && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <svg className="h-5 w-5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              <h3 className="text-sm font-semibold text-gray-900">Cannot apply inactive rules</h3>
+            </div>
+            <p className="text-xs text-gray-600 mb-3">
+              The following rule{inactiveApplyNames.length > 1 ? 's are' : ' is'} currently inactive. Please activate {inactiveApplyNames.length > 1 ? 'them' : 'it'} before applying.
+            </p>
+            <ul className="mb-4 space-y-1">
+              {inactiveApplyNames.slice(0, 5).map((name, i) => (
+                <li key={i} className="flex items-center gap-2 text-xs text-gray-700">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-400 flex-shrink-0" />
+                  {name}
+                </li>
+              ))}
+              {inactiveApplyNames.length > 5 && (
+                <li className="text-xs text-gray-400 pl-3.5">+{inactiveApplyNames.length - 5} more</li>
+              )}
+            </ul>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setInactiveApplyNames(null)}
+                className="rounded-md bg-gray-800 px-4 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

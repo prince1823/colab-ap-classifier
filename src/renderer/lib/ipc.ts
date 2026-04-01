@@ -106,6 +106,8 @@ export const ipc = {
       invoke('transactions:getIdsByConditions', conditions),
     getFilterFields: () => invoke('transactions:getFilterFields'),
     markAllReviewed: () => invoke('transactions:markAllReviewed'),
+    countByConditions: (grouped: import('../../shared/types/transactions').GroupedFilter) =>
+      invoke('transactions:countByConditions', grouped),
   },
 
   // ── Taxonomy (8 channels) ──

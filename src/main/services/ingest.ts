@@ -653,29 +653,39 @@ export class IngestService implements IIngestService {
     return [...canonicals].sort();
   }
 
-  async getUploadStatsBatch(): Promise<Record<string, { classifiedCount: number }>> {
-    const rows = await this.db.all<{ upload_id: string; classified_count: number | bigint }>(
+  async getUploadStatsBatch(): Promise<Record<string, { classifiedCount: number; humanReviewedCount: number }>> {
+    const rows = await this.db.all<{
+      upload_id: string;
+      classified_count: number | bigint;
+      human_reviewed_count: number | bigint;
+    }>(
       `SELECT upload_id,
-         COUNT(CASE WHEN classification_status != 'unclassified' THEN 1 END) AS classified_count
+         COUNT(CASE WHEN classification_status != 'unclassified' THEN 1 END) AS classified_count,
+         COUNT(CASE WHEN human_reviewed = TRUE THEN 1 END) AS human_reviewed_count
        FROM transactions
        WHERE upload_id IS NOT NULL
        GROUP BY upload_id`
     );
-    const result: Record<string, { classifiedCount: number }> = {};
+    const result: Record<string, { classifiedCount: number; humanReviewedCount: number }> = {};
     for (const row of rows) {
-      result[row.upload_id] = { classifiedCount: Number(row.classified_count) };
+      result[row.upload_id] = {
+        classifiedCount: Number(row.classified_count),
+        humanReviewedCount: Number(row.human_reviewed_count),
+      };
     }
     return result;
   }
 
-  async deleteUpload(uploadId: string): Promise<{ deletedRows: number }> {
-    const classified = await this.db.get<{ cnt: number | bigint }>(
-      `SELECT COUNT(*) AS cnt FROM transactions
-       WHERE upload_id = ? AND classification_status != 'unclassified'`,
-      uploadId
-    );
-    if (Number(classified?.cnt ?? 0) > 0) {
-      throw new Error(`Cannot delete upload: ${Number(classified!.cnt)} row(s) have already been classified`);
+  async deleteUpload(uploadId: string, force = false): Promise<{ deletedRows: number }> {
+    if (!force) {
+      const classified = await this.db.get<{ cnt: number | bigint }>(
+        `SELECT COUNT(*) AS cnt FROM transactions
+         WHERE upload_id = ? AND classification_status != 'unclassified'`,
+        uploadId
+      );
+      if (Number(classified?.cnt ?? 0) > 0) {
+        throw new Error(`Cannot delete upload: ${Number(classified!.cnt)} row(s) have already been classified`);
+      }
     }
 
     const deleted = await this.db.get<{ cnt: number | bigint }>(
@@ -686,13 +696,15 @@ export class IngestService implements IIngestService {
 
     await this.db.run('DELETE FROM transactions WHERE upload_id = ?', uploadId);
     await this.db.run('DELETE FROM uploads WHERE id = ?', uploadId);
-    await this.db.run(
-      `DELETE FROM project_suppliers
-       WHERE id NOT IN (
-         SELECT DISTINCT project_supplier_id FROM transactions
-         WHERE project_supplier_id IS NOT NULL
-       )`
-    );
+    if (!force) {
+      await this.db.run(
+        `DELETE FROM project_suppliers
+         WHERE id NOT IN (
+           SELECT DISTINCT project_supplier_id FROM transactions
+           WHERE project_supplier_id IS NOT NULL
+         )`
+      );
+    }
 
     return { deletedRows };
   }

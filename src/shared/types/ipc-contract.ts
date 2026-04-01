@@ -49,8 +49,8 @@ export interface IPCInvokeMap {
   'ingest:importCSV':        { args: [filePath: string, mapping?: ColumnMapping]; result: { rowsInserted: number; uploadId: string } };
   'ingest:getUpload':              { args: []; result: { id: string; fileName: string; columnMappings: ColumnMappingWithPriority | null; rowCount: number } | null };
   'ingest:getUploadHistory':       { args: []; result: UploadRecord[] };
-  'ingest:getUploadStatsBatch':    { args: []; result: Record<string, { classifiedCount: number }> };
-  'ingest:deleteUpload':           { args: [uploadId: string]; result: { deletedRows: number } };
+  'ingest:getUploadStatsBatch':    { args: []; result: Record<string, { classifiedCount: number; humanReviewedCount: number }> };
+  'ingest:deleteUpload':           { args: [uploadId: string, force?: boolean]; result: { deletedRows: number } };
   'ingest:deriveMappings':         { args: [columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource]; result: DerivedMappings };
   'ingest:getExistingCanonicals':  { args: []; result: string[] };
 

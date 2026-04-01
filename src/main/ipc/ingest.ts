@@ -53,11 +53,11 @@ export function registerIngestHandlers(ingest: IngestService, eventBus: EventBus
     return ingest.getUploadStatsBatch();
   });
 
-  registerHandler('ingest:deleteUpload', async (_event, uploadId: unknown) => {
+  registerHandler('ingest:deleteUpload', async (_event, uploadId: unknown, force: unknown) => {
     if (typeof uploadId !== 'string' || !uploadId) {
       throw new Error('uploadId must be a non-empty string');
     }
-    return ingest.deleteUpload(uploadId);
+    return ingest.deleteUpload(uploadId, force === true);
   });
 
   registerHandler('ingest:getExistingCanonicals', async () => {

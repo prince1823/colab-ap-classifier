@@ -537,6 +537,11 @@ export default function HierarchicalPivotView({
     }
   }, [])
 
+  const handleCmdL = useMemo(() => (rows: FlattenedPivotRow[]) => {
+    if (rows.length === 0) return
+    onCreateRule?.(rows)
+  }, [onCreateRule])
+
   const { focusedIndex, selectedKeys, handleKeyDown, clearSelection, setFocusedIndex } = usePivotKeyboard({
     visibleRows,
     rowVirtualizer,
@@ -544,6 +549,7 @@ export default function HierarchicalPivotView({
     onCmdK: handleCmdK,
     onCmdF: handleCmdF,
     onCmdS: handleCmdS,
+    onCmdL: handleCmdL,
     onToggleExpand: toggleExpand,
     onClearAllFilters,
     disabled: modalOpen || !!supplierInfoModal,

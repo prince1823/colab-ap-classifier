@@ -1,6 +1,7 @@
 import { useMemo, useCallback, useEffect, useState, useRef } from 'react'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
+import CreateRuleModal from '../components/review/CreateRuleModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import { useServerPivotData } from '../hooks/useServerPivotData'
@@ -264,9 +265,15 @@ export default function PivotPage() {
     await ipc.export.csv(filter)
   }, [filter])
 
+  const [createRuleRows, setCreateRuleRows] = useState<FlattenedPivotRow[] | null>(null)
+
   const handleReclassify = useCallback((rows: FlattenedPivotRow[]) => {
     reclassify.open(rows)
   }, [reclassify])
+
+  const handleCreateRule = useCallback((rows: FlattenedPivotRow[]) => {
+    setCreateRuleRows(rows)
+  }, [])
 
   return (
     <div className="flex flex-col h-full p-4 gap-3">
@@ -275,7 +282,7 @@ export default function PivotPage() {
           <h2 className="text-lg font-semibold text-gray-900">Review</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Navigate with arrow keys, Enter to select rows.
-            <span className="text-gray-400 ml-1">⌘F filter | ⌘K classify &amp; create rule | ⌘S supplier info | Double-click to filter</span>
+            <span className="text-gray-400 ml-1">⌘F filter | ⌘K classify &amp; create rule | ⌘L create named rule | ⌘S supplier info | Double-click to filter</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -332,8 +339,9 @@ export default function PivotPage() {
           spendDisplayMode={spendDisplayMode}
           onSpendDisplayModeChange={setSpendDisplayMode}
           onReclassify={handleReclassify}
+          onCreateRule={handleCreateRule}
           onDrillDown={setDrillDownRow}
-          modalOpen={reclassify.isOpen || showAdvancedFilter}
+          modalOpen={reclassify.isOpen || !!createRuleRows || showAdvancedFilter}
           advancedFilterCount={advancedConditions.length}
           onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
           advancedConditions={advancedConditions}
@@ -373,6 +381,15 @@ export default function PivotPage() {
         conflicts={reclassify.conflicts}
         onConfirmConflicts={reclassify.confirmConflicts}
         error={reclassify.error}
+      />
+
+      <CreateRuleModal
+        isOpen={!!createRuleRows}
+        onClose={() => setCreateRuleRows(null)}
+        selectedRows={createRuleRows ?? []}
+        onCreated={() => { setCreateRuleRows(null); refetch(); loadRuleGroups() }}
+        selectedGroupId={selectedGroupId}
+        selectedGroupName={selectedGroupName}
       />
 
       <AdvancedFilterModal

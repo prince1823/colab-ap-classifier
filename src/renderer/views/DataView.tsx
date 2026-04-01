@@ -181,6 +181,8 @@ export default function DataView() {
           createdAt: new Date().toISOString(),
         },
       ])
+      // New imports have no classified rows yet — seed stats so the delete button shows
+      setUploadStats((prev) => ({ ...prev, [result.uploadId]: { classifiedCount: 0 } }))
 
       await refreshGateState()
 

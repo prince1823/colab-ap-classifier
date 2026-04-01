@@ -110,6 +110,11 @@ export interface TransactionUpdate {
   classificationStatus?: ClassificationStatus;
   flaggedForReview?: boolean;
   appliedRuleId?: string | null;
+  /** Filter context when change was made (for audit trail in changelog) */
+  filterContext?: {
+    pathSegments?: Array<{ dimensionField: string; value: string }>;
+    filterState?: Record<string, string[]>;
+  } | null;
 }
 
 /**

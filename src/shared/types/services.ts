@@ -268,6 +268,7 @@ export interface ChangelogStore {
   getCount(filter?: ChangelogFilter): Promise<number>;
   logChange(entry: Omit<ChangeLog, 'id' | 'createdAt'>): Promise<string>;
   revertChange(changeId: string): Promise<void>;
+  listByRuleId(ruleId: string): Promise<ChangeLog[]>;
 }
 
 export interface IngestService {

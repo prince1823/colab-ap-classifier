@@ -8,6 +8,7 @@ import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import type { OverrideRule, RuleGroup } from '../../shared/types/rules'
 import type { FieldDefinition, GroupedFilter } from '../../shared/types/transactions'
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
+import RuleDeactivationModal from '../components/rules/RuleDeactivationModal'
 
 const UNGROUPED_ID = '__ungrouped__'
 
@@ -68,6 +69,9 @@ export default function OverrideRulesPage() {
     () => new Set([...selectedGroupedIds, ...selectedUngroupedIds]),
     [selectedGroupedIds, selectedUngroupedIds]
   )
+
+  // Rule deactivation modal
+  const [deactivatingRule, setDeactivatingRule] = useState<OverrideRule | null>(null)
 
   // Apply rules state
   const [applying, setApplying] = useState(false)
@@ -221,6 +225,20 @@ export default function OverrideRulesPage() {
   }
 
   const handleToggle = async (rule: OverrideRule) => {
+    if (rule.isActive) {
+      // Deactivating — check if rule has affected transactions
+      try {
+        const entries = await ipc.changelog.listByRule(rule.id)
+        if (entries.length > 0) {
+          // Has affected transactions — show deactivation modal
+          setDeactivatingRule(rule)
+          return
+        }
+      } catch {
+        // If check fails, fall through to direct toggle
+      }
+    }
+    // Activating, or no affected transactions — toggle directly
     setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r))
     setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r))
     try {
@@ -229,6 +247,22 @@ export default function OverrideRulesPage() {
       setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: rule.isActive } : r))
       setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: rule.isActive } : r))
       setError(e instanceof Error ? e.message : 'Failed to toggle rule')
+    }
+  }
+
+  const handleDeactivationClose = async (allReverted: boolean) => {
+    const rule = deactivatingRule
+    if (!rule) return
+    setDeactivatingRule(null)
+    // Mark rule inactive regardless of revert status
+    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: false } : r))
+    setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: false } : r))
+    try {
+      await ipc.rules.update(rule.id, { isActive: false })
+    } catch (e) {
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: true } : r))
+      setUngroupedRulesState(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: true } : r))
+      setError(e instanceof Error ? e.message : 'Failed to deactivate rule')
     }
   }
 
@@ -1133,7 +1167,6 @@ export default function OverrideRulesPage() {
                   getNodePath={getNodePath}
                   formatConditionSummary={formatConditionSummary}
                   openEdit={openEdit}
-                  handleDelete={handleDelete}
                   handleToggle={handleToggle}
                   handleCategoryAToggle={handleCategoryAToggle}
                   handleRuleDragStart={handleRuleDragStart}
@@ -1223,7 +1256,7 @@ export default function OverrideRulesPage() {
                         getNodePath={getNodePath}
                         formatConditionSummary={formatConditionSummary}
                         onEdit={openEdit}
-                        onDelete={handleDelete}
+
                         onToggle={handleToggle}
                         onCategoryAToggle={handleCategoryAToggle}
                         onDragStart={(e) => handleRuleDragStart(e, rule.id, null)}
@@ -1268,6 +1301,15 @@ export default function OverrideRulesPage() {
           No override rules yet. Create groups to organize your rules, then add rules to classify vendors.
         </div>
       )}
+
+      {/* Rule deactivation modal */}
+      {deactivatingRule && (
+        <RuleDeactivationModal
+          ruleId={deactivatingRule.id}
+          ruleName={deactivatingRule.name}
+          onClose={handleDeactivationClose}
+        />
+      )}
     </div>
   )
 }
@@ -1293,7 +1335,6 @@ interface GroupSectionProps {
   getNodePath: (id: string) => string
   formatConditionSummary: (rule: OverrideRule) => string
   openEdit: (rule: OverrideRule) => void
-  handleDelete: (id: string) => void
   handleToggle: (rule: OverrideRule) => void
   handleCategoryAToggle: (rule: OverrideRule) => void
   handleRuleDragStart: (e: React.DragEvent, ruleId: string, sourceGroupId: string | null) => void
@@ -1315,7 +1356,7 @@ function GroupSection({
   editingGroupId, editingGroupName, setEditingGroupName, handleRenameGroup, setEditingGroupId,
   openCreate, setDeletingGroupId,
   handleGroupDragOver, setDragOverGroupId, handleGroupDrop,
-  getNodePath, formatConditionSummary, openEdit, handleDelete, handleToggle, handleCategoryAToggle,
+  getNodePath, formatConditionSummary, openEdit, handleToggle, handleCategoryAToggle,
   handleRuleDragStart, handleRuleDragEnd, expandedConditions, setExpandedConditions,
   selectedGroupedIds, onGroupRuleSelect,
   handleGroupDragStart, handleGroupDragEnd, handleGroupReorderDragOver, handleGroupReorderDrop, setDragOverGroupReorderId, isDragOverReorder,
@@ -1416,7 +1457,6 @@ function GroupSection({
               getNodePath={getNodePath}
               formatConditionSummary={formatConditionSummary}
               onEdit={openEdit}
-              onDelete={handleDelete}
               onToggle={handleToggle}
               onCategoryAToggle={handleCategoryAToggle}
               onDragStart={(e) => handleRuleDragStart(e, rule.id, group.id)}
@@ -1545,7 +1585,6 @@ interface RuleRowProps {
   getNodePath: (id: string) => string
   formatConditionSummary: (rule: OverrideRule) => string
   onEdit: (rule: OverrideRule) => void
-  onDelete: (id: string) => void
   onToggle: (rule: OverrideRule) => void
   onCategoryAToggle: (rule: OverrideRule) => void
   onDragStart: (e: React.DragEvent) => void
@@ -1558,7 +1597,7 @@ interface RuleRowProps {
 }
 
 function RuleRow({
-  rule, getNodePath, formatConditionSummary, onEdit, onDelete, onToggle, onCategoryAToggle,
+  rule, getNodePath, formatConditionSummary, onEdit, onToggle, onCategoryAToggle,
   onDragStart, onDragEnd, expandedConditions, setExpandedConditions,
   selectable, selected, onSelect,
 }: RuleRowProps) {
@@ -1684,9 +1723,6 @@ function RuleRow({
         <div className="flex items-center justify-center gap-0.5">
           <button onClick={(e) => { e.stopPropagation(); onEdit(rule) }} className="rounded p-1 text-blue-500 hover:bg-blue-50" title="Edit">
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); onDelete(rule.id) }} className="rounded p-1 text-red-400 hover:bg-red-50" title="Delete">
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
           </button>
         </div>
       </td>

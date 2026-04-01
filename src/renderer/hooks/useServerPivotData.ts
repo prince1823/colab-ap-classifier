@@ -26,6 +26,7 @@ export function useServerPivotData(
   aggregation: Aggregation = 'sum',
   filters?: TransactionFilter
 ): UseServerPivotDataResult {
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
   const [rawRows, setRawRows] = useState<{ dimensions: string[]; amount: number; count: number }[]>([])
   const [dimCols, setDimCols] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -58,7 +59,7 @@ export function useServerPivotData(
       setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(dimensions), valueDimension, JSON.stringify(filters)])
+  }, [JSON.stringify(dimensions), valueDimension, JSON.stringify(filters), projectFilePath])
 
   useEffect(() => {
     mountedRef.current = true

@@ -10,6 +10,7 @@ import { useIPC } from '../hooks/useIPC'
 import { ipc } from '../lib/ipc'
 import { showError } from '../lib/toast-errors'
 import { usePivotStore } from '../stores/pivotStore'
+import { useWorkflowStore } from '../stores/workflowStore'
 import type { FlattenedPivotRow } from '../types/pivot'
 import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
@@ -90,6 +91,8 @@ export default function PivotPage() {
     clearAllFilters,
   } = usePivotStore()
 
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
+
   // Derive classification filter state from advancedGrouped
   const classificationFilter = useMemo((): 'all' | 'classified' | 'unclassified' => {
     if (!advancedGrouped) return 'all'
@@ -141,7 +144,7 @@ export default function PivotPage() {
     [advancedGrouped]
   )
 
-  const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [])
+  const { data: columns } = useIPC(() => ipc.transactions.getColumns(), [projectFilePath])
 
   // Load suggestions for string filter fields (supplier names, etc.)
   const [supplierSuggestions, setSupplierSuggestions] = useState<string[]>([])
@@ -149,7 +152,7 @@ export default function PivotPage() {
     ipc.transactions.distinctValues('supplier_name', 5000)
       .then(vals => setSupplierSuggestions(vals.filter(Boolean)))
       .catch((e) => showError('Failed to load supplier suggestions', e))
-  }, [])
+  }, [projectFilePath])
 
   // Load rule groups for the bucket selector on the toolbar
   const [ruleGroups, setRuleGroups] = useState<RuleGroup[]>([])
@@ -157,7 +160,7 @@ export default function PivotPage() {
     ipc.rules.listGroups()
       .then(groups => setRuleGroups(groups ?? []))
       .catch((e) => showError('Failed to load rule groups', e))
-  }, [])
+  }, [projectFilePath])
 
   const filter = useMemo(() => {
     const pillFilter = buildTransactionFilter(filterState)

@@ -162,6 +162,34 @@ export default function CreateRuleModal({
 
   const conditionCount = grouped.groups.flatMap(g => g.conditions.filter(c => c.field)).length
 
+  // Live preview: count transactions matching current conditions (debounced)
+  const [matchingCount, setMatchingCount] = useState<number | null>(null)
+  const [countLoading, setCountLoading] = useState(false)
+  const countTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (!isOpen || conditionCount === 0) {
+      setMatchingCount(null)
+      return
+    }
+
+    // Debounce the count query
+    if (countTimerRef.current) clearTimeout(countTimerRef.current)
+    setCountLoading(true)
+
+    countTimerRef.current = setTimeout(() => {
+      ipc.transactions.countByConditions(grouped)
+        .then((count) => setMatchingCount(count))
+        .catch(() => setMatchingCount(null))
+        .finally(() => setCountLoading(false))
+    }, 300)
+
+    return () => {
+      if (countTimerRef.current) clearTimeout(countTimerRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, JSON.stringify(grouped)])
+
   const handleSave = useCallback(async () => {
     if (conditionCount === 0) {
       setError('At least one condition is required')
@@ -342,6 +370,26 @@ export default function CreateRuleModal({
                 <span className="text-xs italic text-gray-400">No conditions configured</span>
               )}
             </div>
+            {/* Live matching count */}
+            {conditionCount > 0 && (
+              <div className="mt-2 flex items-center gap-1.5 text-[11px]">
+                {countLoading ? (
+                  <>
+                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                    <span className="text-gray-400">Counting matches...</span>
+                  </>
+                ) : matchingCount !== null ? (
+                  <>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${matchingCount > 0 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {matchingCount.toLocaleString()}
+                    </span>
+                    <span className="text-gray-500">
+                      transaction{matchingCount !== 1 ? 's' : ''} match{matchingCount === 1 ? 'es' : ''} these conditions
+                    </span>
+                  </>
+                ) : null}
+              </div>
+            )}
             <button
               ref={editConditionsBtnRef}
               type="button"

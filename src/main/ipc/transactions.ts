@@ -1,6 +1,7 @@
 import { registerHandler } from './register';
 import type { TransactionStore } from '../../shared/types/services';
 import type { TransactionFilter, TransactionUpdate, FilterCondition } from '../../shared/types';
+import type { GroupedFilter } from '../../shared/types/transactions';
 
 export function registerTransactionsHandlers(transactions: TransactionStore): void {
   registerHandler('transactions:query', async (_event, filters: unknown) => {
@@ -59,5 +60,9 @@ export function registerTransactionsHandlers(transactions: TransactionStore): vo
 
   registerHandler('transactions:markAllReviewed', async () => {
     return transactions.markAllReviewed();
+  });
+
+  registerHandler('transactions:countByConditions', async (_event, grouped: unknown) => {
+    return transactions.countByGroupedConditions(grouped as GroupedFilter);
   });
 }

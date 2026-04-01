@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ipc } from '../../lib/ipc'
 import { showError } from '../../lib/toast-errors'
+import { useWorkflowStore } from '../../stores/workflowStore'
 import type { MappingRow } from '../../../shared/types/column-mapping'
 import { VIRTUAL_COLUMN_NAMES } from '../../../shared/virtual-columns'
 
@@ -15,6 +16,7 @@ interface TransactionPreviewRow {
 }
 
 export default function DataPriorityStep({ allMappings, onSave, onBack }: Props) {
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
   // Virtual columns (supplier_name, parent_name, etc.) are resolved via JOINs and cannot
   // contribute to LLM dedup groups — exclude them from the priority UI entirely.
   const allCanonicals = [...new Set(
@@ -52,7 +54,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
       setNonLlm(remaining)
       setLoadedFromSaved(true)
     }).catch((e) => showError('Failed to load saved column priorities', e))
-  }, [])
+  }, [projectFilePath])
 
   const loadPreview = useCallback(async () => {
     setPreviewColumns(allCanonicals)
@@ -71,7 +73,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
 
   useEffect(() => {
     loadPreview()
-  }, [])
+  }, [projectFilePath])
 
   // Fetch unique value counts for each canonical column
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
     ).then((entries) => {
       setValueCounts(Object.fromEntries(entries))
     }).catch((e) => showError('Failed to load value counts', e))
-  }, [])
+  }, [projectFilePath])
 
   // Drag state for LLM rows
   const [dragIndex, setDragIndex] = useState<number | null>(null)

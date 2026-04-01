@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ipc } from '../lib/ipc'
+import { useWorkflowStore } from '../stores/workflowStore'
 import type { ProjectSupplierView } from '../../shared/types/suppliers'
 import type { GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
@@ -71,6 +72,7 @@ function SummarySection({
 type ViewMode = 'sync' | 'export'
 
 export default function SyncToUniversePage() {
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
   const [viewMode, setViewMode] = useState<ViewMode>('sync')
   const [filterMode, setFilterMode] = useState<FilterMode>('researched')
   const [customGrouped, setCustomGrouped] = useState<GroupedFilter | null>(null)
@@ -82,12 +84,12 @@ export default function SyncToUniversePage() {
   const [syncResult, setSyncResult] = useState<{ synced: number; failed: number; errors: string[] } | null>(null)
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Load filter fields once
+  // Load filter fields when project changes
   useEffect(() => {
     ipc.suppliers.getFilterFields()
       .then(fields => setFilterFields(fields as FieldDefinition[]))
       .catch(() => {})
-  }, [])
+  }, [projectFilePath])
 
   // Whether the custom filter has valid conditions
   const hasCustomFilter = customGrouped && customGrouped.groups.some(g => g.conditions.some(c => c.field))

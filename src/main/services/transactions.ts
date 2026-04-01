@@ -811,6 +811,29 @@ export class TransactionStore implements ITransactionStore {
   }
 
   /**
+   * Count transactions matching grouped filter conditions (without fetching all IDs).
+   */
+  async countByGroupedConditions(grouped: GroupedFilter): Promise<number> {
+    const resolveColumn = (field: string) =>
+      FILTER_VIRTUAL_EXPRS[field] ?? `t."${field}"`;
+
+    const built = buildGroupedWhereClause(grouped, resolveColumn);
+    if (!built) return 0;
+
+    const allConditions = grouped.groups.flatMap(g => g.conditions);
+    const needsTaxonomy = allConditions.some((c) => c.field.startsWith('classification_'));
+    const taxonomyJoin = needsTaxonomy
+      ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id'
+      : '';
+    const rulesJoin = allConditions.some((c) => c.field === 'applied_rule_name') ? RULES_JOIN : '';
+    const supplierParentJoin = allConditions.some((c) => c.field === 'parent_name') ? SUPPLIER_PARENT_JOIN : '';
+
+    const sql = `SELECT COUNT(*) as cnt FROM transactions t ${SUPPLIER_JOIN} ${supplierParentJoin} ${taxonomyJoin} ${rulesJoin} WHERE (${built.sql})`;
+    const row = await this.db.get<{ cnt: number }>(sql, ...built.params);
+    return Number(row?.cnt ?? 0);
+  }
+
+  /**
    * Applies a rule's conditions to matching transactions.
    * Caller (RuleStore) is responsible for ensuring ruleId exists.
    */

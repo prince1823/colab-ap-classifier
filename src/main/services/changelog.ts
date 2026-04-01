@@ -156,35 +156,22 @@ export class ChangelogStore implements IChangelogStore {
     const change = rowToChangeLog(row);
 
     if (change.isReverted) {
-      // Un-revert: re-apply the new values
-      if (!change.newValues) throw new Error(`Cannot un-revert change ${changeId}: no new_values recorded`);
-      const columns = Object.keys(change.newValues);
-      if (columns.length > 0 && change.affectedIds.length > 0) {
-        const setClauses = columns.map((col) => `${col} = ?`).join(', ');
-        const setValues = columns.map((col) => change.newValues![col]);
-        const placeholders = change.affectedIds.map(() => '?').join(', ');
-        await this.db.run(
-          `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
-          ...setValues,
-          ...change.affectedIds
-        );
-      }
-      await this.db.run('UPDATE change_log SET is_reverted = FALSE WHERE id = ?', changeId);
-    } else {
-      // Revert: restore the old values
-      if (!change.oldValues) throw new Error(`Cannot revert change ${changeId}: no old_values recorded`);
-      const columns = Object.keys(change.oldValues);
-      if (columns.length > 0 && change.affectedIds.length > 0) {
-        const setClauses = columns.map((col) => `${col} = ?`).join(', ');
-        const setValues = columns.map((col) => change.oldValues![col]);
-        const placeholders = change.affectedIds.map(() => '?').join(', ');
-        await this.db.run(
-          `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
-          ...setValues,
-          ...change.affectedIds
-        );
-      }
-      await this.db.run('UPDATE change_log SET is_reverted = TRUE WHERE id = ?', changeId);
+      throw new Error('This change has already been reverted');
     }
+
+    // Revert: restore the old values
+    if (!change.oldValues) throw new Error(`Cannot revert change ${changeId}: no old_values recorded`);
+    const columns = Object.keys(change.oldValues);
+    if (columns.length > 0 && change.affectedIds.length > 0) {
+      const setClauses = columns.map((col) => `${col} = ?`).join(', ');
+      const setValues = columns.map((col) => change.oldValues![col]);
+      const placeholders = change.affectedIds.map(() => '?').join(', ');
+      await this.db.run(
+        `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
+        ...setValues,
+        ...change.affectedIds
+      );
+    }
+    await this.db.run('UPDATE change_log SET is_reverted = TRUE WHERE id = ?', changeId);
   }
 }

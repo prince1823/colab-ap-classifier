@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import LaunchModal from './LaunchModal'
@@ -13,25 +13,23 @@ import OverrideRulesView from '../views/OverrideRulesView'
 import VersionHistoryView from '../views/VersionHistoryView'
 import SyncToUniverseView from '../views/SyncToUniverseView'
 
-/** Route config for keep-alive rendering */
-const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
-  { path: '/project', element: <ProjectView /> },
-  { path: '/taxonomy', element: <TaxonomyView /> },
-  { path: '/data', element: <DataView /> },
-  { path: '/suppliers', element: <SuppliersView /> },
-  { path: '/classification', element: <ClassificationView /> },
-  { path: '/review', element: <ReviewView /> },
-  { path: '/override-rules', element: <OverrideRulesView /> },
-  { path: '/version-history', element: <VersionHistoryView /> },
-  { path: '/sync-to-universe', element: <SyncToUniverseView /> },
-]
+/** Map route paths to their view components — rendered on demand, no keep-alive */
+const ROUTE_COMPONENTS: Record<string, React.ComponentType> = {
+  '/project': ProjectView,
+  '/taxonomy': TaxonomyView,
+  '/data': DataView,
+  '/suppliers': SuppliersView,
+  '/classification': ClassificationView,
+  '/review': ReviewView,
+  '/override-rules': OverrideRulesView,
+  '/version-history': VersionHistoryView,
+  '/sync-to-universe': SyncToUniverseView,
+}
 
 export default function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const { subscribeToClassificationProgress, subscribeToResearchProgress, subscribeToQCProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress } = useWorkflowStore()
   const location = useLocation()
-  // Track which routes have been visited so we mount them once and keep them alive
-  const [visitedRoutes, setVisitedRoutes] = useState<Set<string>>(new Set([location.pathname]))
   const navigate = useNavigate()
   const autoReopenAttempted = useRef(false)
   // Initialize synchronously so the first render already shows the spinner
@@ -61,15 +59,11 @@ export default function AppShell() {
       .finally(() => setReopening(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Track current route in persisted store + mark as visited for keep-alive
+  // Track current route in persisted store
   useEffect(() => {
     if (hasProject && location.pathname !== '/') {
       setLastRoute(location.pathname)
     }
-    setVisitedRoutes((prev) => {
-      if (prev.has(location.pathname)) return prev
-      return new Set(prev).add(location.pathname)
-    })
   }, [location.pathname, hasProject, setLastRoute])
 
   // Subscribe to classification progress events when a project is open
@@ -167,23 +161,15 @@ export default function AppShell() {
               </div>
             </div>
           )}
-          {ROUTE_PAGES.map(({ path, element }) => {
-            const isActive = location.pathname === path
-            if (!visitedRoutes.has(path)) return null
+          {(() => {
+            const ViewComponent = ROUTE_COMPONENTS[location.pathname]
+            if (!ViewComponent) return null
             return (
-              <div
-                key={path}
-                className="overflow-auto absolute inset-0"
-                style={{
-                  visibility: isActive ? 'visible' : 'hidden',
-                  pointerEvents: isActive ? 'auto' : 'none',
-                  zIndex: isActive ? 1 : 0,
-                }}
-              >
-                {element}
+              <div key={location.pathname} className="overflow-auto absolute inset-0" style={{ zIndex: 1 }}>
+                <ViewComponent />
               </div>
             )
-          })}
+          })()}
         </main>
       </div>
       {!hasProject && !reopening && <LaunchModal onProjectReady={handleProjectReady} />}

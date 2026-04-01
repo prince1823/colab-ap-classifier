@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Zap, X, CheckCircle2 } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import { showError } from '../lib/toast-errors'
+import { useWorkflowStore } from '../stores/workflowStore'
 import { makeEmptyGroup, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import type { OverrideRule, RuleGroup } from '../../shared/types/rules'
@@ -17,6 +18,7 @@ const RULE_PROPERTY_FIELD_NAMES = new Set(['rule_name', 'rule_source', 'rule_is_
 const UNGROUPED_PAGE_SIZE = 100
 
 export default function OverrideRulesPage() {
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
   const [rules, setRules] = useState<OverrideRule[]>([])  // grouped rules only
   const [ungroupedRulesState, setUngroupedRulesState] = useState<OverrideRule[]>([])
   const [ungroupedTotal, setUngroupedTotal] = useState(0)
@@ -156,7 +158,7 @@ export default function OverrideRulesPage() {
   useEffect(() => {
     loadData()
     loadUngrouped(0)
-  }, [])
+  }, [projectFilePath])
 
   const openCreate = (groupId?: string | null) => {
     setEditingRule(null)

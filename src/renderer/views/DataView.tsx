@@ -30,6 +30,7 @@ export default function DataView() {
   const navigate = useNavigate()
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
   const refreshGateState = useWorkflowStore((s) => s.refreshGateState)
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
 
   const [step, setStep] = useState<Step>('upload')
   const [completedUploads, setCompletedUploads] = useState<CompletedUpload[]>([])
@@ -67,7 +68,7 @@ export default function DataView() {
     ipc.ingest.getUploadStatsBatch().then(setUploadStats).catch((e) => {
       showError('Failed to load upload stats', e)
     })
-  }, [])
+  }, [projectFilePath])
 
   const handleDeleteUpload = async (uploadId: string) => {
     try {

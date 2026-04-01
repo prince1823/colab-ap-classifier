@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import StatsCards from '../components/data-review/StatsCards'
 import SupplierTable from '../components/data-review/SupplierTable'
 import { ipc } from '../lib/ipc'
+import { useWorkflowStore } from '../stores/workflowStore'
 import type { TransactionStats } from '../../shared/types/transactions'
 import type { ProjectSupplierView } from '../../shared/types/suppliers'
 
 export default function DataReviewPage() {
   const navigate = useNavigate()
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
   const [stats, setStats] = useState<TransactionStats | null>(null)
   const [suppliers, setSuppliers] = useState<ProjectSupplierView[]>([])
   const [taxonomyNodeCount, setTaxonomyNodeCount] = useState(0)
@@ -35,7 +37,7 @@ export default function DataReviewPage() {
 
   useEffect(() => {
     loadData()
-  }, [])
+  }, [projectFilePath])
 
   if (loading) {
     return (

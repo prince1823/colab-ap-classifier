@@ -179,6 +179,7 @@ export interface TransactionStore {
   queryPivotAggregation(dimensions: string[], valueDimension?: string, filters?: TransactionFilter): Promise<PivotAggregationResult>;
   getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;
   getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
+  countByGroupedConditions(grouped: import('./transactions').GroupedFilter): Promise<number>;
   markAllReviewed(): Promise<number>;
   applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
   getSupplierAddress(supplierId: string): Promise<string | undefined>;

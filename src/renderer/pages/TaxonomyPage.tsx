@@ -166,6 +166,7 @@ interface FlatRow {
 
 export default function TaxonomyPage() {
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
 
   const [nodes, setNodes] = useState<TaxonomyNode[]>([])
   const [loading, setLoading] = useState(true)
@@ -225,7 +226,7 @@ export default function TaxonomyPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [projectFilePath])
 
   useEffect(() => { loadData() }, [loadData])
 

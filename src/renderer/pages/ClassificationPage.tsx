@@ -45,6 +45,7 @@ const PRESET_LABELS: Record<ScopePreset, string> = {
 
 export default function ClassificationPage() {
   const storeProgress = useWorkflowStore((s) => s.classificationProgress)
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
   // Tab state
   const [activeTab, setActiveTab] = useState<ActiveTab>('classification')
 
@@ -58,10 +59,10 @@ export default function ClassificationPage() {
   const [filterFields, setFilterFields] = useState<FieldDefinition[]>([])
   const [filterModalOpen, setFilterModalOpen] = useState(false)
 
-  // Load filter fields on mount
+  // Load filter fields on mount and when project changes
   useEffect(() => {
     ipc.transactions.getFilterFields().then(setFilterFields).catch(console.error)
-  }, [])
+  }, [projectFilePath])
 
   // Sync local state from the store.
   useEffect(() => {

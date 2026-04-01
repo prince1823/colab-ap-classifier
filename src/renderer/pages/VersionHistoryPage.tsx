@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { ipc } from '../lib/ipc'
+import { useWorkflowStore } from '../stores/workflowStore'
 import type { ChangeLog, ChangelogFilter } from '../../shared/types/changelog'
 import type { Transaction } from '../../shared/types/transactions'
 import type { FeedbackRecommendation } from '../../shared/types/feedback'
@@ -273,6 +274,7 @@ function ChangeTransactionPanel({
 }
 
 export default function VersionHistoryPage() {
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
   const [entries, setEntries] = useState<ChangeLog[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [page, setPage] = useState(1)
@@ -327,7 +329,7 @@ export default function VersionHistoryPage() {
     } finally {
       setLoading(false)
     }
-  }, [viewFilter])
+  }, [viewFilter, projectFilePath])
 
   useEffect(() => { fetchPage(page) }, [fetchPage, page])
 

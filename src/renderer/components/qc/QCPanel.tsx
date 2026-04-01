@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ipc } from '../../lib/ipc'
+import { useWorkflowStore } from '../../stores/workflowStore'
 import QCSettingsForm from './QCSettingsForm'
 import QCProgressDisplay from './QCProgressDisplay'
 import QCResultsSummary from './QCResultsSummary'
@@ -22,6 +23,7 @@ interface FlaggedEntry {
 }
 
 export default function QCPanel() {
+  const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
   const [localProgress, setLocalProgress] = useState<QCProgress | null>(null)
 
   const [config, setConfig] = useState<QCConfig | null>(null)
@@ -48,7 +50,7 @@ export default function QCPanel() {
   const isRunning = localProgress?.status === 'running'
   const isTerminal = localProgress != null && localProgress.status !== 'running'
 
-  // Load config + defaults on mount
+  // Load config + defaults on mount and when project changes
   useEffect(() => {
     async function load() {
       try {
@@ -65,7 +67,7 @@ export default function QCPanel() {
       }
     }
     load()
-  }, [])
+  }, [projectFilePath])
 
   // Subscribe directly to qc:progress to catch every event (Zustand batches and can miss intermediate ones)
   useEffect(() => {
@@ -113,7 +115,7 @@ export default function QCPanel() {
     if (config) {
       fetchScopeCount(config.scope)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectFilePath]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Config change handler — update state, debounce save + scope count
   const handleConfigChange = useCallback((newConfig: QCConfig) => {

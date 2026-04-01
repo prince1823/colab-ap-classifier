@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { dialog, BrowserWindow } from 'electron';
+import { debugLog } from '../utils/debug-log';
 import { parse as parseSync } from 'csv-parse/sync';
 import { parse as parseStream } from 'csv-parse';
 import { randomUUID } from 'crypto';
@@ -553,6 +554,7 @@ export class IngestService implements IIngestService {
   }
 
   async getUploadHistory(): Promise<UploadRecord[]> {
+    debugLog('INFO', '[getUploadHistory] querying DB file: ' + this.db.getFilePath());
     const rows = await this.db.all<{
       id: string;
       file_name: string;
@@ -563,6 +565,8 @@ export class IngestService implements IIngestService {
       created_at: string;
       updated_at: string | null;
     }>('SELECT * FROM uploads ORDER BY created_at DESC');
+
+    debugLog('INFO', '[getUploadHistory] found ' + rows.length + ' uploads: ' + rows.map(r => r.file_name).join(', '));
 
     return rows.map((row) => ({
       id: row.id,

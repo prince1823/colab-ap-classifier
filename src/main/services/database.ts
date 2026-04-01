@@ -55,6 +55,7 @@ export class DuckDBDatabase implements Database {
   }
 
   async openDatabase(filePath: string): Promise<void> {
+    debugLog('INFO', '[DB] openDatabase called', { from: this.currentFilePath, to: filePath });
     if (this.instance) {
       await this.closeDatabase();
     }

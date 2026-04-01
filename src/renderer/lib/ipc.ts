@@ -67,7 +67,7 @@ export const ipc = {
     getUpload: () => invoke('ingest:getUpload'),
     getUploadHistory: () => invoke('ingest:getUploadHistory'),
     getUploadStatsBatch: () => invoke('ingest:getUploadStatsBatch'),
-    deleteUpload: (uploadId: string) => invoke('ingest:deleteUpload', uploadId),
+    deleteUpload: (uploadId: string, force?: boolean) => invoke('ingest:deleteUpload', uploadId, force),
     deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
       invoke('ingest:deriveMappings', columns, sampleRows, source),
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),

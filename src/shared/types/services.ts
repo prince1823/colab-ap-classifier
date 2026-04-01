@@ -277,8 +277,8 @@ export interface IngestService {
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
   importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
   getUploadHistory(): Promise<UploadRecord[]>;
-  getUploadStatsBatch(): Promise<Record<string, { classifiedCount: number }>>;
-  deleteUpload(uploadId: string): Promise<{ deletedRows: number }>;
+  getUploadStatsBatch(): Promise<Record<string, { classifiedCount: number; humanReviewedCount: number }>>;
+  deleteUpload(uploadId: string, force?: boolean): Promise<{ deletedRows: number }>;
   deriveMappings(columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource): Promise<DerivedMappings>;
   getExistingCanonicals(): Promise<string[]>;
 }

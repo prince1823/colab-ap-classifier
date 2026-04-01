@@ -69,11 +69,15 @@ export const usePivotStore = create<PivotState>()(
     }),
     {
       name: 'c91-pivot',
-      version: 3,
+      version: 4,
       partialize: (state) => ({
+        rowDimensions: state.rowDimensions,
         valueDimension: state.valueDimension,
         aggregation: state.aggregation,
         spendDisplayMode: state.spendDisplayMode,
+        selectedGroupId: state.selectedGroupId,
+        filterState: state.filterState,
+        flaggedForReviewOnly: state.flaggedForReviewOnly,
       }),
     }
   )

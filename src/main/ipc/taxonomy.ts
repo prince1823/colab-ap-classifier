@@ -27,7 +27,7 @@ export function registerTaxonomyHandlers(taxonomy: TaxonomyStore): void {
   });
 
   registerHandler('taxonomy:deleteNode', async (_event, nodeId: unknown) => {
-    await taxonomy.deleteNode(nodeId as string);
+    return taxonomy.deleteNode(nodeId as string);
   });
 
   registerHandler('taxonomy:importFromFile', async (_event, filePath: unknown) => {

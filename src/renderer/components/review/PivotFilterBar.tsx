@@ -9,7 +9,6 @@ import * as Popover from '@radix-ui/react-popover'
 /** Dynamic filter state — keyed by column name */
 export type PivotFilterState = Record<string, string[]>
 
-export const INITIAL_PIVOT_FILTER_STATE: PivotFilterState = {}
 
 /** Human-readable labels for well-known columns */
 const COLUMN_LABELS: Record<string, string> = {
@@ -483,42 +482,3 @@ export default function PivotFilterBar({
   )
 }
 
-/* ------------------------------------------------------------------ */
-/* Filter application (pure function, used by Dashboard / ReviewPage)   */
-/* ------------------------------------------------------------------ */
-
-export function applyPivotFilters(
-  rows: Record<string, unknown>[],
-  filterState: PivotFilterState
-): Record<string, unknown>[] {
-  // Collect only active filter entries
-  const activeFilters = Object.entries(filterState).filter(
-    ([, values]) => values.length > 0
-  )
-  if (activeFilters.length === 0) return rows
-
-  return rows.filter((row) => {
-    for (const [col, allowedValues] of activeFilters) {
-      const cellValue = String(row[col] ?? '').trim()
-      if (!cellValue) return false
-      // Case-insensitive match
-      if (!allowedValues.some(v => v.toLowerCase() === cellValue.toLowerCase())) return false
-    }
-    return true
-  })
-}
-
-/* ------------------------------------------------------------------ */
-/* Summarize active filters for export template                        */
-/* ------------------------------------------------------------------ */
-
-export function summarizeFilters(filterState: PivotFilterState): string {
-  const parts: string[] = []
-  for (const [col, vals] of Object.entries(filterState)) {
-    if (vals.length > 0) {
-      const label = colLabel(col)
-      parts.push(`${label}: ${vals.length > 3 ? `${vals.slice(0, 3).join(', ')} +${vals.length - 3} more` : vals.join(', ')}`)
-    }
-  }
-  return parts.length > 0 ? parts.join(' | ') : 'None'
-}

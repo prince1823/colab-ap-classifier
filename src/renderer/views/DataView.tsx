@@ -82,9 +82,9 @@ export default function DataView() {
     })
   }, [projectFilePath])
 
-  const handleDeleteUpload = async (uploadId: string) => {
+  const handleDeleteUpload = async (uploadId: string, force?: boolean) => {
     try {
-      await ipc.ingest.deleteUpload(uploadId)
+      await ipc.ingest.deleteUpload(uploadId, force)
       setCompletedUploads((prev) => prev.filter((u) => u.uploadId !== uploadId))
       setUploadStats((prev) => {
         const next = { ...prev }
@@ -181,6 +181,8 @@ export default function DataView() {
           createdAt: new Date().toISOString(),
         },
       ])
+      // New imports have no classified rows yet — seed stats so the delete button shows
+      setUploadStats((prev) => ({ ...prev, [result.uploadId]: { classifiedCount: 0 } }))
 
       await refreshGateState()
 

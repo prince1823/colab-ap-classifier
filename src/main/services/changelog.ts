@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Database, ChangelogStore as IChangelogStore } from '../../shared/types/services';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from '../../shared/types/changelog';
+import type { FilterCondition } from '../../shared/types/transactions';
 
 interface ChangeLogRow {
   id: string;
@@ -12,6 +13,8 @@ interface ChangeLogRow {
   new_values: string | null;
   description: string | null;
   is_reverted: boolean;
+  filter_context: string | null;
+  rule_id: string | null;
   created_at: string;
 }
 
@@ -31,6 +34,8 @@ function rowToChangeLog(row: ChangeLogRow): ChangeLog {
     newValues: safeParse(row.new_values) as Record<string, unknown> | null,
     description: row.description,
     isReverted: Boolean(row.is_reverted),
+    filterContext: safeParse(row.filter_context) as FilterCondition[] | null,
+    ruleId: row.rule_id ?? null,
     createdAt: String(row.created_at),
   };
 }
@@ -132,8 +137,8 @@ export class ChangelogStore implements IChangelogStore {
   async logChange(entry: Omit<ChangeLog, 'id' | 'createdAt'>): Promise<string> {
     const id = uuidv4();
     await this.db.run(
-      `INSERT INTO change_log (id, source, affected_table, affected_ids, affected_count, old_values, new_values, description, is_reverted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE)`,
+      `INSERT INTO change_log (id, source, affected_table, affected_ids, affected_count, old_values, new_values, description, is_reverted, filter_context, rule_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?)`,
       id,
       entry.source,
       entry.affectedTable,
@@ -141,7 +146,9 @@ export class ChangelogStore implements IChangelogStore {
       entry.affectedCount,
       entry.oldValues ? JSON.stringify(entry.oldValues) : null,
       entry.newValues ? JSON.stringify(entry.newValues) : null,
-      entry.description ?? null
+      entry.description ?? null,
+      entry.filterContext ? JSON.stringify(entry.filterContext) : null,
+      entry.ruleId ?? null
     );
     return id;
   }
@@ -156,20 +163,8 @@ export class ChangelogStore implements IChangelogStore {
     const change = rowToChangeLog(row);
 
     if (change.isReverted) {
-      // Un-revert: re-apply the new values
-      if (!change.newValues) throw new Error(`Cannot un-revert change ${changeId}: no new_values recorded`);
-      const columns = Object.keys(change.newValues);
-      if (columns.length > 0 && change.affectedIds.length > 0) {
-        const setClauses = columns.map((col) => `${col} = ?`).join(', ');
-        const setValues = columns.map((col) => change.newValues![col]);
-        const placeholders = change.affectedIds.map(() => '?').join(', ');
-        await this.db.run(
-          `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
-          ...setValues,
-          ...change.affectedIds
-        );
-      }
-      await this.db.run('UPDATE change_log SET is_reverted = FALSE WHERE id = ?', changeId);
+      // Revert is one-way — once reverted, it cannot be undone
+      throw new Error(`Change ${changeId} has already been reverted`);
     } else {
       // Revert: restore the old values
       if (!change.oldValues) throw new Error(`Cannot revert change ${changeId}: no old_values recorded`);
@@ -186,5 +181,42 @@ export class ChangelogStore implements IChangelogStore {
       }
       await this.db.run('UPDATE change_log SET is_reverted = TRUE WHERE id = ?', changeId);
     }
+  }
+
+  /**
+   * List changelog entries for a specific rule, filtering affected IDs
+   * to only include transactions still owned by that rule.
+   */
+  async listByRuleId(ruleId: string): Promise<ChangeLog[]> {
+    const rows = await this.db.all<ChangeLogRow>(
+      `SELECT * FROM change_log WHERE rule_id = ? ORDER BY created_at DESC`,
+      ruleId
+    );
+    const entries = rows.map(rowToChangeLog);
+
+    // Get all transaction IDs still owned by this rule
+    const ownedRows = await this.db.all<{ id: string }>(
+      `SELECT CAST(id AS VARCHAR) as id FROM transactions WHERE CAST(applied_rule_id AS VARCHAR) = ?`,
+      ruleId
+    );
+    const ownedIds = new Set(ownedRows.map(r => r.id));
+
+    const result: ChangeLog[] = [];
+    for (const entry of entries) {
+      if (entry.isReverted) {
+        // Already-reverted entries shown as-is for display
+        result.push(entry);
+        continue;
+      }
+      // Filter affected IDs to only still-owned transactions
+      const filteredIds = entry.affectedIds.filter(id => ownedIds.has(id));
+      if (filteredIds.length === 0) continue; // All txns reclassified by other rules
+      result.push({
+        ...entry,
+        affectedIds: filteredIds,
+        affectedCount: filteredIds.length,
+      });
+    }
+    return result;
   }
 }

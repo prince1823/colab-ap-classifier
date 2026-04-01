@@ -32,6 +32,12 @@ export interface OverrideRuleUpdate {
   categoryASupplier?: boolean;
 }
 
+export interface ConflictRow {
+  transactionId: string;
+  existingRuleId: string;
+  existingRuleName: string;
+}
+
 export interface GenerateRulesResult {
   rulesCreated: number;
   suppliersProcessed: number;

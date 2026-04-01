@@ -3,7 +3,7 @@ import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfir
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate, ConflictRow } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress, CategorySelectionInput, L3ClassificationInput, TailSpendCategorySelectionInput, TailSpendL3Input, QCConfig, QCResult, SpendByTaxonomyResult, FilterConditionQC } from './classification';
@@ -197,7 +197,7 @@ export interface TaxonomyStore {
   getNodes(): Promise<TaxonomyNode[]>;
   addNode(fullPath: string, description?: string): Promise<TaxonomyNode>;
   updateNode(nodeId: string, updates: { description?: string }): Promise<void>;
-  deleteNode(nodeId: string, reassignTo?: string): Promise<void>;
+  deleteNode(nodeId: string, reassignTo?: string): Promise<{ warnings?: string[] }>;
   renameNode(nodeId: string, newName: string): Promise<void>;
   mergeNodes(sourceId: string, targetId: string): Promise<{ transactionsMoved: number }>;
   importFromFile(filePath: string): Promise<{ nodeCount: number; fileName: string }>;
@@ -242,7 +242,8 @@ export interface RuleStore {
   listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
   getRule(id: string): Promise<OverrideRule | null>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
-  createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
+  createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number; skippedCount: number; changelogId?: string }>;
+  previewRuleConflicts(candidateIds: string[]): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
   setCategoryA(ruleId: string, value: boolean): Promise<void>;
@@ -268,6 +269,7 @@ export interface ChangelogStore {
   getCount(filter?: ChangelogFilter): Promise<number>;
   logChange(entry: Omit<ChangeLog, 'id' | 'createdAt'>): Promise<string>;
   revertChange(changeId: string): Promise<void>;
+  listByRuleId(ruleId: string): Promise<ChangeLog[]>;
 }
 
 export interface IngestService {
@@ -276,8 +278,8 @@ export interface IngestService {
   suggestMappings(columns: string[], sampleRows: Record<string, string>[]): Promise<ColumnMappingResult>;
   importCSV(filePath: string, columnMappings: ColumnMapping, uploadId?: string): Promise<{ rowsInserted: number; uploadId: string }>;
   getUploadHistory(): Promise<UploadRecord[]>;
-  getUploadStatsBatch(): Promise<Record<string, { classifiedCount: number }>>;
-  deleteUpload(uploadId: string): Promise<{ deletedRows: number }>;
+  getUploadStatsBatch(): Promise<Record<string, { classifiedCount: number; humanReviewedCount: number }>>;
+  deleteUpload(uploadId: string, force?: boolean): Promise<{ deletedRows: number }>;
   deriveMappings(columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource): Promise<DerivedMappings>;
   getExistingCanonicals(): Promise<string[]>;
 }

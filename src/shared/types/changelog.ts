@@ -11,6 +11,9 @@ export interface ChangeLog {
   description: string | null;
   createdAt: string;
   isReverted?: boolean;
+  /** Effective filter conditions that selected the affected transactions */
+  filterContext?: import('./transactions').FilterCondition[] | null;
+  ruleId?: string | null;
   /** Computed at read-time: supplier names for transaction changes */
   supplierNames?: string[];
 }

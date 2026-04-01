@@ -8,7 +8,7 @@ interface Props {
   completedUploads: CompletedUpload[]
   uploadStats: Record<string, { classifiedCount: number }>
   onFileReady: (filePath: string, preview: CSVPreview, source: DeriveMappingsSource) => void
-  onDeleteUpload: (uploadId: string) => Promise<void>
+  onDeleteUpload: (uploadId: string, force?: boolean) => Promise<void>
   onProceedToPriority: () => void
   derivingMappings: boolean
   derivedMappings: DerivedMappings | null
@@ -225,47 +225,65 @@ export default function DataUploadStep({
       </div>
 
       {/* Delete confirmation modal */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-gray-900">Delete Upload</h3>
-            <p className="mt-2 text-sm text-gray-600">
-              Are you sure you want to delete <span className="font-medium text-gray-900">{deleteTarget.fileName}</span>?
-            </p>
-            <p className="mt-1 text-sm text-gray-600">
-              This will permanently remove{' '}
-              <span className="font-medium">{deleteTarget.rowCount.toLocaleString()}</span>{' '}
-              <span className="font-medium text-amber-600">unclassified</span> transaction row{deleteTarget.rowCount !== 1 ? 's' : ''}.
-            </p>
-            <div className="mt-5 flex justify-end gap-3">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                disabled={deleting}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  setDeleting(true)
-                  try {
-                    await onDeleteUpload(deleteTarget.uploadId)
-                    setDeleteTarget(null)
-                  } catch {
-                    // error handled by parent
-                  } finally {
-                    setDeleting(false)
-                  }
-                }}
-                disabled={deleting}
-                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-              >
-                {deleting ? 'Deleting...' : 'Delete'}
-              </button>
+      {deleteTarget && (() => {
+        const stats = uploadStats[deleteTarget.uploadId]
+        const classifiedCount = stats?.classifiedCount ?? 0
+        const humanReviewedCount = stats?.humanReviewedCount ?? 0
+        const hasClassified = classifiedCount > 0
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50">
+            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+              <h3 className="text-lg font-semibold text-gray-900">Delete Upload</h3>
+              <p className="mt-2 text-sm text-gray-600">
+                Are you sure you want to delete <span className="font-medium text-gray-900">{deleteTarget.fileName}</span>?
+              </p>
+              <p className="mt-1 text-sm text-gray-600">
+                This will permanently remove{' '}
+                <span className="font-medium">{deleteTarget.rowCount.toLocaleString()}</span>{' '}
+                transaction row{deleteTarget.rowCount !== 1 ? 's' : ''}.
+              </p>
+              {hasClassified && (
+                <div className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-800">
+                  <p>
+                    <span className="font-semibold">{classifiedCount.toLocaleString()}</span> of these row{classifiedCount !== 1 ? 's have' : ' has'} been classified and will be permanently lost.
+                  </p>
+                  {humanReviewedCount > 0 && (
+                    <p className="mt-1">
+                      <span className="font-semibold">{humanReviewedCount.toLocaleString()}</span> row{humanReviewedCount !== 1 ? 's have' : ' has'} been manually reviewed.
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={deleting}
+                  className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setDeleting(true)
+                    try {
+                      await onDeleteUpload(deleteTarget.uploadId, hasClassified ? true : undefined)
+                      setDeleteTarget(null)
+                    } catch {
+                      // error handled by parent
+                    } finally {
+                      setDeleting(false)
+                    }
+                  }}
+                  disabled={deleting}
+                  className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Upload history table — full width, fills remaining height, scrolls both axes */}
       {hasUploads && (
@@ -334,13 +352,12 @@ export default function DataUploadStep({
                     )}
                     <td className="whitespace-nowrap px-4 py-2.5 text-center">
                       {(() => {
-                        const stats = uploadStats[upload.uploadId]
-                        const classified = stats?.classifiedCount ?? 0
                         // If stats haven't loaded yet for this upload, disable deletion (safe default)
-                        const isClassified = !stats || classified > 0
-                        return isClassified ? (
-                          <span className="text-xs text-gray-400 italic">Cannot delete — has classified transactions</span>
-                        ) : (
+                        const stats = uploadStats[upload.uploadId]
+                        if (!stats) {
+                          return <span className="text-xs text-gray-400 italic">Loading...</span>
+                        }
+                        return (
                           <button
                             onClick={() => setDeleteTarget(upload)}
                             title="Delete upload"

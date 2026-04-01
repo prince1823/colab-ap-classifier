@@ -1,8 +1,9 @@
 import { useMemo, useCallback, useEffect, useState, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
-import DrillDownPanel from '../components/review/DrillDownPanel'
 import CreateRuleModal from '../components/review/CreateRuleModal'
+import DrillDownPanel from '../components/review/DrillDownPanel'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import { useServerPivotData } from '../hooks/useServerPivotData'
 import { useReclassification } from '../hooks/useReclassification'
@@ -76,6 +77,8 @@ const ENUM_FIELDS: Record<string, string[]> = {
 const NUMERIC_COLS = new Set(['spend_amount', 'amount', 'invoice_amount', 'master_year'])
 
 export default function PivotPage() {
+  const location = useLocation()
+
   // Persisted state from Zustand store (survives tab switches)
   const {
     rowDimensions, setRowDimensions,
@@ -133,7 +136,6 @@ export default function PivotPage() {
 
   // Transient UI state (OK to lose on tab switch)
   const [drillDownRow, setDrillDownRow] = useState<FlattenedPivotRow | null>(null)
-  const [createRuleRows, setCreateRuleRows] = useState<FlattenedPivotRow[] | null>(null)
 
   // Flat conditions derived from grouped for backward compat (chips, badge count, etc.)
   const advancedConditions = useMemo(() =>
@@ -154,7 +156,9 @@ export default function PivotPage() {
       .catch((e) => showError('Failed to load supplier suggestions', e))
   }, [projectFilePath, confirmedSupplierCount])
 
-  // Load rule groups for the bucket selector on the toolbar
+  // Load rule groups for the bucket selector on the toolbar.
+  // Re-fetch whenever this tab becomes active (keep-alive means the component
+  // stays mounted, so we watch location.pathname to detect tab switches).
   const [ruleGroups, setRuleGroups] = useState<RuleGroup[]>([])
   const loadRuleGroups = useCallback(() => {
     ipc.rules.listGroups()
@@ -163,8 +167,9 @@ export default function PivotPage() {
   }, [])
   useEffect(() => {
     if (!projectFilePath) { setRuleGroups([]); return }
+    if (location.pathname !== '/review') return
     loadRuleGroups()
-  }, [projectFilePath, loadRuleGroups])
+  }, [projectFilePath, loadRuleGroups, location.pathname])
 
   const filter = useMemo(() => {
     const pillFilter = buildTransactionFilter(filterState)
@@ -198,8 +203,12 @@ export default function PivotPage() {
     filter
   )
 
+  const selectedGroupName = ruleGroups.find(g => g.id === selectedGroupId)?.name ?? null
+
   const reclassify = useReclassification({
     filterState,
+    selectedGroupId,
+    selectedGroupName,
     onSuccess: refetch,
   })
 
@@ -262,6 +271,8 @@ export default function PivotPage() {
     await ipc.export.csv(filter)
   }, [filter])
 
+  const [createRuleRows, setCreateRuleRows] = useState<FlattenedPivotRow[] | null>(null)
+
   const handleReclassify = useCallback((rows: FlattenedPivotRow[]) => {
     reclassify.open(rows)
   }, [reclassify])
@@ -277,7 +288,7 @@ export default function PivotPage() {
           <h2 className="text-lg font-semibold text-gray-900">Review</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Navigate with arrow keys, Enter to select rows.
-            <span className="text-gray-400 ml-1">⌘F filter | ⌘K reclassify | ⌘L classify & create rule | ⌘S supplier info | Double-click to filter</span>
+            <span className="text-gray-400 ml-1">⌘F filter | ⌘K classify &amp; create rule | ⌘L create named rule | ⌘S supplier info | Double-click to filter</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -336,7 +347,7 @@ export default function PivotPage() {
           onReclassify={handleReclassify}
           onCreateRule={handleCreateRule}
           onDrillDown={setDrillDownRow}
-          modalOpen={reclassify.isOpen || showAdvancedFilter || !!createRuleRows}
+          modalOpen={reclassify.isOpen || !!createRuleRows || showAdvancedFilter}
           advancedFilterCount={advancedConditions.length}
           onOpenAdvancedFilter={() => setShowAdvancedFilter(true)}
           advancedConditions={advancedConditions}
@@ -372,7 +383,19 @@ export default function PivotPage() {
         onApply={reclassify.apply}
         onAddNode={reclassify.addNode}
         applying={reclassify.applying}
+        conflictChecking={reclassify.conflictChecking}
+        conflicts={reclassify.conflicts}
+        onConfirmConflicts={reclassify.confirmConflicts}
         error={reclassify.error}
+      />
+
+      <CreateRuleModal
+        isOpen={!!createRuleRows}
+        onClose={() => setCreateRuleRows(null)}
+        selectedRows={createRuleRows ?? []}
+        onCreated={() => { setCreateRuleRows(null); refetch(); loadRuleGroups() }}
+        selectedGroupId={selectedGroupId}
+        selectedGroupName={selectedGroupName}
       />
 
       <AdvancedFilterModal
@@ -383,15 +406,6 @@ export default function PivotPage() {
         availableFields={advancedFilterFields}
         pillFilterState={filterState}
         onClearPillFilters={() => setFilterState({})}
-      />
-
-      <CreateRuleModal
-        isOpen={!!createRuleRows}
-        onClose={() => setCreateRuleRows(null)}
-        selectedRows={createRuleRows ?? []}
-        onCreated={() => { refetch(); loadRuleGroups() }}
-        selectedGroupId={selectedGroupId}
-        selectedGroupName={ruleGroups.find(g => g.id === selectedGroupId)?.name ?? null}
       />
 
       {/* Generate Rules confirmation modal */}

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { ChevronLeft, ChevronRight, X, RefreshCw } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import type { ChangeLog, ChangelogFilter } from '../../shared/types/changelog'
 import type { Transaction } from '../../shared/types/transactions'
@@ -283,11 +283,21 @@ export default function VersionHistoryPage() {
   const [reverting, setReverting] = useState<string | null>(null)
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
   const [supplierDropdownId, setSupplierDropdownId] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [viewFilter, setViewFilter] = useState<'all' | 'changes' | 'feedback'>('all')
 
-  // Reset to page 1 when view filter changes
-  useEffect(() => { setPage(1) }, [viewFilter])
+  // Debounce search input (300ms)
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [searchQuery])
+
+  // Reset to page 1 when view filter or search changes
+  useEffect(() => { setPage(1) }, [viewFilter, debouncedSearch])
 
   // Close supplier dropdown when clicking outside
   useEffect(() => {
@@ -314,6 +324,7 @@ export default function VersionHistoryPage() {
         page: p,
         pageSize: PAGE_SIZE,
         viewFilter: viewFilter === 'all' ? undefined : viewFilter,
+        search: debouncedSearch || undefined,
       }
       const [result, nodes] = await Promise.all([
         ipc.changelog.list(filter),
@@ -327,20 +338,15 @@ export default function VersionHistoryPage() {
     } finally {
       setLoading(false)
     }
-  }, [viewFilter])
+  }, [viewFilter, debouncedSearch])
 
   useEffect(() => { fetchPage(page) }, [fetchPage, page])
 
-  // Client-side search filter (matches supplier names, description, source)
-  const filteredEntries = useMemo(() => {
-    if (!searchQuery) return entries
-    const q = searchQuery.toLowerCase()
-    return entries.filter((entry) =>
-      entry.description?.toLowerCase().includes(q) ||
-      entry.source?.toLowerCase().includes(q) ||
-      entry.supplierNames?.some((name) => name.toLowerCase().includes(q))
-    )
-  }, [entries, searchQuery])
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await fetchPage(page)
+    setTimeout(() => setRefreshing(false), 400)
+  }, [fetchPage, page])
 
   const handleRevert = async (changeId: string) => {
     setReverting(changeId)
@@ -444,6 +450,14 @@ export default function VersionHistoryPage() {
           >
             {viewFilter === 'all' ? 'All' : viewFilter === 'changes' ? 'Changes' : 'Feedback'}
           </button>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Refresh data"
+            className="p-1.5 rounded-md border border-gray-300 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
           <input
             type="text"
             placeholder="Search..."
@@ -489,13 +503,13 @@ export default function VersionHistoryPage() {
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
         </div>
-      ) : filteredEntries.length === 0 ? (
+      ) : entries.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
           {searchQuery ? 'No matching changes found.' : 'No changes recorded yet.'}
         </div>
       ) : (
         <div className="space-y-2">
-          {filteredEntries.map((entry) => {
+          {entries.map((entry) => {
             const isExpanded = expandedId === entry.id
             const isReverted = entry.isReverted
             const changes = getChangedFields(entry.oldValues, entry.newValues, taxonomyMap)
@@ -602,6 +616,26 @@ export default function VersionHistoryPage() {
                       <div className="mb-2 text-xs text-gray-600">
                         <span className="font-medium">Supplier{entry.supplierNames.length > 1 ? 's' : ''}:</span>{' '}
                         {entry.supplierNames.join(', ')}
+                      </div>
+                    )}
+
+                    {/* Filter context pills — shows the conditions used to select affected transactions */}
+                    {entry.filterContext && entry.filterContext.length > 0 && (
+                      <div className="mb-2 flex flex-wrap items-center gap-1">
+                        <span className="text-[10px] font-medium text-gray-500 uppercase mr-1">Applied on:</span>
+                        {(entry.filterContext as Array<{ field: string; operator: string; value: unknown }>)
+                          .filter(c => c.field !== 'supplier_name')
+                          .map((c, i) => {
+                            const val = Array.isArray(c.value) ? (c.value as string[]).join(', ') : String(c.value || '')
+                            const label = c.operator === 'is_null'
+                              ? `${humanizeField(c.field)}: (Unclassified)`
+                              : `${humanizeField(c.field)}: ${val}`
+                            return (
+                              <span key={i} className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 border border-blue-200">
+                                {label}
+                              </span>
+                            )
+                          })}
                       </div>
                     )}
 

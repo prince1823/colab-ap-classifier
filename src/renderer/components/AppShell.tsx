@@ -28,7 +28,7 @@ const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
 
 export default function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const { subscribeToClassificationProgress, subscribeToResearchProgress, subscribeToQCProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress } = useWorkflowStore()
+  const { subscribeToClassificationProgress, subscribeToResearchProgress, subscribeToQCProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress, projectFilePath } = useWorkflowStore()
   const location = useLocation()
   // Track which routes have been visited so we mount them once and keep them alive
   const [visitedRoutes, setVisitedRoutes] = useState<Set<string>>(new Set([location.pathname]))
@@ -60,6 +60,17 @@ export default function AppShell() {
       })
       .finally(() => setReopening(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset keep-alive pages on project switch so stale state doesn't persist.
+  // When projectFilePath changes, all previously mounted pages unmount and
+  // will re-mount fresh the next time they're visited.
+  const prevProjectRef = useRef(projectFilePath)
+  useEffect(() => {
+    if (prevProjectRef.current !== projectFilePath) {
+      prevProjectRef.current = projectFilePath
+      setVisitedRoutes(new Set([location.pathname]))
+    }
+  }, [projectFilePath, location.pathname])
 
   // Track current route in persisted store + mark as visited for keep-alive
   useEffect(() => {

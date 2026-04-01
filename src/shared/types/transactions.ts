@@ -110,6 +110,8 @@ export interface TransactionUpdate {
   classificationStatus?: ClassificationStatus;
   flaggedForReview?: boolean;
   appliedRuleId?: string | null;
+  /** Effective filter conditions used to select transactions (for audit trail in changelog) */
+  filterContext?: FilterCondition[] | null;
 }
 
 /**

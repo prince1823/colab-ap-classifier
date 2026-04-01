@@ -18,6 +18,24 @@ import type {
   CsvApplyResult,
 } from '../../shared/types/suppliers';
 import type { FilterCondition, GroupedFilter, FieldDefinition } from '../../shared/types/transactions';
+
+/** Safely parse a JSON string, returning null on failure */
+function safeParseJSON<T = unknown>(value: string | null | undefined): T | null {
+  if (!value) return null;
+  try { return JSON.parse(value) as T; } catch { return null; }
+}
+
+/** Parse a value that should be string[] — handles both JSON arrays and plain strings (legacy data) */
+function safeParseStringArray(value: string | null | undefined): string[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [String(parsed)];
+  } catch {
+    // Legacy data stored as plain string, not JSON
+    return [value];
+  }
+}
 import { buildWhereClause, buildGroupedWhereClause, type ColumnResolver } from '../utils/query-builder';
 
 export class SupplierService implements ISupplierService {
@@ -466,9 +484,9 @@ export class SupplierService implements ISupplierService {
       isTailSpend: Boolean(row.is_tail_spend),
       parentSupplierId: row.parent_supplier_id,
       parentName: row.parent_name,
-      supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
-      mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
-      l1L2Path: row.l1_l2_path ? JSON.parse(row.l1_l2_path) : null,
+      supplierInfo: safeParseJSON(row.supplier_info),
+      mappedTaxonomyPaths: safeParseJSON<string[]>(row.mapped_taxonomy_paths),
+      l1L2Path: safeParseStringArray(row.l1_l2_path),
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
       categoryASupplier: Boolean(row.category_a_supplier),
@@ -514,9 +532,9 @@ export class SupplierService implements ISupplierService {
       isTailSpend: Boolean(row.is_tail_spend),
       parentSupplierId: row.parent_supplier_id,
       parentName: row.parent_name,
-      supplierInfo: row.supplier_info ? JSON.parse(row.supplier_info) : null,
-      mappedTaxonomyPaths: row.mapped_taxonomy_paths ? JSON.parse(row.mapped_taxonomy_paths) : null,
-      l1L2Path: row.l1_l2_path ? JSON.parse(row.l1_l2_path) : null,
+      supplierInfo: safeParseJSON(row.supplier_info),
+      mappedTaxonomyPaths: safeParseJSON<string[]>(row.mapped_taxonomy_paths),
+      l1L2Path: safeParseStringArray(row.l1_l2_path),
       universeMatch: Boolean(row.universe_match),
       isResearched: Boolean(row.is_researched),
       categoryASupplier: Boolean(row.category_a_supplier),

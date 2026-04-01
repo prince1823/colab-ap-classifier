@@ -1,14 +1,16 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Check } from 'lucide-react'
+import { X, Check, AlertTriangle } from 'lucide-react'
 import { makeEmptyGroup } from '../FilterConditionBuilder'
 import AdvancedFilterModal from './AdvancedFilterModal'
 import { ipc } from '../../lib/ipc'
 import { showError } from '../../lib/toast-errors'
-import type { GroupedFilter, ConditionGroup, FilterCondition } from '../../../shared/types/transactions'
+import { buildGroupedConditionsFromRows } from '../../utils/buildConditionsFromRows'
+import type { GroupedFilter } from '../../../shared/types/transactions'
 import type { FieldDefinition } from '../FilterConditionBuilder'
 import type { TaxonomyNode } from '../../../shared/types/taxonomy'
 import type { FlattenedPivotRow } from '../../types/pivot'
+import type { ConflictRow } from '../../../shared/types/rules'
 interface CreateRuleModalProps {
   isOpen: boolean
   onClose: () => void
@@ -20,45 +22,6 @@ interface CreateRuleModalProps {
   selectedGroupId?: string | null
   /** Name of the selected rule group (for display) */
   selectedGroupName?: string | null
-}
-
-/**
- * Build a GroupedFilter from selected pivot rows.
- * Groups rows by dimensionField: values in the same field are OR'd via in_list,
- * different fields are AND'd together.
- */
-function buildConditionsFromRows(rows: FlattenedPivotRow[]): GroupedFilter {
-  // Only use the leaf (deepest) segment of each row — the one the user actually selected.
-  // Ancestor segments (L1, L2 parents of an L3 row) are NOT included.
-  const fieldValues = new Map<string, Set<string>>()
-  for (const row of rows) {
-    const leaf = row.pathSegments[row.pathSegments.length - 1]
-    if (!leaf) continue
-    if (!fieldValues.has(leaf.dimensionField)) {
-      fieldValues.set(leaf.dimensionField, new Set())
-    }
-    fieldValues.get(leaf.dimensionField)!.add(leaf.value)
-  }
-
-  if (fieldValues.size === 0) {
-    return { groupConnector: 'AND', groups: [makeEmptyGroup()] }
-  }
-
-  // Each value becomes its own individual "equals" condition, OR'd within a group per field
-  // Multiple fields are AND'd via separate groups
-  const groups: ConditionGroup[] = []
-  for (const [field, values] of fieldValues) {
-    const valArr = Array.from(values)
-    const conditions: FilterCondition[] = valArr.map(v => ({
-      field,
-      operator: 'equals' as const,
-      value: v,
-      connector: 'OR' as const,
-    }))
-    groups.push({ connector: 'OR', conditions })
-  }
-
-  return { groupConnector: 'AND', groups }
 }
 
 export default function CreateRuleModal({
@@ -75,6 +38,7 @@ export default function CreateRuleModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [conflicts, setConflicts] = useState<{ covered: ConflictRow[]; eligibleIds: string[] } | null>(null)
 
   // Taxonomy
   const [taxonomyNodes, setTaxonomyNodes] = useState<TaxonomyNode[]>([])
@@ -122,15 +86,16 @@ export default function CreateRuleModal({
     const justOpened = isOpen && !prevOpenRef.current
     prevOpenRef.current = isOpen
     if (!justOpened) return
-    setName('')
+    setName(selectedGroupName?.trim() ?? '')
     setTargetNodeId('')
     setError(null)
     setSaving(false)
     setSuccessMessage(null)
+    setConflicts(null)
     setTaxonomySearch('')
     setTaxonomyDropdownOpen(false)
     setTaxonomyHighlightIdx(-1)
-    setGrouped(buildConditionsFromRows(selectedRows))
+    setGrouped(buildGroupedConditionsFromRows(selectedRows))
     // Focus the rule name input after modal opens
     requestAnimationFrame(() => nameInputRef.current?.focus())
   }, [isOpen, selectedRows])
@@ -162,14 +127,13 @@ export default function CreateRuleModal({
 
   const conditionCount = grouped.groups.flatMap(g => g.conditions.filter(c => c.field)).length
 
+  const effectiveName = useCallback(() => {
+    return name.trim() || selectedGroupName?.trim() || 'Rule'
+  }, [name, selectedGroupName])
+
   const handleSave = useCallback(async () => {
     if (conditionCount === 0) {
       setError('At least one condition is required')
-      return
-    }
-    if (!name.trim()) {
-      setError('Rule name is required')
-      nameInputRef.current?.focus()
       return
     }
     if (!targetNodeId) {
@@ -181,16 +145,42 @@ export default function CreateRuleModal({
     setSaving(true)
     setError(null)
     try {
+      // Phase 1: get candidates and check for priority conflicts (grouped, preserving OR-within-field semantics)
+      const candidateIds = await ipc.transactions.getIdsByGroupedConditions(grouped)
+
+      if (candidateIds.length > 0) {
+        const conflictResult = await ipc.rules.previewConflicts(candidateIds)
+        if (conflictResult.covered.length > 0) {
+          setConflicts(conflictResult)
+          setSaving(false)
+          return
+        }
+      }
+
+      // No conflicts — apply immediately
+      await doApply()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create rule')
+      setSaving(false)
+    }
+  }, [conditionCount, targetNodeId, grouped, selectedGroupId, effectiveName])
+
+  const doApply = useCallback(async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const ruleName = effectiveName()
       const { matchedCount } = await ipc.rules.createAndApply({
-        name: name.trim(),
+        name: ruleName,
         groupedConditions: grouped,
         targetTaxonomyNodeId: targetNodeId,
         groupId: selectedGroupId,
       })
 
       onCreated?.()
-      setSuccessMessage(`Rule "${name.trim()}" created and applied to ${matchedCount} transaction${matchedCount !== 1 ? 's' : ''}.`)
+      setSuccessMessage(`Rule "${ruleName}" created and applied to ${matchedCount} transaction${matchedCount !== 1 ? 's' : ''}.`)
       setSaving(false)
+      setConflicts(null)
       closeTimerRef.current = setTimeout(() => {
         setSuccessMessage(null)
         onClose()
@@ -199,7 +189,7 @@ export default function CreateRuleModal({
       setError(e instanceof Error ? e.message : 'Failed to create rule')
       setSaving(false)
     }
-  }, [conditionCount, name, targetNodeId, grouped, selectedGroupId, onCreated, onClose])
+  }, [grouped, targetNodeId, selectedGroupId, effectiveName, onCreated, onClose])
 
   // Taxonomy dropdown keyboard handling
   const handleTaxonomySearchKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -271,9 +261,66 @@ export default function CreateRuleModal({
         : Math.max(currentIdx - 1, 0)
       focusOrder[nextIdx].current?.focus()
     }
-  }, [taxonomyDropdownOpen, onClose, handleSave, focusOrder])
+  }, [taxonomyDropdownOpen, onClose, handleSave, focusOrder, conflicts])
 
   if (!isOpen) return null
+
+  // Conflict warning screen
+  if (conflicts) {
+    const ruleConflictCounts = new Map<string, number>()
+    for (const row of conflicts.covered) {
+      ruleConflictCounts.set(row.existingRuleName, (ruleConflictCounts.get(row.existingRuleName) ?? 0) + 1)
+    }
+    return createPortal(
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+        <div className="relative bg-white rounded-xl shadow-2xl w-[480px] flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={16} className="text-amber-500 flex-shrink-0" />
+              <h3 className="text-sm font-semibold text-gray-900">Some transactions already have higher-priority rules</h3>
+            </div>
+            <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors" tabIndex={-1}>
+              <X size={16} />
+            </button>
+          </div>
+          {/* Conflict list */}
+          <div className="px-5 py-3 space-y-1.5 max-h-48 overflow-y-auto">
+            {[...ruleConflictCounts.entries()].map(([ruleName, count]) => (
+              <div key={ruleName} className="flex items-center justify-between text-xs">
+                <span className="text-gray-700 font-medium truncate mr-2">{ruleName}</span>
+                <span className="text-gray-400 flex-shrink-0">{count} transaction{count !== 1 ? 's' : ''}</span>
+              </div>
+            ))}
+          </div>
+          {/* Summary */}
+          <div className="px-5 py-2 border-t border-gray-100 bg-gray-50">
+            <p className="text-xs text-gray-500">
+              <span className="font-medium text-gray-700">{conflicts.eligibleIds.length} transaction{conflicts.eligibleIds.length !== 1 ? 's' : ''}</span>
+              {' '}will be updated.{' '}
+              <span className="text-gray-400">{conflicts.covered.length} skipped (covered by higher-priority rules).</span>
+            </p>
+          </div>
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
+            <button onClick={() => setConflicts(null)} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+              Back
+            </button>
+            <button
+              onClick={doApply}
+              disabled={saving}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors"
+            >
+              {saving ? 'Creating...' : `Apply to ${conflicts.eligibleIds.length} transaction${conflicts.eligibleIds.length !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+          {error && <div className="px-5 pb-3 text-xs text-red-600">{error}</div>}
+        </div>
+      </div>,
+      document.body
+    )
+  }
 
   // Success state — green checkmark, auto-closes after 2.5s
   if (successMessage) {
@@ -357,13 +404,15 @@ export default function CreateRuleModal({
 
           {/* Rule Name */}
           <div>
-            <label htmlFor="rule-name" className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
+            <label htmlFor="rule-name" className="mb-1 block text-xs font-medium text-gray-600">
+              Rule Name <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
             <input
               id="rule-name"
               ref={nameInputRef}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. IT Software suppliers"
+              placeholder={selectedGroupName?.trim() || 'e.g. IT Software suppliers'}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
           </div>

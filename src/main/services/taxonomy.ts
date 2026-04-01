@@ -154,7 +154,7 @@ export class TaxonomyStore implements ITaxonomyStore {
     );
   }
 
-  async deleteNode(nodeId: string, reassignTo?: string): Promise<void> {
+  async deleteNode(nodeId: string, reassignTo?: string): Promise<{ warnings?: string[] }> {
     const node = await this.db.get<TaxonomyRow>(
       'SELECT * FROM taxonomy WHERE id = ?',
       nodeId
@@ -169,6 +169,17 @@ export class TaxonomyStore implements ITaxonomyStore {
     );
     if (children.length > 0) {
       throw new Error(`Cannot delete node "${node.full_path}": has ${children.length} child node(s)`);
+    }
+
+    const warnings: string[] = [];
+
+    // Warn if override rules reference this node (don't block)
+    const rules = await this.db.get<{ cnt: number | bigint }>(
+      'SELECT COUNT(*) as cnt FROM override_rules WHERE target_taxonomy_node_id = ?',
+      nodeId
+    );
+    if (Number(rules?.cnt ?? 0) > 0) {
+      warnings.push(`${Number(rules!.cnt)} override rule(s) still reference this node — they will need to be updated`);
     }
 
     if (reassignTo) {
@@ -190,6 +201,7 @@ export class TaxonomyStore implements ITaxonomyStore {
     }
 
     await this.db.run('DELETE FROM taxonomy WHERE id = ?', nodeId);
+    return { warnings: warnings.length > 0 ? warnings : undefined };
   }
 
   async renameNode(nodeId: string, newName: string): Promise<void> {
@@ -240,6 +252,50 @@ export class TaxonomyStore implements ITaxonomyStore {
         newChildParent,
         child.id
       );
+    }
+
+    // Cascade: update mapped_taxonomy_paths on project_suppliers
+    const suppliersWithPaths = await this.db.all<{ id: string; mapped_taxonomy_paths: string }>(
+      'SELECT id, mapped_taxonomy_paths FROM project_suppliers WHERE mapped_taxonomy_paths IS NOT NULL'
+    );
+    for (const supplier of suppliersWithPaths) {
+      const paths: string[] = JSON.parse(supplier.mapped_taxonomy_paths);
+      let changed = false;
+      const updated = paths.map(p => {
+        if (p === oldPath || p.startsWith(oldPath + '|')) {
+          changed = true;
+          return newPath + p.slice(oldPath.length);
+        }
+        return p;
+      });
+      if (changed) {
+        await this.db.run(
+          'UPDATE project_suppliers SET mapped_taxonomy_paths = ? WHERE id = ?',
+          JSON.stringify(updated), supplier.id
+        );
+      }
+    }
+
+    // Cascade: update l1_l2_path on project_suppliers
+    const suppliersWithL1L2 = await this.db.all<{ id: string; l1_l2_path: string }>(
+      'SELECT id, l1_l2_path FROM project_suppliers WHERE l1_l2_path IS NOT NULL'
+    );
+    for (const supplier of suppliersWithL1L2) {
+      const paths: string[] = JSON.parse(supplier.l1_l2_path);
+      let changed = false;
+      const updated = paths.map(p => {
+        if (p === oldPath || p.startsWith(oldPath + '|')) {
+          changed = true;
+          return newPath + p.slice(oldPath.length);
+        }
+        return p;
+      });
+      if (changed) {
+        await this.db.run(
+          'UPDATE project_suppliers SET l1_l2_path = ? WHERE id = ?',
+          JSON.stringify(updated), supplier.id
+        );
+      }
     }
   }
 

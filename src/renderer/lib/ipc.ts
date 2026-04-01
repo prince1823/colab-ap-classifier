@@ -67,7 +67,7 @@ export const ipc = {
     getUpload: () => invoke('ingest:getUpload'),
     getUploadHistory: () => invoke('ingest:getUploadHistory'),
     getUploadStatsBatch: () => invoke('ingest:getUploadStatsBatch'),
-    deleteUpload: (uploadId: string) => invoke('ingest:deleteUpload', uploadId),
+    deleteUpload: (uploadId: string, force?: boolean) => invoke('ingest:deleteUpload', uploadId, force),
     deriveMappings: (columns: string[], sampleRows: Record<string, string>[], source: DeriveMappingsSource) =>
       invoke('ingest:deriveMappings', columns, sampleRows, source),
     getExistingCanonicals: () => invoke('ingest:getExistingCanonicals'),
@@ -115,6 +115,8 @@ export const ipc = {
       invoke('transactions:pivotAggregation', dimensions, valueDimension, filters),
     getIdsByConditions: (conditions: FilterCondition[]) =>
       invoke('transactions:getIdsByConditions', conditions),
+    getIdsByGroupedConditions: (grouped: GroupedFilter) =>
+      invoke('transactions:getIdsByGroupedConditions', grouped),
     getFilterFields: () => invoke('transactions:getFilterFields'),
     markAllReviewed: () => invoke('transactions:markAllReviewed'),
   },
@@ -194,15 +196,17 @@ export const ipc = {
     moveRule: (ruleId: string, targetGroupId: string | null) => invoke('rules:moveRule', ruleId, targetGroupId),
     assignToGroup: (ruleIds: string[], groupId: string | null) => invoke('rules:assignToGroup', ruleIds, groupId),
     filterAssign: (filter: import('../../shared/types/transactions').GroupedFilter, targetGroupId: string | null) => invoke('rules:filterAssign', filter, targetGroupId),
+    previewConflicts: (candidateIds: string[]) => invoke('rules:previewConflicts', candidateIds),
     previewApply: (ruleIds: string[]) => invoke('rules:previewApply', ruleIds),
     apply: (ruleIds: string[]) => invoke('rules:apply', ruleIds),
     setCategoryA: (ruleId: string, value: boolean) => invoke('rules:setCategoryA', ruleId, value),
   },
 
-  // ── Changelog (2 channels) ──
+  // ── Changelog (3 channels) ──
   changelog: {
     list: (filter?: ChangelogFilter) => invoke('changelog:list', filter),
     revert: (changeId: string) => invoke('changelog:revert', changeId),
+    listByRule: (ruleId: string) => invoke('changelog:listByRule', ruleId),
   },
 
   // ── Feedback (2 channels) ──

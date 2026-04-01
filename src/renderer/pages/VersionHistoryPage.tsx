@@ -604,22 +604,23 @@ export default function VersionHistoryPage() {
                       </div>
                     )}
 
-                    {/* Filter context pills — shows the pivot path + filters active when change was made */}
-                    {entry.filterContext && (
+                    {/* Filter context pills — shows the conditions used to select affected transactions */}
+                    {entry.filterContext && entry.filterContext.length > 0 && (
                       <div className="mb-2 flex flex-wrap items-center gap-1">
                         <span className="text-[10px] font-medium text-gray-500 uppercase mr-1">Applied on:</span>
-                        {entry.filterContext.pathSegments?.map((seg, i) => (
-                          <span key={`seg-${i}`} className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 border border-blue-200">
-                            {humanizeField(seg.dimensionField)}: {seg.value}
-                          </span>
-                        ))}
-                        {entry.filterContext.filterState && Object.entries(entry.filterContext.filterState).map(([field, values]) =>
-                          (values as string[]).map((val, i) => (
-                            <span key={`filt-${field}-${i}`} className="inline-flex items-center rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-medium text-purple-700 border border-purple-200">
-                              {humanizeField(field)}: {val}
-                            </span>
-                          ))
-                        )}
+                        {(entry.filterContext as Array<{ field: string; operator: string; value: unknown }>)
+                          .filter(c => c.field !== 'supplier_name')
+                          .map((c, i) => {
+                            const val = Array.isArray(c.value) ? (c.value as string[]).join(', ') : String(c.value || '')
+                            const label = c.operator === 'is_null'
+                              ? `${humanizeField(c.field)}: (Unclassified)`
+                              : `${humanizeField(c.field)}: ${val}`
+                            return (
+                              <span key={i} className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 border border-blue-200">
+                                {label}
+                              </span>
+                            )
+                          })}
                       </div>
                     )}
 

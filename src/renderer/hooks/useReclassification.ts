@@ -177,18 +177,21 @@ export function useReclassification({ filterState, onSuccess }: UseReclassificat
         return
       }
 
+      // Collect the effective filter conditions used to select these transactions
+      const allConditions: import('../../shared/types/transactions').FilterCondition[] = []
+      const seen = new Set<string>()
+      for (const row of targetRows) {
+        for (const c of buildConditionsFromRow(row.pathSegments, filterState)) {
+          const key = `${c.field}::${c.operator}::${JSON.stringify(c.value)}`
+          if (!seen.has(key)) { seen.add(key); allConditions.push(c) }
+        }
+      }
+
       const changelogId = await ipc.transactions.update({
         ids: uniqueIds,
         taxonomyNodeId: node.id,
         classificationStatus: 'classified_by_ai',
-        filterContext: {
-          pathSegments: targetRows.flatMap(r =>
-            r.pathSegments.map(s => ({ dimensionField: s.dimensionField, value: s.value }))
-          ),
-          filterState: Object.fromEntries(
-            Object.entries(filterState).filter(([, v]) => v.length > 0)
-          ),
-        },
+        filterContext: allConditions.length > 0 ? allConditions : null,
       })
 
       // Push to undo stack if we got a changelog ID

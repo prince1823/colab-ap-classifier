@@ -1,10 +1,5 @@
 export type ChangeSource = 'manual' | 'pipeline' | 'rule' | 'feedback';
 
-export interface FilterContext {
-  pathSegments?: Array<{ dimensionField: string; value: string }>;
-  filterState?: Record<string, string[]>;
-}
-
 export interface ChangeLog {
   id: string;
   source: ChangeSource;
@@ -16,7 +11,8 @@ export interface ChangeLog {
   description: string | null;
   createdAt: string;
   isReverted?: boolean;
-  filterContext?: FilterContext | null;
+  /** Effective filter conditions that selected the affected transactions */
+  filterContext?: import('./transactions').FilterCondition[] | null;
   ruleId?: string | null;
   /** Computed at read-time: supplier names for transaction changes */
   supplierNames?: string[];

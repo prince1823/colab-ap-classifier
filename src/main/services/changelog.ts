@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Database, ChangelogStore as IChangelogStore } from '../../shared/types/services';
-import type { ChangeLog, ChangeSource, ChangelogFilter, FilterContext, PaginatedChangelog } from '../../shared/types/changelog';
+import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from '../../shared/types/changelog';
+import type { FilterCondition } from '../../shared/types/transactions';
 
 interface ChangeLogRow {
   id: string;
@@ -33,7 +34,7 @@ function rowToChangeLog(row: ChangeLogRow): ChangeLog {
     newValues: safeParse(row.new_values) as Record<string, unknown> | null,
     description: row.description,
     isReverted: Boolean(row.is_reverted),
-    filterContext: safeParse(row.filter_context) as FilterContext | null,
+    filterContext: safeParse(row.filter_context) as FilterCondition[] | null,
     ruleId: row.rule_id ?? null,
     createdAt: String(row.created_at),
   };

@@ -160,14 +160,12 @@ describe('ChangelogStore', () => {
   });
 
   describe('filterContext', () => {
-    it('should store and retrieve filter context', async () => {
-      const filterContext = {
-        pathSegments: [
-          { dimensionField: 'supplier_name', value: 'Acme Corp' },
-          { dimensionField: 'classification_l1', value: 'Services' },
-        ],
-        filterState: { gl_description: ['Office', 'Supplies'] },
-      };
+    it('should store and retrieve filter context as FilterCondition[]', async () => {
+      const filterContext = [
+        { field: 'supplier_name', operator: 'equals' as const, value: 'Acme Corp' },
+        { field: 'classification_l1', operator: 'equals' as const, value: 'Services' },
+        { field: 'gl_description', operator: 'in_list' as const, value: ['Office', 'Supplies'] },
+      ];
       const id = await store.logChange({
         source: 'manual', affectedTable: 'transactions', affectedIds: ['txn-1'],
         affectedCount: 1, oldValues: { taxonomy_node_id: 'old' },

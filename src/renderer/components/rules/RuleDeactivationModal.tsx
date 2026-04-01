@@ -266,14 +266,11 @@ function EntryRow({
               {entry.description || `${entry.affectedCount} transaction(s)`}
             </p>
 
-            {/* Revert preview: current → reverts to */}
-            {!entry.isReverted && currentClassification && (
+            {/* Revert preview: what it reverts to */}
+            {!entry.isReverted && (
               <div className="flex items-center gap-1.5 mt-1">
-                <span className="text-[10px] font-medium text-gray-500">Current:</span>
-                <span className="text-[10px] text-gray-700 truncate max-w-[180px]" title={currentClassification}>{currentClassification}</span>
-                <span className="text-[10px] text-gray-400">→</span>
                 <span className="text-[10px] font-medium text-gray-500">Reverts to:</span>
-                <span className={`text-[10px] truncate max-w-[180px] ${revertsTo === 'Unclassified' ? 'text-amber-600 italic' : 'text-green-700'}`} title={revertsTo}>{revertsTo}</span>
+                <span className={`text-[10px] ${revertsTo === 'Unclassified' ? 'text-amber-600 italic' : 'text-green-700'}`}>{revertsTo}</span>
               </div>
             )}
 

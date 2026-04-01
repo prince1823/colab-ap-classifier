@@ -9,7 +9,6 @@ interface UsePivotKeyboardOptions {
   onCmdK: (rows: FlattenedPivotRow[]) => void
   onCmdF: (rows: FlattenedPivotRow[]) => void
   onCmdS?: (rows: FlattenedPivotRow[]) => void
-  onCmdL?: (rows: FlattenedPivotRow[]) => void
   onToggleExpand: (key: string) => void
   onClearAllFilters: () => void
   disabled: boolean
@@ -30,7 +29,6 @@ export function usePivotKeyboard({
   onCmdK,
   onCmdF,
   onCmdS,
-  onCmdL,
   onToggleExpand,
   onClearAllFilters,
   disabled,
@@ -219,7 +217,7 @@ export function usePivotKeyboard({
       case 'k': {
         if (metaKey) {
           e.preventDefault()
-          onCmdF(getExplicitlySelectedRows())
+          onCmdF(getSelectedRows())
         }
         break
       }
@@ -228,14 +226,6 @@ export function usePivotKeyboard({
           e.preventDefault()
           const rows = getExplicitlySelectedRows()
           if (rows.length > 0) onCmdS(rows)
-        }
-        break
-      }
-      case 'l': {
-        if (metaKey && onCmdL) {
-          e.preventDefault()
-          const rows = getExplicitlySelectedRows()
-          if (rows.length > 0) onCmdL(rows)
         }
         break
       }
@@ -256,7 +246,7 @@ export function usePivotKeyboard({
         break
       }
     }
-  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onCmdS, onCmdL, onToggleExpand, onClearAllFilters, getSelectedRows, getExplicitlySelectedRows, clearSelection])
+  }, [disabled, visibleRows, focusedIndex, rowVirtualizer, onCmdK, onCmdF, onCmdS, onToggleExpand, onClearAllFilters, getSelectedRows, getExplicitlySelectedRows, clearSelection])
 
   return {
     focusedIndex,

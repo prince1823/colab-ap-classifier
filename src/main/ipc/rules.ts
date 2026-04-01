@@ -72,6 +72,10 @@ export function registerRulesHandlers(
   });
 
 
+  registerHandler('rules:previewConflicts', async (_event, candidateIds: unknown) => {
+    return rules.previewRuleConflicts(candidateIds as string[]);
+  });
+
   registerHandler('rules:generate', async () => {
     return rules.generate_rules_preview();
   });

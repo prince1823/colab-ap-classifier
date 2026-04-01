@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactionStore, ProjectStore as IProjectStore } from '../../shared/types/services';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types/rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource, RuleGroup, RuleGroupCreate, RuleGroupUpdate, ConflictRow } from '../../shared/types/rules';
 import type { GroupedFilter } from '../../shared/types/transactions';
 import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 
@@ -253,10 +253,47 @@ export class RuleStore implements IRuleStore {
     return { id };
   }
 
-  async createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }> {
+  async previewRuleConflicts(candidateIds: string[]): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }> {
+    const ruleMap = await this.evaluateRules(candidateIds);
+    const allRules = await this.listAllRules();
+    const ruleNameById = new Map(allRules.map(r => [r.id, r.name]));
+
+    const covered: ConflictRow[] = [...ruleMap.entries()].map(([txnId, match]) => ({
+      transactionId: txnId,
+      existingRuleId: match.ruleId,
+      existingRuleName: ruleNameById.get(match.ruleId) ?? match.ruleId,
+    }));
+    const eligibleIds = candidateIds.filter(id => !ruleMap.has(id));
+    return { covered, eligibleIds };
+  }
+
+  async createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number; skippedCount: number; changelogId?: string }> {
+    // Get all transactions matching the new rule's conditions
+    const allMatchingIds = await this.transactions.getIdsByGroupedConditions(
+      input.groupedConditions ?? { groupConnector: 'AND', groups: [] }
+    );
+
+    // Check which are already covered by higher-priority existing rules (before creating the new rule)
+    const { eligibleIds } = await this.previewRuleConflicts(allMatchingIds);
+
+    // Create the rule
     const { id } = await this.createRule(input);
-    const matchedCount = await this.transactions.applyRule(id, input.groupedConditions, input.targetTaxonomyNodeId);
-    return { id, matchedCount };
+
+    // Apply only to eligible transactions
+    let changelogId: string | undefined;
+    if (eligibleIds.length > 0) {
+      changelogId = await this.transactions.updateTransactions(
+        { ids: eligibleIds, taxonomyNodeId: input.targetTaxonomyNodeId, classificationStatus: 'classified_by_rule', appliedRuleId: id },
+        'rule'
+      ) ?? undefined;
+    }
+
+    return {
+      id,
+      matchedCount: eligibleIds.length,
+      skippedCount: allMatchingIds.length - eligibleIds.length,
+      changelogId,
+    };
   }
 
   async updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void> {

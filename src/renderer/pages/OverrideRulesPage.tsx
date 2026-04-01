@@ -844,18 +844,29 @@ export default function OverrideRulesPage() {
           <h3 className="text-sm font-medium text-gray-700">{editingRule ? 'Edit Rule' : 'New Rule'}</h3>
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Conditions</label>
-            <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-              <span className="text-xs text-gray-600 truncate" title={formatGroupedFilter(grouped)}>
-                {formatGroupedFilter(grouped)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setConditionsModalOpen(true)}
-                className="ml-3 shrink-0 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50"
-              >
-                Configure
-              </button>
-            </div>
+            {(() => {
+              const conditionsConfigured = grouped?.groups?.length > 0 && grouped.groups.some(g => g.conditions.some(c => c.field))
+              return (
+                <div className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                  conditionsConfigured ? 'border-gray-200 bg-gray-50' : 'border-amber-300 bg-amber-50'
+                }`}>
+                  <span className={`text-xs truncate ${conditionsConfigured ? 'text-gray-600' : 'text-amber-700 font-medium'}`} title={formatGroupedFilter(grouped)}>
+                    {formatGroupedFilter(grouped)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setConditionsModalOpen(true)}
+                    className={`ml-3 shrink-0 rounded-md border px-2.5 py-1 text-xs font-medium ${
+                      conditionsConfigured
+                        ? 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50'
+                        : 'border-amber-400 bg-amber-100 text-amber-700 hover:bg-amber-200'
+                    }`}
+                  >
+                    Configure
+                  </button>
+                </div>
+              )
+            })()}
             <AdvancedFilterModal
               isOpen={conditionsModalOpen}
               onClose={() => setConditionsModalOpen(false)}
@@ -868,8 +879,8 @@ export default function OverrideRulesPage() {
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm" />
+              <label className="mb-1 block text-xs font-medium text-gray-600">Rule Name</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter rule name" className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm" />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Group</label>
@@ -930,7 +941,7 @@ export default function OverrideRulesPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={handleSave} disabled={saving} className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            <button onClick={handleSave} disabled={saving || !(grouped?.groups?.length > 0 && grouped.groups.some(g => g.conditions.some(c => c.field)))} className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
               {saving ? 'Saving...' : 'Save'}
             </button>
             <button onClick={() => setShowEditor(false)} className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>

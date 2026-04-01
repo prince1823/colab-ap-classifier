@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X, RefreshCw } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import type { ChangeLog, ChangelogFilter } from '../../shared/types/changelog'
 import type { Transaction } from '../../shared/types/transactions'
@@ -283,6 +283,7 @@ export default function VersionHistoryPage() {
   const [reverting, setReverting] = useState<string | null>(null)
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
   const [supplierDropdownId, setSupplierDropdownId] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -340,6 +341,12 @@ export default function VersionHistoryPage() {
   }, [viewFilter, debouncedSearch])
 
   useEffect(() => { fetchPage(page) }, [fetchPage, page])
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await fetchPage(page)
+    setTimeout(() => setRefreshing(false), 400)
+  }, [fetchPage, page])
 
   const handleRevert = async (changeId: string) => {
     setReverting(changeId)
@@ -442,6 +449,14 @@ export default function VersionHistoryPage() {
             }`}
           >
             {viewFilter === 'all' ? 'All' : viewFilter === 'changes' ? 'Changes' : 'Feedback'}
+          </button>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Refresh data"
+            className="p-1.5 rounded-md border border-gray-300 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
           </button>
           <input
             type="text"

@@ -244,10 +244,23 @@ function EntryRow({
             <p className={`text-xs font-medium ${entry.isReverted ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
               {entry.description || `${entry.affectedCount} transaction(s)`}
             </p>
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="text-[10px] text-gray-400">
-                {entry.affectedCount} txn{entry.affectedCount !== 1 ? 's' : ''}
+                {entry.affectedCount} txn{entry.affectedCount !== 1 ? 's' : ''} still owned by this rule
               </span>
+              {(() => {
+                const originalMatch = entry.description?.match(/(\d+)\s*txn/)
+                const originalCount = originalMatch ? parseInt(originalMatch[1], 10) : null
+                const diff = originalCount && originalCount > entry.affectedCount ? originalCount - entry.affectedCount : 0
+                if (diff > 0) {
+                  return (
+                    <span className="text-[10px] text-amber-500" title={`${diff} transaction(s) were reclassified by another rule and are no longer affected`}>
+                      ({diff} moved to other rules)
+                    </span>
+                  )
+                }
+                return null
+              })()}
               {entry.supplierNames && entry.supplierNames.length > 0 && (
                 <span className="text-[10px] text-gray-400">
                   {entry.supplierNames.slice(0, 3).join(', ')}

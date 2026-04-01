@@ -3,7 +3,7 @@ import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfir
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate, ConflictRow } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { CompanyContext } from './project';
 import type { ClassificationInput, ClassificationResult, ResearchProgress, ClassificationProgress, CategorySelectionInput, L3ClassificationInput, TailSpendCategorySelectionInput, TailSpendL3Input, QCConfig, QCResult, SpendByTaxonomyResult, FilterConditionQC } from './classification';
@@ -242,7 +242,8 @@ export interface RuleStore {
   listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
   getRule(id: string): Promise<OverrideRule | null>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
-  createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number }>;
+  createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number; skippedCount: number; changelogId?: string }>;
+  previewRuleConflicts(candidateIds: string[]): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
   setCategoryA(ruleId: string, value: boolean): Promise<void>;

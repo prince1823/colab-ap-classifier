@@ -219,7 +219,7 @@ export function usePivotKeyboard({
       case 'k': {
         if (metaKey) {
           e.preventDefault()
-          onCmdF(getExplicitlySelectedRows())
+          onCmdF(getSelectedRows())
         }
         break
       }
@@ -234,8 +234,7 @@ export function usePivotKeyboard({
       case 'l': {
         if (metaKey && onCmdL) {
           e.preventDefault()
-          const rows = getExplicitlySelectedRows()
-          if (rows.length > 0) onCmdL(rows)
+          onCmdL(getSelectedRows())
         }
         break
       }

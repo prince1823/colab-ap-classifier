@@ -24,7 +24,7 @@ import type {
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from './classification';
 import type { TaxonomyNode } from './taxonomy';
 import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
-import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate } from './rules';
+import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate, ConflictRow } from './rules';
 import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
 import type { FeedbackAnalyzeInput, FeedbackRecommendation, FeedbackApplyInput } from './feedback';
@@ -64,6 +64,7 @@ export interface IPCInvokeMap {
   'transactions:getIdsByValue':     { args: [column: string, value: string, filters?: TransactionFilter]; result: string[] };
   'transactions:pivotAggregation':  { args: [dimensions: string[], valueDimension: string, filters?: TransactionFilter]; result: PivotAggregationResult };
   'transactions:getIdsByConditions': { args: [conditions: FilterCondition[]]; result: string[] };
+  'transactions:getIdsByGroupedConditions': { args: [grouped: GroupedFilter]; result: string[] };
   'transactions:getFilterFields':    { args: []; result: FieldDefinition[] };
   'transactions:markAllReviewed':   { args: []; result: number };
 
@@ -123,7 +124,8 @@ export interface IPCInvokeMap {
   'rules:list':     { args: []; result: OverrideRule[] };
   'rules:listPaginated': { args: [opts: { limit: number; offset: number; search?: string }]; result: { rules: OverrideRule[]; total: number } };
   'rules:create':         { args: [input: OverrideRuleCreate]; result: { id: string } };
-  'rules:createAndApply': { args: [input: OverrideRuleCreate]; result: { id: string; matchedCount: number } };
+  'rules:createAndApply': { args: [input: OverrideRuleCreate]; result: { id: string; matchedCount: number; skippedCount: number; changelogId?: string } };
+  'rules:previewConflicts': { args: [candidateIds: string[]]; result: { covered: ConflictRow[]; eligibleIds: string[] } };
   'rules:update':         { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
   'rules:delete':   { args: [ruleId: string]; result: void };
   'rules:generate':      { args: []; result: GenerateRulesResult };

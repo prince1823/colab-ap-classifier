@@ -512,11 +512,6 @@ export default function HierarchicalPivotView({
     onReclassify?.(rows)
   }, [onReclassify])
 
-  const handleCmdL = useMemo(() => (rows: FlattenedPivotRow[]) => {
-    if (rows.length === 0) return
-    onCreateRule?.(rows)
-  }, [onCreateRule])
-
   // Cmd+S: show supplier info for focused/selected supplier rows
   const handleCmdS = useCallback(async (rows: FlattenedPivotRow[]) => {
     // Filter to only supplier_name rows
@@ -541,6 +536,11 @@ export default function HierarchicalPivotView({
       setSupplierInfoModal(names.map(name => ({ name, info: null, isResearched: false })))
     }
   }, [])
+
+  const handleCmdL = useMemo(() => (rows: FlattenedPivotRow[]) => {
+    if (rows.length === 0) return
+    onCreateRule?.(rows)
+  }, [onCreateRule])
 
   const { focusedIndex, selectedKeys, handleKeyDown, clearSelection, setFocusedIndex } = usePivotKeyboard({
     visibleRows,

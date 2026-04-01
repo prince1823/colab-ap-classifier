@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { X, Plus } from 'lucide-react'
+import { X, Plus, AlertTriangle } from 'lucide-react'
 import type { FlattenedPivotRow } from '../../types/pivot'
 import type { TaxonomyNode } from '../../../shared/types/taxonomy'
+import type { ConflictState } from '../../hooks/useReclassification'
 
 interface ReclassifyModalProps {
   isOpen: boolean
@@ -19,6 +20,9 @@ interface ReclassifyModalProps {
   onApply: (node: TaxonomyNode) => void
   onAddNode?: (l1: string, l2: string, l3: string, description?: string) => Promise<TaxonomyNode | null>
   applying: boolean
+  conflictChecking: boolean
+  conflicts: ConflictState | null
+  onConfirmConflicts: () => void
   error: string | null
 }
 
@@ -36,6 +40,9 @@ export default function ReclassifyModal({
   onApply,
   onAddNode,
   applying,
+  conflictChecking,
+  conflicts,
+  onConfirmConflicts,
   error,
 }: ReclassifyModalProps) {
   const listRef = useRef<HTMLDivElement>(null)
@@ -96,14 +103,19 @@ export default function ReclassifyModal({
     }
   }, [isOpen])
 
-  // Scroll focused item into view (only when not in add form)
+  // Scroll focused item into view (only when not in add form and not on conflict screen)
   useEffect(() => {
-    if (!listRef.current || showAddForm) return
+    if (!listRef.current || showAddForm || conflicts) return
     const item = listRef.current.children[focusedIdx] as HTMLElement | undefined
     item?.scrollIntoView({ block: 'nearest' })
-  }, [focusedIdx, showAddForm])
+  }, [focusedIdx, showAddForm, conflicts])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // On conflict screen, only allow Escape
+    if (conflicts) {
+      if (e.key === 'Escape') { e.preventDefault(); onClose() }
+      return
+    }
     if (showAddForm) {
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -144,7 +156,6 @@ export default function ReclassifyModal({
       setNewL2('')
       setNewL3('')
       setNewDesc('')
-      // Auto-apply the new node
       onApply(node)
     }
   }
@@ -157,6 +168,76 @@ export default function ReclassifyModal({
 
   const totalTxns = targetRows.reduce((sum, r) => sum + r.transactionCount, 0)
 
+  // ── Conflict warning screen ─────────────────────────────────────────────────
+  if (conflicts) {
+    // Group covered rows by rule name for a clean summary
+    const ruleConflictCounts = new Map<string, number>()
+    for (const row of conflicts.covered) {
+      ruleConflictCounts.set(row.existingRuleName, (ruleConflictCounts.get(row.existingRuleName) ?? 0) + 1)
+    }
+
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+        onClick={onClose}
+      >
+        <div
+          className="bg-white rounded-lg shadow-xl w-[480px] flex flex-col"
+          onClick={e => e.stopPropagation()}
+          onKeyDown={handleKeyDown}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={16} className="text-amber-500 flex-shrink-0" />
+              <h3 className="text-sm font-semibold text-gray-900">Some transactions already have higher-priority rules</h3>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Conflict list */}
+          <div className="px-4 py-3 space-y-1.5 max-h-48 overflow-y-auto">
+            {[...ruleConflictCounts.entries()].map(([ruleName, count]) => (
+              <div key={ruleName} className="flex items-center justify-between text-xs">
+                <span className="text-gray-700 font-medium truncate mr-2">{ruleName}</span>
+                <span className="text-gray-400 flex-shrink-0">{count} transaction{count !== 1 ? 's' : ''}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Summary */}
+          <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
+            <p className="text-xs text-gray-500">
+              <span className="font-medium text-gray-700">{conflicts.eligibleIds.length} transaction{conflicts.eligibleIds.length !== 1 ? 's' : ''}</span>
+              {' '}will be updated.{' '}
+              <span className="text-gray-400">{conflicts.covered.length} skipped (covered by higher-priority rules).</span>
+            </p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100">
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 rounded border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirmConflicts}
+              disabled={applying || conflicts.eligibleIds.length === 0}
+              className="px-3 py-1.5 rounded bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {applying ? 'Applying...' : `Apply to ${conflicts.eligibleIds.length} transaction${conflicts.eligibleIds.length !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Main screen (taxonomy picker) ───────────────────────────────────────────
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
@@ -171,7 +252,7 @@ export default function ReclassifyModal({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Reclassify</h3>
+            <h3 className="text-sm font-semibold text-gray-900">Classify &amp; Create Rule</h3>
             <p className="text-xs text-gray-500 mt-0.5">
               {rowSummary}
               {totalTxns > 0 && <span className="text-gray-400"> ({totalTxns.toLocaleString()} transactions)</span>}
@@ -332,9 +413,14 @@ export default function ReclassifyModal({
         )}
 
         {/* Footer */}
-        {applying && (
+        {(applying || conflictChecking) && (
           <div className="px-4 py-2 text-xs text-blue-600 border-t border-gray-100">
-            Applying reclassification...
+            {conflictChecking ? 'Checking rule priority...' : 'Applying...'}
+          </div>
+        )}
+        {!applying && !conflictChecking && !error && (
+          <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">
+            A rule will be created and applied immediately.
           </div>
         )}
       </div>

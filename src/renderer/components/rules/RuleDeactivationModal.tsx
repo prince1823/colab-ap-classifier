@@ -29,11 +29,16 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
   const [confirmRevert, setConfirmRevert] = useState<string | null>(null) // changeId to confirm
   const [confirmRevertAll, setConfirmRevertAll] = useState(false)
   const [confirmDeactivate, setConfirmDeactivate] = useState(false)
+  const [taxonomyMap, setTaxonomyMap] = useState<Map<string, string>>(new Map())
 
   const fetchEntries = useCallback(async () => {
     try {
-      const result = await ipc.changelog.listByRule(ruleId)
+      const [result, nodes] = await Promise.all([
+        ipc.changelog.listByRule(ruleId),
+        ipc.taxonomy.getNodes(),
+      ])
       setEntries(result)
+      setTaxonomyMap(new Map(nodes.map((n: { id: string; fullPath: string }) => [n.id, n.fullPath])))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load changes')
     } finally {
@@ -143,6 +148,7 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
                   onRevert={(changeId) => setConfirmRevert(changeId)}
                   expanded={expandedEntryId === entry.id}
                   onToggleExpand={() => setExpandedEntryId(prev => prev === entry.id ? null : entry.id)}
+                  taxonomyMap={taxonomyMap}
                 />
               ))}
             </div>
@@ -215,13 +221,28 @@ function EntryRow({
   onRevert,
   expanded,
   onToggleExpand,
+  taxonomyMap,
 }: {
   entry: ChangeLog
   reverting: string | null
   onRevert: (changeId: string) => void
   expanded: boolean
   onToggleExpand: () => void
+  taxonomyMap: Map<string, string>
 }) {
+  const formatPath = (nodeId: string | null | undefined) => {
+    if (!nodeId) return 'Unclassified'
+    const path = taxonomyMap.get(String(nodeId))
+    return path ? path.split('|').map(s => s.trim()).join(' > ') : String(nodeId)
+  }
+
+  const currentClassification = entry.newValues?.taxonomy_node_id != null
+    ? formatPath(String(entry.newValues.taxonomy_node_id))
+    : null
+  const revertsTo = entry.oldValues?.taxonomy_node_id != null
+    ? formatPath(String(entry.oldValues.taxonomy_node_id))
+    : 'Unclassified'
+
   return (
     <div
       className={`rounded-lg border ${
@@ -244,6 +265,18 @@ function EntryRow({
             <p className={`text-xs font-medium ${entry.isReverted ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
               {entry.description || `${entry.affectedCount} transaction(s)`}
             </p>
+
+            {/* Revert preview: current → reverts to */}
+            {!entry.isReverted && currentClassification && (
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-[10px] font-medium text-gray-500">Current:</span>
+                <span className="text-[10px] text-gray-700 truncate max-w-[180px]" title={currentClassification}>{currentClassification}</span>
+                <span className="text-[10px] text-gray-400">→</span>
+                <span className="text-[10px] font-medium text-gray-500">Reverts to:</span>
+                <span className={`text-[10px] truncate max-w-[180px] ${revertsTo === 'Unclassified' ? 'text-amber-600 italic' : 'text-green-700'}`} title={revertsTo}>{revertsTo}</span>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="text-[10px] text-gray-400">
                 {entry.affectedCount} txn{entry.affectedCount !== 1 ? 's' : ''} still owned by this rule

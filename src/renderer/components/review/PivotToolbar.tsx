@@ -355,7 +355,7 @@ export default function PivotToolbar({
 
       {/* Right side: Bucket, $, Filter, Review, Collapse, Freeze */}
       <div className="flex items-center gap-1" style={{ marginLeft: 'auto' }}>
-        {ruleGroups && ruleGroups.length > 0 && onSelectedGroupIdChange && (
+        {ruleGroups && onSelectedGroupIdChange && (
           <BucketSelector
             groups={ruleGroups}
             selectedGroupId={selectedGroupId ?? null}

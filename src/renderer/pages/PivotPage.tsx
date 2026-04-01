@@ -1,4 +1,5 @@
 import { useMemo, useCallback, useEffect, useState, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import HierarchicalPivotView from '../components/review/HierarchicalPivotView'
 import ReclassifyModal from '../components/review/ReclassifyModal'
 import DrillDownPanel from '../components/review/DrillDownPanel'
@@ -76,6 +77,8 @@ const ENUM_FIELDS: Record<string, string[]> = {
 const NUMERIC_COLS = new Set(['spend_amount', 'amount', 'invoice_amount', 'master_year'])
 
 export default function PivotPage() {
+  const location = useLocation()
+
   // Persisted state from Zustand store (survives tab switches)
   const {
     rowDimensions, setRowDimensions,
@@ -154,7 +157,9 @@ export default function PivotPage() {
       .catch((e) => showError('Failed to load supplier suggestions', e))
   }, [projectFilePath, confirmedSupplierCount])
 
-  // Load rule groups for the bucket selector on the toolbar
+  // Load rule groups for the bucket selector on the toolbar.
+  // Re-fetch whenever this tab becomes active (keep-alive means the component
+  // stays mounted, so we watch location.pathname to detect tab switches).
   const [ruleGroups, setRuleGroups] = useState<RuleGroup[]>([])
   const loadRuleGroups = useCallback(() => {
     ipc.rules.listGroups()
@@ -163,8 +168,9 @@ export default function PivotPage() {
   }, [])
   useEffect(() => {
     if (!projectFilePath) { setRuleGroups([]); return }
+    if (location.pathname !== '/review') return
     loadRuleGroups()
-  }, [projectFilePath, loadRuleGroups])
+  }, [projectFilePath, loadRuleGroups, location.pathname])
 
   const filter = useMemo(() => {
     const pillFilter = buildTransactionFilter(filterState)

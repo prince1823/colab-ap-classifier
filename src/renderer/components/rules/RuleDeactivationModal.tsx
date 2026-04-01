@@ -26,6 +26,9 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
   const [reverting, setReverting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null)
+  const [confirmRevert, setConfirmRevert] = useState<string | null>(null) // changeId to confirm
+  const [confirmRevertAll, setConfirmRevertAll] = useState(false)
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false)
 
   const fetchEntries = useCallback(async () => {
     try {
@@ -40,7 +43,8 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
 
   useEffect(() => { fetchEntries() }, [fetchEntries])
 
-  const handleRevert = async (changeId: string) => {
+  const executeRevert = async (changeId: string) => {
+    setConfirmRevert(null)
     setReverting(changeId)
     setError(null)
     try {
@@ -53,7 +57,8 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
     }
   }
 
-  const handleRevertAll = async () => {
+  const executeRevertAll = async () => {
+    setConfirmRevertAll(false)
     const unrevertedEntries = entries.filter(e => !e.isReverted)
     if (unrevertedEntries.length === 0) return
     setError(null)
@@ -70,6 +75,14 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
     }
     setReverting(null)
     await fetchEntries()
+  }
+
+  const handleDeactivateClick = () => {
+    if (allReverted) {
+      onClose(true)
+    } else {
+      setConfirmDeactivate(true)
+    }
   }
 
   const allReverted = entries.length > 0 && entries.every(e => e.isReverted)
@@ -114,7 +127,7 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
                 </p>
                 {unrevertedCount > 1 && (
                   <button
-                    onClick={handleRevertAll}
+                    onClick={() => setConfirmRevertAll(true)}
                     disabled={reverting !== null}
                     className="flex-shrink-0 ml-3 rounded border border-red-300 bg-red-50 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-50"
                   >
@@ -127,7 +140,7 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
                   key={entry.id}
                   entry={entry}
                   reverting={reverting}
-                  onRevert={handleRevert}
+                  onRevert={(changeId) => setConfirmRevert(changeId)}
                   expanded={expandedEntryId === entry.id}
                   onToggleExpand={() => setExpandedEntryId(prev => prev === entry.id ? null : entry.id)}
                 />
@@ -146,12 +159,48 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
                 : ''}
           </p>
           <button
-            onClick={() => onClose(allReverted)}
+            onClick={handleDeactivateClick}
             className="rounded-md bg-gray-800 px-4 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
           >
             {allReverted ? 'Deactivate Rule' : 'Deactivate Anyway'}
           </button>
         </div>
+
+        {/* ── Confirmation: Revert single set ── */}
+        {confirmRevert && (
+          <ConfirmDialog
+            title="Revert transactions?"
+            message="This will undo the classifications made by this rule. Past classifications will be removed and transactions will return to their previous state. This action cannot be undone."
+            confirmLabel="Revert"
+            confirmClassName="bg-red-600 hover:bg-red-700"
+            onConfirm={() => executeRevert(confirmRevert)}
+            onCancel={() => setConfirmRevert(null)}
+          />
+        )}
+
+        {/* ── Confirmation: Revert all sets ── */}
+        {confirmRevertAll && (
+          <ConfirmDialog
+            title="Revert all transactions?"
+            message={`This will undo all ${unrevertedCount} set(s) of classifications made by this rule. Past classifications will be removed and transactions will return to their previous state. This action cannot be undone.`}
+            confirmLabel="Revert All"
+            confirmClassName="bg-red-600 hover:bg-red-700"
+            onConfirm={executeRevertAll}
+            onCancel={() => setConfirmRevertAll(false)}
+          />
+        )}
+
+        {/* ── Confirmation: Deactivate without revert ── */}
+        {confirmDeactivate && (
+          <ConfirmDialog
+            title="Deactivate without reverting?"
+            message="The rule will stop applying to new data, but past classifications will remain. Transactions already classified by this rule will keep their current classification."
+            confirmLabel="Deactivate Anyway"
+            confirmClassName="bg-gray-800 hover:bg-gray-700"
+            onConfirm={() => { setConfirmDeactivate(false); onClose(false) }}
+            onCancel={() => setConfirmDeactivate(false)}
+          />
+        )}
       </div>
     </div>
   )
@@ -361,6 +410,48 @@ function TransactionPanel({ entry }: { entry: ChangeLog }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+/* ── Confirmation dialog ───────────────────────────────────── */
+
+function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  confirmClassName,
+  onConfirm,
+  onCancel,
+}: {
+  title: string
+  message: string
+  confirmLabel: string
+  confirmClassName: string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl p-6">
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">{title}</h3>
+        <p className="text-xs text-gray-600 leading-relaxed mb-5">{message}</p>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium text-white ${confirmClassName}`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -203,34 +203,14 @@ export default function OverrideRulesPage() {
     }
   }
 
-  const handleDelete = async (ruleId: string) => {
-    // Optimistic: remove from both lists
-    const previousRules = rules
-    const previousUngrouped = ungroupedRulesState
-    const previousTotal = ungroupedTotal
-    const isUngrouped = ungroupedRulesState.some(r => r.id === ruleId)
-    setRules(prev => prev.filter(r => r.id !== ruleId))
-    if (isUngrouped) {
-      setUngroupedRulesState(prev => prev.filter(r => r.id !== ruleId))
-      setUngroupedTotal(prev => prev - 1)
-    }
-    try {
-      await ipc.rules.delete(ruleId)
-    } catch (e) {
-      setRules(previousRules)
-      setUngroupedRulesState(previousUngrouped)
-      setUngroupedTotal(previousTotal)
-      setError(e instanceof Error ? e.message : 'Failed to delete rule')
-    }
-  }
-
   const handleToggle = async (rule: OverrideRule) => {
     if (rule.isActive) {
       // Deactivating — check if rule has affected transactions
       try {
         const entries = await ipc.changelog.listByRule(rule.id)
-        if (entries.length > 0) {
-          // Has affected transactions — show deactivation modal
+        const unrevertedEntries = entries.filter(e => !e.isReverted)
+        if (unrevertedEntries.length > 0) {
+          // Has affected transactions that haven't been reverted — show deactivation modal
           setDeactivatingRule(rule)
           return
         }

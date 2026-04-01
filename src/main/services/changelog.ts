@@ -163,20 +163,8 @@ export class ChangelogStore implements IChangelogStore {
     const change = rowToChangeLog(row);
 
     if (change.isReverted) {
-      // Un-revert: re-apply the new values
-      if (!change.newValues) throw new Error(`Cannot un-revert change ${changeId}: no new_values recorded`);
-      const columns = Object.keys(change.newValues);
-      if (columns.length > 0 && change.affectedIds.length > 0) {
-        const setClauses = columns.map((col) => `${col} = ?`).join(', ');
-        const setValues = columns.map((col) => change.newValues![col]);
-        const placeholders = change.affectedIds.map(() => '?').join(', ');
-        await this.db.run(
-          `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
-          ...setValues,
-          ...change.affectedIds
-        );
-      }
-      await this.db.run('UPDATE change_log SET is_reverted = FALSE WHERE id = ?', changeId);
+      // Revert is one-way — once reverted, it cannot be undone
+      throw new Error(`Change ${changeId} has already been reverted`);
     } else {
       // Revert: restore the old values
       if (!change.oldValues) throw new Error(`Cannot revert change ${changeId}: no old_values recorded`);
@@ -208,7 +196,7 @@ export class ChangelogStore implements IChangelogStore {
 
     // Get all transaction IDs still owned by this rule
     const ownedRows = await this.db.all<{ id: string }>(
-      `SELECT CAST(id AS VARCHAR) as id FROM transactions WHERE applied_rule_id = ?`,
+      `SELECT CAST(id AS VARCHAR) as id FROM transactions WHERE CAST(applied_rule_id AS VARCHAR) = ?`,
       ruleId
     );
     const ownedIds = new Set(ownedRows.map(r => r.id));

@@ -134,10 +134,8 @@ export function useReclassification({ filterState, selectedGroupId, selectedGrou
       // Build grouped conditions from selected rows
       const groupedConditions = buildGroupedConditionsFromRows(targetRows)
 
-      // Get candidate transaction IDs
-      const candidateIds = await ipc.transactions.getIdsByConditions(
-        groupedConditions.groups.flatMap(g => g.conditions.filter(c => c.field))
-      )
+      // Get candidate transaction IDs (grouped, preserving OR-within-field semantics)
+      const candidateIds = await ipc.transactions.getIdsByGroupedConditions(groupedConditions)
 
       if (candidateIds.length === 0) {
         setError('No matching transactions found.')

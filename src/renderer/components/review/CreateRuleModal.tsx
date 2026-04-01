@@ -145,10 +145,8 @@ export default function CreateRuleModal({
     setSaving(true)
     setError(null)
     try {
-      // Phase 1: get candidates and check for priority conflicts
-      const candidateIds = await ipc.transactions.getIdsByConditions(
-        grouped.groups.flatMap(g => g.conditions.filter(c => c.field))
-      )
+      // Phase 1: get candidates and check for priority conflicts (grouped, preserving OR-within-field semantics)
+      const candidateIds = await ipc.transactions.getIdsByGroupedConditions(grouped)
 
       if (candidateIds.length > 0) {
         const conflictResult = await ipc.rules.previewConflicts(candidateIds)

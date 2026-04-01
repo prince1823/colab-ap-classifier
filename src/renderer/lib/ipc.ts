@@ -115,6 +115,8 @@ export const ipc = {
       invoke('transactions:pivotAggregation', dimensions, valueDimension, filters),
     getIdsByConditions: (conditions: FilterCondition[]) =>
       invoke('transactions:getIdsByConditions', conditions),
+    getIdsByGroupedConditions: (grouped: GroupedFilter) =>
+      invoke('transactions:getIdsByGroupedConditions', grouped),
     getFilterFields: () => invoke('transactions:getFilterFields'),
     markAllReviewed: () => invoke('transactions:markAllReviewed'),
   },

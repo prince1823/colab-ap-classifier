@@ -146,10 +146,15 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
         return aa < ba ? -dir : aa > ba ? dir : 0
       }
 
-      // Default: sort by parent name so same-parent rows are adjacent (no-parent rows go last)
+      // Default: sort by parent name so same-parent rows are adjacent
+      // Rows with no parent always go last, regardless of sort direction
+      const aHasParent = !!a.supplier.parentName
+      const bHasParent = !!b.supplier.parentName
+      if (aHasParent !== bHasParent) return aHasParent ? -1 : 1
+
       const parentDir = sortColumn === 'parent' ? dir : 1
-      const pa = a.supplier.parentName?.toLowerCase() ?? '\uffff'
-      const pb = b.supplier.parentName?.toLowerCase() ?? '\uffff'
+      const pa = a.supplier.parentName?.toLowerCase() ?? ''
+      const pb = b.supplier.parentName?.toLowerCase() ?? ''
       if (pa !== pb) return pa < pb ? -parentDir : parentDir
       return a.supplier.supplierName.toLowerCase() < b.supplier.supplierName.toLowerCase() ? -1 : 1
     })

@@ -142,8 +142,8 @@ export function useReclassification({ filterState, selectedGroupId, selectedGrou
         return
       }
 
-      // Check for priority conflicts
-      const { covered, eligibleIds } = await ipc.rules.previewConflicts(candidateIds)
+      // Check for priority conflicts — pass the target group so lower-priority rules don't block
+      const { covered, eligibleIds } = await ipc.rules.previewConflicts(candidateIds, selectedGroupId ?? null)
 
       const ruleName = selectedGroupName?.trim() || node.l3 || node.l2 || node.l1
 

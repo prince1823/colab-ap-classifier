@@ -243,7 +243,7 @@ export interface RuleStore {
   getRule(id: string): Promise<OverrideRule | null>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
   createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number; skippedCount: number; changelogId?: string }>;
-  previewRuleConflicts(candidateIds: string[]): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }>;
+  previewRuleConflicts(candidateIds: string[], newRuleGroupId?: string | null): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
   setCategoryA(ruleId: string, value: boolean): Promise<void>;

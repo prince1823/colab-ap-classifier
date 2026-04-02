@@ -149,7 +149,7 @@ export default function CreateRuleModal({
       const candidateIds = await ipc.transactions.getIdsByGroupedConditions(grouped)
 
       if (candidateIds.length > 0) {
-        const conflictResult = await ipc.rules.previewConflicts(candidateIds)
+        const conflictResult = await ipc.rules.previewConflicts(candidateIds, selectedGroupId ?? null)
         if (conflictResult.covered.length > 0) {
           setConflicts(conflictResult)
           setSaving(false)

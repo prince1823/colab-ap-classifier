@@ -30,7 +30,7 @@ import type {
 import type { IngestProgress } from '../../shared/types/classification';
 
 const SAMPLE_ROW_LIMIT = 100;
-const IMPORT_BATCH_SIZE = 5000;
+const IMPORT_BATCH_SIZE = 50000;
 const PREVIEW_BUFFER_SIZE = 65536; // 64KB for preview/detection
 const DELIMITERS = [',', ';', '\t'] as const;
 
@@ -124,40 +124,6 @@ function readFilePrefix(filePath: string, maxBytes: number = PREVIEW_BUFFER_SIZE
   } finally {
     fs.closeSync(fd);
   }
-}
-
-/**
- * Count lines in a file by streaming through it counting newline bytes.
- * Subtracts 1 for the header row. Much faster than parsing all rows.
- */
-async function countLines(filePath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let lineCount = 0;
-    let lastByte = 0;
-    let totalBytes = 0;
-    const stream = fs.createReadStream(filePath, { highWaterMark: 256 * 1024 });
-    stream.on('data', (chunk: string | Buffer) => {
-      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
-      for (let i = 0; i < buf.length; i++) {
-        if (buf[i] === 0x0a) lineCount++;
-      }
-      if (buf.length > 0) {
-        lastByte = buf[buf.length - 1];
-        totalBytes += buf.length;
-      }
-    });
-    stream.on('end', () => {
-      if (totalBytes === 0) {
-        resolve(0);
-        return;
-      }
-      // If file doesn't end with newline, the last line wasn't counted
-      if (lastByte !== 0x0a) lineCount++;
-      // Subtract 1 for the header row
-      resolve(Math.max(0, lineCount - 1));
-    });
-    stream.on('error', reject);
-  });
 }
 
 /**
@@ -341,8 +307,8 @@ export class IngestService implements IIngestService {
     const { encoding, content: prefixContent } = readFilePrefix(filePath);
     const delimiter = detectDelimiter(prefixContent);
 
-    // Estimate total rows for progress reporting
-    const estimatedTotal = await countLines(filePath);
+    // Estimate total rows for progress reporting (instant, no full file scan)
+    const estimatedTotal = estimateRowCount(filePath, prefixContent);
 
     this.emitProgress({
       status: 'running',

@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import { fmtAbbrev } from '../../utils/formatSpend'
-import { Search, X } from 'lucide-react'
+import { Search, X, ArrowUpAZ, ArrowDownZA, ArrowUpDown } from 'lucide-react'
 
+export type NameSort = 'none' | 'asc' | 'desc'
 type QuickFilter = 'all' | 'unresearched' | 'unconfirmed'
 
 interface SupplierListPanelProps {
@@ -26,6 +27,8 @@ interface SupplierListPanelProps {
   onResearchSelected?: () => void
   onCategorizeSelected?: () => void
   onConfirmSelected?: () => void
+  nameSort: NameSort
+  onNameSortChange: (sort: NameSort) => void
 }
 
 function ConfirmedChip({ supplier }: { supplier: ProjectSupplierView }) {
@@ -80,6 +83,8 @@ export default function SupplierListPanel({
   onResearchSelected,
   onCategorizeSelected,
   onConfirmSelected,
+  nameSort,
+  onNameSortChange,
 }: SupplierListPanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -191,6 +196,19 @@ export default function SupplierListPanel({
           {suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''}
           {selectedIds.size > 0 && ` · ${selectedIds.size} checked`}
         </span>
+        <span className="flex-1" />
+        <button
+          type="button"
+          title={nameSort === 'none' ? 'Sort by name A–Z' : nameSort === 'asc' ? 'Sort by name Z–A' : 'Sort by spend'}
+          onClick={() => onNameSortChange(nameSort === 'none' ? 'asc' : nameSort === 'asc' ? 'desc' : 'none')}
+          className={`p-0.5 rounded transition-colors ${
+            nameSort !== 'none'
+              ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          {nameSort === 'asc' ? <ArrowUpAZ size={14} /> : nameSort === 'desc' ? <ArrowDownZA size={14} /> : <ArrowUpDown size={14} />}
+        </button>
       </div>
 
       {/* Supplier list */}

@@ -9,6 +9,7 @@ import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterCondit
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import SupplierListPanel from '../components/suppliers/SupplierListPanel'
+import type { NameSort } from '../components/suppliers/SupplierListPanel'
 import SupplierDetailPanel from '../components/suppliers/SupplierDetailPanel'
 import type { SupplierDetailPanelHandle } from '../components/suppliers/SupplierDetailPanel'
 import { useSupplierListKeyboard } from '../hooks/useSupplierListKeyboard'
@@ -41,6 +42,7 @@ export default function SuppliersPage() {
   // New state for master-detail
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [nameSort, setNameSort] = useState<NameSort>('none')
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
 
   // Cross-panel keyboard navigation
@@ -395,11 +397,12 @@ export default function SuppliersPage() {
 
   // --- Derived data for the two-panel layout ---
 
-  /** Sort by spend descending */
-  const sortedSuppliers = useMemo(() =>
-    [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend),
-    [suppliers]
-  )
+  /** Sort by spend descending (default) or by name */
+  const sortedSuppliers = useMemo(() => {
+    if (nameSort === 'asc') return [...suppliers].sort((a, b) => a.supplierName.localeCompare(b.supplierName))
+    if (nameSort === 'desc') return [...suppliers].sort((a, b) => b.supplierName.localeCompare(a.supplierName))
+    return [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
+  }, [suppliers, nameSort])
 
   /** Apply quick filter */
   const quickFiltered = useMemo(() => {
@@ -757,6 +760,8 @@ export default function SuppliersPage() {
               onResearchSelected={hasResearchable ? researchSelected : undefined}
               onCategorizeSelected={hasCategorizable ? categorizeSelected : undefined}
               onConfirmSelected={hasConfirmable ? confirmSelected : undefined}
+              nameSort={nameSort}
+              onNameSortChange={setNameSort}
             />
             <SupplierDetailPanel
               ref={detailPanelRef}

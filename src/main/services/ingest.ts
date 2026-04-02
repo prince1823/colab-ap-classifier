@@ -161,6 +161,35 @@ async function countLines(filePath: string): Promise<number> {
 }
 
 /**
+ * Estimate row count from the 64KB prefix we already read + file size.
+ * Avoids reading the entire file just for a preview row count.
+ * Returns an approximate count (prefixed with ~) that's accurate enough for preview.
+ */
+function estimateRowCount(filePath: string, prefixContent: string): number {
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+
+  // If the entire file fits in the prefix buffer, count exactly
+  if (fileSize <= PREVIEW_BUFFER_SIZE) {
+    const lines = prefixContent.split('\n').filter(l => l.trim().length > 0);
+    return Math.max(0, lines.length - 1); // subtract header
+  }
+
+  // Count newlines in the prefix to get average bytes per line
+  let newlineCount = 0;
+  for (let i = 0; i < prefixContent.length; i++) {
+    if (prefixContent[i] === '\n') newlineCount++;
+  }
+
+  if (newlineCount === 0) return 0;
+
+  const bytesPerLine = PREVIEW_BUFFER_SIZE / newlineCount;
+  const estimatedTotal = Math.round(fileSize / bytesPerLine);
+  // Subtract 1 for header row
+  return Math.max(0, estimatedTotal - 1);
+}
+
+/**
  * Parse the first N sample rows from a CSV using streaming parser.
  */
 async function parseSampleRows(
@@ -273,8 +302,8 @@ export class IngestService implements IIngestService {
 
     const columns = Object.keys(sampleRows[0]);
 
-    // Count total rows via fast line counting (no full parse)
-    const totalRows = await countLines(filePath);
+    // Estimate total rows from prefix + file size (instant, no full file scan)
+    const totalRows = estimateRowCount(filePath, content);
 
     return { columns, sampleRows, totalRows: totalRows || sampleRows.length };
   }

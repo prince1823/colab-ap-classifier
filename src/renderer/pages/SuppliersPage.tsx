@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
+import type { TaxonomyNode } from '../../shared/types/taxonomy'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { researchSingle, isResearchRunning } from '../lib/researchRunner'
@@ -35,6 +36,7 @@ export default function SuppliersPage() {
   const [tailSpendSet, setTailSpendSet] = useState(false)
   const [tailSpendActive, setTailSpendActive] = useState(false)
   const [editingThreshold, setEditingThreshold] = useState(false)
+  const [taxonomyL1L2Options, setTaxonomyL1L2Options] = useState<string[]>([])
 
   // New state for master-detail
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
@@ -89,6 +91,22 @@ export default function SuppliersPage() {
     )
     if (hasTailFilter) setTailSpendActive(true)
   }, [projectFilePath, columnsLength]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load unique L1|L2 paths from taxonomy for dropdown options
+  useEffect(() => {
+    if (!projectFilePath) return
+    async function loadTaxonomyOptions() {
+      try {
+        const nodes = await ipc.taxonomy.getNodes() as TaxonomyNode[]
+        const l1l2Set = new Set<string>()
+        for (const node of nodes) {
+          if (node.l1 && node.l2) l1l2Set.add(`${node.l1}|${node.l2}`)
+        }
+        setTaxonomyL1L2Options([...l1l2Set].sort())
+      } catch { /* non-fatal */ }
+    }
+    loadTaxonomyOptions()
+  }, [projectFilePath])
 
   const loadData = useCallback(async () => {
     if (suppliers.length === 0) setLoading(true)
@@ -183,10 +201,10 @@ export default function SuppliersPage() {
   }, [updateSuppliers])
 
   /** Save l1L2Path directly on project_suppliers */
-  const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
+  const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newPaths: string[]) => {
     setSaving(true)
     try {
-      const paths = newValue ? newValue.split(',').map(s => s.trim()).filter(Boolean) : undefined
+      const paths = newPaths.length > 0 ? newPaths : undefined
       await ipc.suppliers.update(supplier.id, { l1L2Path: paths })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, l1L2Path: paths || null } : s
@@ -746,6 +764,7 @@ export default function SuppliersPage() {
               onSaveField={saveField}
               onSaveParentName={saveParentName}
               onSaveL1L2Path={saveL1L2Path}
+              taxonomyL1L2Options={taxonomyL1L2Options}
               onResearch={researchSupplier}
               onCategorize={categorizeSupplier}
               onConfirm={confirmSupplier}

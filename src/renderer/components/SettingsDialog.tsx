@@ -10,15 +10,18 @@ interface Props {
   onClose: () => void
 }
 
+interface ValidationResult { valid: boolean; error?: string }
+
 interface SettingsFormState {
   provider: string
   model: string
   apiKey: string
   isValidating: boolean
-  validationResult: { valid: boolean; error?: string } | null
+  validationResult: ValidationResult | null
+  modelValidationResult: ValidationResult | null
   exaKey: string
   isValidatingExa: boolean
-  exaValidationResult: { valid: boolean; error?: string } | null
+  exaValidationResult: ValidationResult | null
 }
 
 const PROVIDERS = ['openrouter', 'anthropic', 'openai'] as const
@@ -29,6 +32,7 @@ const DEFAULT_FORM: SettingsFormState = {
   apiKey: '',
   isValidating: false,
   validationResult: null,
+  modelValidationResult: null,
   exaKey: '',
   isValidatingExa: false,
   exaValidationResult: null,
@@ -66,11 +70,11 @@ export default function SettingsDialog({ open, onClose }: Props) {
   }, [open])
 
   function handleProviderChange(e: React.ChangeEvent<HTMLInputElement>): void {
-    setForm((prev) => ({ ...prev, provider: e.target.value, apiKey: '', validationResult: null }))
+    setForm((prev) => ({ ...prev, provider: e.target.value, apiKey: '', validationResult: null, modelValidationResult: null }))
   }
 
   function handleModelChange(e: React.ChangeEvent<HTMLInputElement>): void {
-    setForm((prev) => ({ ...prev, model: e.target.value }))
+    setForm((prev) => ({ ...prev, model: e.target.value, modelValidationResult: null }))
   }
 
   function handleApiKeyChange(e: React.ChangeEvent<HTMLInputElement>): void {
@@ -78,11 +82,23 @@ export default function SettingsDialog({ open, onClose }: Props) {
   }
 
   async function handleValidate(): Promise<void> {
-    if (!form.apiKey.trim()) return
-    setForm((prev) => ({ ...prev, isValidating: true, validationResult: null }))
+    setForm((prev) => ({ ...prev, isValidating: true, validationResult: null, modelValidationResult: null }))
     try {
-      const result = await ipc.settings.validateApiKey(form.provider, form.apiKey.trim())
-      setForm((prev) => ({ ...prev, isValidating: false, validationResult: result }))
+      // Validate key: use typed key if present, otherwise validate stored key
+      const keyResult = form.apiKey.trim()
+        ? await ipc.settings.validateApiKey(form.provider, form.apiKey.trim())
+        : await ipc.settings.validateStoredApiKey(form.provider)
+      setForm((prev) => ({ ...prev, validationResult: keyResult }))
+
+      // Validate model only if key is valid
+      if (keyResult.valid && form.model.trim()) {
+        const modelResult = form.apiKey.trim()
+          ? await ipc.settings.validateModel(form.provider, form.apiKey.trim(), form.model.trim())
+          : await ipc.settings.validateStoredModel(form.provider, form.model.trim())
+        setForm((prev) => ({ ...prev, isValidating: false, modelValidationResult: modelResult }))
+      } else {
+        setForm((prev) => ({ ...prev, isValidating: false }))
+      }
     } catch (e) {
       setForm((prev) => ({
         ...prev,
@@ -143,7 +159,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
       // Refresh config to update "key is set" indicators
       const updated = await ipc.settings.getLLMConfig()
       setConfig(updated)
-      setForm((prev) => ({ ...prev, apiKey: '', validationResult: null }))
+      setForm((prev) => ({ ...prev, apiKey: '', validationResult: null, modelValidationResult: null }))
       setSaveSuccess(true)
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Failed to save settings')
@@ -216,6 +232,20 @@ export default function SettingsDialog({ open, onClose }: Props) {
                   placeholder="claude-3-5-haiku-latest"
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
                 />
+                {form.modelValidationResult && (
+                  <div
+                    className={`mt-1 flex items-center gap-1 text-xs ${
+                      form.modelValidationResult.valid ? 'text-green-600' : 'text-red-600'
+                    }`}
+                  >
+                    {form.modelValidationResult.valid ? (
+                      <CheckCircleIcon className="h-3.5 w-3.5" />
+                    ) : (
+                      <ExclamationCircleIcon className="h-3.5 w-3.5" />
+                    )}
+                    {form.modelValidationResult.valid ? 'Model found' : (form.modelValidationResult.error ?? 'Model not found')}
+                  </div>
+                )}
               </div>
 
               {/* API Key */}
@@ -248,6 +278,17 @@ export default function SettingsDialog({ open, onClose }: Props) {
                       <ExclamationCircleIcon className="h-3.5 w-3.5" />
                     )}
                     {form.validationResult.valid ? 'Key is valid' : (form.validationResult.error ?? 'Invalid key')}
+                  </div>
+                )}
+                {(form.apiKey.trim() || keyIsSet) && (
+                  <div className="mt-2">
+                    <button
+                      onClick={handleValidate}
+                      disabled={form.isValidating || isSaving}
+                      className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {form.isValidating ? 'Validating…' : 'Validate'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -335,15 +376,6 @@ export default function SettingsDialog({ open, onClose }: Props) {
               {saveError && <p className="text-xs text-red-600">{saveError}</p>}
             </div>
             <div className="flex items-center gap-2">
-              {form.apiKey.trim() && (
-                <button
-                  onClick={handleValidate}
-                  disabled={form.isValidating}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  {form.isValidating ? 'Validating…' : 'Validate Key'}
-                </button>
-              )}
               <button
                 onClick={handleSave}
                 disabled={isSaving}

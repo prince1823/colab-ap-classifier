@@ -24,7 +24,7 @@ interface Props {
   preview: CSVPreview
   derivedMappings: DerivedMappings
   onApply: (mappings: MappingRow[], columnStates?: ColumnState[]) => void
-  onBack: () => void
+  onBack: () => void | Promise<void>
   fromPreviousMapping?: boolean
   preservedColumnStates?: ColumnState[] | null
   importing?: boolean
@@ -863,7 +863,7 @@ export default function DataMappingStep({
         </div>
         <div className="flex gap-3">
           <button
-            onClick={onBack}
+            onClick={() => void onBack()}
             disabled={importing}
             className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >

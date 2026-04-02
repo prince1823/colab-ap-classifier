@@ -345,7 +345,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     }> = [];
 
     for (const supplier of tailSpendSuppliers) {
-      if (this.isCancelled) return;
+      if (this.isCancelled) return { categorized: 0, invalidPaths: 0 };
 
       // Fetch transactions for this supplier
       const txns = await this.getSupplierTransactions(supplier.id, columnPriorities);

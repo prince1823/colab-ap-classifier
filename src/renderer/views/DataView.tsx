@@ -17,6 +17,7 @@ import type {
   DeriveMappingsSource,
   CompletedUpload,
 } from '../../shared/types/column-mapping'
+import type { IngestProgress } from '../../shared/types/classification'
 
 type Step = 'upload' | 'mapping' | 'priority'
 
@@ -42,6 +43,7 @@ export default function DataView() {
   const [activePreview, setActivePreview] = useState<CSVPreview | null>(null)
   const [activeDerivedMappings, setActiveDerivedMappings] = useState<DerivedMappings | null>(null)
   const [importing, setImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState<IngestProgress | null>(null)
   const [derivingMappings, setDerivingMappings] = useState(false)
   const [mappingFromPrevious, setMappingFromPrevious] = useState(false)
   // Preserved column states so going back from priority doesn't lose edits
@@ -84,6 +86,14 @@ export default function DataView() {
       showError('Failed to load upload stats', e)
     })
   }, [projectFilePath])
+
+  // Listen for import progress events from the backend
+  useEffect(() => {
+    const unsubscribe = ipc.ingest.onProgress((progress: IngestProgress) => {
+      setImportProgress(progress)
+    })
+    return unsubscribe
+  }, [])
 
   const handleDeleteUpload = async (uploadId: string, force?: boolean) => {
     try {
@@ -135,6 +145,7 @@ export default function DataView() {
     if (columnStates) setPreservedColumnStates(columnStates)
     setImporting(true)
     setError(null)
+    setImportProgress(null)
     try {
       // If the user went back from priority and is re-importing, delete the previous upload first
       if (activeUploadId) {
@@ -204,6 +215,7 @@ export default function DataView() {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
     } finally {
       setImporting(false)
+      setImportProgress(null)
     }
   }
 
@@ -321,6 +333,7 @@ export default function DataView() {
             fromPreviousMapping={mappingFromPrevious}
             preservedColumnStates={preservedColumnStates}
             importing={importing}
+            importProgress={importProgress}
             isFirstUpload={completedUploads.length === 0}
           />
         )}

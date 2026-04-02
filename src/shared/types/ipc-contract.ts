@@ -162,6 +162,9 @@ export interface IPCInvokeMap {
   'settings:setProvider':    { args: [provider: string]; result: void };
   'settings:setModel':       { args: [model: string]; result: void };
   'settings:validateApiKey': { args: [provider: string, key: string]; result: { valid: boolean; error?: string } };
+  'settings:validateStoredApiKey': { args: [provider: string]; result: { valid: boolean; error?: string } };
+  'settings:validateModel': { args: [provider: string, key: string, model: string]; result: { valid: boolean; error?: string } };
+  'settings:validateStoredModel': { args: [provider: string, model: string]; result: { valid: boolean; error?: string } };
   // Settings — Exa
   'settings:setExaKey':           { args: [key: string]; result: void };
   'settings:validateExaKey':      { args: [key: string]; result: { valid: boolean; error?: string } };

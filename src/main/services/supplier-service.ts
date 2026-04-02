@@ -122,12 +122,16 @@ export class SupplierService implements ISupplierService {
     return result.id;
   }
 
-  async normalizeAllTransactions(): Promise<void> {
+  async normalizeAllTransactions(onProgress?: (done: number, total: number, step: string) => void): Promise<void> {
+    const report = onProgress || (() => {});
+
     // Get all distinct original_supplier_name values from transactions
     const cols = await this.db.all<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'original_supplier_name'"
     );
     if (cols.length === 0) return;
+
+    report(0, 0, 'Finding unique suppliers...');
 
     const supplierRows = await this.db.all<{ original_supplier_name: string }>(
       `SELECT DISTINCT original_supplier_name FROM transactions
@@ -135,6 +139,9 @@ export class SupplierService implements ISupplierService {
     );
 
     if (supplierRows.length === 0) return;
+
+    const totalSuppliers = supplierRows.length;
+    report(0, totalSuppliers, `Resolving 0 / ${totalSuppliers.toLocaleString()} suppliers...`);
 
     // Pre-fetch all existing alias mappings once for O(1) lookup per raw name
     const aliasRows = await this.db.all<{ key: string; project_supplier_id: string }>(
@@ -146,10 +153,18 @@ export class SupplierService implements ISupplierService {
 
     // Build a map of rawName → supplierId (this creates project_suppliers records as needed)
     const nameToSupplierId = new Map<string, string>();
+    let resolved = 0;
     for (const row of supplierRows) {
       const supplierId = await this.normalizeSupplierName(row.original_supplier_name, aliasMap);
       nameToSupplierId.set(row.original_supplier_name, supplierId);
+      resolved++;
+      // Report every 100 suppliers to avoid flooding the event bus
+      if (resolved % 100 === 0 || resolved === totalSuppliers) {
+        report(resolved, totalSuppliers, `Resolving suppliers ${resolved.toLocaleString()} / ${totalSuppliers.toLocaleString()}...`);
+      }
     }
+
+    report(totalSuppliers, totalSuppliers, 'Linking transactions to suppliers...');
 
     // Bulk UPDATE using a per-call temp table to avoid collisions if imports overlap
     const tmpTable = `_norm_map_${uuidv4().replace(/-/g, '')}`;
@@ -179,6 +194,8 @@ export class SupplierService implements ISupplierService {
     } finally {
       try { await this.db.exec(`DROP TABLE IF EXISTS ${tmpTable}`); } catch { /* ignore cleanup error */ }
     }
+
+    report(totalSuppliers, totalSuppliers, 'Supplier normalization complete');
   }
 
   async assignAlias(supplierId: string, rawName: string): Promise<void> {

@@ -525,7 +525,18 @@ export class IngestService implements IIngestService {
     });
 
     // Link transactions to project_suppliers via original_supplier_name
-    await this.suppliers.normalizeAllTransactions();
+    await this.suppliers.normalizeAllTransactions((done, total, step) => {
+      // Map supplier normalization progress to 97-99% range
+      const subPct = total > 0 ? Math.round((done / total) * 100) : 0;
+      const overallPct = 97 + Math.round((subPct / 100) * 2); // 97% → 99%
+      this.emitProgress({
+        status: 'running',
+        totalRows: estimatedTotal,
+        processedRows: rowsInserted,
+        percentage: Math.min(99, overallPct),
+        currentStep: step,
+      });
+    });
 
     // Auto-apply tail spend threshold to newly created suppliers
     const threshold = await this.project.getSetting('tail_spend_threshold') as number | undefined;

@@ -5,6 +5,7 @@ import type { TaxonomyNode } from '../../shared/types/taxonomy'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { researchSingle, isResearchRunning } from '../lib/researchRunner'
+import { showError } from '../lib/toast-errors'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
@@ -254,7 +255,7 @@ export default function SuppliersPage() {
     // Fire-and-forget: progress is streamed via EventBus → workflowStore.
     // SuppliersPage reloads supplier data when the completed event arrives (see effect above).
     ipc.suppliers.researchAll(selectedIds_).catch((err) => {
-      console.error('[Research] researchAll failed:', err)
+      showError('Research failed', err)
     })
     setSelectedIds(new Set())
   }, [suppliers, selectedIds])
@@ -272,7 +273,7 @@ export default function SuppliersPage() {
       return
     }
     ipc.suppliers.categorizeAll().catch((err) => {
-      console.error('[Categorize] categorizeAll failed:', err)
+      showError('Categorization failed', err)
     })
   }, [suppliers])
 
@@ -297,7 +298,7 @@ export default function SuppliersPage() {
       return
     }
     ipc.suppliers.categorizeAll(ids).catch((err) => {
-      console.error('[Categorize] categorizeSelected failed:', err)
+      showError('Categorization failed', err)
     })
   }, [suppliers, selectedIds])
 
@@ -312,7 +313,7 @@ export default function SuppliersPage() {
       return
     }
     ipc.suppliers.categorizeAll([supplier.id]).catch((err) => {
-      console.error('[Categorize] categorizeSupplier failed:', err)
+      showError('Categorization failed', err)
     })
   }, [])
 
@@ -725,18 +726,39 @@ export default function SuppliersPage() {
               </div>
             </div>
           )}
-          {researchProgress && researchProgress.status === 'completed' && (
+          {researchProgress && researchProgress.status === 'completed' && (() => {
+            const hasWarning = researchProgress.currentStep !== 'Complete' && researchProgress.currentStep
+            return (
+              <div className="suppliers-progress">
+                <div className="flex items-center gap-2 py-1">
+                  {hasWarning ? (
+                    <span className="text-amber-600 font-semibold text-sm">
+                      ⚠ {researchProgress.currentStep}
+                    </span>
+                  ) : (
+                    <span className="text-green-600 font-semibold text-sm">
+                      ✓ {researchProgress.totalSuppliers > 0 ? 'Research' : 'Categorization'} completed
+                    </span>
+                  )}
+                  {!hasWarning && researchProgress.totalSuppliers > 0 && (
+                    <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''})</span>
+                  )}
+                </div>
+                <div className="progress-bar">
+                  <div className={`progress-fill ${hasWarning ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: '100%' }} />
+                </div>
+              </div>
+            )
+          })()}
+          {researchProgress && researchProgress.status === 'failed' && (
             <div className="suppliers-progress">
               <div className="flex items-center gap-2 py-1">
-                <span className="text-green-600 font-semibold text-sm">
-                  ✓ {researchProgress.currentStep === 'Complete' ? 'Categorization' : 'Research'} completed
+                <span className="text-red-600 font-semibold text-sm">
+                  ✗ {researchProgress.currentStep || 'Operation failed'}
                 </span>
-                {researchProgress.totalSuppliers > 0 && (
-                  <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''})</span>
-                )}
               </div>
               <div className="progress-bar">
-                <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
+                <div className="progress-fill bg-red-500" style={{ width: '100%' }} />
               </div>
             </div>
           )}

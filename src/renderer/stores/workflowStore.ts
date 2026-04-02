@@ -281,10 +281,11 @@ export const useWorkflowStore = create<WorkflowState>()(
           set({ researchProgress: progress })
 
           if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled') {
+            const clearDelay = progress.status === 'failed' ? 8000 : 3000
             clearTimerId = setTimeout(() => {
               set({ researchProgress: null })
               clearTimerId = null
-            }, 3000)
+            }, clearDelay)
           }
         })
 

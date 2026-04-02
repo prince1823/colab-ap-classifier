@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 import { Download, GripVertical } from 'lucide-react'
 
 interface ColumnItem {
@@ -24,7 +25,7 @@ export default function ExportCSVPanel() {
       .then(cols => {
         setColumns((cols as string[]).map(name => ({ name, included: true })))
       })
-      .catch(() => {})
+      .catch((err) => showError('Failed to load export columns', err))
       .finally(() => setLoading(false))
   }, [])
 
@@ -100,8 +101,8 @@ export default function ExportCSVPanel() {
     try {
       const result = await ipc.export.csv(undefined, selected)
       if (result) setExportResult(result as { rowsExported: number })
-    } catch {
-      // export dialog cancelled or error
+    } catch (err) {
+      showError('Export failed', err)
     } finally {
       setExporting(false)
     }

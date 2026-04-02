@@ -72,9 +72,15 @@ export class AppConfigService implements IAppConfigService {
   }
 
   private save(): void {
-    const dir = path.dirname(this.configPath);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
+    try {
+      const dir = path.dirname(this.configPath);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
+    } catch (err) {
+      // Reload from disk to restore consistency — in-memory state was already mutated
+      this.load();
+      throw new Error(`Failed to save config: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // ─── LLM Settings ──────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ import { toEnrichedMapping, toSimpleMapping } from '../../shared/types/column-ma
 import type { ColumnMappingWithPriority } from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS, REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import { detectMasterDateFormat } from '../utils/date-format';
+import { debugLog } from '../utils/debug-log';
 import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import type {
   Database,
@@ -289,8 +290,9 @@ export class IngestService implements IIngestService {
   private emitProgress(progress: IngestProgress): void {
     try {
       this.eventBus.emit('ingest:progress', progress);
-    } catch {
-      // Never let a listener error crash the import
+    } catch (err) {
+      // Never let a listener error crash the import — but log it for debugging
+      debugLog('WARN', '[Ingest] EventBus emit failed', err instanceof Error ? err.message : String(err));
     }
   }
 

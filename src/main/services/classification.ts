@@ -144,6 +144,9 @@ export class ClassificationRunner implements IClassificationRunner {
 
       const totalSuppliers = supplierRows.length;
       let processedSuppliers = 0;
+      let errorCount = 0;
+      let skippedNoPaths = 0;
+      let lastError: Error | null = null;
 
       this.emitProgress({
         status: 'running',
@@ -263,6 +266,7 @@ export class ClassificationRunner implements IClassificationRunner {
           try {
             if (!supplier.l1_l2_paths || supplier.l1_l2_paths.length === 0) {
               debugLog('WARN', `[Classification] l1_l2_paths missing for "${supplier.supplier_name}" — marking as error`);
+              skippedNoPaths++;
               await this.markSupplierError(supplier.id, scopedIds);
             } else {
               await this.classifySupplierTransactions(
@@ -272,6 +276,8 @@ export class ClassificationRunner implements IClassificationRunner {
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             debugLog('ERROR', `Classification failed for supplier "${supplier.supplier_name}"`, { error: errMsg });
+            errorCount++;
+            lastError = err instanceof Error ? err : new Error(errMsg);
             try {
               await this.markSupplierError(supplier.id, scopedIds);
             } catch (markErr) {
@@ -302,6 +308,7 @@ export class ClassificationRunner implements IClassificationRunner {
 
         // Mark invalid ones as errors
         for (const supplier of tailSpendSuppliers.filter((s) => !s.l1_l2_paths || s.l1_l2_paths.length === 0)) {
+          skippedNoPaths++;
           await this.markSupplierError(supplier.id, scopedIds);
           processedSuppliers++;
         }
@@ -432,8 +439,10 @@ export class ClassificationRunner implements IClassificationRunner {
               debugLog('ERROR', `Tail spend L3 classification failed for L2 group "${task.l2Path}"`, {
                 error: err instanceof Error ? err.message : String(err),
               });
+              lastError = err instanceof Error ? err : new Error(String(err));
               // Mark all suppliers in batch as error
               for (const entry of task.batch) {
+                errorCount++;
                 await this.markSupplierError(entry.supplier.id, scopedIds);
                 processedSuppliers++;
               }
@@ -445,6 +454,15 @@ export class ClassificationRunner implements IClassificationRunner {
       }
 
       if (this.isStopped) return;
+
+      // If every supplier that needed LLM classification failed, surface the error
+      const llmSupplierCount = nonTailSpendSuppliers.length + tailSpendSuppliers.length;
+      if (llmSupplierCount > 0 && errorCount + skippedNoPaths >= llmSupplierCount) {
+        if (skippedNoPaths > 0 && errorCount === 0) {
+          throw new Error(`All ${skippedNoPaths} suppliers are missing category paths — run categorization first`);
+        }
+        throw lastError ?? new Error('All suppliers failed during classification');
+      }
 
       // Log to changelog
       const classifiedCount = await this.db.get<{ cnt: number | bigint }>(
@@ -460,13 +478,21 @@ export class ClassificationRunner implements IClassificationRunner {
         description: `Classification completed: ${processedSuppliers} suppliers processed`,
       });
 
+      const completedParts: string[] = ['Completed'];
+      if (skippedNoPaths > 0) {
+        completedParts.push(`${skippedNoPaths} supplier${skippedNoPaths > 1 ? 's' : ''} skipped (missing category paths — run categorization first)`);
+      }
+      if (errorCount > 0) {
+        completedParts.push(`${errorCount} supplier${errorCount > 1 ? 's' : ''} failed during classification`);
+      }
+
       this.emitProgress({
         status: 'completed',
         totalSuppliers,
         processedSuppliers: totalSuppliers,
         percentage: 100,
         currentSupplier: null,
-        currentStep: 'Completed',
+        currentStep: completedParts.join(' — '),
       });
     } catch (err) {
       if (!this.isStopped) {

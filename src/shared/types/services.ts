@@ -282,8 +282,8 @@ export interface ExportService {
 export interface SupplierResearcher {
   researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>, supplierId?: string): Promise<SupplierInfo>;
   researchAll(supplierIds?: string[], options?: { suppressTerminal?: boolean }): Promise<void>;
-  categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<void>;
-  categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], supplierIds?: string[]): Promise<void>;
+  categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<{ categorized: number; skippedNoInfo: number; invalidPaths: number }>;
+  categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], supplierIds?: string[]): Promise<{ categorized: number; invalidPaths: number }>;
   cancel(): void;
 }
 

@@ -472,6 +472,10 @@ export default function SuppliersPage() {
     setEditingFieldIndex(null)
   }, [])
 
+  const handleActivateDetail = useCallback(() => {
+    setActivePanel('detail')
+  }, [])
+
   const handleClearSelections = useCallback(() => {
     setSelectedIds(new Set())
   }, [])
@@ -778,6 +782,7 @@ export default function SuppliersPage() {
               editingFieldIndex={editingFieldIndex}
               onEditingFieldChange={setEditingFieldIndex}
               onMoveToList={handleMoveToList}
+              onActivate={handleActivateDetail}
               isActive={activePanel === 'detail'}
             />
           </div>

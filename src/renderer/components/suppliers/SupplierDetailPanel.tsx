@@ -311,6 +311,7 @@ interface SupplierDetailPanelProps {
   editingFieldIndex: number | null
   onEditingFieldChange: (index: number | null) => void
   onMoveToList: () => void
+  onActivate: () => void
   isActive: boolean
 }
 
@@ -328,6 +329,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   editingFieldIndex,
   onEditingFieldChange,
   onMoveToList,
+  onActivate,
   isActive,
 }, ref) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -434,6 +436,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       className="supplier-detail-panel"
       tabIndex={0}
       onKeyDown={handlePanelKeyDown}
+      onMouseDown={() => { if (!isActive) onActivate() }}
       style={{ outline: 'none' }}
     >
       {/* Header */}

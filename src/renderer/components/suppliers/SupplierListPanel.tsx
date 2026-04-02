@@ -93,10 +93,21 @@ export default function SupplierListPanel({
   const confirmBtnRef = useRef<HTMLButtonElement>(null)
   const [actionFocused, setActionFocused] = useState<'research' | 'categorize' | 'confirm' | null>(null)
 
-  // Auto-focus list for keyboard nav
+  // Auto-focus list for keyboard nav — on mount and whenever panel becomes active
   useEffect(() => {
-    if (isActive) listRef.current?.focus()
+    if (isActive) {
+      // Small delay to ensure DOM is ready after render
+      const timer = setTimeout(() => listRef.current?.focus(), 50)
+      return () => clearTimeout(timer)
+    }
   }, [isActive])
+
+  // Focus list on initial data load
+  useEffect(() => {
+    if (isActive && suppliers.length > 0) {
+      setTimeout(() => listRef.current?.focus(), 50)
+    }
+  }, [suppliers.length > 0]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle Cmd+Enter to focus action buttons, and arrow keys within them
   const handleListKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -217,6 +228,7 @@ export default function SupplierListPanel({
         className="supplier-list-scroll"
         tabIndex={0}
         onKeyDown={handleListKeyDown}
+        onMouseDown={() => listRef.current?.focus()}
       >
         {suppliers.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-gray-400">

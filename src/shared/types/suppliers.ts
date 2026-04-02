@@ -25,18 +25,24 @@ export interface SupplierParent {
   createdAt: string;
 }
 
-/** A supplier from the shared supplier_universe.db */
-export interface Supplier {
-  id: string;
-  supplierName: string;
-  aliases: string[] | null;
-  parentSupplierId: string | null;
+// ─── Supplier Universe Record ────────────────────────────────────────────────
+
+/** Full supplier record from the shared supplier universe. */
+export interface SupplierRecord {
+  supplierInfo: SupplierInfo;
+  aliases: string[];
   parentName: string | null;
-  supplierInfo: SupplierInfo | null;
-  mappedTaxonomyPaths: string[] | null;
+  mappedTaxonomyPaths: string[];
   categoryASupplier: boolean;
-  createdAt: string;
-  updatedAt: string;
+}
+
+/** Partial input for upserting a supplier into the universe. */
+export interface SupplierRecordInput {
+  supplierInfo?: Partial<SupplierInfo>;
+  aliases?: string[];
+  parentName?: string | null;
+  mappedTaxonomyPaths?: string[];
+  categoryASupplier?: boolean;
 }
 
 // ─── Project Suppliers (per-project, FK-based model) ─────────────────────────

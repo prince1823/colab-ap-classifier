@@ -286,6 +286,92 @@ describe('SupplierResearcher', () => {
     });
   });
 
+  describe('resolveCatASupplier (via researchAll)', () => {
+    const taxonomy = [
+      { id: 't1', fullPath: 'Corporate|IT', l1: 'Corporate', l2: 'IT', l3: null, depth: 2, description: null, parentPath: 'Corporate', createdAt: '' },
+    ];
+
+    const catASupplier = {
+      id: 'sup1', supplierName: 'CatACo', confirmationStatus: 'pending' as const,
+      isTailSpend: false, parentSupplierId: null, parentName: null,
+      supplierInfo: null, mappedTaxonomyPaths: ['Corp Services|Information Technology'],
+      l1L2Path: null, universeMatch: true, isResearched: false,
+      createdAt: '', transactionCount: 5, totalSpend: 5000, aliases: [],
+      categoryASupplier: true,
+    };
+
+    function setupCatAMocks() {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([catASupplier] as any);
+      vi.mocked(supplierUniverse.getSupplier).mockResolvedValue({ industry: 'IT', supplierType: 'Corp' });
+      vi.mocked(supplierUniverse.getSuppliersByNames).mockResolvedValue(new Map([
+        ['CatACo', { industry: 'IT', supplierType: 'Corp' }],
+      ]) as any);
+      vi.mocked(supplierUniverse.getSupplierRecord).mockResolvedValue({
+        categoryASupplier: true,
+        mappedTaxonomyPaths: ['Corp Services|Information Technology'],
+        parentName: null,
+      } as any);
+      vi.mocked(taxonomyStore.getNodes).mockResolvedValue(taxonomy as any);
+      vi.mocked(ruleStore.getCatARuleForSupplier).mockResolvedValue(null);
+    }
+
+    it('should create rule and mark supplier as catA when path resolves', async () => {
+      setupCatAMocks();
+      vi.mocked(catAAgent.resolve).mockResolvedValue({ resolvedPath: 'Corporate|IT' });
+
+      await researcher.researchAll();
+
+      expect(catAAgent.resolve).toHaveBeenCalledWith('Corp Services|Information Technology', taxonomy);
+      expect(ruleStore.createRule).toHaveBeenCalledWith(expect.objectContaining({
+        name: '[Cat A] CatACo',
+        categoryASupplier: true,
+        targetTaxonomyNodeId: 't1',
+      }));
+      expect(supplierService.updateSupplier).toHaveBeenCalledWith('sup1', expect.objectContaining({
+        categoryASupplier: true,
+      }));
+    });
+
+    it('should NOT mark supplier as catA when all paths fail to resolve', async () => {
+      setupCatAMocks();
+      vi.mocked(catAAgent.resolve).mockResolvedValue({ resolvedPath: 'Nonexistent|Path' });
+
+      await researcher.researchAll();
+
+      // Rule should NOT be created (path doesn't match taxonomy)
+      expect(ruleStore.createRule).not.toHaveBeenCalled();
+      // Supplier should NOT be marked as catA (no rule was created)
+      expect(supplierService.updateSupplier).not.toHaveBeenCalledWith('sup1', expect.objectContaining({
+        categoryASupplier: true,
+      }));
+    });
+
+    it('should emit warning when Cat A resolution fails', async () => {
+      setupCatAMocks();
+      vi.mocked(catAAgent.resolve).mockRejectedValue(new Error('LLM error'));
+
+      await researcher.researchAll();
+
+      expect(eventBus.emit).toHaveBeenCalledWith(
+        'suppliers:research:progress',
+        expect.objectContaining({
+          status: 'completed',
+          currentStep: expect.stringContaining('Cat A'),
+        })
+      );
+    });
+
+    it('should skip resolution when rule already exists', async () => {
+      setupCatAMocks();
+      vi.mocked(ruleStore.getCatARuleForSupplier).mockResolvedValue({ id: 'existing-rule' } as any);
+
+      await researcher.researchAll();
+
+      expect(catAAgent.resolve).not.toHaveBeenCalled();
+      expect(ruleStore.createRule).not.toHaveBeenCalled();
+    });
+  });
+
   describe('cancel', () => {
     it('should be callable without error', () => {
       expect(() => researcher.cancel()).not.toThrow();

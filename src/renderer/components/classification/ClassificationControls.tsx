@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 import type { GroupedFilter } from '../../../shared/types/transactions'
 
 interface Props {
@@ -64,7 +65,7 @@ export default function ClassificationControls({ isRunning, groupedFilter, onSta
       await ipc.classification.stop()
       onCancelled()
     } catch (e) {
-      console.error('Failed to cancel classification:', e)
+      showError('Failed to cancel classification', e)
     } finally {
       setCancelling(false)
     }

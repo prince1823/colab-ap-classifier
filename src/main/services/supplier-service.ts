@@ -122,12 +122,16 @@ export class SupplierService implements ISupplierService {
     return result.id;
   }
 
-  async normalizeAllTransactions(): Promise<void> {
+  async normalizeAllTransactions(onProgress?: (done: number, total: number, step: string) => void): Promise<void> {
+    const report = onProgress || (() => {});
+
     // Get all distinct original_supplier_name values from transactions
     const cols = await this.db.all<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'original_supplier_name'"
     );
     if (cols.length === 0) return;
+
+    report(0, 0, 'Finding unique suppliers...');
 
     const supplierRows = await this.db.all<{ original_supplier_name: string }>(
       `SELECT DISTINCT original_supplier_name FROM transactions
@@ -135,6 +139,9 @@ export class SupplierService implements ISupplierService {
     );
 
     if (supplierRows.length === 0) return;
+
+    const totalSuppliers = supplierRows.length;
+    report(0, totalSuppliers, `Resolving 0 / ${totalSuppliers.toLocaleString()} suppliers...`);
 
     // Pre-fetch all existing alias mappings once for O(1) lookup per raw name
     const aliasRows = await this.db.all<{ key: string; project_supplier_id: string }>(
@@ -146,39 +153,54 @@ export class SupplierService implements ISupplierService {
 
     // Build a map of rawName → supplierId (this creates project_suppliers records as needed)
     const nameToSupplierId = new Map<string, string>();
+    let resolved = 0;
     for (const row of supplierRows) {
       const supplierId = await this.normalizeSupplierName(row.original_supplier_name, aliasMap);
       nameToSupplierId.set(row.original_supplier_name, supplierId);
+      resolved++;
+      // Report every 100 suppliers to avoid flooding the event bus
+      if (resolved % 100 === 0 || resolved === totalSuppliers) {
+        report(resolved, totalSuppliers, `Resolving suppliers ${resolved.toLocaleString()} / ${totalSuppliers.toLocaleString()}...`);
+      }
     }
 
-    // Bulk UPDATE using a per-call temp table to avoid collisions if imports overlap
-    const tmpTable = `_norm_map_${uuidv4().replace(/-/g, '')}`;
-    await this.db.exec(`CREATE TEMP TABLE ${tmpTable} (original_name VARCHAR, supplier_id VARCHAR)`);
+    // Link transactions to suppliers in batches so we can report progress.
+    // Each batch UPDATEs transactions for a chunk of supplier names via a temp table.
+    const LINK_BATCH_SIZE = 500;
+    const entries = [...nameToSupplierId.entries()];
+    const totalEntries = entries.length;
+    let linked = 0;
 
-    try {
-      // Insert mappings into temp table in chunks
-      const CHUNK_SIZE = 1000;
-      const entries = [...nameToSupplierId.entries()];
-      for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
-        const chunk = entries.slice(i, i + CHUNK_SIZE);
+    report(0, totalEntries, `Linking transactions to suppliers 0 / ${totalEntries.toLocaleString()}...`);
+
+    for (let i = 0; i < entries.length; i += LINK_BATCH_SIZE) {
+      const chunk = entries.slice(i, i + LINK_BATCH_SIZE);
+      const tmpTable = `_norm_map_${uuidv4().replace(/-/g, '')}`;
+      await this.db.exec(`CREATE TEMP TABLE ${tmpTable} (original_name VARCHAR, supplier_id VARCHAR)`);
+
+      try {
         // sid is always a UUID from normalizeSupplierName — safe to interpolate
         const valueRows = chunk.map(([name, sid]) =>
           `('${name.replace(/'/g, "''")}', '${sid.replace(/'/g, "''")}')`
         ).join(',\n');
         await this.db.exec(`INSERT INTO ${tmpTable} (original_name, supplier_id) VALUES ${valueRows}`);
+
+        await this.db.exec(`
+          UPDATE transactions
+          SET project_supplier_id = m.supplier_id
+          FROM ${tmpTable} m
+          WHERE transactions.original_supplier_name = m.original_name
+            AND transactions.project_supplier_id IS NULL
+        `);
+      } finally {
+        try { await this.db.exec(`DROP TABLE IF EXISTS ${tmpTable}`); } catch { /* ignore cleanup error */ }
       }
 
-      // Single bulk UPDATE from temp table
-      await this.db.exec(`
-        UPDATE transactions
-        SET project_supplier_id = m.supplier_id
-        FROM ${tmpTable} m
-        WHERE transactions.original_supplier_name = m.original_name
-          AND transactions.project_supplier_id IS NULL
-      `);
-    } finally {
-      try { await this.db.exec(`DROP TABLE IF EXISTS ${tmpTable}`); } catch { /* ignore cleanup error */ }
+      linked += chunk.length;
+      report(linked, totalEntries, `Linking transactions to suppliers ${linked.toLocaleString()} / ${totalEntries.toLocaleString()}...`);
     }
+
+    report(totalSuppliers, totalSuppliers, 'Supplier normalization complete');
   }
 
   async assignAlias(supplierId: string, rawName: string): Promise<void> {

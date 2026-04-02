@@ -1,5 +1,5 @@
 import type { LicenseStatus, LicenseActivationResult } from './license';
-import type { SupplierInfo, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
+import type { SupplierInfo, SupplierRecord, SupplierRecordInput, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
 import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
@@ -75,20 +75,8 @@ export interface SupplierUniverse {
   getSupplier(name: string): Promise<SupplierInfo | null>;
   getSuppliersByNames(names: string[]): Promise<Map<string, SupplierInfo>>;
   upsertSupplier(name: string, data: Partial<SupplierInfo>): Promise<void>;
-  upsertSupplierFull(name: string, data: {
-    supplierInfo?: Partial<SupplierInfo>;
-    aliases?: string[];
-    parentName?: string | null;
-    mappedTaxonomyPaths?: string[];
-    categoryASupplier?: boolean;
-  }): Promise<void>;
-  getSupplierRecord(name: string): Promise<{
-    supplierInfo: SupplierInfo;
-    aliases: string[];
-    parentName: string | null;
-    mappedTaxonomyPaths: string[];
-    categoryASupplier: boolean;
-  } | null>;
+  upsertSupplierFull(name: string, data: SupplierRecordInput): Promise<void>;
+  getSupplierRecord(name: string): Promise<SupplierRecord | null>;
   searchVariants(name: string): Promise<string[]>;
 }
 
@@ -206,7 +194,7 @@ export interface TaxonomyStore {
 
 export interface SupplierService {
   normalizeSupplierName(rawName: string, aliasMap?: Map<string, string>): Promise<string>;
-  normalizeAllTransactions(): Promise<void>;
+  normalizeAllTransactions(onProgress?: (done: number, total: number, step: string) => void): Promise<void>;
   assignAlias(supplierId: string, rawName: string): Promise<void>;
   getProjectAliases(supplierId: string): Promise<string[]>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
@@ -243,7 +231,7 @@ export interface RuleStore {
   getRule(id: string): Promise<OverrideRule | null>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
   createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number; skippedCount: number; changelogId?: string }>;
-  previewRuleConflicts(candidateIds: string[]): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }>;
+  previewRuleConflicts(candidateIds: string[], newRuleGroupId?: string | null): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }>;
   updateRule(ruleId: string, updates: OverrideRuleUpdate): Promise<void>;
   deleteRule(ruleId: string): Promise<void>;
   setCategoryA(ruleId: string, value: boolean): Promise<void>;
@@ -291,13 +279,11 @@ export interface ExportService {
 
 // ─── Orchestrators ───────────────────────────────────────────────────────────
 
-export type ResearchProgressCallback = (progress: ResearchProgress) => void;
-
 export interface SupplierResearcher {
   researchSingle(supplierName: string, universeCache?: Map<string, SupplierInfo>, supplierId?: string): Promise<SupplierInfo>;
   researchAll(supplierIds?: string[], options?: { suppressTerminal?: boolean }): Promise<void>;
-  categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<void>;
-  categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], supplierIds?: string[]): Promise<void>;
+  categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<{ categorized: number; skippedNoInfo: number; invalidPaths: number }>;
+  categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], supplierIds?: string[]): Promise<{ categorized: number; invalidPaths: number }>;
   cancel(): void;
 }
 

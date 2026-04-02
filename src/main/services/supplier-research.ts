@@ -110,11 +110,12 @@ export class SupplierResearcher implements ISupplierResearcher {
 
     // Gather candidates
     let candidates: Array<{ id: string; supplierName: string; categoryASupplier: boolean; mappedTaxonomyPaths: string[] | null }>;
+    let excludedTailSpend = 0;
     if (supplierIds && supplierIds.length > 0) {
       const fetched = await Promise.all(supplierIds.map((id) => this.supplierService.getProjectSupplier(id)));
-      candidates = fetched.filter(
-        (s): s is NonNullable<typeof s> => s !== null && !s.isTailSpend
-      );
+      const valid = fetched.filter((s): s is NonNullable<typeof s> => s !== null);
+      excludedTailSpend = valid.filter((s) => s.isTailSpend).length;
+      candidates = valid.filter((s) => !s.isTailSpend);
     } else {
       const all = await this.supplierService.listProjectSuppliers();
       candidates = all.filter((s) => !s.isResearched && !s.isTailSpend);
@@ -122,11 +123,17 @@ export class SupplierResearcher implements ISupplierResearcher {
 
     const total = candidates.length;
     if (total === 0) {
-      emit(0, 0, 'No suppliers to research');
+      const step = excludedTailSpend > 0
+        ? `No suppliers to research (${excludedTailSpend} tail spend supplier${excludedTailSpend > 1 ? 's' : ''} excluded — categorized via transaction data)`
+        : 'No suppliers to research';
+      emit(0, 0, step);
       return;
     }
 
-    emit(0, total, 'Starting research');
+    const startStep = excludedTailSpend > 0
+      ? `Starting research (${excludedTailSpend} tail spend supplier${excludedTailSpend > 1 ? 's' : ''} excluded)`
+      : 'Starting research';
+    emit(0, total, startStep);
 
     // Pre-fetch all universe entries in one batch query — avoids N round-trips during concurrent phase
     const universeCache = await this.supplierUniverse.getSuppliersByNames(
@@ -137,6 +144,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     const taxonomyNodes = await this.taxonomyStore.getNodes();
 
     let completed = 0;
+    let catAResolveFailed = 0;
     const queue = [...candidates];
 
     const worker = async (): Promise<void> => {
@@ -172,13 +180,13 @@ export class SupplierResearcher implements ISupplierResearcher {
             if (supplier.categoryASupplier || universeRecord?.categoryASupplier) {
               const paths = updatePayload.mappedTaxonomyPaths ?? supplier.mappedTaxonomyPaths ?? [];
               if (paths.length > 0) {
-                await this.resolveCatASupplier(supplier.id, supplier.supplierName, paths, taxonomyNodes);
+                const resolved = await this.resolveCatASupplier(supplier.id, supplier.supplierName, paths, taxonomyNodes);
+                if (!resolved) catAResolveFailed++;
               }
             }
           } catch (updateErr) {
             console.error(`[Research] Failed to persist info for "${supplier.supplierName}":`, updateErr);
-            // Still mark researched even if info write failed
-            await this.supplierService.markResearched(supplier.id);
+            // Don't mark as researched — persistence failed, data is incomplete
           }
         } catch (err) {
           console.error(`[Research] Failed for "${supplier.supplierName}":`, err);
@@ -202,7 +210,10 @@ export class SupplierResearcher implements ISupplierResearcher {
         currentStep: 'Cancelled',
       } satisfies ResearchProgress);
     } else if (!options?.suppressTerminal) {
-      emit(total, total, 'Completed');
+      const step = catAResolveFailed > 0
+        ? `Completed — ${catAResolveFailed} Cat A supplier${catAResolveFailed > 1 ? 's' : ''} could not be mapped to project taxonomy`
+        : 'Completed';
+      emit(total, total, step);
     }
   }
 
@@ -210,20 +221,26 @@ export class SupplierResearcher implements ISupplierResearcher {
    * Categorize non-tail-spend suppliers that have supplier_info but no l1_l2_path.
    * Uses the existing selectCategories agent method.
    */
-  async categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<void> {
-    if (this.isCancelled) return;
+  async categorizeWithSupplierInfo(
+    taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]
+  ): Promise<{ categorized: number; skippedNoInfo: number; invalidPaths: number }> {
+    if (this.isCancelled) return { categorized: 0, skippedNoInfo: 0, invalidPaths: 0 };
 
-    // Fetch candidates: non-tail-spend, has supplier_info, no l1_l2_path
+    // Fetch candidates: non-tail-spend, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
     const idSet = supplierIds ? new Set(supplierIds) : null;
-    const candidates = allSuppliers.filter(
-      (s) => !s.isTailSpend && s.supplierInfo !== null && s.l1L2Path === null && (!idSet || idSet.has(s.id))
+    const eligible = allSuppliers.filter(
+      (s) => !s.isTailSpend && s.l1L2Path === null && (!idSet || idSet.has(s.id))
     );
+    const skippedNoInfo = eligible.filter((s) => s.supplierInfo === null).length;
+    const candidates = eligible.filter((s) => s.supplierInfo !== null);
 
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) return { categorized: 0, skippedNoInfo, invalidPaths: 0 };
 
     const total = candidates.length;
     let completed = 0;
+    let categorized = 0;
+    let invalidPaths = 0;
     const BATCH_SIZE = 10;
 
     const batches: typeof candidates[] = [];
@@ -232,6 +249,8 @@ export class SupplierResearcher implements ISupplierResearcher {
     }
 
     const queue = [...batches];
+    let failedBatches = 0;
+    let lastError: Error | null = null;
 
     const worker = async (): Promise<void> => {
       while (true) {
@@ -259,16 +278,20 @@ export class SupplierResearcher implements ISupplierResearcher {
                 if (validated) {
                   validatedPaths.push(validated);
                 } else {
+                  invalidPaths++;
                   console.warn(`[Research] Invalid category path "${path}" for supplier "${batch[i].supplierName}" — skipping`);
                 }
               }
               if (validatedPaths.length > 0) {
                 await this.supplierService.updateSupplier(batch[i].id, { l1L2Path: validatedPaths });
+                categorized++;
               }
             }
           }
         } catch (err) {
           console.error('[Research] categorizeWithSupplierInfo batch failed:', err);
+          failedBatches++;
+          lastError = err instanceof Error ? err : new Error(String(err));
         }
 
         completed += batch.length;
@@ -284,6 +307,12 @@ export class SupplierResearcher implements ISupplierResearcher {
     };
 
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => worker()));
+
+    if (failedBatches > 0 && failedBatches === batches.length) {
+      throw lastError ?? new Error('All categorization batches failed');
+    }
+
+    return { categorized, skippedNoInfo, invalidPaths };
   }
 
   /**
@@ -295,8 +324,8 @@ export class SupplierResearcher implements ISupplierResearcher {
     companyContext: CompanyContext,
     columnPriorities: string[],
     supplierIds?: string[]
-  ): Promise<void> {
-    if (this.isCancelled) return;
+  ): Promise<{ categorized: number; invalidPaths: number }> {
+    if (this.isCancelled) return { categorized: 0, invalidPaths: 0 };
 
     // Fetch candidates: tail spend, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
@@ -305,7 +334,7 @@ export class SupplierResearcher implements ISupplierResearcher {
       (s) => s.isTailSpend && s.l1L2Path === null && (!idSet || idSet.has(s.id))
     );
 
-    if (tailSpendSuppliers.length === 0) return;
+    if (tailSpendSuppliers.length === 0) return { categorized: 0, invalidPaths: 0 };
 
     // Build dedup groups per supplier
     const supplierGroups: Array<{
@@ -316,7 +345,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     }> = [];
 
     for (const supplier of tailSpendSuppliers) {
-      if (this.isCancelled) return;
+      if (this.isCancelled) return { categorized: 0, invalidPaths: 0 };
 
       // Fetch transactions for this supplier
       const txns = await this.getSupplierTransactions(supplier.id, columnPriorities);
@@ -342,7 +371,10 @@ export class SupplierResearcher implements ISupplierResearcher {
       });
     }
 
-    if (supplierGroups.length === 0) return;
+    if (supplierGroups.length === 0) return { categorized: 0, invalidPaths: 0 };
+
+    let categorized = 0;
+    let invalidPaths = 0;
 
     // Batch: max 10 suppliers, max 300 groups per call
     const MAX_SUPPLIERS = 10;
@@ -381,6 +413,8 @@ export class SupplierResearcher implements ISupplierResearcher {
 
     // Process batches with worker pool
     const queue = [...batches];
+    let failedBatches = 0;
+    let lastError: Error | null = null;
 
     const worker = async (): Promise<void> => {
       while (true) {
@@ -404,18 +438,28 @@ export class SupplierResearcher implements ISupplierResearcher {
               const validated = validateCategoryPath(path, taxonomy);
               if (validated) {
                 await this.supplierService.updateSupplier(batch[i].id, { l1L2Path: [validated] });
+                categorized++;
               } else {
+                invalidPaths++;
                 console.warn(`[Research] Invalid tail spend category path "${path}" for "${batch[i].name}" — skipping`);
               }
             }
           }
         } catch (err) {
           console.error('[Research] categorizeTailSpend batch failed:', err);
+          failedBatches++;
+          lastError = err instanceof Error ? err : new Error(String(err));
         }
       }
     };
 
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => worker()));
+
+    if (failedBatches > 0 && failedBatches === batches.length) {
+      throw lastError ?? new Error('All tail spend categorization batches failed');
+    }
+
+    return { categorized, invalidPaths };
   }
 
   /**
@@ -448,14 +492,15 @@ export class SupplierResearcher implements ISupplierResearcher {
     supplierName: string,
     mappedPaths: string[],
     taxonomyNodes: import('../../shared/types/taxonomy').TaxonomyNode[],
-  ): Promise<void> {
-    // One cat A rule per supplier — skip silently if one already exists
+  ): Promise<boolean> {
+    // One cat A rule per supplier — skip if one already exists
     const existingCatARule = await this.ruleStore.getCatARuleForSupplier(supplierName);
     if (existingCatARule) {
-      return;
+      return true;
     }
 
     // Try each mapped path in order; create a rule for the first successful resolution
+    let ruleCreated = false;
     for (const mappedPath of mappedPaths) {
       try {
         const { resolvedPath } = await this.catAAgent.resolve(mappedPath, taxonomyNodes);
@@ -477,15 +522,19 @@ export class SupplierResearcher implements ISupplierResearcher {
           source: 'supplier_universe',
           categoryASupplier: true,
         });
-        // Stop after first successful rule creation
+        await this.supplierService.updateSupplier(supplierId, { categoryASupplier: true });
+        ruleCreated = true;
         break;
       } catch (err) {
         console.error(`[CatA] Failed to resolve path "${mappedPath}" for supplier "${supplierName}":`, err);
       }
     }
 
-    // Mark the project supplier as category A
-    await this.supplierService.updateSupplier(supplierId, { categoryASupplier: true });
+    if (!ruleCreated) {
+      console.warn(`[CatA] All mapped paths failed to resolve for "${supplierName}" — no rule created, not marked as Cat A`);
+    }
+
+    return ruleCreated;
   }
 
   cancel(): void {

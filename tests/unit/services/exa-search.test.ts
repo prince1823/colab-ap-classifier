@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  searchSupplier,
-  isAvailable,
-  resetClient,
-} from '../../../src/main/services/exa-search';
+import { ExaWebSearch } from '../../../src/main/services/exa-search';
 
 // Mock the exa-js module
 vi.mock('exa-js', () => {
@@ -50,10 +46,11 @@ const MOCK_SEARCH_RESPONSE = {
 
 describe('exa-search', () => {
   const originalEnv = process.env.EXA_API_KEY;
+  let client: ExaWebSearch;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    resetClient();
+    client = new ExaWebSearch();
   });
 
   afterEach(() => {
@@ -67,24 +64,24 @@ describe('exa-search', () => {
   describe('isAvailable', () => {
     it('should return true when EXA_API_KEY is set', () => {
       process.env.EXA_API_KEY = 'test-key';
-      expect(isAvailable()).toBe(true);
+      expect(client.isAvailable()).toBe(true);
     });
 
     it('should return false when EXA_API_KEY is not set', () => {
       delete process.env.EXA_API_KEY;
-      expect(isAvailable()).toBe(false);
+      expect(client.isAvailable()).toBe(false);
     });
 
     it('should return false when EXA_API_KEY is empty', () => {
       process.env.EXA_API_KEY = '';
-      expect(isAvailable()).toBe(false);
+      expect(client.isAvailable()).toBe(false);
     });
   });
 
   describe('searchSupplier', () => {
     it('should return empty array when EXA_API_KEY is not set', async () => {
       delete process.env.EXA_API_KEY;
-      const results = await searchSupplier('Acme Corporation');
+      const results = await client.searchSupplier('Acme Corporation');
       expect(results).toEqual([]);
       expect(mockSearch).not.toHaveBeenCalled();
     });
@@ -93,7 +90,7 @@ describe('exa-search', () => {
       process.env.EXA_API_KEY = 'test-key';
       mockSearch.mockResolvedValueOnce(MOCK_SEARCH_RESPONSE);
 
-      await searchSupplier('Acme Corporation');
+      await client.searchSupplier('Acme Corporation');
 
       expect(MockExa).toHaveBeenCalledWith('test-key');
       expect(mockSearch).toHaveBeenCalledWith(
@@ -110,7 +107,7 @@ describe('exa-search', () => {
       process.env.EXA_API_KEY = 'test-key';
       mockSearch.mockResolvedValueOnce({ results: [], requestId: 'req-456' });
 
-      await searchSupplier('Acme Corporation', '123 Main St, Springfield, IL');
+      await client.searchSupplier('Acme Corporation', '123 Main St, Springfield, IL');
 
       expect(mockSearch).toHaveBeenCalledWith(
         'Acme Corporation 123 Main St, Springfield, IL company information linkedin',
@@ -122,7 +119,7 @@ describe('exa-search', () => {
       process.env.EXA_API_KEY = 'test-key';
       mockSearch.mockResolvedValueOnce({ results: [], requestId: 'req-789' });
 
-      await searchSupplier('Test Corp', undefined, 3);
+      await client.searchSupplier('Test Corp', undefined, 3);
 
       expect(mockSearch).toHaveBeenCalledWith(
         expect.any(String),
@@ -134,7 +131,7 @@ describe('exa-search', () => {
       process.env.EXA_API_KEY = 'test-key';
       mockSearch.mockResolvedValueOnce(MOCK_SEARCH_RESPONSE);
 
-      const results = await searchSupplier('Acme Corporation');
+      const results = await client.searchSupplier('Acme Corporation');
 
       expect(results).toHaveLength(2);
       expect(results[0].title).toBe('Acme Corporation - Industrial Supplies');
@@ -145,7 +142,7 @@ describe('exa-search', () => {
       process.env.EXA_API_KEY = 'test-key';
       mockSearch.mockResolvedValueOnce(MOCK_SEARCH_RESPONSE);
 
-      const results = await searchSupplier('Acme Corporation');
+      const results = await client.searchSupplier('Acme Corporation');
 
       expect(results[0]).toEqual({
         title: 'Acme Corporation - Industrial Supplies',
@@ -164,7 +161,7 @@ describe('exa-search', () => {
         requestId: 'req-000',
       });
 
-      const results = await searchSupplier('Test');
+      const results = await client.searchSupplier('Test');
       expect(results[0].title).toBe('Untitled');
     });
 
@@ -172,8 +169,8 @@ describe('exa-search', () => {
       process.env.EXA_API_KEY = 'test-key';
       mockSearch.mockResolvedValue({ results: [], requestId: 'req-reuse' });
 
-      await searchSupplier('First');
-      await searchSupplier('Second');
+      await client.searchSupplier('First');
+      await client.searchSupplier('Second');
 
       // Exa constructor should only be called once
       expect(MockExa).toHaveBeenCalledTimes(1);
@@ -183,7 +180,7 @@ describe('exa-search', () => {
       process.env.EXA_API_KEY = 'test-key';
       mockSearch.mockRejectedValueOnce(new Error('Exa API rate limit'));
 
-      await expect(searchSupplier('Test')).rejects.toThrow('Exa API rate limit');
+      await expect(client.searchSupplier('Test')).rejects.toThrow('Exa API rate limit');
     });
   });
 
@@ -192,13 +189,13 @@ describe('exa-search', () => {
       process.env.EXA_API_KEY = 'key-1';
       mockSearch.mockResolvedValue({ results: [], requestId: 'req-a' });
 
-      await searchSupplier('First');
+      await client.searchSupplier('First');
       expect(MockExa).toHaveBeenCalledTimes(1);
 
-      resetClient();
+      client.resetClient();
       process.env.EXA_API_KEY = 'key-2';
 
-      await searchSupplier('Second');
+      await client.searchSupplier('Second');
       expect(MockExa).toHaveBeenCalledTimes(2);
       expect(MockExa).toHaveBeenLastCalledWith('key-2');
     });

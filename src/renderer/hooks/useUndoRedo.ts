@@ -1,5 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 
 interface UndoEntry {
   type: 'reclassify';
@@ -45,7 +46,7 @@ export function useUndoRedo({ onUndoRedo }: UseUndoRedoOptions = {}) {
       updateFlags()
       if (onUndoRedo) await onUndoRedo()
     } catch (err) {
-      console.error('[Undo] Failed to revert:', err)
+      showError('Undo failed', err)
       undoStack.current.push(entry) // put it back
       updateFlags()
     }
@@ -62,7 +63,7 @@ export function useUndoRedo({ onUndoRedo }: UseUndoRedoOptions = {}) {
       updateFlags()
       if (onUndoRedo) await onUndoRedo()
     } catch (err) {
-      console.error('[Redo] Failed:', err)
+      showError('Redo failed', err)
       redoStack.current.push(entry) // put it back
       updateFlags()
     }

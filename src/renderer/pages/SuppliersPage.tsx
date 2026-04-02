@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ipc } from '../lib/ipc'
 import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppliers'
+import type { TaxonomyNode } from '../../shared/types/taxonomy'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { researchSingle, isResearchRunning } from '../lib/researchRunner'
+import { showError } from '../lib/toast-errors'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import SupplierListPanel from '../components/suppliers/SupplierListPanel'
+import type { NameSort } from '../components/suppliers/SupplierListPanel'
 import SupplierDetailPanel from '../components/suppliers/SupplierDetailPanel'
 import type { SupplierDetailPanelHandle } from '../components/suppliers/SupplierDetailPanel'
 import { useSupplierListKeyboard } from '../hooks/useSupplierListKeyboard'
@@ -35,10 +38,12 @@ export default function SuppliersPage() {
   const [tailSpendSet, setTailSpendSet] = useState(false)
   const [tailSpendActive, setTailSpendActive] = useState(false)
   const [editingThreshold, setEditingThreshold] = useState(false)
+  const [taxonomyL1L2Options, setTaxonomyL1L2Options] = useState<string[]>([])
 
   // New state for master-detail
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [nameSort, setNameSort] = useState<NameSort>('none')
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
 
   // Cross-panel keyboard navigation
@@ -89,6 +94,22 @@ export default function SuppliersPage() {
     )
     if (hasTailFilter) setTailSpendActive(true)
   }, [projectFilePath, columnsLength]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load unique L1|L2 paths from taxonomy for dropdown options
+  useEffect(() => {
+    if (!projectFilePath) return
+    async function loadTaxonomyOptions() {
+      try {
+        const nodes = await ipc.taxonomy.getNodes() as TaxonomyNode[]
+        const l1l2Set = new Set<string>()
+        for (const node of nodes) {
+          if (node.l1 && node.l2) l1l2Set.add(`${node.l1}|${node.l2}`)
+        }
+        setTaxonomyL1L2Options([...l1l2Set].sort())
+      } catch { /* non-fatal */ }
+    }
+    loadTaxonomyOptions()
+  }, [projectFilePath])
 
   const loadData = useCallback(async () => {
     if (suppliers.length === 0) setLoading(true)
@@ -183,10 +204,10 @@ export default function SuppliersPage() {
   }, [updateSuppliers])
 
   /** Save l1L2Path directly on project_suppliers */
-  const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newValue: string) => {
+  const saveL1L2Path = useCallback(async (supplier: ProjectSupplierView, newPaths: string[]) => {
     setSaving(true)
     try {
-      const paths = newValue ? newValue.split(',').map(s => s.trim()).filter(Boolean) : undefined
+      const paths = newPaths.length > 0 ? newPaths : undefined
       await ipc.suppliers.update(supplier.id, { l1L2Path: paths })
       updateSuppliers(prev => prev.map(s =>
         s.id === supplier.id ? { ...s, l1L2Path: paths || null } : s
@@ -234,7 +255,7 @@ export default function SuppliersPage() {
     // Fire-and-forget: progress is streamed via EventBus → workflowStore.
     // SuppliersPage reloads supplier data when the completed event arrives (see effect above).
     ipc.suppliers.researchAll(selectedIds_).catch((err) => {
-      console.error('[Research] researchAll failed:', err)
+      showError('Research failed', err)
     })
     setSelectedIds(new Set())
   }, [suppliers, selectedIds])
@@ -252,7 +273,7 @@ export default function SuppliersPage() {
       return
     }
     ipc.suppliers.categorizeAll().catch((err) => {
-      console.error('[Categorize] categorizeAll failed:', err)
+      showError('Categorization failed', err)
     })
   }, [suppliers])
 
@@ -277,7 +298,7 @@ export default function SuppliersPage() {
       return
     }
     ipc.suppliers.categorizeAll(ids).catch((err) => {
-      console.error('[Categorize] categorizeSelected failed:', err)
+      showError('Categorization failed', err)
     })
   }, [suppliers, selectedIds])
 
@@ -292,7 +313,7 @@ export default function SuppliersPage() {
       return
     }
     ipc.suppliers.categorizeAll([supplier.id]).catch((err) => {
-      console.error('[Categorize] categorizeSupplier failed:', err)
+      showError('Categorization failed', err)
     })
   }, [])
 
@@ -377,11 +398,12 @@ export default function SuppliersPage() {
 
   // --- Derived data for the two-panel layout ---
 
-  /** Sort by spend descending */
-  const sortedSuppliers = useMemo(() =>
-    [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend),
-    [suppliers]
-  )
+  /** Sort by spend descending (default) or by name */
+  const sortedSuppliers = useMemo(() => {
+    if (nameSort === 'asc') return [...suppliers].sort((a, b) => a.supplierName.localeCompare(b.supplierName))
+    if (nameSort === 'desc') return [...suppliers].sort((a, b) => b.supplierName.localeCompare(a.supplierName))
+    return [...suppliers].sort((a, b) => b.totalSpend - a.totalSpend)
+  }, [suppliers, nameSort])
 
   /** Apply quick filter */
   const quickFiltered = useMemo(() => {
@@ -449,6 +471,10 @@ export default function SuppliersPage() {
   const handleMoveToList = useCallback(() => {
     setActivePanel('list')
     setEditingFieldIndex(null)
+  }, [])
+
+  const handleActivateDetail = useCallback(() => {
+    setActivePanel('detail')
   }, [])
 
   const handleClearSelections = useCallback(() => {
@@ -700,18 +726,39 @@ export default function SuppliersPage() {
               </div>
             </div>
           )}
-          {researchProgress && researchProgress.status === 'completed' && (
+          {researchProgress && researchProgress.status === 'completed' && (() => {
+            const hasWarning = researchProgress.currentStep !== 'Complete' && researchProgress.currentStep
+            return (
+              <div className="suppliers-progress">
+                <div className="flex items-center gap-2 py-1">
+                  {hasWarning ? (
+                    <span className="text-amber-600 font-semibold text-sm">
+                      ⚠ {researchProgress.currentStep}
+                    </span>
+                  ) : (
+                    <span className="text-green-600 font-semibold text-sm">
+                      ✓ {researchProgress.totalSuppliers > 0 ? 'Research' : 'Categorization'} completed
+                    </span>
+                  )}
+                  {!hasWarning && researchProgress.totalSuppliers > 0 && (
+                    <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''})</span>
+                  )}
+                </div>
+                <div className="progress-bar">
+                  <div className={`progress-fill ${hasWarning ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: '100%' }} />
+                </div>
+              </div>
+            )
+          })()}
+          {researchProgress && researchProgress.status === 'failed' && (
             <div className="suppliers-progress">
               <div className="flex items-center gap-2 py-1">
-                <span className="text-green-600 font-semibold text-sm">
-                  ✓ {researchProgress.currentStep === 'Complete' ? 'Categorization' : 'Research'} completed
+                <span className="text-red-600 font-semibold text-sm">
+                  ✗ {researchProgress.currentStep || 'Operation failed'}
                 </span>
-                {researchProgress.totalSuppliers > 0 && (
-                  <span className="text-gray-500 text-xs">({researchProgress.totalSuppliers} supplier{researchProgress.totalSuppliers > 1 ? 's' : ''})</span>
-                )}
               </div>
               <div className="progress-bar">
-                <div className="progress-fill bg-green-500" style={{ width: '100%' }} />
+                <div className="progress-fill bg-red-500" style={{ width: '100%' }} />
               </div>
             </div>
           )}
@@ -739,6 +786,8 @@ export default function SuppliersPage() {
               onResearchSelected={hasResearchable ? researchSelected : undefined}
               onCategorizeSelected={hasCategorizable ? categorizeSelected : undefined}
               onConfirmSelected={hasConfirmable ? confirmSelected : undefined}
+              nameSort={nameSort}
+              onNameSortChange={setNameSort}
             />
             <SupplierDetailPanel
               ref={detailPanelRef}
@@ -746,6 +795,7 @@ export default function SuppliersPage() {
               onSaveField={saveField}
               onSaveParentName={saveParentName}
               onSaveL1L2Path={saveL1L2Path}
+              taxonomyL1L2Options={taxonomyL1L2Options}
               onResearch={researchSupplier}
               onCategorize={categorizeSupplier}
               onConfirm={confirmSupplier}
@@ -754,6 +804,7 @@ export default function SuppliersPage() {
               editingFieldIndex={editingFieldIndex}
               onEditingFieldChange={setEditingFieldIndex}
               onMoveToList={handleMoveToList}
+              onActivate={handleActivateDetail}
               isActive={activePanel === 'detail'}
             />
           </div>

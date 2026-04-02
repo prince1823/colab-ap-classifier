@@ -52,6 +52,45 @@ async function validateExaKey(key: string): Promise<{ valid: boolean; error?: st
   }
 }
 
+async function validateModel(
+  provider: string,
+  key: string,
+  model: string
+): Promise<{ valid: boolean; error?: string }> {
+  type EndpointDef = { url: string; headers: Record<string, string> };
+  const endpoints: Record<string, EndpointDef> = {
+    openrouter: {
+      url: 'https://openrouter.ai/api/v1/models',
+      headers: { Authorization: `Bearer ${key}` },
+    },
+    anthropic: {
+      url: 'https://api.anthropic.com/v1/models',
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    },
+    openai: {
+      url: 'https://api.openai.com/v1/models',
+      headers: { Authorization: `Bearer ${key}` },
+    },
+  };
+
+  const endpoint = endpoints[provider];
+  if (!endpoint) return { valid: false, error: `Unknown provider: ${provider}` };
+
+  try {
+    const response = await fetch(endpoint.url, { headers: endpoint.headers });
+    if (!response.ok) {
+      return { valid: false, error: `Could not fetch models (HTTP ${response.status})` };
+    }
+    const body = await response.json() as { data?: Array<{ id: string }> };
+    const models = body.data ?? [];
+    const found = models.some((m) => m.id === model);
+    if (found) return { valid: true };
+    return { valid: false, error: `Model "${model}" not found for ${provider}` };
+  } catch (e) {
+    return { valid: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export function registerSettingsHandlers(appConfig: ILLMConfig & Pick<IAppConfigService, 'getExaApiKey' | 'setExaApiKey'>): void {
   registerHandler('settings:getLLMConfig', async (): Promise<LLMConfigResponse> => {
     return {
@@ -92,5 +131,21 @@ export function registerSettingsHandlers(appConfig: ILLMConfig & Pick<IAppConfig
     const key = appConfig.getExaApiKey();
     if (!key) return { valid: false, error: 'No Exa API key stored' };
     return validateExaKey(key);
+  });
+
+  registerHandler('settings:validateStoredApiKey', async (_event, provider: unknown) => {
+    const key = appConfig.getApiKey(provider as string);
+    if (!key) return { valid: false, error: `No API key stored for ${provider as string}` };
+    return validateApiKey(provider as string, key);
+  });
+
+  registerHandler('settings:validateModel', async (_event, provider: unknown, key: unknown, model: unknown) => {
+    return validateModel(provider as string, key as string, model as string);
+  });
+
+  registerHandler('settings:validateStoredModel', async (_event, provider: unknown, model: unknown) => {
+    const key = appConfig.getApiKey(provider as string);
+    if (!key) return { valid: false, error: `No API key stored for ${provider as string}` };
+    return validateModel(provider as string, key, model as string);
   });
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ArrowUpTrayIcon } from '@heroicons/react/24/outline'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 
 interface Props {
   onFileSelected: (filePath: string) => void
@@ -19,7 +20,7 @@ export default function FileDropZone({ onFileSelected }: Props) {
         onFileSelected(filePath)
       }
     } catch (e) {
-      console.error('[FileDropZone] Failed to select file:', e)
+      showError('Failed to select file', e)
     } finally {
       setSelecting(false)
     }

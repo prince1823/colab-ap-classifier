@@ -1,6 +1,6 @@
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
-export type CanonicalColumnType = 'text' | 'log_text' | 'number' | 'category' | 'date';
+type CanonicalColumnType = 'text' | 'log_text' | 'number' | 'category' | 'date';
 
 /** Maps canonical column name → original CSV column name */
 export interface ColumnMapping {
@@ -8,7 +8,7 @@ export interface ColumnMapping {
 }
 
 /** Entry in the enriched column mapping (stored in uploads table). */
-export interface ColumnMappingEntry {
+interface ColumnMappingEntry {
   csvColumn: string;
   classificationPriority?: number; // 1 = highest priority sent to LLM; undefined = don't send
 }
@@ -47,14 +47,6 @@ export interface CSVPreview {
   columns: string[];
   sampleRows: Record<string, string>[];
   totalRows: number;
-}
-
-/**
- * Extended preview that includes LLM-suggested column mappings.
- * Returned by `upload:parsePreview`.
- */
-export interface CSVPreviewWithMappings extends CSVPreview {
-  mappingSuggestion: ColumnMappingResult;
 }
 
 export interface ColumnMappingResult {

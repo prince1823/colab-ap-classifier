@@ -7,7 +7,7 @@
  * these columns don't exist, so they would always be silently absent from dedup groups.
  */
 
-export interface VirtualColumnDef {
+interface VirtualColumnDef {
   /** SQL expression when this column appears in a SELECT (using standard JOIN aliases). */
   selectExpr: string;
   /** The JOIN clause required to resolve this column. */

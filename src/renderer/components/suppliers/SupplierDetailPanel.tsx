@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react'
 import type { ProjectSupplierView, SupplierInfo, SupplierType } from '../../../shared/types/suppliers'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import { ipc } from '../../lib/ipc'
@@ -10,14 +10,14 @@ const DETAIL_FIELDS: {
   key: keyof SupplierInfo | 'parentName' | 'l1L2Path' | 'mappedTaxonomyPaths'
   label: string
   editable: boolean
-  type: 'text' | 'select' | 'readonly'
+  type: 'text' | 'select' | 'readonly' | 'l1l2-dropdown'
   wide?: boolean
 }[] = [
-  { key: 'l1L2Path', label: 'L1|L2 Category', editable: true, type: 'text', wide: true },
+  { key: 'l1L2Path', label: 'L1|L2 Category', editable: true, type: 'l1l2-dropdown', wide: true },
   { key: 'mappedTaxonomyPaths', label: 'Mapped Taxonomy Paths', editable: false, type: 'readonly', wide: true },
   { key: 'supplierType', label: 'Supplier Type', editable: true, type: 'select' },
   { key: 'officialBusinessName', label: 'Official Business Name', editable: true, type: 'text' },
-  { key: 'parentName', label: 'Parent Supplier', editable: true, type: 'text' },
+  { key: 'parentName', label: 'Parent Supplier', editable: false, type: 'readonly' },
   { key: 'industry', label: 'Industry', editable: true, type: 'text' },
   { key: 'serviceType', label: 'Service Type', editable: true, type: 'text' },
   { key: 'naicsCode', label: 'NAICS Code', editable: true, type: 'text' },
@@ -30,6 +30,148 @@ const DETAIL_FIELDS: {
 
 /** Only editable fields can be keyboard-navigated */
 const NAVIGABLE_FIELDS = DETAIL_FIELDS.filter(f => f.editable)
+
+/* ---------- L1|L2 Searchable Dropdown ---------- */
+
+function L1L2Dropdown({
+  value,
+  options,
+  onSelect,
+  autoFocus,
+}: {
+  value: string
+  options: string[]
+  onSelect: (val: string) => void
+  autoFocus?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [highlightIdx, setHighlightIdx] = useState(-1)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+
+  const filtered = useMemo(() => {
+    if (!search) return options
+    const q = search.toLowerCase()
+    return options.filter(o => o.toLowerCase().includes(q))
+  }, [options, search])
+
+  // Auto-open on mount if autoFocus
+  useEffect(() => {
+    if (autoFocus) {
+      setOpen(true)
+      requestAnimationFrame(() => searchRef.current?.focus())
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+        setSearch('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightIdx >= 0 && listRef.current) {
+      const el = listRef.current.children[highlightIdx] as HTMLElement
+      el?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [highlightIdx])
+
+  const selectItem = (val: string) => {
+    onSelect(val)
+    setOpen(false)
+    setSearch('')
+  }
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setHighlightIdx(prev => Math.min(prev + 1, filtered.length)) // +1 for blank option
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHighlightIdx(prev => Math.max(prev - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (highlightIdx === 0) selectItem('')
+      else if (highlightIdx > 0 && filtered[highlightIdx - 1]) selectItem(filtered[highlightIdx - 1])
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setOpen(false)
+      setSearch('')
+    }
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(!open)
+          if (!open) requestAnimationFrame(() => searchRef.current?.focus())
+        }}
+        className="flex w-full items-center justify-between rounded border border-gray-300 bg-white px-2 py-1 text-left text-xs hover:border-gray-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+      >
+        <span className={value ? 'text-gray-900 truncate' : 'text-gray-400'}>
+          {value || '(blank)'}
+        </span>
+        <svg className={`ml-1 h-3 w-3 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg" style={{ minWidth: 280 }}>
+          <div className="border-b border-gray-100 p-1.5">
+            <input
+              ref={searchRef}
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setHighlightIdx(0) }}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search..."
+              className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+          </div>
+          <ul ref={listRef} className="max-h-48 overflow-y-auto py-0.5">
+            <li
+              onMouseDown={(e) => { e.preventDefault(); selectItem('') }}
+              onMouseEnter={() => setHighlightIdx(0)}
+              className={`cursor-pointer px-3 py-1.5 text-xs ${
+                highlightIdx === 0 ? 'bg-blue-50 text-blue-700' : !value ? 'bg-blue-50/50 text-blue-600 font-medium' : 'text-gray-400 italic hover:bg-gray-50'
+              }`}
+            >
+              (blank)
+            </li>
+            {filtered.length === 0 && (
+              <li className="px-3 py-2 text-xs text-gray-400">No matches</li>
+            )}
+            {filtered.map((opt, idx) => (
+              <li
+                key={opt}
+                onMouseDown={(e) => { e.preventDefault(); selectItem(opt) }}
+                onMouseEnter={() => setHighlightIdx(idx + 1)}
+                className={`cursor-pointer px-3 py-1.5 text-xs leading-snug ${
+                  idx + 1 === highlightIdx
+                    ? 'bg-blue-50 text-blue-700'
+                    : opt === value
+                      ? 'bg-blue-50/50 font-medium text-blue-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                {opt}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
 
 /* ---------- Editable field ---------- */
 
@@ -159,7 +301,8 @@ interface SupplierDetailPanelProps {
   supplier: ProjectSupplierView | null
   onSaveField: (supplier: ProjectSupplierView, field: keyof SupplierInfo, value: string) => void
   onSaveParentName: (supplier: ProjectSupplierView, value: string) => void
-  onSaveL1L2Path: (supplier: ProjectSupplierView, value: string) => void
+  onSaveL1L2Path: (supplier: ProjectSupplierView, value: string[]) => void
+  taxonomyL1L2Options: string[]
   onResearch: (supplier: ProjectSupplierView) => void
   onCategorize: (supplier: ProjectSupplierView) => void
   onConfirm: (supplier: ProjectSupplierView) => void
@@ -168,6 +311,7 @@ interface SupplierDetailPanelProps {
   editingFieldIndex: number | null
   onEditingFieldChange: (index: number | null) => void
   onMoveToList: () => void
+  onActivate: () => void
   isActive: boolean
 }
 
@@ -176,6 +320,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   onSaveField,
   onSaveParentName,
   onSaveL1L2Path,
+  taxonomyL1L2Options,
   onResearch,
   onCategorize,
   onConfirm,
@@ -184,9 +329,21 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   editingFieldIndex,
   onEditingFieldChange,
   onMoveToList,
+  onActivate,
   isActive,
 }, ref) {
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // If taxonomy changes and a supplier's l1L2Path contains paths no longer in the taxonomy, clear them
+  useEffect(() => {
+    if (!supplier || taxonomyL1L2Options.length === 0) return
+    const currentPaths = supplier.l1L2Path ?? []
+    if (currentPaths.length === 0) return
+    const validPaths = currentPaths.filter(p => taxonomyL1L2Options.includes(p))
+    if (validPaths.length !== currentPaths.length) {
+      onSaveL1L2Path(supplier, validPaths)
+    }
+  }, [supplier?.id, taxonomyL1L2Options]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useImperativeHandle(ref, () => ({
     focusField: (index: number) => {
@@ -253,11 +410,9 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
   }
 
   const handleSave = (key: keyof SupplierInfo | 'parentName' | 'l1L2Path' | 'mappedTaxonomyPaths', val: string) => {
-    if (key === 'mappedTaxonomyPaths') return // readonly
+    if (key === 'mappedTaxonomyPaths' || key === 'l1L2Path') return // readonly / handled by dropdown
     if (key === 'parentName') {
       onSaveParentName(supplier, val)
-    } else if (key === 'l1L2Path') {
-      onSaveL1L2Path(supplier, val)
     } else {
       onSaveField(supplier, key as keyof SupplierInfo, val)
     }
@@ -281,6 +436,7 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       className="supplier-detail-panel"
       tabIndex={0}
       onKeyDown={handlePanelKeyDown}
+      onMouseDown={() => { if (!isActive) onActivate() }}
       style={{ outline: 'none' }}
     >
       {/* Header */}
@@ -324,21 +480,27 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       {/* Info grid */}
       <div className="detail-info-grid">
         {DETAIL_FIELDS.map((field) => {
-          // Mapped taxonomy paths: readonly display (no nav index)
-          if (field.key === 'mappedTaxonomyPaths') {
-            const paths = supplier.mappedTaxonomyPaths ?? []
+          // Readonly fields: no nav index, display only
+          if (!field.editable) {
+            const val = getVal(field.key)
+            const isArrayField = field.key === 'mappedTaxonomyPaths'
+            const arrVals = isArrayField ? (supplier.mappedTaxonomyPaths ?? []) : []
             return (
-              <div key={field.key} className="detail-field detail-field-wide">
+              <div key={field.key} className={`detail-field ${field.wide ? 'detail-field-wide' : ''}`}>
                 <label className="detail-field-label">{field.label}</label>
                 <div className="detail-field-value">
-                  {paths.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {paths.map((p, i) => (
-                        <span key={i} className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{p}</span>
-                      ))}
-                    </div>
+                  {isArrayField ? (
+                    arrVals.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {arrVals.map((p, i) => (
+                          <span key={i} className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{p}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-gray-300 italic">—</span>
+                    )
                   ) : (
-                    <span className="text-gray-300 italic">—</span>
+                    val ? <span>{val}</span> : <span className="text-gray-300 italic">—</span>
                   )}
                 </div>
               </div>
@@ -348,6 +510,71 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
           // Editable field with keyboard nav
           const currentNavIdx = navIdx
           navIdx++
+
+          // L1|L2 Category: dropdown-based selection
+          if (field.key === 'l1L2Path') {
+            const currentPaths = supplier.l1L2Path ?? []
+            const validPaths = currentPaths.filter(p => taxonomyL1L2Options.includes(p))
+            const isFieldFocused = isActive && currentNavIdx === focusedFieldIndex
+            const isFieldEditing = editingFieldIndex === currentNavIdx
+
+            const handleDropdownChange = (index: number, newValue: string) => {
+              const updated = [...validPaths]
+              if (newValue === '') {
+                // Remove this dropdown slot
+                updated.splice(index, 1)
+              } else {
+                updated[index] = newValue
+              }
+              onSaveL1L2Path(supplier, updated.filter(Boolean))
+              // Stay in edit mode
+            }
+
+            return (
+              <div
+                key={field.key}
+                className={`detail-field detail-field-wide ${isFieldFocused && !isFieldEditing ? 'detail-field-focused' : ''}`}
+                tabIndex={isFieldFocused && !isFieldEditing ? 0 : -1}
+                onKeyDown={!isFieldEditing ? handlePanelKeyDown : undefined}
+              >
+                <label className="detail-field-label">{field.label}</label>
+                {isFieldEditing ? (
+                  <div className="flex flex-col gap-1.5">
+                    {(validPaths.length === 0 ? [''] : validPaths).map((path, i) => (
+                      <L1L2Dropdown
+                        key={i}
+                        value={validPaths.includes(path) ? path : ''}
+                        options={taxonomyL1L2Options}
+                        autoFocus={i === 0}
+                        onSelect={(val) => {
+                          if (validPaths.length === 0 && val) {
+                            onSaveL1L2Path(supplier, [val])
+                          } else {
+                            handleDropdownChange(i, val)
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div
+                    className="detail-field-value"
+                    onClick={() => onEditingFieldChange(currentNavIdx)}
+                  >
+                    {validPaths.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {validPaths.map((p, i) => (
+                          <span key={i} className="inline-block rounded bg-blue-50 border border-blue-200 px-2 py-0.5 text-xs text-blue-800">{p}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-gray-300 italic">—</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          }
 
           // Sources: clickable tags in view mode, text input in edit mode
           if (field.key === 'sources') {

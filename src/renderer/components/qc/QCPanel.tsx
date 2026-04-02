@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ipc } from '../../lib/ipc'
+import { showError } from '../../lib/toast-errors'
 import QCSettingsForm from './QCSettingsForm'
 import QCProgressDisplay from './QCProgressDisplay'
 import QCResultsSummary from './QCResultsSummary'
@@ -122,7 +123,7 @@ export default function QCPanel() {
     // Debounced save
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
-      ipc.qc.setConfig(newConfig).catch(console.error)
+      ipc.qc.setConfig(newConfig).catch((err) => showError('Failed to save QC config', err))
     }, 500)
 
     // Debounced scope count
@@ -166,7 +167,7 @@ export default function QCPanel() {
     try {
       await ipc.qc.stop()
     } catch (e) {
-      console.error('Failed to stop QC:', e)
+      showError('Failed to stop QC', e)
     }
   }
 

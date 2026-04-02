@@ -17,6 +17,7 @@ import type {
   DeriveMappingsSource,
   CompletedUpload,
 } from '../../shared/types/column-mapping'
+import type { IngestProgress } from '../../shared/types/classification'
 
 type Step = 'upload' | 'mapping' | 'priority'
 
@@ -42,10 +43,13 @@ export default function DataView() {
   const [activePreview, setActivePreview] = useState<CSVPreview | null>(null)
   const [activeDerivedMappings, setActiveDerivedMappings] = useState<DerivedMappings | null>(null)
   const [importing, setImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState<IngestProgress | null>(null)
   const [derivingMappings, setDerivingMappings] = useState(false)
   const [mappingFromPrevious, setMappingFromPrevious] = useState(false)
   // Preserved column states so going back from priority doesn't lose edits
   const [preservedColumnStates, setPreservedColumnStates] = useState<ColumnState[] | null>(null)
+  // Track upload created in the current mapping cycle so we can delete it if user goes back
+  const [activeUploadId, setActiveUploadId] = useState<string | null>(null)
 
   // Load existing uploads and stats on mount and when project changes
   useEffect(() => {
@@ -56,6 +60,7 @@ export default function DataView() {
     setActivePreview(null)
     setActiveDerivedMappings(null)
     setPreservedColumnStates(null)
+    setActiveUploadId(null)
     setStep('upload')
     setError(null)
 
@@ -81,6 +86,14 @@ export default function DataView() {
       showError('Failed to load upload stats', e)
     })
   }, [projectFilePath])
+
+  // Listen for import progress events from the backend
+  useEffect(() => {
+    const unsubscribe = ipc.ingest.onProgress((progress: IngestProgress) => {
+      setImportProgress(progress)
+    })
+    return unsubscribe
+  }, [])
 
   const handleDeleteUpload = async (uploadId: string, force?: boolean) => {
     try {
@@ -132,7 +145,15 @@ export default function DataView() {
     if (columnStates) setPreservedColumnStates(columnStates)
     setImporting(true)
     setError(null)
+    setImportProgress(null)
     try {
+      // If the user went back from priority and is re-importing, delete the previous upload first
+      if (activeUploadId) {
+        await ipc.ingest.deleteUpload(activeUploadId, true)
+        setCompletedUploads((prev) => prev.filter((u) => u.uploadId !== activeUploadId))
+        setUploadStats((prev) => { const next = { ...prev }; delete next[activeUploadId]; return next })
+        setActiveUploadId(null)
+      }
       // Build simple ColumnMapping from mapping rows (skip empty canonicals)
       const columnMapping: ColumnMapping = {}
       for (const row of rows) {
@@ -183,6 +204,8 @@ export default function DataView() {
       ])
       // New imports have no classified rows yet — seed stats so the delete button shows
       setUploadStats((prev) => ({ ...prev, [result.uploadId]: { classifiedCount: 0 } }))
+      // Track so we can delete if user goes back and re-imports
+      setActiveUploadId(result.uploadId)
 
       await refreshGateState()
 
@@ -192,6 +215,7 @@ export default function DataView() {
       setError(e instanceof Error ? e.message : 'Failed to import CSV')
     } finally {
       setImporting(false)
+      setImportProgress(null)
     }
   }
 
@@ -211,6 +235,7 @@ export default function DataView() {
       setActivePreview(null)
       setActiveDerivedMappings(null)
       setPreservedColumnStates(null)
+      setActiveUploadId(null)
       setStep('upload')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save priorities')
@@ -295,10 +320,20 @@ export default function DataView() {
             preview={activePreview}
             derivedMappings={activeDerivedMappings}
             onApply={handleImport}
-            onBack={() => { setActiveDerivedMappings(null); setStep('upload') }}
+            onBack={async () => {
+              if (activeUploadId) {
+                await ipc.ingest.deleteUpload(activeUploadId, true).catch(() => {})
+                setCompletedUploads((prev) => prev.filter((u) => u.uploadId !== activeUploadId))
+                setUploadStats((prev) => { const next = { ...prev }; delete next[activeUploadId]; return next })
+                setActiveUploadId(null)
+              }
+              setActiveDerivedMappings(null)
+              setStep('upload')
+            }}
             fromPreviousMapping={mappingFromPrevious}
             preservedColumnStates={preservedColumnStates}
             importing={importing}
+            importProgress={importProgress}
             isFirstUpload={completedUploads.length === 0}
           />
         )}

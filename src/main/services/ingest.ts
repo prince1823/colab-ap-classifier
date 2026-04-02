@@ -16,6 +16,7 @@ import { toEnrichedMapping, toSimpleMapping } from '../../shared/types/column-ma
 import type { ColumnMappingWithPriority } from '../../shared/types/column-mapping';
 import { CANONICAL_COLUMNS, REQUIRED_CANONICAL_COLUMNS } from '../../shared/canonical-columns';
 import { detectMasterDateFormat } from '../utils/date-format';
+import { debugLog } from '../utils/debug-log';
 import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import type {
   Database,
@@ -30,7 +31,7 @@ import type {
 import type { IngestProgress } from '../../shared/types/classification';
 
 const SAMPLE_ROW_LIMIT = 100;
-const IMPORT_BATCH_SIZE = 5000;
+const IMPORT_BATCH_SIZE = 50000;
 const PREVIEW_BUFFER_SIZE = 65536; // 64KB for preview/detection
 const DELIMITERS = [',', ';', '\t'] as const;
 
@@ -127,37 +128,32 @@ function readFilePrefix(filePath: string, maxBytes: number = PREVIEW_BUFFER_SIZE
 }
 
 /**
- * Count lines in a file by streaming through it counting newline bytes.
- * Subtracts 1 for the header row. Much faster than parsing all rows.
+ * Estimate row count from the 64KB prefix we already read + file size.
+ * Avoids reading the entire file just for a preview row count.
+ * Returns an approximate count (prefixed with ~) that's accurate enough for preview.
  */
-async function countLines(filePath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let lineCount = 0;
-    let lastByte = 0;
-    let totalBytes = 0;
-    const stream = fs.createReadStream(filePath, { highWaterMark: 256 * 1024 });
-    stream.on('data', (chunk: string | Buffer) => {
-      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
-      for (let i = 0; i < buf.length; i++) {
-        if (buf[i] === 0x0a) lineCount++;
-      }
-      if (buf.length > 0) {
-        lastByte = buf[buf.length - 1];
-        totalBytes += buf.length;
-      }
-    });
-    stream.on('end', () => {
-      if (totalBytes === 0) {
-        resolve(0);
-        return;
-      }
-      // If file doesn't end with newline, the last line wasn't counted
-      if (lastByte !== 0x0a) lineCount++;
-      // Subtract 1 for the header row
-      resolve(Math.max(0, lineCount - 1));
-    });
-    stream.on('error', reject);
-  });
+function estimateRowCount(filePath: string, prefixContent: string): number {
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+
+  // If the entire file fits in the prefix buffer, count exactly
+  if (fileSize <= PREVIEW_BUFFER_SIZE) {
+    const lines = prefixContent.split('\n').filter(l => l.trim().length > 0);
+    return Math.max(0, lines.length - 1); // subtract header
+  }
+
+  // Count newlines in the prefix to get average bytes per line
+  let newlineCount = 0;
+  for (let i = 0; i < prefixContent.length; i++) {
+    if (prefixContent[i] === '\n') newlineCount++;
+  }
+
+  if (newlineCount === 0) return 0;
+
+  const bytesPerLine = PREVIEW_BUFFER_SIZE / newlineCount;
+  const estimatedTotal = Math.round(fileSize / bytesPerLine);
+  // Subtract 1 for header row
+  return Math.max(0, estimatedTotal - 1);
 }
 
 /**
@@ -273,8 +269,8 @@ export class IngestService implements IIngestService {
 
     const columns = Object.keys(sampleRows[0]);
 
-    // Count total rows via fast line counting (no full parse)
-    const totalRows = await countLines(filePath);
+    // Estimate total rows from prefix + file size (instant, no full file scan)
+    const totalRows = estimateRowCount(filePath, content);
 
     return { columns, sampleRows, totalRows: totalRows || sampleRows.length };
   }
@@ -294,8 +290,9 @@ export class IngestService implements IIngestService {
   private emitProgress(progress: IngestProgress): void {
     try {
       this.eventBus.emit('ingest:progress', progress);
-    } catch {
-      // Never let a listener error crash the import
+    } catch (err) {
+      // Never let a listener error crash the import — but log it for debugging
+      debugLog('WARN', '[Ingest] EventBus emit failed', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -312,8 +309,8 @@ export class IngestService implements IIngestService {
     const { encoding, content: prefixContent } = readFilePrefix(filePath);
     const delimiter = detectDelimiter(prefixContent);
 
-    // Estimate total rows for progress reporting
-    const estimatedTotal = await countLines(filePath);
+    // Estimate total rows for progress reporting (instant, no full file scan)
+    const estimatedTotal = estimateRowCount(filePath, prefixContent);
 
     this.emitProgress({
       status: 'running',
@@ -530,7 +527,18 @@ export class IngestService implements IIngestService {
     });
 
     // Link transactions to project_suppliers via original_supplier_name
-    await this.suppliers.normalizeAllTransactions();
+    await this.suppliers.normalizeAllTransactions((done, total, step) => {
+      // Map supplier normalization progress to 97-99% range
+      const subPct = total > 0 ? Math.round((done / total) * 100) : 0;
+      const overallPct = 97 + Math.round((subPct / 100) * 2); // 97% → 99%
+      this.emitProgress({
+        status: 'running',
+        totalRows: estimatedTotal,
+        processedRows: rowsInserted,
+        percentage: Math.min(99, overallPct),
+        currentStep: step,
+      });
+    });
 
     // Auto-apply tail spend threshold to newly created suppliers
     const threshold = await this.project.getSetting('tail_spend_threshold') as number | undefined;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Trash2, Plus, Search, X,
-  Merge, ArrowRightLeft,
+  Merge, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown,
 } from 'lucide-react'
 import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import MergeModal from './MergeModal'
@@ -73,6 +73,27 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   // Pending parent delete confirmation (holds parentSupplierId)
   const [pendingDeleteParentRowId, setPendingDeleteParentRowId] = useState<string | null>(null)
 
+  // Column sorting
+  type SortColumn = 'parent' | 'name' | 'aliases' | 'spend' | 'txns'
+  type SortDir = 'asc' | 'desc'
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+
+  const toggleSort = useCallback((col: SortColumn) => {
+    if (sortColumn === col) {
+      if (sortDir === 'asc') {
+        setSortDir('desc')
+      } else {
+        // Third click: reset to default (no sort)
+        setSortColumn(null)
+        setSortDir('asc')
+      }
+    } else {
+      setSortColumn(col)
+      setSortDir('asc')
+    }
+  }, [sortColumn, sortDir])
+
   // Track which supplier rows show all aliases vs first 4
   const [expandedAliases, setExpandedAliases] = useState<Set<string>>(new Set())
 
@@ -113,15 +134,38 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   // ── Flatten into table rows (aliases shown inline) ───────────────
 
   const flatRows: FlatRow[] = useMemo(() => {
-    // Sort by parent name so same-parent rows are adjacent (no-parent rows go last)
     const sorted = [...filtered].sort((a, b) => {
-      const pa = a.supplier.parentName?.toLowerCase() ?? '\uffff'
-      const pb = b.supplier.parentName?.toLowerCase() ?? '\uffff'
-      if (pa !== pb) return pa < pb ? -1 : 1
+      const dir = sortDir === 'asc' ? 1 : -1
+
+      if (sortColumn === 'spend') {
+        return (a.supplier.totalSpend - b.supplier.totalSpend) * dir
+      }
+      if (sortColumn === 'txns') {
+        return (a.supplier.transactionCount - b.supplier.transactionCount) * dir
+      }
+      if (sortColumn === 'name') {
+        return a.supplier.supplierName.toLowerCase() < b.supplier.supplierName.toLowerCase() ? -dir : dir
+      }
+      if (sortColumn === 'aliases') {
+        const aa = a.aliases.map(x => x.rawName).join(', ').toLowerCase()
+        const ba = b.aliases.map(x => x.rawName).join(', ').toLowerCase()
+        return aa < ba ? -dir : aa > ba ? dir : 0
+      }
+
+      // Default: sort by parent name so same-parent rows are adjacent
+      // Rows with no parent always go last, regardless of sort direction
+      const aHasParent = !!a.supplier.parentName
+      const bHasParent = !!b.supplier.parentName
+      if (aHasParent !== bHasParent) return aHasParent ? -1 : 1
+
+      const parentDir = sortColumn === 'parent' ? dir : 1
+      const pa = a.supplier.parentName?.toLowerCase() ?? ''
+      const pb = b.supplier.parentName?.toLowerCase() ?? ''
+      if (pa !== pb) return pa < pb ? -parentDir : parentDir
       return a.supplier.supplierName.toLowerCase() < b.supplier.supplierName.toLowerCase() ? -1 : 1
     })
     return sorted.map(r => ({ normalized: r }))
-  }, [filtered])
+  }, [filtered, sortColumn, sortDir])
 
   // Compute parent grouping: for each row, whether it's the first in its parent group and the group span
   const parentGroupInfo = useMemo(() => {
@@ -619,11 +663,30 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
           <table className="w-full border-collapse text-xs border border-gray-300">
             <thead className="sticky top-0 z-10">
               <tr className="bg-gray-50">
-                <th className="w-[18%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Parent</th>
-                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Normalized Name</th>
-                <th className="w-[22%] px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Aliases</th>
-                <th className="w-[10%] px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Spend</th>
-                <th className="w-[7%] px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Txns</th>
+                {([
+                  { key: 'parent' as SortColumn, label: 'Parent', cls: 'w-[18%] text-left' },
+                  { key: 'name' as SortColumn, label: 'Normalized Name', cls: 'text-left' },
+                  { key: 'aliases' as SortColumn, label: 'Aliases', cls: 'w-[22%] text-left' },
+                  { key: 'spend' as SortColumn, label: 'Spend', cls: 'w-[10%] text-right' },
+                  { key: 'txns' as SortColumn, label: 'Txns', cls: 'w-[7%] text-right' },
+                ]).map(col => {
+                  const isActive = sortColumn === col.key
+                  const SortIcon = isActive
+                    ? sortDir === 'asc' ? ArrowUp : ArrowDown
+                    : ArrowUpDown
+                  return (
+                    <th
+                      key={col.key}
+                      className={`${col.cls} px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300 cursor-pointer select-none hover:bg-gray-100 transition-colors`}
+                      onClick={() => toggleSort(col.key)}
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        {col.label}
+                        <SortIcon size={12} className={isActive ? 'text-blue-600' : 'text-gray-300'} />
+                      </span>
+                    </th>
+                  )
+                })}
                 <th className="w-24 px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 border border-gray-300">Actions</th>
               </tr>
             </thead>

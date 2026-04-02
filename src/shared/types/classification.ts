@@ -49,36 +49,26 @@ export interface SpendByTaxonomyResult {
   txnCount: number;
 }
 
-export interface QCProgress {
+/** Base shape for supplier-oriented progress events. */
+export interface SupplierProgress {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   totalSuppliers: number;
   processedSuppliers: number;
   percentage: number;
   currentSupplier: string | null;
   currentStep: string;
+}
+
+export interface QCProgress extends SupplierProgress {
   /** Set after a supplier is processed — describes what action was taken. */
   outcome?: QCOutcome;
   /** The winning taxonomy path when outcome is 'consolidated'. */
   consolidatedTo?: string;
 }
 
-export interface ResearchProgress {
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
-  totalSuppliers: number;
-  processedSuppliers: number;
-  percentage: number;
-  currentSupplier: string | null;
-  currentStep: string;
-}
+export type ResearchProgress = SupplierProgress;
 
-export interface ClassificationProgress {
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
-  totalSuppliers: number;
-  processedSuppliers: number;
-  percentage: number;
-  currentSupplier: string | null;
-  currentStep: string;
-}
+export type ClassificationProgress = SupplierProgress;
 
 export interface IngestProgress {
   status: 'running' | 'completed' | 'failed';

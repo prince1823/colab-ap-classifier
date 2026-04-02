@@ -66,11 +66,3 @@ export class ExaWebSearch implements WebSearch {
     this.client = null;
   }
 }
-
-// Backward compatibility exports
-const defaultInstance = new ExaWebSearch();
-export function isAvailable(): boolean { return defaultInstance.isAvailable(); }
-export async function searchSupplier(supplierName: string, supplierAddress?: string, numResults = 5): Promise<ExaSearchResult[]> {
-  return defaultInstance.searchSupplier(supplierName, supplierAddress, numResults);
-}
-export function resetClient(): void { defaultInstance.resetClient(); }

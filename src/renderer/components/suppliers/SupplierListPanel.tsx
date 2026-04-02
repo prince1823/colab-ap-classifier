@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import { fmtAbbrev } from '../../utils/formatSpend'
-import { Search, X } from 'lucide-react'
+import { Search, X, ArrowUpAZ, ArrowDownZA, ArrowUpDown } from 'lucide-react'
 
+export type NameSort = 'none' | 'asc' | 'desc'
 type QuickFilter = 'all' | 'unresearched' | 'unconfirmed'
 
 interface SupplierListPanelProps {
@@ -26,6 +27,8 @@ interface SupplierListPanelProps {
   onResearchSelected?: () => void
   onCategorizeSelected?: () => void
   onConfirmSelected?: () => void
+  nameSort: NameSort
+  onNameSortChange: (sort: NameSort) => void
 }
 
 function ConfirmedChip({ supplier }: { supplier: ProjectSupplierView }) {
@@ -80,6 +83,8 @@ export default function SupplierListPanel({
   onResearchSelected,
   onCategorizeSelected,
   onConfirmSelected,
+  nameSort,
+  onNameSortChange,
 }: SupplierListPanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -88,10 +93,21 @@ export default function SupplierListPanel({
   const confirmBtnRef = useRef<HTMLButtonElement>(null)
   const [actionFocused, setActionFocused] = useState<'research' | 'categorize' | 'confirm' | null>(null)
 
-  // Auto-focus list for keyboard nav
+  // Auto-focus list for keyboard nav — on mount and whenever panel becomes active
   useEffect(() => {
-    if (isActive) listRef.current?.focus()
+    if (isActive) {
+      // Small delay to ensure DOM is ready after render
+      const timer = setTimeout(() => listRef.current?.focus(), 50)
+      return () => clearTimeout(timer)
+    }
   }, [isActive])
+
+  // Focus list on initial data load
+  useEffect(() => {
+    if (isActive && suppliers.length > 0) {
+      setTimeout(() => listRef.current?.focus(), 50)
+    }
+  }, [suppliers.length > 0]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle Cmd+Enter to focus action buttons, and arrow keys within them
   const handleListKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -191,6 +207,19 @@ export default function SupplierListPanel({
           {suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''}
           {selectedIds.size > 0 && ` · ${selectedIds.size} checked`}
         </span>
+        <span className="flex-1" />
+        <button
+          type="button"
+          title={nameSort === 'none' ? 'Sort by name A–Z' : nameSort === 'asc' ? 'Sort by name Z–A' : 'Sort by spend'}
+          onClick={() => onNameSortChange(nameSort === 'none' ? 'asc' : nameSort === 'asc' ? 'desc' : 'none')}
+          className={`p-0.5 rounded transition-colors ${
+            nameSort !== 'none'
+              ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          {nameSort === 'asc' ? <ArrowUpAZ size={14} /> : nameSort === 'desc' ? <ArrowDownZA size={14} /> : <ArrowUpDown size={14} />}
+        </button>
       </div>
 
       {/* Supplier list */}
@@ -199,6 +228,7 @@ export default function SupplierListPanel({
         className="supplier-list-scroll"
         tabIndex={0}
         onKeyDown={handleListKeyDown}
+        onMouseDown={() => listRef.current?.focus()}
       >
         {suppliers.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-gray-400">

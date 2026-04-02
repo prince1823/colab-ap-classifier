@@ -125,7 +125,7 @@ export interface IPCInvokeMap {
   'rules:listPaginated': { args: [opts: { limit: number; offset: number; search?: string }]; result: { rules: OverrideRule[]; total: number } };
   'rules:create':         { args: [input: OverrideRuleCreate]; result: { id: string } };
   'rules:createAndApply': { args: [input: OverrideRuleCreate]; result: { id: string; matchedCount: number; skippedCount: number; changelogId?: string } };
-  'rules:previewConflicts': { args: [candidateIds: string[]]; result: { covered: ConflictRow[]; eligibleIds: string[] } };
+  'rules:previewConflicts': { args: [candidateIds: string[], newRuleGroupId?: string | null]; result: { covered: ConflictRow[]; eligibleIds: string[] } };
   'rules:update':         { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
   'rules:delete':   { args: [ruleId: string]; result: void };
   'rules:generate':      { args: []; result: GenerateRulesResult };
@@ -162,6 +162,9 @@ export interface IPCInvokeMap {
   'settings:setProvider':    { args: [provider: string]; result: void };
   'settings:setModel':       { args: [model: string]; result: void };
   'settings:validateApiKey': { args: [provider: string, key: string]; result: { valid: boolean; error?: string } };
+  'settings:validateStoredApiKey': { args: [provider: string]; result: { valid: boolean; error?: string } };
+  'settings:validateModel': { args: [provider: string, key: string, model: string]; result: { valid: boolean; error?: string } };
+  'settings:validateStoredModel': { args: [provider: string, model: string]; result: { valid: boolean; error?: string } };
   // Settings — Exa
   'settings:setExaKey':           { args: [key: string]; result: void };
   'settings:validateExaKey':      { args: [key: string]; result: { valid: boolean; error?: string } };

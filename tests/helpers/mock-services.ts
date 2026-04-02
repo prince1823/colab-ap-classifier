@@ -50,13 +50,7 @@ export function createMockSupplierUniverse(): SupplierUniverse {
     getSuppliersByNames: vi.fn().mockResolvedValue(new Map()),
     upsertSupplier: vi.fn(),
     upsertSupplierFull: vi.fn(),
-    getSupplierRecord: vi.fn().mockResolvedValue(null as {
-      supplierInfo: import('../../src/shared/types/suppliers').SupplierInfo;
-      aliases: string[];
-      parentName: string | null;
-      mappedTaxonomyPaths: string[];
-      categoryASupplier: boolean;
-    } | null),
+    getSupplierRecord: vi.fn().mockResolvedValue(null as import('../../src/shared/types/suppliers').SupplierRecord | null),
     searchVariants: vi.fn().mockResolvedValue([]),
   };
 }

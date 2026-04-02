@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { REQUIRED_CANONICAL_COLUMNS } from '../../../shared/canonical-columns'
 import { ipc } from '../../lib/ipc'
 import type { CSVPreview, DerivedMappings, MappingRow } from '../../../shared/types/column-mapping'
+import type { IngestProgress } from '../../../shared/types/classification'
 
 /* ── Constants ── */
 
@@ -24,10 +25,11 @@ interface Props {
   preview: CSVPreview
   derivedMappings: DerivedMappings
   onApply: (mappings: MappingRow[], columnStates?: ColumnState[]) => void
-  onBack: () => void
+  onBack: () => void | Promise<void>
   fromPreviousMapping?: boolean
   preservedColumnStates?: ColumnState[] | null
   importing?: boolean
+  importProgress?: IngestProgress | null
   isFirstUpload?: boolean
 }
 
@@ -496,6 +498,7 @@ export default function DataMappingStep({
   fromPreviousMapping = false,
   preservedColumnStates,
   importing = false,
+  importProgress,
   isFirstUpload = true,
 }: Props) {
   const [columns, setColumns] = useState<ColumnState[]>(() =>
@@ -863,7 +866,7 @@ export default function DataMappingStep({
         </div>
         <div className="flex gap-3">
           <button
-            onClick={onBack}
+            onClick={() => void onBack()}
             disabled={importing}
             className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
@@ -880,7 +883,9 @@ export default function DataMappingStep({
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Importing...
+                {importProgress
+                  ? `${importProgress.currentStep} (${importProgress.percentage}%)`
+                  : 'Starting import...'}
               </>
             ) : (
               'Next \u2192'
@@ -888,6 +893,25 @@ export default function DataMappingStep({
           </button>
         </div>
       </div>
+
+      {/* Import progress bar */}
+      {importing && importProgress && (
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <div className="mb-2 flex items-center justify-between text-sm">
+            <span className="font-medium text-blue-800">{importProgress.currentStep}</span>
+            <span className="text-blue-600">
+              {importProgress.processedRows.toLocaleString()} / ~{importProgress.totalRows.toLocaleString()} rows
+            </span>
+          </div>
+          <div className="h-3 w-full overflow-hidden rounded-full bg-blue-200">
+            <div
+              className="h-full rounded-full bg-blue-600 transition-all duration-300 ease-out"
+              style={{ width: `${importProgress.percentage}%` }}
+            />
+          </div>
+          <div className="mt-1 text-right text-xs text-blue-500">{importProgress.percentage}%</div>
+        </div>
+      )}
     </div>
   )
 }

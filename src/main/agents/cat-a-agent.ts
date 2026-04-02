@@ -27,7 +27,7 @@ ${paths}
 Return the closest matching path as JSON.`;
 }
 
-export interface CatAResolution {
+interface CatAResolution {
   resolvedPath: string;
 }
 

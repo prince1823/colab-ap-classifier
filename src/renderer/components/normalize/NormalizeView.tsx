@@ -81,12 +81,18 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
 
   const toggleSort = useCallback((col: SortColumn) => {
     if (sortColumn === col) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+      if (sortDir === 'asc') {
+        setSortDir('desc')
+      } else {
+        // Third click: reset to default (no sort)
+        setSortColumn(null)
+        setSortDir('asc')
+      }
     } else {
       setSortColumn(col)
       setSortDir('asc')
     }
-  }, [sortColumn])
+  }, [sortColumn, sortDir])
 
   // Track which supplier rows show all aliases vs first 4
   const [expandedAliases, setExpandedAliases] = useState<Set<string>>(new Set())

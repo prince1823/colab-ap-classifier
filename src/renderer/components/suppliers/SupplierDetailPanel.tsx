@@ -17,7 +17,7 @@ const DETAIL_FIELDS: {
   { key: 'mappedTaxonomyPaths', label: 'Mapped Taxonomy Paths', editable: false, type: 'readonly', wide: true },
   { key: 'supplierType', label: 'Supplier Type', editable: true, type: 'select' },
   { key: 'officialBusinessName', label: 'Official Business Name', editable: true, type: 'text' },
-  { key: 'parentName', label: 'Parent Supplier', editable: true, type: 'text' },
+  { key: 'parentName', label: 'Parent Supplier', editable: false, type: 'readonly' },
   { key: 'industry', label: 'Industry', editable: true, type: 'text' },
   { key: 'serviceType', label: 'Service Type', editable: true, type: 'text' },
   { key: 'naicsCode', label: 'NAICS Code', editable: true, type: 'text' },
@@ -477,21 +477,27 @@ const SupplierDetailPanel = forwardRef<SupplierDetailPanelHandle, SupplierDetail
       {/* Info grid */}
       <div className="detail-info-grid">
         {DETAIL_FIELDS.map((field) => {
-          // Mapped taxonomy paths: readonly display (no nav index)
-          if (field.key === 'mappedTaxonomyPaths') {
-            const paths = supplier.mappedTaxonomyPaths ?? []
+          // Readonly fields: no nav index, display only
+          if (!field.editable) {
+            const val = getVal(field.key)
+            const isArrayField = field.key === 'mappedTaxonomyPaths'
+            const arrVals = isArrayField ? (supplier.mappedTaxonomyPaths ?? []) : []
             return (
-              <div key={field.key} className="detail-field detail-field-wide">
+              <div key={field.key} className={`detail-field ${field.wide ? 'detail-field-wide' : ''}`}>
                 <label className="detail-field-label">{field.label}</label>
                 <div className="detail-field-value">
-                  {paths.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {paths.map((p, i) => (
-                        <span key={i} className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{p}</span>
-                      ))}
-                    </div>
+                  {isArrayField ? (
+                    arrVals.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {arrVals.map((p, i) => (
+                          <span key={i} className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{p}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-gray-300 italic">—</span>
+                    )
                   ) : (
-                    <span className="text-gray-300 italic">—</span>
+                    val ? <span>{val}</span> : <span className="text-gray-300 italic">—</span>
                   )}
                 </div>
               </div>

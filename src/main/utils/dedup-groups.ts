@@ -10,7 +10,7 @@
  */
 
 /** System/metadata columns to exclude from LLM prompts — not useful for classification. */
-export const EXCLUDED_FIELDS = new Set([
+const EXCLUDED_FIELDS = new Set([
   'id',
   'row_index',
   'created_at',
@@ -42,7 +42,7 @@ export function extractFields(
     .map(([k, v]) => [k, String(v)] as [string, string]);
 }
 
-export interface DedupGroup {
+interface DedupGroup {
   groupNumber: number;
   fields: Array<[string, string]>;
   transactionIds: string[];
@@ -198,7 +198,7 @@ export function buildDedupGroups(
 }
 
 /** Default maximum number of dedup groups per LLM call */
-export const DEFAULT_GROUP_BATCH_SIZE = 300;
+const DEFAULT_GROUP_BATCH_SIZE = 300;
 
 /**
  * Split a DedupGroupResult into batches of at most `batchSize` groups.

@@ -80,7 +80,7 @@ interface CategoryGroup {
 
 // ─── Rule generation helpers (exported for testing) ──────────────────────────
 
-export function generateSingleCategoryRule(
+function generateSingleCategoryRule(
   supplierName: string,
   taxonomyNodeId: string,
 ): OverrideRuleCreate {
@@ -98,7 +98,7 @@ export function generateSingleCategoryRule(
   };
 }
 
-export function generateMultiCategoryRules(
+function generateMultiCategoryRules(
   supplierName: string,
   categories: CategoryGroup[],
   columnPriorities: string[],

@@ -10,25 +10,3 @@ export interface TaxonomyNode {
   createdAt: string;
 }
 
-export interface TaxonomyMetadata {
-  name: string;
-  nodeCount: number;
-}
-
-export interface TaxonomySetInput {
-  name: string;
-  nodes: Array<{
-    path: string;
-    description?: string;
-  }>;
-}
-
-export interface TaxonomyInfo {
-  name: string;
-  nodeCount: number;
-}
-
-export interface RulePackInfo {
-  name: string;
-  ruleCount: number;
-}

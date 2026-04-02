@@ -1,7 +1,7 @@
 import type { LLMClient, ILLMConfig } from '../../shared/types/services';
 import { debugLog } from '../utils/debug-log';
 
-export interface ChatOptions {
+interface ChatOptions {
   model?: string;
   maxTokens?: number;
   temperature?: number;

@@ -6,7 +6,7 @@ import type { ResearchAgent, LLMClient } from '../../shared/types/services';
 import * as llmClient from '../services/llm-client';
 import { traceLog } from '../utils/llm-trace';
 
-export interface SupplierResearchResult extends SupplierInfo {
+interface SupplierResearchResult extends SupplierInfo {
   confidence: 'high' | 'medium' | 'low';
   sources: string[];
 }
@@ -130,7 +130,7 @@ export function buildUserPrompt(
   return sections.join('\n\n');
 }
 
-export interface ResearchParseResult {
+interface ResearchParseResult {
   result: SupplierResearchResult;
 }
 

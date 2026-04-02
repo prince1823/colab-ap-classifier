@@ -1,7 +1,7 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
 import { existsSync, unlinkSync } from 'fs';
 import type { SupplierUniverse, IAppConfigService } from '../../shared/types/services';
-import type { SupplierInfo } from '../../shared/types/suppliers';
+import type { SupplierInfo, SupplierRecord, SupplierRecordInput } from '../../shared/types/suppliers';
 import { convertPlaceholders } from './database';
 
 export class SupplierUniverseNotConfiguredError extends Error {
@@ -140,13 +140,7 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
     return parseJSON<SupplierInfo>(row[0].supplier_info);
   }
 
-  async getSupplierRecord(name: string): Promise<{
-    supplierInfo: SupplierInfo;
-    aliases: string[];
-    parentName: string | null;
-    mappedTaxonomyPaths: string[];
-    categoryASupplier: boolean;
-  } | null> {
+  async getSupplierRecord(name: string): Promise<SupplierRecord | null> {
     const rows = await this.allRaw<{
       supplier_info: string;
       aliases: string;
@@ -212,13 +206,7 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
     }
   }
 
-  async upsertSupplierFull(name: string, data: {
-    supplierInfo?: Partial<SupplierInfo>;
-    aliases?: string[];
-    parentName?: string | null;
-    mappedTaxonomyPaths?: string[];
-    categoryASupplier?: boolean;
-  }): Promise<void> {
+  async upsertSupplierFull(name: string, data: SupplierRecordInput): Promise<void> {
     const existing = await this.allRaw<{
       id: string;
       supplier_info: string;

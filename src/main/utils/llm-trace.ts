@@ -1,6 +1,6 @@
 import { appendFileSync } from 'fs';
 
-export type TraceAgentType =
+type TraceAgentType =
   | 'classification-category'
   | 'classification-l3'
   | 'classification-tailspend-category'

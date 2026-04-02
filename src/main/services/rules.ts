@@ -253,17 +253,46 @@ export class RuleStore implements IRuleStore {
     return { id };
   }
 
-  async previewRuleConflicts(candidateIds: string[]): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }> {
+  async previewRuleConflicts(
+    candidateIds: string[],
+    newRuleGroupId?: string | null,
+  ): Promise<{ covered: ConflictRow[]; eligibleIds: string[] }> {
     const ruleMap = await this.evaluateRules(candidateIds);
     const allRules = await this.listAllRules();
     const ruleNameById = new Map(allRules.map(r => [r.id, r.name]));
+    const ruleGroupIdById = new Map(allRules.map(r => [r.id, r.groupId]));
 
-    const covered: ConflictRow[] = [...ruleMap.entries()].map(([txnId, match]) => ({
-      transactionId: txnId,
-      existingRuleId: match.ruleId,
-      existingRuleName: ruleNameById.get(match.ruleId) ?? match.ruleId,
-    }));
-    const eligibleIds = candidateIds.filter(id => !ruleMap.has(id));
+    // Look up group priorities to compare new rule's bucket against existing rules'
+    const groupRows = await this.db.all<{ id: string; priority: number }>('SELECT id, priority FROM rule_groups');
+    const groupPriorityById = new Map(groupRows.map(g => [g.id, g.priority]));
+
+    const newRulePriority = newRuleGroupId ? (groupPriorityById.get(newRuleGroupId) ?? 0) : 0;
+
+    const covered: ConflictRow[] = [];
+    const eligibleIds: string[] = [];
+
+    for (const candidateId of candidateIds) {
+      const match = ruleMap.get(candidateId);
+      if (!match) {
+        eligibleIds.push(candidateId);
+        continue;
+      }
+      const existingGroupId = ruleGroupIdById.get(match.ruleId) ?? null;
+      const existingPriority = existingGroupId ? (groupPriorityById.get(existingGroupId) ?? 0) : 0;
+
+      // Block only if the existing rule's bucket has strictly higher priority.
+      // Equal or lower priority means the new rule can supersede — no conflict.
+      if (existingPriority > newRulePriority) {
+        covered.push({
+          transactionId: candidateId,
+          existingRuleId: match.ruleId,
+          existingRuleName: ruleNameById.get(match.ruleId) ?? match.ruleId,
+        });
+      } else {
+        eligibleIds.push(candidateId);
+      }
+    }
+
     return { covered, eligibleIds };
   }
 
@@ -274,7 +303,7 @@ export class RuleStore implements IRuleStore {
     );
 
     // Check which are already covered by higher-priority existing rules (before creating the new rule)
-    const { eligibleIds } = await this.previewRuleConflicts(allMatchingIds);
+    const { eligibleIds } = await this.previewRuleConflicts(allMatchingIds, input.groupId ?? null);
 
     // Create the rule
     const { id } = await this.createRule(input);

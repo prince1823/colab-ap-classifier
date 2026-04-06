@@ -256,7 +256,8 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
 
   // Export CSV respecting current sort/filter order
   const handleExportCsv = useCallback(async () => {
-    const orderedSuppliers = flatRows.map(r => r.normalized.supplier)
+    const allRows = data.csvMode ? csvSorted : normalizedRows.map(r => ({ normalized: r }))
+    const orderedSuppliers = allRows.map(r => r.normalized.supplier)
     const csvString = suppliersToCSV(orderedSuppliers, parents, aliasCache)
     const fileName = data.csvMode ? (data.csvFileName ?? 'normalized-suppliers.csv') : 'normalized-suppliers.csv'
     try {
@@ -264,7 +265,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     } catch (e) {
       data.setError(e instanceof Error ? e.message : 'Failed to save CSV')
     }
-  }, [flatRows, parents, aliasCache, data])
+  }, [data, csvSorted, normalizedRows, parents, aliasCache])
 
   // Compute parent grouping for the current page only
   const parentGroupInfo = useMemo(() => {

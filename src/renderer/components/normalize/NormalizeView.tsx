@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Trash2, Plus, Search, X,
   Merge, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown,
+  Clock,
 } from 'lucide-react'
 import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import MergeModal from './MergeModal'
@@ -40,8 +41,8 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   const [selectedSupplierIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   // Focus — row + column (spreadsheet-style nav)
-  // Columns: 0=parent, 1=name, 2=alias, 3=spend, 4=txns, 5=actions
-  const COL_COUNT = 6
+  // Columns: 0=parent, 1=name, 2=alias, 3=spend, 4=txns, 5=created, 6=actions
+  const COL_COUNT = 7
   const [focusedRowIndex, setFocusedRowIndex] = useState(0)
   const [focusedColIndex, setFocusedColIndex] = useState(0) // start on Parent
   const [focusedAliasIndex, setFocusedAliasIndex] = useState(0) // which alias mini-cell is focused when col=2
@@ -74,7 +75,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   const [pendingDeleteParentRowId, setPendingDeleteParentRowId] = useState<string | null>(null)
 
   // Column sorting
-  type SortColumn = 'parent' | 'name' | 'aliases' | 'spend' | 'txns'
+  type SortColumn = 'parent' | 'name' | 'aliases' | 'spend' | 'txns' | 'created'
   type SortDir = 'asc' | 'desc'
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')
@@ -137,6 +138,11 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     const sorted = [...filtered].sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1
 
+      if (sortColumn === 'created') {
+        const ta = new Date(a.supplier.createdAt).getTime()
+        const tb = new Date(b.supplier.createdAt).getTime()
+        return (ta - tb) * dir
+      }
       if (sortColumn === 'spend') {
         return (a.supplier.totalSpend - b.supplier.totalSpend) * dir
       }
@@ -628,6 +634,28 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
         {/* CSV upload/download */}
         <CsvToolbar data={data} onIngestComplete={onDataChange} />
 
+        {/* Newest first toggle */}
+        <button
+          onClick={() => {
+            if (sortColumn === 'created' && sortDir === 'desc') {
+              setSortColumn(null)
+              setSortDir('asc')
+            } else {
+              setSortColumn('created')
+              setSortDir('desc')
+            }
+          }}
+          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
+            sortColumn === 'created' && sortDir === 'desc'
+              ? 'border-blue-400 bg-blue-50 text-blue-700'
+              : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
+          }`}
+          title="Sort by newest first"
+        >
+          <Clock size={12} />
+          Newest first
+        </button>
+
         {/* Right: search */}
         <div className="relative w-48">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
@@ -667,8 +695,9 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
                   { key: 'parent' as SortColumn, label: 'Parent', cls: 'w-[18%] text-left' },
                   { key: 'name' as SortColumn, label: 'Normalized Name', cls: 'text-left' },
                   { key: 'aliases' as SortColumn, label: 'Aliases', cls: 'w-[22%] text-left' },
-                  { key: 'spend' as SortColumn, label: 'Spend', cls: 'w-[10%] text-right' },
-                  { key: 'txns' as SortColumn, label: 'Txns', cls: 'w-[7%] text-right' },
+                  { key: 'spend' as SortColumn, label: 'Spend', cls: 'w-[9%] text-right' },
+                  { key: 'txns' as SortColumn, label: 'Txns', cls: 'w-[6%] text-right' },
+                  { key: 'created' as SortColumn, label: 'Created', cls: 'w-[10%] text-left' },
                 ]).map(col => {
                   const isActive = sortColumn === col.key
                   const SortIcon = isActive
@@ -886,8 +915,15 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
                         {s.transactionCount.toLocaleString()}
                       </td>
 
-                      {/* Col 5: Actions */}
-                      <td className={`px-2 py-2.5 border border-gray-300 align-top ${cellFocus(idx, 5)} ${cellSelect(5, isSelected)}`} onClick={() => { setFocusedColIndex(5) }}>
+                      {/* Col 5: Created */}
+                      <td className={`px-3 py-2.5 text-left text-gray-400 border border-gray-300 align-top ${cellFocus(idx, 5)} ${cellSelect(5, isSelected)}`} onClick={() => { setFocusedColIndex(5) }}>
+                        <span title={new Date(s.createdAt).toLocaleString()}>
+                          {new Date(s.createdAt).toLocaleDateString()}
+                        </span>
+                      </td>
+
+                      {/* Col 6: Actions */}
+                      <td className={`px-2 py-2.5 border border-gray-300 align-top ${cellFocus(idx, 6)} ${cellSelect(6, isSelected)}`} onClick={() => { setFocusedColIndex(6) }}>
                         <div className="flex items-center justify-end gap-1 pr-1">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteNormalized(s.id) }}

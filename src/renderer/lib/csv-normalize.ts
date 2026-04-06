@@ -27,6 +27,7 @@ export function suppliersToCSV(
         alias: '',
         total_spend: s.totalSpend,
         transaction_count: s.transactionCount,
+        created_at: s.createdAt.split(/[T ]/)[0],
       })
     } else {
       for (const ad of aliasDataList) {
@@ -36,13 +37,14 @@ export function suppliersToCSV(
           alias: ad.rawName,
           total_spend: ad.spend,
           transaction_count: ad.txnCount,
+          created_at: s.createdAt.split(/[T ]/)[0],
         })
       }
     }
   }
 
   return Papa.unparse(rows, {
-    columns: ['parent_name', 'supplier_name', 'alias', 'total_spend', 'transaction_count'],
+    columns: ['parent_name', 'supplier_name', 'alias', 'total_spend', 'transaction_count', 'created_at'],
   })
 }
 

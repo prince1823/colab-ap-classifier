@@ -32,7 +32,7 @@ function buildTransactionFilter(pillState: Record<string, string[]>): Transactio
 /** Columns that are internal DB plumbing — never shown in the UI. */
 const INTERNAL_COLS = new Set([
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
-  'original_supplier_name', 'project_supplier_id',
+  'project_supplier_id',
   'applied_rule_id',
   'created_at', 'updated_at',
 ])

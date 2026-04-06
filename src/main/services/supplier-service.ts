@@ -580,6 +580,7 @@ export class SupplierService implements ISupplierService {
       parent_name: 'sub.parent_name',
       total_spend: 'sub.total_spend',
       transaction_count: 'sub.transaction_count',
+      created_at: 'sub.created_at',
     };
     const orderCol = sortBy ? (sortMap[sortBy] ?? 'sub.supplier_name') : 'sub.supplier_name';
     const direction = sortDir === 'desc' ? 'DESC' : 'ASC';

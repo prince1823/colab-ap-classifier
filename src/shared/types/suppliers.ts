@@ -75,7 +75,7 @@ export interface ProjectSupplierView extends ProjectSupplier {
 
 // ─── Paginated Supplier Listing ─────────────────────────────────────────────
 
-export type SupplierSortColumn = 'supplier_name' | 'parent_name' | 'total_spend' | 'transaction_count';
+export type SupplierSortColumn = 'supplier_name' | 'parent_name' | 'total_spend' | 'transaction_count' | 'created_at';
 
 export interface SupplierPaginationParams {
   limit: number;

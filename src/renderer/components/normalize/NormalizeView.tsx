@@ -121,11 +121,12 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   // ── Server-side paginated data (project mode) ─────────────────────
   // Map UI sort column names to server-side column names
   const serverSortBy = useMemo(() => {
-    const map: Record<string, 'supplier_name' | 'parent_name' | 'total_spend' | 'transaction_count'> = {
+    const map: Record<string, 'supplier_name' | 'parent_name' | 'total_spend' | 'transaction_count' | 'created_at'> = {
       name: 'supplier_name',
       parent: 'parent_name',
       spend: 'total_spend',
       txns: 'transaction_count',
+      created: 'created_at',
     }
     return sortColumn ? (map[sortColumn] ?? undefined) : undefined
   }, [sortColumn])

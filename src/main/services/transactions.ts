@@ -55,7 +55,7 @@ const FILTER_VIRTUAL_EXPRS: Record<string, string> = {
   confirmation_status: 'ps.confirmation_status',
   applied_rule_name: 'ar.name',
   parent_name: 'sp.name',
-  source_file: 'upl.file_name',
+  source_file: "upl.file_name || ' (' || strftime(upl.created_at, '%Y-%m-%d %H:%M') || ')'",
 };
 
 export class TransactionStore implements ITransactionStore {
@@ -619,7 +619,7 @@ export class TransactionStore implements ITransactionStore {
       supplier_name: "COALESCE(ps.supplier_name, '')",
       parent_name: "COALESCE(sp.name, '')",
       applied_rule_name: "COALESCE(ar.name, '')",
-      source_file: "COALESCE(upl.file_name, '')",
+      source_file: "COALESCE(upl.file_name || ' (' || strftime(upl.created_at, '%Y-%m-%d %H:%M') || ')', '')",
       master_year: `YEAR(${masterDateExpr})`,
       master_month: `strftime('%B', ${masterDateExpr})`,
     };

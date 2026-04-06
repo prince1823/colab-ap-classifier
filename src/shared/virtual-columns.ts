@@ -25,7 +25,7 @@ export const VIRTUAL_COLUMN_REGISTRY: Record<string, VirtualColumnDef> = {
   classification_l3:   { selectExpr: 'tax.l3',                                    requiredJoin: 'taxonomy'        },
   classification_path: { selectExpr: "CONCAT_WS(' > ', tax.l1, tax.l2, tax.l3)", requiredJoin: 'taxonomy'        },
   applied_rule_name:   { selectExpr: 'ar.name',                                   requiredJoin: 'rules'           },
-  source_file:         { selectExpr: 'upl.file_name',                             requiredJoin: 'upload'          },
+  source_file:         { selectExpr: "upl.file_name || ' (' || strftime(upl.created_at, '%Y-%m-%d %H:%M') || ')'", requiredJoin: 'upload' },
 };
 
 /**

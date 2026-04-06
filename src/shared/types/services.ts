@@ -203,6 +203,7 @@ export interface SupplierService {
   deleteSupplier(supplierId: string): Promise<void>;
   updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void>;
   listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
+  listProjectSuppliersPaginated(params: import('./suppliers').SupplierPaginationParams): Promise<import('./suppliers').PaginatedSuppliers>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;

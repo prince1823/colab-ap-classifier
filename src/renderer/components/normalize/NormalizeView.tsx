@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Trash2, Plus, Search, X,
   Merge, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import MergeModal from './MergeModal'
@@ -11,6 +12,7 @@ import CsvToolbar from './CsvToolbar'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import { useNormalizeData } from '../../hooks/useNormalizeData'
 import type { AliasData } from '../../hooks/useNormalizeData'
+import { useDebounce } from '../../hooks/useDebounce'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -35,6 +37,12 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   const { suppliers, parents, aliasCache, loading, error } = data
 
   const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300)
+
+  // Pagination
+  const PAGE_SIZES = [25, 50, 100] as const
+  const [pageSize, setPageSize] = useState<number>(50)
+  const [currentPage, setCurrentPage] = useState(0)
 
   // Selection: set of normalized supplier IDs
   const [selectedSupplierIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -107,9 +115,66 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     }
   }, [loading, showMergeModal, reassigningAlias, parentTypeahead, editingId, editingParentId])
 
+  // ── Server-side paginated data (project mode) ─────────────────────
+  // Map UI sort column names to server-side column names
+  const serverSortBy = useMemo(() => {
+    const map: Record<string, 'supplier_name' | 'parent_name' | 'total_spend' | 'transaction_count'> = {
+      name: 'supplier_name',
+      parent: 'parent_name',
+      spend: 'total_spend',
+      txns: 'transaction_count',
+    }
+    return sortColumn ? (map[sortColumn] ?? undefined) : undefined
+  }, [sortColumn])
+
+  const [serverRows, setServerRows] = useState<ProjectSupplierView[]>([])
+  const [serverTotal, setServerTotal] = useState(0)
+  const [pageLoading, setPageLoading] = useState(false)
+
+  // Fetch version counter to trigger re-fetch after mutations
+  const [fetchVersion, setFetchVersion] = useState(0)
+  const triggerRefetch = useCallback(() => setFetchVersion(v => v + 1), [])
+
+  // Reset to first page when filter/sort changes
+  useEffect(() => { setCurrentPage(0) }, [debouncedSearch, sortColumn, sortDir])
+
+  // Reset focused row when page changes
+  useEffect(() => { setFocusedRowIndex(0); setFocusedAliasIndex(0) }, [currentPage, pageSize])
+
+  // Server-side fetch for project mode
+  useEffect(() => {
+    if (data.csvMode) return
+    let cancelled = false
+    setPageLoading(true)
+    data.fetchPage({
+      limit: pageSize,
+      offset: currentPage * pageSize,
+      search: debouncedSearch || undefined,
+      sortBy: serverSortBy,
+      sortDir: sortDir,
+    }).then(result => {
+      if (cancelled) return
+      setServerRows(result.rows)
+      setServerTotal(result.total)
+      setPageLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [data.csvMode, data.fetchPage, currentPage, pageSize, debouncedSearch, serverSortBy, sortDir, fetchVersion])
+
   // ── Build normalized rows ─────────────────────────────────────────
+  // In CSV mode: use client-side filtering/sorting/pagination
+  // In project mode: use server-fetched page data
 
   const normalizedRows: NormalizedRow[] = useMemo(() => {
+    if (!data.csvMode) {
+      // Server already sorted, filtered, and paginated — just map to NormalizedRow
+      return serverRows.map(s => ({
+        supplier: s,
+        aliases: s.aliases.map(name => ({ rawName: name, spend: 0, txnCount: 0 })),
+        aliasesLoaded: true,
+      }))
+    }
+    // CSV mode: client-side data
     return suppliers
       .sort((a, b) => b.totalSpend - a.totalSpend)
       .map(s => ({
@@ -117,47 +182,36 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
         aliases: aliasCache.get(s.id) ?? [],
         aliasesLoaded: aliasCache.has(s.id),
       }))
-  }, [suppliers, aliasCache])
+  }, [data.csvMode, serverRows, suppliers, aliasCache])
 
-  // ── Search filter ─────────────────────────────────────────────────
+  // ── CSV-mode client-side filter + sort + pagination ───────────────
 
-  const filtered = useMemo(() => {
-    if (!searchQuery) return normalizedRows
-    const q = searchQuery.toLowerCase()
+  const csvFiltered = useMemo(() => {
+    if (!data.csvMode) return []
+    if (!debouncedSearch) return normalizedRows
+    const q = debouncedSearch.toLowerCase()
     return normalizedRows.filter(r =>
       r.supplier.supplierName.toLowerCase().includes(q) ||
       r.supplier.parentName?.toLowerCase().includes(q) ||
       r.aliases.some(a => a.rawName.toLowerCase().includes(q))
     )
-  }, [normalizedRows, searchQuery])
+  }, [data.csvMode, normalizedRows, debouncedSearch])
 
-  // ── Flatten into table rows (aliases shown inline) ───────────────
-
-  const flatRows: FlatRow[] = useMemo(() => {
-    const sorted = [...filtered].sort((a, b) => {
+  const csvSorted: FlatRow[] = useMemo(() => {
+    if (!data.csvMode) return []
+    const sorted = [...csvFiltered].sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1
-
-      if (sortColumn === 'spend') {
-        return (a.supplier.totalSpend - b.supplier.totalSpend) * dir
-      }
-      if (sortColumn === 'txns') {
-        return (a.supplier.transactionCount - b.supplier.transactionCount) * dir
-      }
-      if (sortColumn === 'name') {
-        return a.supplier.supplierName.toLowerCase() < b.supplier.supplierName.toLowerCase() ? -dir : dir
-      }
+      if (sortColumn === 'spend') return (a.supplier.totalSpend - b.supplier.totalSpend) * dir
+      if (sortColumn === 'txns') return (a.supplier.transactionCount - b.supplier.transactionCount) * dir
+      if (sortColumn === 'name') return a.supplier.supplierName.toLowerCase() < b.supplier.supplierName.toLowerCase() ? -dir : dir
       if (sortColumn === 'aliases') {
         const aa = a.aliases.map(x => x.rawName).join(', ').toLowerCase()
         const ba = b.aliases.map(x => x.rawName).join(', ').toLowerCase()
         return aa < ba ? -dir : aa > ba ? dir : 0
       }
-
-      // Default: sort by parent name so same-parent rows are adjacent
-      // Rows with no parent always go last, regardless of sort direction
       const aHasParent = !!a.supplier.parentName
       const bHasParent = !!b.supplier.parentName
       if (aHasParent !== bHasParent) return aHasParent ? -1 : 1
-
       const parentDir = sortColumn === 'parent' ? dir : 1
       const pa = a.supplier.parentName?.toLowerCase() ?? ''
       const pb = b.supplier.parentName?.toLowerCase() ?? ''
@@ -165,21 +219,40 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       return a.supplier.supplierName.toLowerCase() < b.supplier.supplierName.toLowerCase() ? -1 : 1
     })
     return sorted.map(r => ({ normalized: r }))
-  }, [filtered, sortColumn, sortDir])
+  }, [data.csvMode, csvFiltered, sortColumn, sortDir])
 
-  // Compute parent grouping: for each row, whether it's the first in its parent group and the group span
+  // ── Unified pagination ────────────────────────────────────────────
+  // In project mode: server handles total count and page slicing
+  // In CSV mode: client-side slicing
+
+  const totalFiltered = data.csvMode ? csvSorted.length : serverTotal
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize))
+  const safePage = Math.min(currentPage, totalPages - 1)
+  const pageStart = safePage * pageSize
+  const pageEnd = Math.min(pageStart + pageSize, totalFiltered)
+
+  const pagedRows: FlatRow[] = useMemo(() => {
+    if (!data.csvMode) {
+      // Project mode: serverRows is already the current page
+      return normalizedRows.map(r => ({ normalized: r }))
+    }
+    // CSV mode: slice from client-side sorted list
+    return csvSorted.slice(pageStart, pageEnd)
+  }, [data.csvMode, normalizedRows, csvSorted, pageStart, pageEnd])
+
+  // Compute parent grouping for the current page only
   const parentGroupInfo = useMemo(() => {
     const info: { isFirst: boolean; rowSpan: number }[] = []
     let i = 0
-    while (i < flatRows.length) {
-      const parentName = flatRows[i].normalized.supplier.parentName
+    while (i < pagedRows.length) {
+      const parentName = pagedRows[i].normalized.supplier.parentName
       if (!parentName) {
         info.push({ isFirst: true, rowSpan: 1 })
         i++
         continue
       }
       let j = i + 1
-      while (j < flatRows.length && flatRows[j].normalized.supplier.parentName === parentName) j++
+      while (j < pagedRows.length && pagedRows[j].normalized.supplier.parentName === parentName) j++
       const span = j - i
       for (let k = i; k < j; k++) {
         info.push({ isFirst: k === i, rowSpan: span })
@@ -187,69 +260,82 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       i = j
     }
     return info
-  }, [flatRows])
+  }, [pagedRows])
 
   // ── Actions (delegated to hook) ──────────────────────────────────
 
   const handleRename = useCallback(async (supplierId: string, newName: string) => {
     await data.rename(supplierId, newName)
     setEditingId(null)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   const handleDeleteNormalized = useCallback(async (supplierId: string) => {
-    const supplier = suppliers.find(s => s.id === supplierId)
+    // In project mode, find supplier from current page rows
+    const pageSupplier = pagedRows.find(r => r.normalized.supplier.id === supplierId)?.normalized.supplier
+    const supplier = pageSupplier ?? suppliers.find(s => s.id === supplierId)
     if (!supplier) return
-    const aliases = aliasCache.get(supplierId)
-    if (aliases && aliases.length > 0) {
-      if (!window.confirm(`"${supplier.supplierName}" has ${aliases.length} alias(es). Reassign them first, or delete anyway?`)) return
+    const aliases = data.csvMode ? aliasCache.get(supplierId) : undefined
+    const aliasCount = data.csvMode ? (aliases?.length ?? 0) : (pageSupplier ? pagedRows.find(r => r.normalized.supplier.id === supplierId)!.normalized.aliases.length : 0)
+    if (aliasCount > 0) {
+      if (!window.confirm(`"${supplier.supplierName}" has ${aliasCount} alias(es). Reassign them first, or delete anyway?`)) return
     } else {
       if (!window.confirm(`Delete "${supplier.supplierName}"?`)) return
     }
     await data.deleteSupplier(supplierId)
     setSelectedIds(prev => { const n = new Set(prev); n.delete(supplierId); return n })
-  }, [suppliers, aliasCache, data])
+    if (!data.csvMode) triggerRefetch()
+  }, [suppliers, aliasCache, data, pagedRows, triggerRefetch])
 
   const handleDeleteAlias = useCallback((alias: AliasData, normalizedId: string) => {
     if (!window.confirm(`Remove alias "${alias.rawName}"?`)) return
     data.deleteAlias(alias, normalizedId)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   const handleChangeParent = useCallback(async (supplierId: string, parentId: string | null) => {
     await data.changeParent(supplierId, parentId)
     setParentTypeahead(null)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   const handleRenameParent = useCallback(async (parentId: string, newName: string) => {
     await data.renameParent(parentId, newName)
     setEditingParentId(null)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   const handleDeleteParent = useCallback(async (parentId: string) => {
     await data.deleteParent(parentId)
     setPendingDeleteParentRowId(null)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   const handleCreateParentAndAssign = useCallback(async (supplierId: string, name: string) => {
     await data.createParentAndAssign(supplierId, name)
     setParentTypeahead(null)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   const handleMerge = useCallback(async (survivorId: string, losingIds: string[]) => {
     await data.mergeSuppliers(survivorId, losingIds)
     setSelectedIds(prev => { const n = new Set(prev); new Set(losingIds).forEach(id => n.delete(id)); n.delete(survivorId); return n })
     setShowMergeModal(false)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   const handleMergeParents = useCallback(async (survivorId: string, losingIds: string[]) => {
     await data.mergeParents(survivorId, losingIds)
     setSelectedIds(new Set())
     setShowMergeModal(false)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   const handleReassignAlias = useCallback(async (aliasName: string, fromId: string, toId: string) => {
     await data.reassignAlias(aliasName, fromId, toId)
     setReassigningAlias(null)
-  }, [data])
+    if (!data.csvMode) triggerRefetch()
+  }, [data, triggerRefetch])
 
   // ── Inline edit helpers ───────────────────────────────────────────
 
@@ -330,7 +416,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     // Don't handle table shortcuts while a modal is open — let the modal own the keyboard
     if (showMergeModal || reassigningAlias || parentTypeahead) return
 
-    const row = flatRows[focusedRowIndex]
+    const row = pagedRows[focusedRowIndex]
     if (!row) return
 
     // Cmd+M: merge modal
@@ -392,7 +478,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
           // At top alias — move to previous row, stay on alias col, focus last alias
           if (focusedRowIndex > 0) {
             setFocusedRowIndex(focusedRowIndex - 1)
-            const prevRow = flatRows[focusedRowIndex - 1]
+            const prevRow = pagedRows[focusedRowIndex - 1]
             const prevShowAll = expandedAliases.has(prevRow.normalized.supplier.id)
             const prevCount = prevRow.normalized.aliasesLoaded
               ? (prevShowAll ? prevRow.normalized.aliases.length : Math.min(4, prevRow.normalized.aliases.length))
@@ -403,7 +489,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
           const prev = focusedRowIndex - 1
           if (prev >= 0) {
             setFocusedRowIndex(prev)
-            toggleSelect(flatRows[prev].normalized.supplier.id)
+            toggleSelect(pagedRows[prev].normalized.supplier.id)
           }
         } else {
           setFocusedRowIndex(Math.max(0, focusedRowIndex - 1))
@@ -420,18 +506,18 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
             return
           }
           // At bottom alias — move to next row, stay on alias col, focus first alias
-          if (focusedRowIndex < flatRows.length - 1) {
+          if (focusedRowIndex < pagedRows.length - 1) {
             setFocusedRowIndex(focusedRowIndex + 1)
             setFocusedAliasIndex(0)
           }
         } else if (e.shiftKey) {
           const next = focusedRowIndex + 1
-          if (next < flatRows.length) {
+          if (next < pagedRows.length) {
             setFocusedRowIndex(next)
-            toggleSelect(flatRows[next].normalized.supplier.id)
+            toggleSelect(pagedRows[next].normalized.supplier.id)
           }
         } else {
-          setFocusedRowIndex(Math.min(flatRows.length - 1, focusedRowIndex + 1))
+          setFocusedRowIndex(Math.min(pagedRows.length - 1, focusedRowIndex + 1))
           setFocusedAliasIndex(0)
         }
         break
@@ -495,7 +581,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
         break
       }
     }
-  }, [flatRows, focusedRowIndex, focusedColIndex, focusedAliasIndex, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleSelect, startEdit, startEditParent, suppliers, focusOuter, expandedAliases, selectedAlias])
+  }, [pagedRows, focusedRowIndex, focusedColIndex, focusedAliasIndex, selectedSupplierIds, editingId, editingParentId, showMergeModal, reassigningAlias, parentTypeahead, toggleSelect, startEdit, startEditParent, suppliers, focusOuter, expandedAliases, selectedAlias])
 
   // Global Cmd+key shortcuts — work even when focus is on search input
   useEffect(() => {
@@ -503,7 +589,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       if (!(e.metaKey || e.ctrlKey)) return
       if (showMergeModal || reassigningAlias || parentTypeahead) return
 
-      const row = flatRows[focusedRowIndex]
+      const row = pagedRows[focusedRowIndex]
       if (!row) return
 
       if (e.key === 'm') {
@@ -542,7 +628,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [flatRows, focusedRowIndex, selectedSupplierIds, selectedColIndex, showMergeModal, reassigningAlias, parentTypeahead, suppliers])
+  }, [pagedRows, focusedRowIndex, selectedSupplierIds, selectedColIndex, showMergeModal, reassigningAlias, parentTypeahead, suppliers])
 
   // Scroll focused row into view
   useEffect(() => {
@@ -552,7 +638,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
 
   // Helper: focused cell ring style (suppress on alias col when navigating within aliases)
   const cellFocus = (rowIdx: number, colIdx: number) =>
-    rowIdx === focusedRowIndex && colIdx === focusedColIndex && !(colIdx === 2 && flatRows[rowIdx]?.normalized?.aliasesLoaded && flatRows[rowIdx]?.normalized?.aliases.length > 0)
+    rowIdx === focusedRowIndex && colIdx === focusedColIndex && !(colIdx === 2 && pagedRows[rowIdx]?.normalized?.aliasesLoaded && pagedRows[rowIdx]?.normalized?.aliases.length > 0)
       ? 'ring-2 ring-inset ring-blue-400'
       : ''
 
@@ -581,7 +667,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
         {/* Left: supplier count + merge button */}
         <span className="text-[10px] text-gray-400 flex-shrink-0">
-          {filtered.length} supplier{filtered.length !== 1 ? 's' : ''}
+          {totalFiltered} supplier{totalFiltered !== 1 ? 's' : ''}
         </span>
 
         {selectedSupplierIds.size >= 2 && (
@@ -655,7 +741,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
 
       {/* Table */}
       <div ref={tableRef} className="flex-1 overflow-auto outline-none" tabIndex={-1} onClick={focusOuter}>
-        {filtered.length === 0 ? (
+        {totalFiltered === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
             {searchQuery ? 'No suppliers match your search' : 'No suppliers found'}
           </div>
@@ -691,7 +777,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
               </tr>
             </thead>
             <tbody>
-              {flatRows.map((row, idx) => {
+              {pagedRows.map((row, idx) => {
                 const isFocused = idx === focusedRowIndex
                 const nr = row.normalized
                 const s = nr.supplier
@@ -905,6 +991,65 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
           </table>
         )}
       </div>
+
+      {/* Pagination controls */}
+      {totalFiltered > 0 && (
+        <div className="flex items-center justify-between px-4 py-2 border-t border-gray-200 bg-gray-50/80 flex-shrink-0 text-xs">
+          <div className="flex items-center gap-2 text-gray-500">
+            <span>Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(0) }}
+              className="border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-white outline-none focus:border-blue-400"
+            >
+              {PAGE_SIZES.map(size => (
+                <option key={size} value={size}>{size}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1 text-gray-500">
+            <span className="mr-2">
+              {pageStart + 1}–{pageEnd} of {totalFiltered}
+            </span>
+            <button
+              onClick={() => setCurrentPage(0)}
+              disabled={safePage === 0}
+              className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="First page"
+            >
+              <ChevronsLeft size={14} />
+            </button>
+            <button
+              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+              className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Previous page"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <span className="px-2 tabular-nums">
+              Page {safePage + 1} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={safePage >= totalPages - 1}
+              className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Next page"
+            >
+              <ChevronRight size={14} />
+            </button>
+            <button
+              onClick={() => setCurrentPage(totalPages - 1)}
+              disabled={safePage >= totalPages - 1}
+              className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Last page"
+            >
+              <ChevronsRight size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Merge modal */}
       {showMergeModal && mergeMode === 'parent' && selectedParents.length >= 2 && (

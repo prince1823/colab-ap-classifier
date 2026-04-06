@@ -353,6 +353,7 @@ export class SupplierService implements ISupplierService {
     universe_match: 'ps.universe_match',
     parent_name: 'sp.name',
     data_source: 'ps.data_source',
+    source_file: "upl.file_name || ' (' || strftime(upl.created_at, '%Y-%m-%d %H:%M') || ')'",
     // Aggregate fields — resolved on the outer subquery alias
     total_spend: 'sub.total_spend',
     transaction_count: 'sub.transaction_count',
@@ -367,6 +368,7 @@ export class SupplierService implements ISupplierService {
     { name: 'universe_match', label: 'Universe Match', type: 'boolean' },
     { name: 'parent_name', label: 'Parent Supplier', type: 'string' },
     { name: 'data_source', label: 'Data Source', type: 'string' },
+    { name: 'source_file', label: 'Source File', type: 'string', group: 'Upload' },
     { name: 'total_spend', label: 'Total Spend', type: 'number', group: 'Aggregates' },
     { name: 'transaction_count', label: 'Transaction Count', type: 'number', group: 'Aggregates' },
   ];
@@ -383,6 +385,12 @@ export class SupplierService implements ISupplierService {
         'SELECT name AS val FROM supplier_parents ORDER BY name LIMIT ?',
         limit
       );
+      return rows.map(r => String(r.val));
+    }
+    if (field === 'source_file') {
+      const colExpr = SupplierService.SUPPLIER_COLUMNS[field];
+      const sql = `SELECT DISTINCT ${colExpr} as val FROM uploads upl WHERE upl.file_name IS NOT NULL ORDER BY val LIMIT ?`;
+      const rows = await this.db.all<{ val: string }>(sql, limit);
       return rows.map(r => String(r.val));
     }
     const colExpr = SupplierService.SUPPLIER_COLUMNS[field];
@@ -454,6 +462,7 @@ export class SupplierService implements ISupplierService {
         ${spendExpr} as total_spend
       FROM project_suppliers ps
       LEFT JOIN transactions t ON t.project_supplier_id = ps.id
+      LEFT JOIN uploads upl ON t.upload_id = upl.id
       LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
       ${innerWhereSQL}
       GROUP BY ALL`;

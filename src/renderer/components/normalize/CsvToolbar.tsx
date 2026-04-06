@@ -9,9 +9,10 @@ import { parseNormalizeCsv, csvHasApplyColumns, parseCsvToNormalizeData, supplie
 interface CsvToolbarProps {
   data: NormalizeDataSource
   onIngestComplete?: () => void
+  onExportCsv?: () => Promise<void>
 }
 
-export default function CsvToolbar({ data, onIngestComplete }: CsvToolbarProps) {
+export default function CsvToolbar({ data, onIngestComplete, onExportCsv }: CsvToolbarProps) {
   const [showImportModal, setShowImportModal] = useState(false)
   const [applyRows, setApplyRows] = useState<CsvApplyRow[] | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -112,7 +113,7 @@ export default function CsvToolbar({ data, onIngestComplete }: CsvToolbarProps) 
         {/* Download current data */}
         {data.suppliers.length > 0 && (
           <button
-            onClick={data.exportCsv}
+            onClick={onExportCsv ?? data.exportCsv}
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50 transition-colors"
             title="Download as CSV"
           >

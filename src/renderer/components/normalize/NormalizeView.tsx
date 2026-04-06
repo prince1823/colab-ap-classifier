@@ -12,6 +12,8 @@ import CsvToolbar from './CsvToolbar'
 import { fmtAbbrev } from '../../utils/formatSpend'
 import { useNormalizeData } from '../../hooks/useNormalizeData'
 import type { AliasData } from '../../hooks/useNormalizeData'
+import { suppliersToCSV } from '../../lib/csv-normalize'
+import { ipc } from '../../lib/ipc'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -172,6 +174,18 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     })
     return sorted.map(r => ({ normalized: r }))
   }, [filtered, sortColumn, sortDir])
+
+  // Export CSV respecting current sort/filter order
+  const handleExportCsv = useCallback(async () => {
+    const orderedSuppliers = flatRows.map(r => r.normalized.supplier)
+    const csvString = suppliersToCSV(orderedSuppliers, parents, aliasCache)
+    const fileName = data.csvMode ? (data.csvFileName ?? 'normalized-suppliers.csv') : 'normalized-suppliers.csv'
+    try {
+      await ipc.export.saveContent(csvString, fileName)
+    } catch (e) {
+      data.setError(e instanceof Error ? e.message : 'Failed to save CSV')
+    }
+  }, [flatRows, parents, aliasCache, data])
 
   // Compute parent grouping: for each row, whether it's the first in its parent group and the group span
   const parentGroupInfo = useMemo(() => {
@@ -632,7 +646,7 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
         </div>
 
         {/* CSV upload/download */}
-        <CsvToolbar data={data} onIngestComplete={onDataChange} />
+        <CsvToolbar data={data} onIngestComplete={onDataChange} onExportCsv={handleExportCsv} />
 
         {/* Newest first toggle */}
         <button

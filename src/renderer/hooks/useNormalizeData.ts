@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { ipc } from '../lib/ipc'
 import { showError } from '../lib/toast-errors'
-import type { ProjectSupplierView, SupplierParent } from '../../shared/types/suppliers'
+import type { ProjectSupplierView, SupplierParent, SupplierPaginationParams, PaginatedSuppliers } from '../../shared/types/suppliers'
 import { suppliersToCSV } from '../lib/csv-normalize'
 import type { AliasData, CsvModeData } from '../lib/csv-normalize'
 
@@ -36,6 +36,8 @@ export interface NormalizeDataSource {
   mergeSuppliers(survivorId: string, losingIds: string[]): Promise<void>
   mergeParents(survivorId: string, losingIds: string[]): Promise<void>
   reassignAlias(aliasName: string, fromId: string, toId: string): Promise<void>
+
+  fetchPage(params: SupplierPaginationParams): Promise<PaginatedSuppliers>
 
   refresh(): Promise<void>
   exportCsv(): Promise<void>
@@ -103,31 +105,47 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Auto-load aliases (project mode only)
-  const loadAllAliases = useCallback(async (supplierIds: string[]) => {
-    const results = await Promise.all(
-      supplierIds.map(async (id) => {
-        try {
-          const aliases = await ipc.suppliers.getAliases(id)
-          return [id, (aliases as string[]).map(name => ({ rawName: name, spend: 0, txnCount: 0 }))] as const
-        } catch {
-          return [id, [] as AliasData[]] as const
-        }
+  // Auto-load aliases in batches (project mode only)
+  const ALIAS_BATCH_SIZE = 50
+  const loadAliasesInBatches = useCallback(async (supplierIds: string[]) => {
+    for (let i = 0; i < supplierIds.length; i += ALIAS_BATCH_SIZE) {
+      const batch = supplierIds.slice(i, i + ALIAS_BATCH_SIZE)
+      const results = await Promise.all(
+        batch.map(async (id) => {
+          try {
+            const aliases = await ipc.suppliers.getAliases(id)
+            return [id, (aliases as string[]).map(name => ({ rawName: name, spend: 0, txnCount: 0 }))] as const
+          } catch {
+            return [id, [] as AliasData[]] as const
+          }
+        })
+      )
+      setProjAliasCache(prev => {
+        const next = new Map(prev)
+        for (const [id, data] of results) next.set(id, data)
+        return next
       })
-    )
-    setProjAliasCache(prev => {
-      const next = new Map(prev)
-      for (const [id, data] of results) next.set(id, data)
-      return next
-    })
+    }
   }, [])
 
   useEffect(() => {
     if (!csvMode && projSuppliers.length > 0) {
       const unloaded = projSuppliers.filter(s => !projAliasCache.has(s.id))
-      if (unloaded.length > 0) loadAllAliases(unloaded.map(s => s.id))
+      if (unloaded.length > 0) loadAliasesInBatches(unloaded.map(s => s.id))
     }
-  }, [csvMode, projSuppliers, projAliasCache, loadAllAliases])
+  }, [csvMode, projSuppliers, projAliasCache, loadAliasesInBatches])
+
+  // ── Paginated fetch (project mode — server-side pagination) ────────
+
+  const fetchPage = useCallback(async (params: SupplierPaginationParams): Promise<PaginatedSuppliers> => {
+    try {
+      const result = await ipc.suppliers.listPaginated(params) as PaginatedSuppliers
+      return result
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to fetch page')
+      return { rows: [], total: 0 }
+    }
+  }, [])
 
   // ── Refresh (project mode) ──────────────────────────────────────────
 
@@ -420,6 +438,7 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
     mergeSuppliers,
     mergeParents,
     reassignAlias,
+    fetchPage,
     refresh,
     exportCsv,
   }

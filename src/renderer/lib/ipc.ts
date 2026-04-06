@@ -142,6 +142,7 @@ export const ipc = {
   // ── Suppliers (3 channels + research) ──
   suppliers: {
     list: (filter?: { conditions?: FilterCondition[]; groupedConditions?: import('../../shared/types/transactions').GroupedFilter }) => invoke('suppliers:list', filter),
+    listPaginated: (params: import('../../shared/types/suppliers').SupplierPaginationParams) => invoke('suppliers:listPaginated', params),
     update: (supplierId: string, updates: SupplierUpdateInput) =>
       invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>

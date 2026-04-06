@@ -11,7 +11,7 @@ interface VirtualColumnDef {
   /** SQL expression when this column appears in a SELECT (using standard JOIN aliases). */
   selectExpr: string;
   /** The JOIN clause required to resolve this column. */
-  requiredJoin: 'supplier' | 'taxonomy' | 'rules' | 'supplier_parent';
+  requiredJoin: 'supplier' | 'taxonomy' | 'rules' | 'supplier_parent' | 'upload';
 }
 
 export const VIRTUAL_COLUMN_REGISTRY: Record<string, VirtualColumnDef> = {
@@ -25,6 +25,7 @@ export const VIRTUAL_COLUMN_REGISTRY: Record<string, VirtualColumnDef> = {
   classification_l3:   { selectExpr: 'tax.l3',                                    requiredJoin: 'taxonomy'        },
   classification_path: { selectExpr: "CONCAT_WS(' > ', tax.l1, tax.l2, tax.l3)", requiredJoin: 'taxonomy'        },
   applied_rule_name:   { selectExpr: 'ar.name',                                   requiredJoin: 'rules'           },
+  source_file:         { selectExpr: 'upl.file_name',                             requiredJoin: 'upload'          },
 };
 
 /**

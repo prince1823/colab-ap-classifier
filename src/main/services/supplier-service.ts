@@ -233,6 +233,24 @@ export class SupplierService implements ISupplierService {
     return rows.map(r => r.original_supplier_name);
   }
 
+  async getProjectAliasesWithSpend(supplierId: string): Promise<{ rawName: string; spend: number; txnCount: number }[]> {
+    const hasSpend = await this.transactionColumnExists('spend_amount');
+    const spendExpr = hasSpend ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)' : '0';
+
+    const rows = await this.db.all<{ original_supplier_name: string; total_spend: number; txn_count: number }>(
+      `SELECT t.original_supplier_name,
+              ${spendExpr} as total_spend,
+              COUNT(t.id) as txn_count
+       FROM transactions t
+       WHERE t.project_supplier_id = ?
+       AND t.original_supplier_name IS NOT NULL
+       GROUP BY t.original_supplier_name
+       ORDER BY t.original_supplier_name`,
+      supplierId
+    );
+    return rows.map(r => ({ rawName: r.original_supplier_name, spend: Number(r.total_spend), txnCount: Number(r.txn_count) }));
+  }
+
   async renameSupplier(supplierId: string, newName: string): Promise<void> {
     await this.db.run(
       'UPDATE project_suppliers SET supplier_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',

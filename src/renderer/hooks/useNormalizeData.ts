@@ -108,8 +108,8 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
     const results = await Promise.all(
       supplierIds.map(async (id) => {
         try {
-          const aliases = await ipc.suppliers.getAliases(id)
-          return [id, (aliases as string[]).map(name => ({ rawName: name, spend: 0, txnCount: 0 }))] as const
+          const aliases = await ipc.suppliers.getAliasesWithSpend(id) as AliasData[]
+          return [id, aliases] as const
         } catch {
           return [id, [] as AliasData[]] as const
         }
@@ -316,11 +316,8 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
           n.delete(survivorId)
           return n
         })
-        ipc.suppliers.getAliases(survivorId).then(aliases => {
-          const aliasData: AliasData[] = (aliases as string[]).map(name => ({
-            rawName: name, spend: 0, txnCount: 0,
-          }))
-          setProjAliasCache(c => new Map(c).set(survivorId, aliasData))
+        ipc.suppliers.getAliasesWithSpend(survivorId).then(aliases => {
+          setProjAliasCache(c => new Map(c).set(survivorId, aliases as AliasData[]))
         }).catch((e) => showError('Failed to reload supplier aliases', e))
         ipc.suppliers.list().then(fresh => {
           setProjSuppliers(fresh as ProjectSupplierView[])
@@ -384,9 +381,10 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
         setProjAliasCache(prev => {
           const next = new Map(prev)
           const fromAliases = next.get(fromId) ?? []
+          const movedAlias = fromAliases.find(a => a.rawName === aliasName)
           next.set(fromId, fromAliases.filter(a => a.rawName !== aliasName))
           const toAliases = next.get(toId) ?? []
-          next.set(toId, [...toAliases, { rawName: aliasName, spend: 0, txnCount: 0 }])
+          next.set(toId, [...toAliases, movedAlias ?? { rawName: aliasName, spend: 0, txnCount: 0 }])
           return next
         })
         ipc.suppliers.list().then(fresh => {

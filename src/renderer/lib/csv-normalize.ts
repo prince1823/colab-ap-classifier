@@ -18,8 +18,8 @@ export function suppliersToCSV(
   const rows: Record<string, string | number>[] = []
 
   for (const s of suppliers) {
-    const aliases = (aliasCache.get(s.id) ?? []).map(a => a.rawName)
-    if (aliases.length === 0) {
+    const aliasDataList = aliasCache.get(s.id) ?? []
+    if (aliasDataList.length === 0) {
       // Supplier with no aliases — still emit one row
       rows.push({
         parent_name: s.parentName ?? '',
@@ -29,13 +29,13 @@ export function suppliersToCSV(
         transaction_count: s.transactionCount,
       })
     } else {
-      for (const alias of aliases) {
+      for (const ad of aliasDataList) {
         rows.push({
           parent_name: s.parentName ?? '',
           supplier_name: s.supplierName,
-          alias,
-          total_spend: s.totalSpend,
-          transaction_count: s.transactionCount,
+          alias: ad.rawName,
+          total_spend: ad.spend,
+          transaction_count: ad.txnCount,
         })
       }
     }

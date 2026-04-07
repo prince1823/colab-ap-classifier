@@ -2,6 +2,44 @@ import { registerHandler } from './register';
 import type { RuleStore, SupplierService, TaxonomyStore } from '../../shared/types/services';
 import type { OverrideRuleCreate, OverrideRuleUpdate, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types';
 import type { GroupedFilter } from '../../shared/types/transactions';
+import { extractSupplierNameCondition } from '../services/rules';
+
+/**
+ * Shared Cat A state sync — replaces duplicated logic in delete and setCategoryA handlers.
+ * Updates the project supplier's categoryASupplier flag and mappedTaxonomyPaths.
+ */
+async function syncCatAState(
+  rule: { groupedConditions: GroupedFilter; targetTaxonomyNodeId: string; id: string },
+  categoryA: boolean,
+  rules: RuleStore,
+  suppliers: SupplierService,
+  taxonomy: TaxonomyStore,
+): Promise<void> {
+  const supplierName = extractSupplierNameCondition(rule as Parameters<typeof extractSupplierNameCondition>[0]);
+  if (!supplierName) return;
+
+  const projectSupplier = await suppliers.getProjectSupplierByName(supplierName);
+  if (!projectSupplier) return;
+
+  const nodes = await taxonomy.getNodes();
+  const node = nodes.find((n) => n.id === rule.targetTaxonomyNodeId);
+  if (node) {
+    const currentPaths: string[] = projectSupplier.mappedTaxonomyPaths ?? [];
+    const updatedPaths = categoryA
+      ? (currentPaths.includes(node.fullPath) ? currentPaths : [...currentPaths, node.fullPath])
+      : currentPaths.filter((p) => p !== node.fullPath);
+    await suppliers.updateSupplier(projectSupplier.id, { mappedTaxonomyPaths: updatedPaths });
+  }
+
+  // Check remaining Cat A rules before clearing the supplier flag
+  if (!categoryA) {
+    const remainingCatA = await rules.getCatARuleForSupplier(supplierName);
+    const effectiveCatA = remainingCatA !== null && remainingCatA.id !== rule.id;
+    await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: effectiveCatA });
+  } else {
+    await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: true });
+  }
+}
 
 export function registerRulesHandlers(
   rules: RuleStore,
@@ -16,6 +54,10 @@ export function registerRulesHandlers(
     return rules.listRulesPaginated(opts as { limit: number; offset: number; search?: string });
   });
 
+  registerHandler('rules:listByGroup', async (_event, groupId: unknown, limit: unknown, offset: unknown) => {
+    return rules.listRulesByGroup(groupId as string, limit as number, offset as number);
+  });
+
   registerHandler('rules:create', async (_event, input: unknown) => {
     return rules.createRule(input as OverrideRuleCreate);
   });
@@ -28,49 +70,17 @@ export function registerRulesHandlers(
     return rules.updateRule(ruleId as string, updates as OverrideRuleUpdate);
   });
 
+  // Delete: deactivate is preferred in the UI, but keep internal delete with Cat A cleanup
   registerHandler('rules:delete', async (_event, ruleId: unknown) => {
     const id = ruleId as string;
     const rule = await rules.getRule(id);
 
-    // Cascade cat A cleanup before deleting
     if (rule?.categoryASupplier) {
-      const conditions = rule.groupedConditions.groups.flatMap((g) => g.conditions);
-      const supplierCondition = conditions.find((c) => c.field === 'supplier_name' && c.operator === 'equals');
-
-      if (supplierCondition) {
-        const supplierName = String(supplierCondition.value);
-
-        // Remove this rule's taxonomy path from project supplier's mappedTaxonomyPaths
-        const allSuppliers = await suppliers.listProjectSuppliers();
-        const projectSupplier = allSuppliers.find(
-          (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
-        );
-        if (projectSupplier) {
-          const nodes = await taxonomy.getNodes();
-          const node = nodes.find((n) => n.id === rule.targetTaxonomyNodeId);
-          if (node) {
-            const currentPaths: string[] = projectSupplier.mappedTaxonomyPaths ?? [];
-            const updatedPaths = currentPaths.filter((p) => p !== node.fullPath);
-            await suppliers.updateSupplier(projectSupplier.id, { mappedTaxonomyPaths: updatedPaths });
-          }
-        }
-
-        // Delete the rule first, then check remaining cat A rules
-        await rules.deleteRule(id);
-
-        const remainingCatARule = await rules.getCatARuleForSupplier(supplierName);
-        if (!remainingCatARule && projectSupplier) {
-          // No cat A rules remain — clear project supplier flag
-          await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: false });
-        }
-
-        return;
-      }
+      await syncCatAState(rule, false, rules, suppliers, taxonomy);
     }
 
     return rules.deleteRule(id);
   });
-
 
   registerHandler('rules:previewConflicts', async (_event, candidateIds: unknown, newRuleGroupId: unknown) => {
     return rules.previewRuleConflicts(candidateIds as string[], (newRuleGroupId as string | null | undefined) ?? null);
@@ -117,13 +127,13 @@ export function registerRulesHandlers(
     return rules.previewRules(ruleIds as string[]);
   });
 
-  registerHandler('rules:apply', async (_event, ruleIds: unknown) => {
-    return rules.applyRules(ruleIds as string[]);
+  registerHandler('rules:apply', async (_event, ruleIds: unknown, token: unknown) => {
+    return rules.applyRules(ruleIds as string[], (token as string | undefined) ?? undefined);
   });
 
   /**
    * Toggle category_a_supplier on a rule (supplier-only rules only).
-   * Updates the rule and project supplier; universe is updated via suppliers:syncToUniverse.
+   * Uses shared syncCatAState helper.
    */
   registerHandler('rules:setCategoryA', async (_event, ruleId: unknown, value: unknown) => {
     const id = ruleId as string;
@@ -132,12 +142,8 @@ export function registerRulesHandlers(
     const rule = await rules.getRule(id);
     if (!rule) throw new Error(`Rule not found: ${id}`);
 
-    // Extract supplier name from the single supplier_name condition
-    const conditions = rule.groupedConditions.groups.flatMap((g) => g.conditions);
-    const supplierCondition = conditions.find((c) => c.field === 'supplier_name' && c.operator === 'equals');
-    if (!supplierCondition) throw new Error('rules:setCategoryA only applies to supplier-only rules');
-
-    const supplierName = String(supplierCondition.value);
+    const supplierName = extractSupplierNameCondition(rule);
+    if (!supplierName) throw new Error('rules:setCategoryA only applies to supplier-only rules');
 
     // Enforce one cat A rule per supplier
     if (categoryA) {
@@ -150,28 +156,7 @@ export function registerRulesHandlers(
     // Update rule
     await rules.updateRule(id, { categoryASupplier: categoryA });
 
-    // Find the project supplier and update its flag and mappedTaxonomyPaths
-    const allSuppliers = await suppliers.listProjectSuppliers();
-    const projectSupplier = allSuppliers.find(
-      (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
-    );
-    if (projectSupplier) {
-      await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: categoryA });
-
-      const nodes = await taxonomy.getNodes();
-      const node = nodes.find((n) => n.id === rule.targetTaxonomyNodeId);
-      if (node) {
-        const currentPaths: string[] = projectSupplier.mappedTaxonomyPaths ?? [];
-        let updatedPaths: string[];
-        if (categoryA) {
-          updatedPaths = currentPaths.includes(node.fullPath)
-            ? currentPaths
-            : [...currentPaths, node.fullPath];
-        } else {
-          updatedPaths = currentPaths.filter((p) => p !== node.fullPath);
-        }
-        await suppliers.updateSupplier(projectSupplier.id, { mappedTaxonomyPaths: updatedPaths });
-      }
-    }
+    // Sync supplier state
+    await syncCatAState(rule, categoryA, rules, suppliers, taxonomy);
   });
 }

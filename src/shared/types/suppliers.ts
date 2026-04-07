@@ -73,6 +73,23 @@ export interface ProjectSupplierView extends ProjectSupplier {
   aliases: string[];
 }
 
+// ─── Paginated Supplier Listing ─────────────────────────────────────────────
+
+export type SupplierSortColumn = 'supplier_name' | 'parent_name' | 'total_spend' | 'transaction_count' | 'created_at';
+
+export interface SupplierPaginationParams {
+  limit: number;
+  offset: number;
+  search?: string;
+  sortBy?: SupplierSortColumn;
+  sortDir?: 'asc' | 'desc';
+}
+
+export interface PaginatedSuppliers {
+  rows: ProjectSupplierView[];
+  total: number;
+}
+
 export interface SupplierUpdateInput {
   supplierInfo?: SupplierInfo;
   aliases?: string[] | null;

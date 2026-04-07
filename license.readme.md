@@ -52,12 +52,7 @@ npm run deploy
 
 ### 3. Configure the Electron app
 
-Add to your `.env` file (or set in the app's Settings if UI is added later):
-
-```env
-LICENSE_SERVER_URL=https://colab91-license-server.<your-subdomain>.workers.dev
-LICENSE_PUBLIC_KEY=<public-key-base64-from-step-1>
-```
+The license server URL and public key are hardcoded in `src/main/services/license-config.ts` as compile-time constants. They are intentionally NOT read from env vars or `app-config.json` so that a user cannot redirect the app at their own license server. To rotate, edit the constants and ship a new build.
 
 ### 4. Dev mode bypass
 
@@ -106,6 +101,7 @@ curl https://<worker-url>/api/admin/keys \
 | Valid key, server confirms | App works normally |
 | Key revoked by admin | Block screen on next check (up to 30 min) |
 | Network down, had valid check | Grace period: 48 hours of continued access |
+| First launch, network down | Block screen (no grace on cold start) |
 | Network down, grace expired | Block screen |
 | Dev mode (`SKIP_LICENSE_CHECK=1`) | All checks bypassed |
 
@@ -139,6 +135,7 @@ curl https://<worker-url>/api/admin/keys \
 ### Electron app (client)
 - `src/shared/types/license.ts` — type definitions
 - `src/shared/types/services.ts` — `ILicenseService` interface
+- `src/main/services/license-config.ts` — hardcoded license server URL and public key (root of trust)
 - `src/main/services/license-service.ts` — core service (Ed25519 verify, grace period, periodic checks)
 - `src/main/services/app-config.ts` — encrypted license key storage
 - `src/main/ipc/license.ts` — IPC handlers

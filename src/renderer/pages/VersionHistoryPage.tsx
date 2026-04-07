@@ -6,6 +6,7 @@ import type { Transaction } from '../../shared/types/transactions'
 import type { FeedbackRecommendation } from '../../shared/types/feedback'
 import SystemFeedbackModal from '../components/review/SystemFeedbackModal'
 import SystemFeedbackDialog from '../components/review/SystemFeedbackDialog'
+import { showWarning } from '../lib/toast-errors'
 
 /** Friendly labels for known fields */
 const FIELD_LABELS: Record<string, string> = {
@@ -57,18 +58,60 @@ function getChangedFields(
   oldVals: Record<string, unknown> | null,
   newVals: Record<string, unknown> | null,
   taxonomyMap: Map<string, string>,
-): { field: string; from: string; to: string }[] {
-  const changes: { field: string; from: string; to: string }[] = []
+): { field: string; from: React.ReactNode; to: string }[] {
+  const changes: { field: string; from: React.ReactNode; to: string }[] = []
   const allKeys = new Set([
     ...Object.keys(oldVals || {}),
     ...Object.keys(newVals || {}),
   ])
 
+  // Build a set of distinct old values per field from per-transaction data (if available)
+  const perTxn = oldVals?._perTransaction as Record<string, Record<string, unknown>> | undefined
+
   for (const key of allKeys) {
-    if (key === 'id' || key === 'updated_at' || key === 'created_at') continue
+    if (key === 'id' || key === 'updated_at' || key === 'created_at' || key === '_perTransaction') continue
     const oldVal = oldVals?.[key]
     const newVal = newVals?.[key]
-    const oldStr = formatValue(oldVal, taxonomyMap)
+
+    // Determine "from" display: show distinct old values when per-transaction data exists
+    let oldStr: string
+    if (perTxn) {
+      const distinctOldStrs = new Set(
+        Object.values(perTxn).map((row) => formatValue(row[key], taxonomyMap))
+      )
+      if (distinctOldStrs.size > 1) {
+        // Group transactions by their old value and collect supplier names per group
+        const groupedByVal = new Map<string, Set<string>>()
+        for (const row of Object.values(perTxn)) {
+          const val = formatValue(row[key], taxonomyMap)
+          const supplier = (row.supplier_name as string) || 'unknown'
+          if (!groupedByVal.has(val)) groupedByVal.set(val, new Set())
+          groupedByVal.get(val)!.add(supplier)
+        }
+        const entries = [...groupedByVal.entries()]
+        const fromNode = (
+          <span>
+            Mixed:{' '}
+            {entries.map(([val, suppliers], i) => (
+              <span key={i}>
+                {i > 0 && '; '}
+                <strong>{[...suppliers].join(', ')}</strong> → {val === '-' ? 'unclassified' : val}
+              </span>
+            ))}
+          </span>
+        )
+        const newStr2 = formatValue(newVal, taxonomyMap)
+        if (formatValue(oldVal, taxonomyMap) !== newStr2) {
+          changes.push({ field: humanizeField(key), from: fromNode, to: newStr2 })
+        }
+        continue
+      } else {
+        oldStr = formatValue(oldVal, taxonomyMap)
+      }
+    } else {
+      oldStr = formatValue(oldVal, taxonomyMap)
+    }
+
     const newStr = formatValue(newVal, taxonomyMap)
     if (oldStr !== newStr) {
       changes.push({ field: humanizeField(key), from: oldStr, to: newStr })
@@ -129,11 +172,11 @@ function ChangeTransactionPanel({
     return cols
   })()
 
-  // All column keys: supplier, classification, then dynamic cols
-  const allCols = ['__supplier', '__classification', ...displayCols]
+  // All column keys: supplier, before classification, current classification, then dynamic cols
+  const allCols = ['__supplier', '__before_classification', '__classification', ...displayCols]
 
   // Column widths state (resizable)
-  const defaultWidths: Record<string, number> = { __supplier: 180, __classification: 220 }
+  const defaultWidths: Record<string, number> = { __supplier: 180, __before_classification: 220, __classification: 220 }
   for (const col of displayCols) defaultWidths[col] = 150
 
   const [colWidths, setColWidths] = useState<Record<string, number>>(defaultWidths)
@@ -141,7 +184,7 @@ function ChangeTransactionPanel({
 
   // Reset widths when columns change
   useEffect(() => {
-    const widths: Record<string, number> = { __supplier: 180, __classification: 220 }
+    const widths: Record<string, number> = { __supplier: 180, __before_classification: 220, __classification: 220 }
     for (const col of displayCols) widths[col] = 150
     setColWidths(widths)
   }, [displayCols.join(',')])
@@ -170,14 +213,41 @@ function ChangeTransactionPanel({
     document.body.style.userSelect = 'none'
   }
 
+  // Build a lookup from transaction ID → before classification path using _perTransaction
+  const perTxn = entry.oldValues?._perTransaction as Record<string, Record<string, unknown>> | undefined
+  const [taxonomyMap, setTaxonomyMap] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    ipc.taxonomy.getNodes().then(nodes => {
+      setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
+    }).catch(() => {})
+  }, [])
+
+  const getBeforeClassification = (txId: string): string => {
+    if (!perTxn) {
+      // Legacy: all had the same old value
+      const oldTaxId = entry.oldValues?.taxonomy_node_id as string | null
+      if (!oldTaxId) return 'unclassified'
+      const path = taxonomyMap.get(oldTaxId)
+      return path ? path.split('|').map(s => s.trim()).join(' > ') : 'unclassified'
+    }
+    const rowOld = perTxn[txId]
+    if (!rowOld) return '-'
+    const taxId = rowOld.taxonomy_node_id as string | null
+    if (!taxId) return 'unclassified'
+    const path = taxonomyMap.get(taxId)
+    return path ? path.split('|').map(s => s.trim()).join(' > ') : 'unclassified'
+  }
+
   const colLabel = (col: string) => {
     if (col === '__supplier') return 'Supplier'
-    if (col === '__classification') return 'Classification'
+    if (col === '__before_classification') return 'Before Classification'
+    if (col === '__classification') return 'After Classification'
     return col.replace(/_/g, ' ')
   }
 
   const cellValue = (tx: Transaction, col: string) => {
     if (col === '__supplier') return String(tx.canonicalFields.supplier_name ?? '-')
+    if (col === '__before_classification') return getBeforeClassification(tx.id)
     if (col === '__classification') return tx.classificationPath?.split('|').map(s => s.trim()).join(' > ') ?? '-'
     return String(tx.canonicalFields[col] ?? '-')
   }
@@ -352,7 +422,8 @@ export default function VersionHistoryPage() {
     setReverting(changeId)
     setError(null)
     try {
-      await ipc.changelog.revert(changeId)
+      const warning = await ipc.changelog.revert(changeId)
+      if (warning) showWarning('Revert', warning)
       await fetchPage(page)
       if (expandedTxId === changeId) setExpandedTxId(null)
     } catch (e) {
@@ -707,7 +778,7 @@ export default function VersionHistoryPage() {
                             {(entry.newValues.targetPath as string).replace(/\|/g, ' > ')}
                           </p>
                         </div>
-                        {entry.newValues.conditions && Array.isArray(entry.newValues.conditions) && (
+                        {Array.isArray(entry.newValues.conditions) && (
                           <div>
                             <p className="text-[10px] font-medium text-gray-500 uppercase mb-1">Conditions</p>
                             <div className="space-y-1">

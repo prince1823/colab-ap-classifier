@@ -32,7 +32,7 @@ function buildTransactionFilter(pillState: Record<string, string[]>): Transactio
 /** Columns that are internal DB plumbing — never shown in the UI. */
 const INTERNAL_COLS = new Set([
   'id', 'row_index', 'upload_id', 'taxonomy_node_id',
-  'original_supplier_name', 'project_supplier_id',
+  'project_supplier_id',
   'applied_rule_id',
   'created_at', 'updated_at',
 ])
@@ -41,11 +41,11 @@ const INTERNAL_COLS = new Set([
 const VIRTUAL_COLS = new Set([
   'classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
   'is_tail_spend', 'is_researched', 'applied_rule_name',
-  'classification_status', 'human_reviewed',
+  'classification_status', 'human_reviewed', 'source_file',
 ])
 
 /** Columns excluded from pivot dropdowns but still available in advanced filters. */
-const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched', 'classification_status', 'human_reviewed'])
+const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched', 'classification_status', 'human_reviewed', 'source_file'])
 
 const COLUMN_LABELS: Record<string, string> = {
   classification_l1: 'Classification L1',
@@ -68,6 +68,7 @@ const COLUMN_LABELS: Record<string, string> = {
   quarter: 'Quarter',
   month: 'Month',
   country: 'Country',
+  source_file: 'Source File',
 }
 
 const ENUM_FIELDS: Record<string, string[]> = {

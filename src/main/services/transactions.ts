@@ -41,6 +41,7 @@ const SUPPLIER_JOIN = 'LEFT JOIN project_suppliers ps ON t.project_supplier_id =
 const SUPPLIER_PARENT_JOIN = 'LEFT JOIN supplier_parents sp ON ps.parent_supplier_id = sp.id';
 const TAXONOMY_JOIN = 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id';
 const RULES_JOIN = 'LEFT JOIN override_rules ar ON t.applied_rule_id = ar.id';
+const UPLOAD_JOIN = 'LEFT JOIN uploads upl ON t.upload_id = upl.id';
 
 /** Virtual column → SQL expression for filter/ID-lookup queries. */
 const FILTER_VIRTUAL_EXPRS: Record<string, string> = {
@@ -54,6 +55,7 @@ const FILTER_VIRTUAL_EXPRS: Record<string, string> = {
   confirmation_status: 'ps.confirmation_status',
   applied_rule_name: 'ar.name',
   parent_name: 'sp.name',
+  source_file: "upl.file_name || ' (' || strftime(upl.created_at, '%Y-%m-%d %H:%M') || ')'",
 };
 
 export class TransactionStore implements ITransactionStore {
@@ -120,12 +122,17 @@ export class TransactionStore implements ITransactionStore {
     return columns.some((c) => c === 'applied_rule_name');
   }
 
+  /** Whether any columns in use require the uploads JOIN. */
+  private needsUploadJoin(columns: string[]): boolean {
+    return columns.some((c) => VIRTUAL_COLUMN_REGISTRY[c]?.requiredJoin === 'upload');
+  }
+
   /** Whether any columns in use require the supplier_parents JOIN (must appear after SUPPLIER_JOIN). */
   private needsSupplierParentJoin(columns: string[]): boolean {
     return columns.some((c) => VIRTUAL_COLUMN_REGISTRY[c]?.requiredJoin === 'supplier_parent');
   }
 
-  private buildFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[]; needsTaxonomyJoin: boolean; needsSupplierParentJoin: boolean } {
+  private buildFilterSQL(filters?: TransactionFilter): { whereSQL: string; params: unknown[]; needsTaxonomyJoin: boolean; needsSupplierParentJoin: boolean; needsUploadJoin: boolean } {
     const whereClauses: string[] = [];
     const params: unknown[] = [];
     let needsTaxonomyJoin = false;
@@ -155,7 +162,7 @@ export class TransactionStore implements ITransactionStore {
     // (which has COALESCE variants for display) rather than duplicating the map here.
     const resolver = (field: string) => FILTER_VIRTUAL_EXPRS[field] ?? `t."${field}"`;
 
-    // Check if any conditions reference taxonomy or supplier_parent columns
+    // Check if any conditions reference taxonomy, supplier_parent, or upload columns
     const allConditionFields = filters?.groupedConditions
       ? filters.groupedConditions.groups.flatMap(g => g.conditions.map(c => c.field))
       : (filters?.conditions ?? []).map(c => c.field);
@@ -163,6 +170,7 @@ export class TransactionStore implements ITransactionStore {
       needsTaxonomyJoin = true;
     }
     const needsSupplierParentJoin = allConditionFields.includes('parent_name');
+    const needsUploadJoin = allConditionFields.includes('source_file');
 
     // Prefer groupedConditions (proper parenthesization) over flat conditions
     if (filters?.groupedConditions && filters.groupedConditions.groups.length > 0) {
@@ -180,7 +188,7 @@ export class TransactionStore implements ITransactionStore {
     }
 
     const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-    return { whereSQL, params, needsTaxonomyJoin, needsSupplierParentJoin };
+    return { whereSQL, params, needsTaxonomyJoin, needsSupplierParentJoin, needsUploadJoin };
   }
 
   async queryTransactions(filters?: TransactionFilter): Promise<Transaction[]> {
@@ -320,6 +328,7 @@ export class TransactionStore implements ITransactionStore {
     classification_l2: { label: 'Classification L2', type: 'string' },
     classification_l3: { label: 'Classification L3', type: 'string' },
     applied_rule_name: { label: 'Applied Rule', type: 'string' },
+    source_file: { label: 'Source File', type: 'string', group: 'Upload' },
   };
 
   async getFilterFields(): Promise<FieldDefinition[]> {
@@ -350,10 +359,11 @@ export class TransactionStore implements ITransactionStore {
   }
 
   async getCount(filters?: TransactionFilter): Promise<number> {
-    const { whereSQL, params, needsTaxonomyJoin, needsSupplierParentJoin } = this.buildFilterSQL(filters);
+    const { whereSQL, params, needsTaxonomyJoin, needsSupplierParentJoin, needsUploadJoin } = this.buildFilterSQL(filters);
     const taxonomyJoin = needsTaxonomyJoin ? 'LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id' : '';
     const supplierParentJoin = needsSupplierParentJoin ? SUPPLIER_PARENT_JOIN : '';
-    const sql = `SELECT COUNT(*) as cnt FROM transactions t ${SUPPLIER_JOIN} ${supplierParentJoin} ${taxonomyJoin} ${whereSQL}`;
+    const uploadJoin = needsUploadJoin ? UPLOAD_JOIN : '';
+    const sql = `SELECT COUNT(*) as cnt FROM transactions t ${SUPPLIER_JOIN} ${supplierParentJoin} ${taxonomyJoin} ${uploadJoin} ${whereSQL}`;
     const result = await this.db.get<{ cnt: number | bigint }>(sql, ...params);
     return Number(result?.cnt ?? 0);
   }
@@ -361,16 +371,55 @@ export class TransactionStore implements ITransactionStore {
   async updateTransactions(update: TransactionUpdate, source: ChangeSource = 'manual'): Promise<string | undefined> {
     if (!update.ids || update.ids.length === 0) return undefined;
 
-    const placeholders = update.ids.map(() => '?').join(',');
+    // For large ID sets, avoid spreading thousands of args (causes call stack overflow).
+    // Instead, insert IDs into a temp table and use a subquery.
+    const BULK_THRESHOLD = 5_000;
+    const useTempTable = update.ids.length > BULK_THRESHOLD;
+    let tempTableName: string | null = null;
+    let idsCondition: string;
+    let idsParams: unknown[];
+
+    if (useTempTable) {
+      const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+      tempTableName = `_upd_ids_${runId}`;
+      await this.db.run(`CREATE TEMP TABLE ${tempTableName} (id VARCHAR PRIMARY KEY)`);
+      for (let i = 0; i < update.ids.length; i += 10_000) {
+        const chunk = update.ids.slice(i, i + 10_000);
+        const ph = chunk.map(() => '(?)').join(',');
+        await this.db.run(`INSERT INTO ${tempTableName} VALUES ${ph}`, ...chunk);
+      }
+      idsCondition = `id IN (SELECT id FROM ${tempTableName})`;
+      idsParams = [];
+    } else {
+      idsCondition = `id IN (${update.ids.map(() => '?').join(',')})`;
+      idsParams = update.ids;
+    }
+
+    try {
     const oldRows = await this.db.all<Record<string, unknown>>(
-      `SELECT id, taxonomy_node_id, classification_status FROM transactions WHERE id IN (${placeholders})`,
-      ...update.ids
+      `SELECT t.id, t.taxonomy_node_id, t.classification_status, ps.supplier_name
+       FROM transactions t
+       LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+       WHERE t.${idsCondition}`,
+      ...idsParams
     );
 
     const oldValues: Record<string, unknown> = {};
     if (oldRows.length > 0) {
+      // Store representative values (first row) for display summary
       oldValues.taxonomy_node_id = oldRows[0].taxonomy_node_id;
       oldValues.classification_status = oldRows[0].classification_status;
+
+      // Store per-transaction old values so revert restores each row accurately
+      const perTransaction: Record<string, Record<string, unknown>> = {};
+      for (const row of oldRows) {
+        perTransaction[row.id as string] = {
+          taxonomy_node_id: row.taxonomy_node_id,
+          classification_status: row.classification_status,
+          supplier_name: row.supplier_name ?? null,
+        };
+      }
+      oldValues._perTransaction = perTransaction;
     }
 
     const setClauses: string[] = [];
@@ -401,8 +450,8 @@ export class TransactionStore implements ITransactionStore {
     setClauses.push('updated_at = CURRENT_TIMESTAMP');
 
     await this.db.run(
-      `UPDATE transactions SET ${setClauses.join(', ')} WHERE id IN (${placeholders})`,
-      ...params, ...update.ids
+      `UPDATE transactions SET ${setClauses.join(', ')} WHERE ${idsCondition}`,
+      ...params, ...idsParams
     );
 
     // Only log classification changes (taxonomy / status) — not internal signals like flagged_for_review
@@ -416,8 +465,8 @@ export class TransactionStore implements ITransactionStore {
       const supplierRows = await this.db.all<{ supplier_name: string }>(
         `SELECT DISTINCT ps.supplier_name FROM transactions t
          LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
-         WHERE t.id IN (${placeholders}) AND ps.supplier_name IS NOT NULL`,
-        ...update.ids
+         WHERE t.${idsCondition} AND ps.supplier_name IS NOT NULL`,
+        ...idsParams
       );
       // Get target classification path
       let classPath: string | null = null;
@@ -455,6 +504,11 @@ export class TransactionStore implements ITransactionStore {
       ruleId: update.appliedRuleId ?? null,
     });
     return changelogId;
+    } finally {
+      if (tempTableName) {
+        try { await this.db.run(`DROP TABLE IF EXISTS ${tempTableName}`); } catch { /* ignore */ }
+      }
+    }
   }
 
   /**
@@ -480,12 +534,13 @@ export class TransactionStore implements ITransactionStore {
       return { column, rows: [], totalAmount: 0, totalCount: 0 };
     }
 
-    const { whereSQL, params, needsTaxonomyJoin, needsSupplierParentJoin: filterNeedsParentJoin } = this.buildFilterSQL(filters);
+    const { whereSQL, params, needsTaxonomyJoin, needsSupplierParentJoin: filterNeedsParentJoin, needsUploadJoin: filterNeedsUpload } = this.buildFilterSQL(filters);
     const hasSpend = validCols.includes('spend_amount');
     const colExpr = this.resolveColumn(column);
     const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
     const supplierParentJoin = (filterNeedsParentJoin || this.needsSupplierParentJoin([column])) ? SUPPLIER_PARENT_JOIN : '';
     const taxonomyJoin = (needsTaxonomyJoin || this.needsTaxonomyJoinForColumns([column])) ? TAXONOMY_JOIN : '';
+    const uploadJoin = (filterNeedsUpload || this.needsUploadJoin([column])) ? UPLOAD_JOIN : '';
 
     const amountExpr = hasSpend
       ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)'
@@ -500,6 +555,7 @@ export class TransactionStore implements ITransactionStore {
       ${supplierJoin}
       ${supplierParentJoin}
       ${taxonomyJoin}
+      ${uploadJoin}
       ${whereSQL}
       GROUP BY ${colExpr}
       ORDER BY ${hasSpend ? 'amount DESC' : 'count DESC'}
@@ -535,6 +591,7 @@ export class TransactionStore implements ITransactionStore {
     const supplierParentJoin = this.needsSupplierParentJoin([column]) ? SUPPLIER_PARENT_JOIN : '';
     const taxonomyJoin = this.needsTaxonomyJoinForColumns([column]) ? TAXONOMY_JOIN : '';
     const rulesJoin = this.needsRulesJoin([column]) ? RULES_JOIN : '';
+    const uploadJoin = this.needsUploadJoin([column]) ? UPLOAD_JOIN : '';
 
     const sql = `
       SELECT DISTINCT CAST(${colExpr} AS VARCHAR) as value
@@ -543,6 +600,7 @@ export class TransactionStore implements ITransactionStore {
       ${supplierParentJoin}
       ${taxonomyJoin}
       ${rulesJoin}
+      ${uploadJoin}
       WHERE ${colExpr} IS NOT NULL
       ORDER BY value
       LIMIT ${limit}
@@ -563,11 +621,12 @@ export class TransactionStore implements ITransactionStore {
     const validCols = await this.getColumns();
     if (!this.isValidColumn(column, validCols)) return [];
 
-    const { whereSQL, params, needsTaxonomyJoin, needsSupplierParentJoin: filterNeedsParentJoin } = this.buildFilterSQL(filters);
+    const { whereSQL, params, needsTaxonomyJoin, needsSupplierParentJoin: filterNeedsParentJoin, needsUploadJoin: filterNeedsUpload } = this.buildFilterSQL(filters);
     const colExpr = this.resolveColumn(column);
     const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
     const supplierParentJoin = (filterNeedsParentJoin || this.needsSupplierParentJoin([column])) ? SUPPLIER_PARENT_JOIN : '';
     const taxonomyJoin = (needsTaxonomyJoin || this.needsTaxonomyJoinForColumns([column])) ? TAXONOMY_JOIN : '';
+    const uploadJoin = (filterNeedsUpload || this.needsUploadJoin([column])) ? UPLOAD_JOIN : '';
 
     const valueCondition = value === '(blank)'
       ? `${colExpr} IS NULL`
@@ -578,7 +637,7 @@ export class TransactionStore implements ITransactionStore {
       ? `${whereSQL} AND ${valueCondition}`
       : `WHERE ${valueCondition}`;
 
-    const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${supplierJoin} ${supplierParentJoin} ${taxonomyJoin} ${fullWhere}`;
+    const sql = `SELECT CAST(t.id AS VARCHAR) as id FROM transactions t ${supplierJoin} ${supplierParentJoin} ${taxonomyJoin} ${uploadJoin} ${fullWhere}`;
     const rows = await this.db.all<{ id: string }>(sql, ...params);
     return rows.map((r) => String(r.id));
   }
@@ -604,6 +663,7 @@ export class TransactionStore implements ITransactionStore {
       supplier_name: "COALESCE(ps.supplier_name, '')",
       parent_name: "COALESCE(sp.name, '')",
       applied_rule_name: "COALESCE(ar.name, '')",
+      source_file: "COALESCE(upl.file_name || ' (' || strftime(upl.created_at, '%Y-%m-%d %H:%M') || ')', '')",
       master_year: `YEAR(${masterDateExpr})`,
       master_month: `strftime('%B', ${masterDateExpr})`,
     };
@@ -616,7 +676,7 @@ export class TransactionStore implements ITransactionStore {
       return { dimensionColumns: dimensions, rows: [], totalAmount: 0, totalCount: 0 };
     }
 
-    const { whereSQL, params, needsTaxonomyJoin: filterNeedsTaxonomy } = this.buildFilterSQL(filters);
+    const { whereSQL, params, needsTaxonomyJoin: filterNeedsTaxonomy, needsUploadJoin: filterNeedsUpload } = this.buildFilterSQL(filters);
     const hasValue = validCols.includes(valueDimension);
 
     const amountExpr = hasValue
@@ -632,6 +692,7 @@ export class TransactionStore implements ITransactionStore {
     const supplierJoin = this.needsSupplierJoin(safeDimensions) ? SUPPLIER_JOIN : '';
     const supplierParentJoin = this.needsSupplierParentJoin(safeDimensions) ? SUPPLIER_PARENT_JOIN : '';
     const rulesJoin = this.needsRulesJoin(safeDimensions) ? RULES_JOIN : '';
+    const uploadJoin = (filterNeedsUpload || this.needsUploadJoin(safeDimensions)) ? UPLOAD_JOIN : '';
 
     const dimSelects = safeDimensions.map((d, i) => {
       const expr = PIVOT_VIRTUAL_DIMS[d] ?? `COALESCE(CAST(t.${d} AS VARCHAR), '')`;
@@ -649,6 +710,7 @@ export class TransactionStore implements ITransactionStore {
       ${supplierParentJoin}
       ${taxonomyJoin}
       ${rulesJoin}
+      ${uploadJoin}
       ${whereSQL}
       GROUP BY ${dimGroupBy.join(', ')}
       ORDER BY amount DESC
@@ -774,8 +836,9 @@ export class TransactionStore implements ITransactionStore {
       : '';
     const rulesJoin = conditions.some((c) => c.field === 'applied_rule_name') ? RULES_JOIN : '';
     const supplierParentJoin = conditions.some((c) => c.field === 'parent_name') ? SUPPLIER_PARENT_JOIN : '';
+    const uploadJoin = conditions.some((c) => c.field === 'source_file') ? UPLOAD_JOIN : '';
 
-    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${supplierParentJoin} ${taxonomyJoin} ${rulesJoin} WHERE (${built.sql})`;
+    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${supplierParentJoin} ${taxonomyJoin} ${rulesJoin} ${uploadJoin} WHERE (${built.sql})`;
     const params = [...built.params];
 
     if (scopeToIds && scopeToIds.length > 0) {
@@ -807,8 +870,9 @@ export class TransactionStore implements ITransactionStore {
       : '';
     const rulesJoin = allConditions.some((c) => c.field === 'applied_rule_name') ? RULES_JOIN : '';
     const supplierParentJoin = allConditions.some((c) => c.field === 'parent_name') ? SUPPLIER_PARENT_JOIN : '';
+    const uploadJoin = allConditions.some((c) => c.field === 'source_file') ? UPLOAD_JOIN : '';
 
-    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${supplierParentJoin} ${taxonomyJoin} ${rulesJoin} WHERE (${built.sql})`;
+    let sql = `SELECT t.id FROM transactions t ${SUPPLIER_JOIN} ${supplierParentJoin} ${taxonomyJoin} ${rulesJoin} ${uploadJoin} WHERE (${built.sql})`;
     const params = [...built.params];
 
     if (scopeToIds && scopeToIds.length > 0) {

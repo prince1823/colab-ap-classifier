@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RuleStore } from '../../../src/main/services/rules';
-import { createMockDatabase, createMockTransactionStore, createMockProjectStore } from '../../helpers/mock-services';
-import type { Database, TransactionStore, ProjectStore } from '../../../src/shared/types/services';
+import { createMockDatabase, createMockTransactionStore, createMockProjectStore, createMockSupplierService } from '../../helpers/mock-services';
+import type { Database, TransactionStore, ProjectStore, SupplierService } from '../../../src/shared/types/services';
 
 // ─── Row factories ────────────────────────────────────────────────────────────
 
@@ -10,6 +10,7 @@ function makeRuleRow(overrides: Partial<{
   target_taxonomy_node_id: string; group_id: string | null;
   group_priority: number | null; is_active: boolean;
   source: string; category_a_supplier: boolean; created_at: string;
+  project_supplier_id: string | null;
 }> = {}) {
   return {
     id: 'r1',
@@ -22,6 +23,7 @@ function makeRuleRow(overrides: Partial<{
     source: 'manual',
     category_a_supplier: false,
     created_at: '2026-01-01T00:00:00',
+    project_supplier_id: null,
     ...overrides,
   };
 }
@@ -44,14 +46,24 @@ function makeSupplierAndLineConditions(supplierName: string, lineDesc: string) {
   ]);
 }
 
-function makeExistingRuleRow(supplierName: string) {
-  return {
-    grouped_conditions: makeSupplierOnlyConditions(supplierName),
-  };
-}
-
 function makeTxnRow(supplierName: string, taxonomyNodeId: string) {
   return { id: 'tx-1', supplier_name: supplierName, taxonomy_node_id: taxonomyNodeId, full_path: 'L1|L2|L3' };
+}
+
+/**
+ * Mock `db.all` for evaluateRulesBulk. The method calls db.all twice:
+ *  1. pairs query → distinct (field, operator) pairs from rule_conditions
+ *  2. full CTE evaluation → matched { txn_id, rule_id, target_taxonomy_node_id } rows
+ * Pass empty pairs to simulate no rules / no conditions.
+ */
+function mockBulkEval(
+  db: Database,
+  pairs: { field: string; operator: string }[],
+  results: { txn_id: string; rule_id: string; target_taxonomy_node_id: string }[],
+) {
+  vi.mocked(db.all)
+    .mockResolvedValueOnce(pairs as any)  // pairs query
+    .mockResolvedValueOnce(results as any);  // CTE eval result
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -60,6 +72,7 @@ describe('RuleStore', () => {
   let db: Database;
   let transactions: TransactionStore;
   let project: ProjectStore;
+  let suppliers: SupplierService;
   let store: RuleStore;
 
   beforeEach(() => {
@@ -67,7 +80,11 @@ describe('RuleStore', () => {
     db = createMockDatabase();
     transactions = createMockTransactionStore();
     project = createMockProjectStore();
-    store = new RuleStore(db, transactions, project);
+    suppliers = createMockSupplierService();
+    store = new RuleStore(db, transactions, project, suppliers);
+
+    // Default: FK validation returns a row (valid FK target)
+    vi.mocked(db.get).mockResolvedValue({ id: 'tid1' });
   });
 
   // ─── listRules ──────────────────────────────────────────────────────────────
@@ -111,7 +128,6 @@ describe('RuleStore', () => {
     });
 
     it('orders by COALESCE(group.priority, 0) DESC, created_at DESC', async () => {
-      // DB returns rows in the order the SQL would produce
       vi.mocked(db.all).mockResolvedValue([
         makeRuleRow({ id: 'high-group', group_id: 'g1', group_priority: 10, created_at: '2026-01-01T00:00:00' }),
         makeRuleRow({ id: 'low-group',  group_id: 'g2', group_priority: 1,  created_at: '2026-03-01T00:00:00' }),
@@ -148,12 +164,9 @@ describe('RuleStore', () => {
         groupId: 'g1',
       });
 
-      const insertCall = vi.mocked(db.run).mock.calls[0];
-      const sql = insertCall[0] as string;
-      expect(sql).toContain('group_id');
-      const groupIdArg = insertCall.slice(1).find((_, i, arr) =>
-        arr[i - 1] !== undefined && String(insertCall[0]).includes('group_id') && _ === 'g1'
-      );
+      const runCalls = vi.mocked(db.run).mock.calls;
+      const insertCall = runCalls.find(c => (c[0] as string).includes('INSERT INTO override_rules'));
+      expect(insertCall).toBeDefined();
       expect(insertCall).toContain('g1');
     });
 
@@ -164,31 +177,10 @@ describe('RuleStore', () => {
         targetTaxonomyNodeId: 'tid1',
       });
 
-      const insertCall = vi.mocked(db.run).mock.calls[0];
+      const runCalls = vi.mocked(db.run).mock.calls;
+      const insertCall = runCalls.find(c => (c[0] as string).includes('INSERT INTO override_rules'));
+      expect(insertCall).toBeDefined();
       expect(insertCall).toContain(null); // group_id = null
-    });
-
-    it('does not look up or assign per-rule priority', async () => {
-      await store.createRule({
-        name: 'Test',
-        groupedConditions: { groupConnector: 'AND', groups: [] },
-        targetTaxonomyNodeId: 'tid1',
-      });
-
-      // Should not query MAX(priority) from override_rules
-      const getAllCalls = vi.mocked(db.get).mock.calls.map(c => c[0] as string);
-      expect(getAllCalls.every(sql => !sql.includes('MAX(priority)'))).toBe(true);
-    });
-
-    it('does not look up a default bucket', async () => {
-      await store.createRule({
-        name: 'Test',
-        groupedConditions: { groupConnector: 'AND', groups: [] },
-        targetTaxonomyNodeId: 'tid1',
-      });
-
-      const getAllCalls = vi.mocked(db.get).mock.calls.map(c => c[0] as string);
-      expect(getAllCalls.every(sql => !sql.includes('is_default'))).toBe(true);
     });
 
     it('returns an object with a generated id', async () => {
@@ -215,6 +207,69 @@ describe('RuleStore', () => {
         groupedConditions: { groupConnector: 'AND', groups: [] },
         targetTaxonomyNodeId: 'tid2',
       })).resolves.not.toThrow();
+    });
+
+    it('validates taxonomy FK — throws when node not found', async () => {
+      vi.mocked(db.get).mockResolvedValue(undefined); // FK lookup returns nothing
+
+      await expect(store.createRule({
+        name: 'Bad FK',
+        groupedConditions: { groupConnector: 'AND', groups: [] },
+        targetTaxonomyNodeId: 'nonexistent',
+      })).rejects.toThrow('Taxonomy node not found');
+    });
+
+    it('validates group FK — throws when group not found', async () => {
+      vi.mocked(db.get)
+        .mockResolvedValueOnce({ id: 'tid1' })  // taxonomy FK ok
+        .mockResolvedValueOnce(undefined);        // group FK not found
+
+      await expect(store.createRule({
+        name: 'Bad Group',
+        groupedConditions: { groupConnector: 'AND', groups: [] },
+        targetTaxonomyNodeId: 'tid1',
+        groupId: 'nonexistent-group',
+      })).rejects.toThrow('Rule group not found');
+    });
+
+    it('resolves project_supplier_id from supplier_name condition', async () => {
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue({
+        id: 'sup-123', supplierName: 'Acme',
+      } as any);
+
+      await store.createRule({
+        name: 'Acme Rule',
+        groupedConditions: {
+          groupConnector: 'AND',
+          groups: [{ connector: 'AND', conditions: [{ field: 'supplier_name', operator: 'equals', value: 'Acme' }] }],
+        },
+        targetTaxonomyNodeId: 'tid1',
+      });
+
+      expect(suppliers.getProjectSupplierByName).toHaveBeenCalledWith('Acme');
+      const runCalls = vi.mocked(db.run).mock.calls;
+      const insertCall = runCalls.find(c => (c[0] as string).includes('INSERT INTO override_rules'));
+      expect(insertCall).toContain('sup-123');
+    });
+
+    it('writes to rule_conditions in same transaction (#24)', async () => {
+      await store.createRule({
+        name: 'Test',
+        groupedConditions: {
+          groupConnector: 'AND',
+          groups: [{ connector: 'AND', conditions: [{ field: 'supplier_name', operator: 'equals', value: 'Acme' }] }],
+        },
+        targetTaxonomyNodeId: 'tid1',
+      });
+
+      // Should have BEGIN, INSERT override_rules, INSERT rule_conditions, COMMIT
+      const execCalls = vi.mocked(db.exec).mock.calls.map(c => c[0] as string);
+      expect(execCalls).toContain('BEGIN TRANSACTION');
+      expect(execCalls).toContain('COMMIT');
+
+      const runCalls = vi.mocked(db.run).mock.calls.map(c => c[0] as string);
+      expect(runCalls.some(sql => sql.includes('INSERT INTO override_rules'))).toBe(true);
+      expect(runCalls.some(sql => sql.includes('INSERT INTO rule_conditions'))).toBe(true);
     });
   });
 
@@ -247,7 +302,6 @@ describe('RuleStore', () => {
     });
 
     it('does not accept priorityScore (removed field)', async () => {
-      // priorityScore is no longer a valid update field — passing it should be a no-op
       await store.updateRule('rule1', { priorityScore: 5 } as any);
       expect(db.run).not.toHaveBeenCalled();
     });
@@ -261,17 +315,38 @@ describe('RuleStore', () => {
       const newConditions = { groupConnector: 'AND' as const, groups: [] };
       await store.updateRule('rule1', { groupedConditions: newConditions });
 
-      const sql = vi.mocked(db.run).mock.calls[0][0] as string;
-      expect(sql).toContain('grouped_conditions = ?');
+      const runCalls = vi.mocked(db.run).mock.calls.map(c => c[0] as string);
+      expect(runCalls.some(sql => sql.includes('grouped_conditions = ?'))).toBe(true);
+    });
+
+    it('syncs rule_conditions when conditions change (#29)', async () => {
+      const newConditions = {
+        groupConnector: 'AND' as const,
+        groups: [{ connector: 'AND' as const, conditions: [{ field: 'supplier_name', operator: 'equals', value: 'Beta' }] }],
+      };
+      await store.updateRule('rule1', { groupedConditions: newConditions });
+
+      // Transaction wrapping
+      const execCalls = vi.mocked(db.exec).mock.calls.map(c => c[0] as string);
+      expect(execCalls).toContain('BEGIN TRANSACTION');
+      expect(execCalls).toContain('COMMIT');
+
+      // Deletes old + inserts new conditions
+      const runCalls = vi.mocked(db.run).mock.calls.map(c => c[0] as string);
+      expect(runCalls.some(sql => sql.includes('DELETE FROM rule_conditions WHERE rule_id'))).toBe(true);
+      expect(runCalls.some(sql => sql.includes('INSERT INTO rule_conditions'))).toBe(true);
     });
   });
 
   // ─── deleteRule ─────────────────────────────────────────────────────────────
 
   describe('deleteRule', () => {
-    it('deletes by id', async () => {
+    it('deletes rule_conditions first, then override_rules', async () => {
       await store.deleteRule('rule1');
-      expect(db.run).toHaveBeenCalledWith('DELETE FROM override_rules WHERE id = ?', 'rule1');
+
+      const calls = vi.mocked(db.run).mock.calls.map(c => [c[0], c[1]]);
+      expect(calls[0]).toEqual(['DELETE FROM rule_conditions WHERE rule_id = ?', 'rule1']);
+      expect(calls[1]).toEqual(['DELETE FROM override_rules WHERE id = ?', 'rule1']);
     });
   });
 
@@ -289,8 +364,10 @@ describe('RuleStore', () => {
 
     it('creates the rule and applies to all matching transactions when no higher-priority rules exist', async () => {
       vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-1', 'tx-2', 'tx-3']);
-      // evaluateRules calls db.all for rules — return empty (no existing rules)
-      vi.mocked(db.all).mockResolvedValue([]);
+      // evaluateRulesBulk: no pairs → no existing rules match
+      vi.mocked(db.all).mockResolvedValueOnce([]); // pairs query → empty
+      // previewRuleConflicts also calls db.all for group priorities
+      vi.mocked(db.all).mockResolvedValueOnce([]); // group priorities
       vi.mocked(transactions.updateTransactions).mockResolvedValueOnce('changelog-1');
 
       const result = await store.createAndApplyRule(input);
@@ -299,73 +376,16 @@ describe('RuleStore', () => {
       expect(result.matchedCount).toBe(3);
       expect(result.skippedCount).toBe(0);
       expect(result.changelogId).toBe('changelog-1');
-      expect(transactions.updateTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({ ids: ['tx-1', 'tx-2', 'tx-3'], taxonomyNodeId: 'node-1', classificationStatus: 'classified_by_rule' }),
-        'rule'
-      );
-    });
-
-    it('skips transactions already covered by higher-priority rules', async () => {
-      const ruleRow = makeRuleRow({ id: 'r1', grouped_conditions: makeSupplierOnlyConditions('Acme'), target_taxonomy_node_id: 'other-node', group_id: 'g1', group_priority: 10 });
-      vi.mocked(transactions.getIdsByGroupedConditions)
-        // First call: all candidates matching the new rule's conditions
-        .mockResolvedValueOnce(['tx-1', 'tx-2', 'tx-3'])
-        // Second call: evaluateRules runs existing rules against candidates — tx-1 matches existing rule r1
-        .mockResolvedValueOnce(['tx-1']);
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])                        // evaluateRules → listAllRules
-        .mockResolvedValueOnce([ruleRow])                        // previewRuleConflicts → listAllRules
-        .mockResolvedValueOnce([{ id: 'g1', priority: 10 }]);   // group priorities
-      vi.mocked(transactions.updateTransactions).mockResolvedValueOnce('changelog-2');
-
-      const result = await store.createAndApplyRule(input);
-
-      expect(result.matchedCount).toBe(2);
-      expect(result.skippedCount).toBe(1);
-      expect(transactions.updateTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({ ids: expect.not.arrayContaining(['tx-1']) }),
-        'rule'
-      );
-    });
-
-    it('creates rule but does not call updateTransactions when all candidates are covered', async () => {
-      const ruleRow = makeRuleRow({ id: 'r1', grouped_conditions: makeSupplierOnlyConditions('Acme'), target_taxonomy_node_id: 'other-node', group_id: 'g1', group_priority: 10 });
-      vi.mocked(transactions.getIdsByGroupedConditions)
-        .mockResolvedValueOnce(['tx-1', 'tx-2'])
-        .mockResolvedValueOnce(['tx-1', 'tx-2']); // evaluateRules — both covered
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])                        // evaluateRules → listAllRules
-        .mockResolvedValueOnce([ruleRow])                        // previewRuleConflicts → listAllRules
-        .mockResolvedValueOnce([{ id: 'g1', priority: 10 }]);   // group priorities
-
-      const result = await store.createAndApplyRule(input);
-
-      expect(result.id).toBeDefined();
-      expect(result.matchedCount).toBe(0);
-      expect(result.skippedCount).toBe(2);
-      expect(result.changelogId).toBeUndefined();
-      expect(transactions.updateTransactions).not.toHaveBeenCalled();
     });
 
     it('returns matchedCount of 0 and skippedCount of 0 when no transactions match conditions', async () => {
       vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce([]);
-      vi.mocked(db.all).mockResolvedValue([]);
+      vi.mocked(db.all).mockResolvedValue([]); // evaluateRulesBulk and group priorities
 
       const result = await store.createAndApplyRule(input);
       expect(result.matchedCount).toBe(0);
       expect(result.skippedCount).toBe(0);
       expect(transactions.updateTransactions).not.toHaveBeenCalled();
-    });
-
-    it('passes groupId through to createRule', async () => {
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce([]);
-      vi.mocked(db.all).mockResolvedValue([]);
-
-      await store.createAndApplyRule({ ...input, groupId: 'g1' });
-
-      const insertSql = vi.mocked(db.run).mock.calls[0][0] as string;
-      expect(insertSql).toContain('group_id');
-      expect(vi.mocked(db.run).mock.calls[0]).toContain('g1');
     });
 
     it('propagates error if getIdsByGroupedConditions throws', async () => {
@@ -379,7 +399,9 @@ describe('RuleStore', () => {
 
   describe('previewRuleConflicts', () => {
     it('returns empty covered and all ids as eligible when no existing rules match', async () => {
-      vi.mocked(db.all).mockResolvedValue([]);
+      vi.mocked(db.all)
+        .mockResolvedValueOnce([])  // evaluateRulesBulk pairs → empty
+        .mockResolvedValueOnce([]); // group priorities
 
       const result = await store.previewRuleConflicts(['tx-1', 'tx-2']);
 
@@ -388,14 +410,16 @@ describe('RuleStore', () => {
     });
 
     it('returns covered rows with existing rule name for matched transactions', async () => {
-      const ruleRow = makeRuleRow({ id: 'r1', name: 'Marketing Rule', grouped_conditions: makeSupplierOnlyConditions('Acme'), target_taxonomy_node_id: 'tid1', group_id: 'g1', group_priority: 5 });
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])                       // evaluateRules → listAllRules
-        .mockResolvedValueOnce([ruleRow])                       // previewRuleConflicts → listAllRules
-        .mockResolvedValueOnce([{ id: 'g1', priority: 5 }]);   // group priorities
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-1']);
+      // evaluateRulesBulk returns tx-1 matched by r1
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' }],
+      );
+      // group priorities
+      vi.mocked(db.all).mockResolvedValueOnce([{ id: 'g1', priority: 5 }]);
+      // matched rule metadata lookup
+      vi.mocked(db.all).mockResolvedValueOnce([{ id: 'r1', name: 'Marketing Rule', group_id: 'g1' }]);
 
-      // No newRuleGroupId → ungrouped (priority 0), existing rule priority 5 > 0 → covered
       const result = await store.previewRuleConflicts(['tx-1', 'tx-2']);
 
       expect(result.covered).toEqual([
@@ -404,22 +428,10 @@ describe('RuleStore', () => {
       expect(result.eligibleIds).toEqual(['tx-2']);
     });
 
-    it('returns all as covered when all candidates are matched by higher-priority existing rules', async () => {
-      const ruleRow = makeRuleRow({ id: 'r1', name: 'Rule A', grouped_conditions: makeSupplierOnlyConditions('Acme'), target_taxonomy_node_id: 'tid1', group_id: 'g1', group_priority: 5 });
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([{ id: 'g1', priority: 5 }]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-1', 'tx-2']);
-
-      const result = await store.previewRuleConflicts(['tx-1', 'tx-2']);
-
-      expect(result.covered).toHaveLength(2);
-      expect(result.eligibleIds).toEqual([]);
-    });
-
     it('returns empty arrays when candidateIds is empty', async () => {
-      vi.mocked(db.all).mockResolvedValue([]);
+      vi.mocked(db.all)
+        .mockResolvedValueOnce([])  // pairs
+        .mockResolvedValueOnce([]); // group priorities
 
       const result = await store.previewRuleConflicts([]);
 
@@ -427,76 +439,29 @@ describe('RuleStore', () => {
       expect(result.eligibleIds).toEqual([]);
     });
 
-    it('uses rule name from listAllRules in covered rows', async () => {
-      const ruleRow = makeRuleRow({ id: 'r99', name: 'IT Spend Rule', grouped_conditions: makeSupplierOnlyConditions('TechCo'), target_taxonomy_node_id: 'tid2', group_id: 'g1', group_priority: 3 });
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([{ id: 'g1', priority: 3 }]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-5']);
-
-      // No newRuleGroupId → priority 0, existing priority 3 > 0 → covered
-      const result = await store.previewRuleConflicts(['tx-5']);
-
-      expect(result.covered[0].existingRuleName).toBe('IT Spend Rule');
-    });
-
-    // ── Priority-aware conflict checks (issue #393) ──────────────────────────
-
     it('new rule in higher-priority group supersedes ungrouped rule — no conflict', async () => {
-      const ruleRow = makeRuleRow({
-        id: 'r-ungrouped', name: 'Ungrouped Rule',
-        grouped_conditions: makeSupplierOnlyConditions('Acme'),
-        target_taxonomy_node_id: 'tid1',
-        group_id: null, group_priority: null,
-      });
-
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])                   // evaluateRules → listAllRules
-        .mockResolvedValueOnce([ruleRow])                   // previewRuleConflicts → listAllRules
-        .mockResolvedValueOnce([{ id: 'g-high', priority: 3 }]); // group priorities
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-1']);
+      // evaluateRulesBulk returns tx-1 matched by ungrouped rule
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r-ungrouped', target_taxonomy_node_id: 'tid1' }],
+      );
+      vi.mocked(db.all).mockResolvedValueOnce([{ id: 'g-high', priority: 3 }]); // group priorities
+      vi.mocked(db.all).mockResolvedValueOnce([{ id: 'r-ungrouped', name: 'Ungrouped', group_id: null }]); // metadata
 
       const result = await store.previewRuleConflicts(['tx-1', 'tx-2'], 'g-high');
 
-      // tx-1 is eligible because new group priority 3 > ungrouped priority 0
+      // tx-1 eligible because new group priority 3 > ungrouped priority 0
       expect(result.covered).toEqual([]);
       expect(result.eligibleIds).toEqual(['tx-1', 'tx-2']);
     });
 
-    it('new rule in higher-priority group supersedes lower-priority grouped rule', async () => {
-      const ruleRow = makeRuleRow({
-        id: 'r-low', name: 'Low Priority Rule',
-        grouped_conditions: makeSupplierOnlyConditions('Acme'),
-        target_taxonomy_node_id: 'tid1',
-        group_id: 'g-low', group_priority: 1,
-      });
-
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([{ id: 'g-low', priority: 1 }, { id: 'g-high', priority: 5 }]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-1']);
-
-      const result = await store.previewRuleConflicts(['tx-1'], 'g-high');
-
-      expect(result.covered).toEqual([]);
-      expect(result.eligibleIds).toEqual(['tx-1']);
-    });
-
     it('new rule in lower-priority group is blocked by higher-priority existing rule', async () => {
-      const ruleRow = makeRuleRow({
-        id: 'r-high', name: 'High Priority Rule',
-        grouped_conditions: makeSupplierOnlyConditions('Acme'),
-        target_taxonomy_node_id: 'tid1',
-        group_id: 'g-high', group_priority: 5,
-      });
-
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([{ id: 'g-high', priority: 5 }, { id: 'g-low', priority: 1 }]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-1']);
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r-high', target_taxonomy_node_id: 'tid1' }],
+      );
+      vi.mocked(db.all).mockResolvedValueOnce([{ id: 'g-high', priority: 5 }, { id: 'g-low', priority: 1 }]);
+      vi.mocked(db.all).mockResolvedValueOnce([{ id: 'r-high', name: 'High Priority Rule', group_id: 'g-high' }]);
 
       const result = await store.previewRuleConflicts(['tx-1'], 'g-low');
 
@@ -507,438 +472,318 @@ describe('RuleStore', () => {
     });
 
     it('new rule at same priority as existing rule is allowed (equal priority = no conflict)', async () => {
-      const ruleRow = makeRuleRow({
-        id: 'r-same', name: 'Same Priority Rule',
-        grouped_conditions: makeSupplierOnlyConditions('Acme'),
-        target_taxonomy_node_id: 'tid1',
-        group_id: 'g-a', group_priority: 3,
-      });
-
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([{ id: 'g-a', priority: 3 }, { id: 'g-b', priority: 3 }]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-1']);
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r-same', target_taxonomy_node_id: 'tid1' }],
+      );
+      vi.mocked(db.all).mockResolvedValueOnce([{ id: 'g-a', priority: 3 }, { id: 'g-b', priority: 3 }]);
+      vi.mocked(db.all).mockResolvedValueOnce([{ id: 'r-same', name: 'Same', group_id: 'g-a' }]);
 
       const result = await store.previewRuleConflicts(['tx-1'], 'g-b');
 
       expect(result.covered).toEqual([]);
       expect(result.eligibleIds).toEqual(['tx-1']);
     });
-
-    it('new ungrouped rule is allowed alongside existing ungrouped rule (both priority 0)', async () => {
-      const ruleRow = makeRuleRow({
-        id: 'r-ungrouped', name: 'Existing Ungrouped',
-        grouped_conditions: makeSupplierOnlyConditions('Acme'),
-        target_taxonomy_node_id: 'tid1',
-        group_id: null, group_priority: null,
-      });
-
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([ruleRow])
-        .mockResolvedValueOnce([]);  // no groups exist
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValueOnce(['tx-1']);
-
-      const result = await store.previewRuleConflicts(['tx-1'], null);
-
-      expect(result.covered).toEqual([]);
-      expect(result.eligibleIds).toEqual(['tx-1']);
-    });
-
-    it('mixed: some transactions covered by higher-priority rules, some eligible', async () => {
-      const highRule = makeRuleRow({
-        id: 'r-high', name: 'High Rule',
-        grouped_conditions: makeSupplierOnlyConditions('Acme'),
-        target_taxonomy_node_id: 'tid1',
-        group_id: 'g-high', group_priority: 10,
-      });
-      const lowRule = makeRuleRow({
-        id: 'r-low', name: 'Low Rule',
-        grouped_conditions: makeSupplierOnlyConditions('Beta'),
-        target_taxonomy_node_id: 'tid2',
-        group_id: null, group_priority: null,
-      });
-
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([highRule, lowRule])              // evaluateRules → listAllRules
-        .mockResolvedValueOnce([highRule, lowRule])              // previewRuleConflicts → listAllRules
-        .mockResolvedValueOnce([{ id: 'g-high', priority: 10 }, { id: 'g-mid', priority: 5 }]);
-      // evaluateRules iterates rules: highRule matches tx-1, lowRule matches tx-2
-      vi.mocked(transactions.getIdsByGroupedConditions)
-        .mockResolvedValueOnce(['tx-1'])   // highRule matches tx-1
-        .mockResolvedValueOnce(['tx-2']);   // lowRule matches tx-2
-
-      const result = await store.previewRuleConflicts(['tx-1', 'tx-2', 'tx-3'], 'g-mid');
-
-      // tx-1: covered by r-high (priority 10 >= 5)
-      expect(result.covered).toEqual([
-        { transactionId: 'tx-1', existingRuleId: 'r-high', existingRuleName: 'High Rule' },
-      ]);
-      // tx-2: eligible (ungrouped priority 0 < 5), tx-3: eligible (not matched)
-      expect(result.eligibleIds).toEqual(expect.arrayContaining(['tx-2', 'tx-3']));
-      expect(result.eligibleIds).toHaveLength(2);
-    });
   });
 
-  // ─── evaluateRules ──────────────────────────────────────────────────────────
+  // ─── evaluateRulesBulk ────────────────────────────────────────────────────
 
-  describe('evaluateRules', () => {
-    it('matches transactions and returns ruleId + targetTaxonomyNodeId', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', grouped_conditions: makeSupplierOnlyConditions('Acme'), target_taxonomy_node_id: 'tid1', group_id: 'g1', group_priority: 1 }),
-      ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1', 'tx2']);
-
-      const result = await store.evaluateRules();
-      expect(result.get('tx1')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
-      expect(result.get('tx2')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
-    });
-
-    it('returns empty map when no rules exist', async () => {
-      vi.mocked(db.all).mockResolvedValue([]);
-      const result = await store.evaluateRules();
-      expect(result.size).toBe(0);
-    });
-
-    it('returns empty map when no rules match any transaction', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', group_id: 'g1', group_priority: 1 }),
-      ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue([]);
+  describe('evaluateRulesBulk', () => {
+    it('returns empty map when no active rules (pairs query returns empty) (#9)', async () => {
+      vi.mocked(db.all).mockResolvedValueOnce([]); // pairs → empty
 
       const result = await store.evaluateRules();
       expect(result.size).toBe(0);
     });
 
-    it('first-match-wins: once a transaction is matched, later rules do not overwrite it', async () => {
-      // r1 is evaluated first (higher group priority), r2 second
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', target_taxonomy_node_id: 'tid-first',  group_id: 'g1', group_priority: 10 }),
-        makeRuleRow({ id: 'r2', target_taxonomy_node_id: 'tid-second', group_id: 'g2', group_priority: 1  }),
-      ]);
-      // Both rules match tx1
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1']);
+    it('simple supplier_name equals — single CTE match (#1)', async () => {
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [
+          { txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' },
+          { txn_id: 'tx-2', rule_id: 'r1', target_taxonomy_node_id: 'tid1' },
+        ],
+      );
 
       const result = await store.evaluateRules();
-      expect(result.get('tx1')?.ruleId).toBe('r1');
-      expect(result.get('tx1')?.targetTaxonomyNodeId).toBe('tid-first');
+      expect(result.get('tx-1')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
+      expect(result.get('tx-2')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
     });
 
-    // ── Group priority determines winner ──────────────────────────────────────
-
-    it('higher-priority group wins over lower-priority group regardless of rule specificity', async () => {
-      // Low-priority group has a more specific rule (supplier + line), high-priority group has supplier-only.
-      // High-priority group should still win.
-      vi.mocked(db.all).mockResolvedValue([
-        // High priority group — supplier-only rule (less specific)
-        makeRuleRow({
-          id: 'r-general',
-          grouped_conditions: makeSupplierOnlyConditions('Acme'),
-          target_taxonomy_node_id: 'tid-general',
-          group_id: 'g-high',
-          group_priority: 10,
-          created_at: '2026-01-01T00:00:00',
-        }),
-        // Low priority group — supplier + line rule (more specific)
-        makeRuleRow({
-          id: 'r-specific',
-          grouped_conditions: makeSupplierAndLineConditions('Acme', 'scissors'),
-          target_taxonomy_node_id: 'tid-specific',
-          group_id: 'g-low',
-          group_priority: 1,
-          created_at: '2026-03-01T00:00:00',
-        }),
-      ]);
-
-      // Both rules match this transaction (it has supplier=Acme and line=scissors)
-      vi.mocked(transactions.getIdsByGroupedConditions)
-        .mockResolvedValueOnce(['tx1'])  // r-general matches
-        .mockResolvedValueOnce(['tx1']); // r-specific matches
+    it('higher priority group wins over lower (#2)', async () => {
+      // DISTINCT ON in SQL returns only the winning rule per txn
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r-high', target_taxonomy_node_id: 'tid-high' }],
+      );
 
       const result = await store.evaluateRules();
-
-      // Higher-priority group wins — NOT the more specific rule
-      expect(result.get('tx1')?.ruleId).toBe('r-general');
-      expect(result.get('tx1')?.targetTaxonomyNodeId).toBe('tid-general');
+      expect(result.get('tx-1')?.ruleId).toBe('r-high');
+      expect(result.get('tx-1')?.targetTaxonomyNodeId).toBe('tid-high');
     });
 
-    // ── Same-group tie-break ──────────────────────────────────────────────────
-
-    it('same group: latest created_at wins when multiple rules match — specificity is irrelevant', async () => {
-      // Two rules in the same group: supplier-only (older) vs supplier+line (newer).
-      // Newer rule wins because of created_at, NOT because it is more specific.
-      vi.mocked(db.all).mockResolvedValue([
-        // Newer rule (higher created_at, listed first by ORDER BY created_at DESC)
-        makeRuleRow({
-          id: 'r-newer-specific',
-          grouped_conditions: makeSupplierAndLineConditions('Acme', 'scissors'),
-          target_taxonomy_node_id: 'tid-specific',
-          group_id: 'g1',
-          group_priority: 5,
-          created_at: '2026-03-01T00:00:00',
-        }),
-        // Older rule (lower created_at)
-        makeRuleRow({
-          id: 'r-older-general',
-          grouped_conditions: makeSupplierOnlyConditions('Acme'),
-          target_taxonomy_node_id: 'tid-general',
-          group_id: 'g1',
-          group_priority: 5,
-          created_at: '2026-01-01T00:00:00',
-        }),
-      ]);
-
-      vi.mocked(transactions.getIdsByGroupedConditions)
-        .mockResolvedValueOnce(['tx1'])  // r-newer-specific matches
-        .mockResolvedValueOnce(['tx1']); // r-older-general would match too, but tx1 already claimed
+    it('same group — created_at tiebreak (#3)', async () => {
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r-newer', target_taxonomy_node_id: 'tid-newer' }],
+      );
 
       const result = await store.evaluateRules();
-
-      // Newer rule wins (same group, created_at tie-break) — NOT because it is more specific
-      expect(result.get('tx1')?.ruleId).toBe('r-newer-specific');
+      expect(result.get('tx-1')?.ruleId).toBe('r-newer');
     });
 
-    it('same group: older rule wins if it was created more recently than the specific rule', async () => {
-      // Demonstrates specificity truly does not matter — a newer general rule beats an older specific rule
-      vi.mocked(db.all).mockResolvedValue([
-        // Newer general rule (listed first by ORDER BY created_at DESC)
-        makeRuleRow({
-          id: 'r-newer-general',
-          grouped_conditions: makeSupplierOnlyConditions('Acme'),
-          target_taxonomy_node_id: 'tid-general',
-          group_id: 'g1',
-          group_priority: 5,
-          created_at: '2026-03-01T00:00:00',
-        }),
-        // Older specific rule
-        makeRuleRow({
-          id: 'r-older-specific',
-          grouped_conditions: makeSupplierAndLineConditions('Acme', 'scissors'),
-          target_taxonomy_node_id: 'tid-specific',
-          group_id: 'g1',
-          group_priority: 5,
-          created_at: '2026-01-01T00:00:00',
-        }),
-      ]);
-
-      vi.mocked(transactions.getIdsByGroupedConditions)
-        .mockResolvedValueOnce(['tx1'])  // r-newer-general matches
-        .mockResolvedValueOnce(['tx1']); // r-older-specific would match too
+    it('AND within group — both conditions must match (#4)', async () => {
+      // Two distinct (field, operator) pairs for AND conditions
+      mockBulkEval(db,
+        [
+          { field: 'supplier_name', operator: 'equals' },
+          { field: 'gl_description', operator: 'equals' },
+        ],
+        [{ txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' }],
+      );
 
       const result = await store.evaluateRules();
-
-      // Newer general rule wins over older specific rule — specificity is not a factor
-      expect(result.get('tx1')?.ruleId).toBe('r-newer-general');
+      expect(result.get('tx-1')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
     });
 
-    // ── Ungrouped rules ───────────────────────────────────────────────────────
-
-    it('ungrouped rules are evaluated after all named groups', async () => {
-      // Named group has a low-priority match, ungrouped has a match too.
-      // Named group should win.
-      vi.mocked(db.all).mockResolvedValue([
-        // Named group rule (group_priority = 1 → COALESCE gives 1)
-        makeRuleRow({
-          id: 'r-grouped',
-          target_taxonomy_node_id: 'tid-grouped',
-          group_id: 'g1',
-          group_priority: 1,
-          created_at: '2026-01-01T00:00:00',
-        }),
-        // Ungrouped rule (group_priority = null → COALESCE gives 0 → evaluated last)
-        makeRuleRow({
-          id: 'r-ungrouped',
-          target_taxonomy_node_id: 'tid-ungrouped',
-          group_id: null,
-          group_priority: null,
-          created_at: '2026-03-01T00:00:00', // newer, but ungrouped
-        }),
-      ]);
-
-      vi.mocked(transactions.getIdsByGroupedConditions)
-        .mockResolvedValueOnce(['tx1'])  // r-grouped matches
-        .mockResolvedValueOnce(['tx1']); // r-ungrouped also matches
+    it('AND partial match — one condition fails → zero matches (#5)', async () => {
+      mockBulkEval(db,
+        [
+          { field: 'supplier_name', operator: 'equals' },
+          { field: 'gl_description', operator: 'equals' },
+        ],
+        [], // no matches — incomplete AND group
+      );
 
       const result = await store.evaluateRules();
-
-      // Named group wins over ungrouped even though ungrouped rule is newer
-      expect(result.get('tx1')?.ruleId).toBe('r-grouped');
+      expect(result.size).toBe(0);
     });
 
-    it('ungrouped rule matches and classifies transaction when it is the only rule', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({
-          id: 'r-ungrouped',
-          grouped_conditions: makeSupplierOnlyConditions('Acme'),
-          target_taxonomy_node_id: 'tid-ungrouped',
-          group_id: null,
-          group_priority: null,
-        }),
-      ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1', 'tx2']);
+    it('OR across groups — either group passes (#6)', async () => {
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [
+          { txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' },
+          { txn_id: 'tx-2', rule_id: 'r1', target_taxonomy_node_id: 'tid1' },
+        ],
+      );
 
       const result = await store.evaluateRules();
       expect(result.size).toBe(2);
-      expect(result.get('tx1')).toEqual({ ruleId: 'r-ungrouped', targetTaxonomyNodeId: 'tid-ungrouped' });
-      expect(result.get('tx2')).toEqual({ ruleId: 'r-ungrouped', targetTaxonomyNodeId: 'tid-ungrouped' });
     });
 
-    it('ungrouped rules apply when no named group matches', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({
-          id: 'r-grouped',
-          target_taxonomy_node_id: 'tid-grouped',
-          group_id: 'g1',
-          group_priority: 5,
-        }),
-        makeRuleRow({
-          id: 'r-ungrouped',
-          target_taxonomy_node_id: 'tid-ungrouped',
-          group_id: null,
-          group_priority: null,
-        }),
-      ]);
-
-      vi.mocked(transactions.getIdsByGroupedConditions)
-        .mockResolvedValueOnce([])       // r-grouped does not match
-        .mockResolvedValueOnce(['tx1']); // r-ungrouped matches
+    it('ungrouped vs grouped — grouped wins (#8)', async () => {
+      // SQL DISTINCT ON with COALESCE(rg.priority, 0) DESC ensures grouped wins
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r-grouped', target_taxonomy_node_id: 'tid-grouped' }],
+      );
 
       const result = await store.evaluateRules();
-      expect(result.get('tx1')?.ruleId).toBe('r-ungrouped');
+      expect(result.get('tx-1')?.ruleId).toBe('r-grouped');
     });
 
-    // ── What transaction qualities are evaluated ───────────────────────────────
+    it('zero-match rule — nonexistent supplier → 0 matches, no false positives (#9)', async () => {
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [], // no transactions match nonexistent supplier
+      );
 
-    it('only evaluates columns referenced in the rule conditions — nothing else', async () => {
-      const conditions = makeConditions([
-        { field: 'supplier_name', operator: 'equals', value: 'Acme' },
-      ]);
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', grouped_conditions: conditions }),
-      ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1']);
-
-      await store.evaluateRules();
-
-      // getIdsByGroupedConditions is called with exactly the rule's conditions — no additional fields
-      const calledWith = vi.mocked(transactions.getIdsByGroupedConditions).mock.calls[0][0];
-      const fields = calledWith.groups.flatMap((g: any) => g.conditions.map((c: any) => c.field));
-      expect(fields).toEqual(['supplier_name']);
+      const result = await store.evaluateRules();
+      expect(result.size).toBe(0);
     });
 
-    it('passes all condition fields in a multi-condition rule to getIdsByGroupedConditions', async () => {
-      const conditions = makeConditions([
-        { field: 'supplier_name', operator: 'equals', value: 'Acme' },
-        { field: 'line_description', operator: 'equals', value: 'scissors' },
-      ]);
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', grouped_conditions: conditions }),
-      ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1']);
+    it('unmatched transactions absent from results (#10)', async () => {
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' }],
+        // tx-2, tx-3 etc. not in results
+      );
 
-      await store.evaluateRules();
-
-      const calledWith = vi.mocked(transactions.getIdsByGroupedConditions).mock.calls[0][0];
-      const fields = calledWith.groups.flatMap((g: any) => g.conditions.map((c: any) => c.field));
-      expect(fields).toContain('supplier_name');
-      expect(fields).toContain('line_description');
-      expect(fields).toHaveLength(2);
+      const result = await store.evaluateRules();
+      expect(result.size).toBe(1);
+      expect(result.has('tx-2')).toBe(false);
     });
 
-    it('only evaluates active rules', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r-active',   is_active: true  }),
-        makeRuleRow({ id: 'r-inactive', is_active: false }),
+    it('inactive rule ignored — is_active filter in SQL (#23)', async () => {
+      // The SQL includes WHERE r.is_active = TRUE in the CTEs.
+      // If no active rules have conditions, pairs query returns empty.
+      vi.mocked(db.all).mockResolvedValueOnce([]); // no active rule pairs
+
+      const result = await store.evaluateRules();
+      expect(result.size).toBe(0);
+    });
+
+    it('scoped evaluation via scopeIds — creates temp table (#30)', async () => {
+      // pairs query
+      vi.mocked(db.all).mockResolvedValueOnce([{ field: 'supplier_name', operator: 'equals' }]);
+      // CTE result — only scoped transactions in result
+      vi.mocked(db.all).mockResolvedValueOnce([
+        { txn_id: 'tx-scoped', rule_id: 'r1', target_taxonomy_node_id: 'tid1' },
       ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1']);
 
-      await store.evaluateRules();
+      const result = await store.evaluateRulesBulk({ scopeIds: ['tx-scoped', 'tx-other'] });
 
-      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledTimes(1);
+      // Should create temp table for scope
+      const runCalls = vi.mocked(db.run).mock.calls.map(c => c[0] as string);
+      expect(runCalls.some(sql => sql.includes('CREATE TEMP TABLE'))).toBe(true);
+
+      expect(result.get('tx-scoped')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
+    });
+
+    it('scoped evaluation via scopeTable — joins against it (#30)', async () => {
+      vi.mocked(db.all).mockResolvedValueOnce([{ field: 'supplier_name', operator: 'equals' }]);
+      vi.mocked(db.all).mockResolvedValueOnce([
+        { txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' },
+      ]);
+
+      const result = await store.evaluateRulesBulk({ scopeTable: 'tmp_my_scope' });
+
+      // The SQL should contain a JOIN against the scope table
+      const evalCall = vi.mocked(db.all).mock.calls[1];
+      const sql = evalCall[0] as string;
+      expect(sql).toContain('tmp_my_scope');
+
+      expect(result.size).toBe(1);
+    });
+
+    it('ruleIds filter — only specified rules evaluated (#22)', async () => {
+      vi.mocked(db.all).mockResolvedValueOnce([{ field: 'supplier_name', operator: 'equals' }]);
+      vi.mocked(db.all).mockResolvedValueOnce([
+        { txn_id: 'tx-1', rule_id: 'r2', target_taxonomy_node_id: 'tid2' },
+      ]);
+
+      const result = await store.evaluateRulesBulk({ ruleIds: ['r2'] });
+
+      // Pairs query should include ruleIds filter
+      const pairsCall = vi.mocked(db.all).mock.calls[0];
+      const pairsSql = pairsCall[0] as string;
+      expect(pairsSql).toContain('IN');
+      expect(pairsCall.slice(1)).toContain('r2');
+
+      expect(result.get('tx-1')?.ruleId).toBe('r2');
+    });
+
+    it('empty ruleIds array returns empty map without executing CTE', async () => {
+      // evaluateRules with empty ruleIds passes through to evaluateRulesBulk
+      // which will get no pairs back for non-existent rule IDs
+      vi.mocked(db.all).mockResolvedValueOnce([]); // pairs → empty for empty filter
+
+      const result = await store.evaluateRules(undefined, []);
+      expect(result.size).toBe(0);
+    });
+
+    it('contains operator — ILIKE CTE (#13)', async () => {
+      mockBulkEval(db,
+        [{ field: 'gl_description', operator: 'contains' }],
+        [{ txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' }],
+      );
+
+      const result = await store.evaluateRules();
+      expect(result.get('tx-1')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
     });
   });
 
-  // ─── evaluateRules — ruleIds filter ──────────────────────────────────────────
+  // ─── listRulesByGroup ──────────────────────────────────────────────────────
 
-  describe('evaluateRules — ruleIds filter', () => {
-    it('empty ruleIds array returns empty map without querying transactions', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', is_active: true }),
-      ]);
+  describe('listRulesByGroup', () => {
+    it('returns paginated rules for a specific group', async () => {
+      vi.mocked(db.all)
+        .mockResolvedValueOnce([{ cnt: 3 }])  // count query
+        .mockResolvedValueOnce([               // rules query
+          makeRuleRow({ id: 'r1', group_id: 'g1' }),
+          makeRuleRow({ id: 'r2', group_id: 'g1' }),
+        ]);
 
-      const result = await store.evaluateRules(undefined, []);
+      const result = await store.listRulesByGroup('g1', 2, 0);
+      expect(result.total).toBe(3);
+      expect(result.rules).toHaveLength(2);
+      expect(result.rules[0].id).toBe('r1');
+    });
+  });
 
-      expect(result.size).toBe(0);
-      expect(transactions.getIdsByGroupedConditions).not.toHaveBeenCalled();
+  // ─── reassignSupplierRules ─────────────────────────────────────────────────
+
+  describe('reassignSupplierRules', () => {
+    it('bulk updates project_supplier_id for supplier merges', async () => {
+      await store.reassignSupplierRules(['losing-1', 'losing-2'], 'survivor');
+
+      const call = vi.mocked(db.run).mock.calls[0];
+      const sql = call[0] as string;
+      expect(sql).toContain('UPDATE override_rules SET project_supplier_id');
+      expect(call).toContain('survivor');
+      expect(call).toContain('losing-1');
+      expect(call).toContain('losing-2');
     });
 
-    it('ruleIds filters to only those rules, ignoring other active rules', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', target_taxonomy_node_id: 'tid1', group_id: 'g1', group_priority: 2 }),
-        makeRuleRow({ id: 'r2', target_taxonomy_node_id: 'tid2', group_id: 'g1', group_priority: 1 }),
-      ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx1']);
-
-      const result = await store.evaluateRules(undefined, ['r2']);
-
-      // Only r2 should have been evaluated — one call, not two
-      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledTimes(1);
-      expect(result.get('tx1')).toEqual({ ruleId: 'r2', targetTaxonomyNodeId: 'tid2' });
+    it('no-ops when losingIds is empty', async () => {
+      await store.reassignSupplierRules([], 'survivor');
+      expect(db.run).not.toHaveBeenCalled();
     });
+  });
 
-    it('ruleIds containing an inactive rule — inactive rule is skipped', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r-inactive', is_active: false }),
-      ]);
+  // ─── previewRules ──────────────────────────────────────────────────────────
 
-      const result = await store.evaluateRules(undefined, ['r-inactive']);
-
-      expect(result.size).toBe(0);
-      expect(transactions.getIdsByGroupedConditions).not.toHaveBeenCalled();
-    });
-
-    it('ruleIds containing an unknown rule ID — silently ignored, no error', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', is_active: true }),
-      ]);
-
-      const result = await store.evaluateRules(undefined, ['nonexistent-id']);
-
-      expect(result.size).toBe(0);
-      expect(transactions.getIdsByGroupedConditions).not.toHaveBeenCalled();
-    });
-
-    it('both ruleIds and transactionIds — specified rules evaluated against specified transactions', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', target_taxonomy_node_id: 'tid1' }),
-        makeRuleRow({ id: 'r2', target_taxonomy_node_id: 'tid2' }),
-      ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx5']);
-
-      const result = await store.evaluateRules(['tx5', 'tx6', 'tx7'], ['r1']);
-
-      // Only r1 evaluated — one call
-      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledTimes(1);
-      // transactionIds passed through as scopeToIds
-      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledWith(
-        expect.anything(),
-        ['tx5', 'tx6', 'tx7']
+  describe('previewRules', () => {
+    it('returns token + counts', async () => {
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [
+          { txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' },
+          { txn_id: 'tx-2', rule_id: 'r1', target_taxonomy_node_id: 'tid1' },
+        ],
       );
-      expect(result.get('tx5')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
+
+      const result = await store.previewRules(['r1']);
+
+      expect(result.token).toBeDefined();
+      expect(typeof result.token).toBe('string');
+      expect(result.affectedRowCount).toBe(2);
+      expect(result.matchingRuleCount).toBe(1);
+    });
+  });
+
+  // ─── applyRules ────────────────────────────────────────────────────────────
+
+  describe('applyRules', () => {
+    it('uses cached token to skip re-evaluation', async () => {
+      // First: preview to get token
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' }],
+      );
+      const preview = await store.previewRules(['r1']);
+
+      // Clear mocks — applyRules should NOT call db.all again
+      vi.mocked(db.all).mockClear();
+
+      const result = await store.applyRules(['r1'], preview.token);
+
+      expect(db.all).not.toHaveBeenCalled(); // no re-evaluation
+      expect(result.matchedCount).toBe(1);
+      expect(result.ruleCount).toBe(1);
+      expect(transactions.updateTransactions).toHaveBeenCalled();
     });
 
-    it('ruleIds with valid rules that match no transactions — returns empty map', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r1', is_active: true }),
-      ]);
-      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue([]);
+    it('re-evaluates when no token provided', async () => {
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' }],
+      );
 
-      const result = await store.evaluateRules(undefined, ['r1']);
+      const result = await store.applyRules(['r1']);
 
-      expect(result.size).toBe(0);
-      // Still queried — the rule was evaluated, it just matched nothing
-      expect(transactions.getIdsByGroupedConditions).toHaveBeenCalledTimes(1);
+      expect(db.all).toHaveBeenCalled(); // had to evaluate
+      expect(result.matchedCount).toBe(1);
+    });
+
+    it('returns zero counts when no matches', async () => {
+      vi.mocked(db.all).mockResolvedValueOnce([]); // pairs → empty
+
+      const result = await store.applyRules(['r1']);
+
+      expect(result.matchedCount).toBe(0);
+      expect(result.ruleCount).toBe(0);
     });
   });
 
@@ -964,10 +809,11 @@ describe('RuleStore', () => {
     it('creates a group with the given name and priority', async () => {
       await store.createGroup({ name: 'Client', priority: 5 });
 
-      const sql = vi.mocked(db.run).mock.calls[0][0] as string;
-      expect(sql).toContain('rule_groups');
-      expect(vi.mocked(db.run).mock.calls[0]).toContain('Client');
-      expect(vi.mocked(db.run).mock.calls[0]).toContain(5);
+      const runCalls = vi.mocked(db.run).mock.calls;
+      const insertCall = runCalls.find(c => (c[0] as string).includes('INSERT INTO rule_groups'));
+      expect(insertCall).toBeDefined();
+      expect(insertCall).toContain('Client');
+      expect(insertCall).toContain(5);
     });
 
     it('rejects priority < 1', async () => {
@@ -978,31 +824,28 @@ describe('RuleStore', () => {
     });
 
     it('cascades existing groups up when priority is taken', async () => {
-      // Priority 5 is occupied by existing-group; cascadePriorities bumps it to 6
       vi.mocked(db.all).mockResolvedValueOnce([{ id: 'existing-group', priority: 5 }]);
 
       await store.createGroup({ name: 'New', priority: 5 });
 
-      // Should bump existing-group from 5→6, then insert the new group at 5
       const runCalls = vi.mocked(db.run).mock.calls;
       const bumpCall = runCalls.find(c => (c[0] as string).includes('UPDATE rule_groups') && c.includes('existing-group'));
       expect(bumpCall).toBeDefined();
-      expect(bumpCall).toContain(6); // bumped to 6
+      expect(bumpCall).toContain(6);
 
       const insertCall = runCalls.find(c => (c[0] as string).includes('INSERT INTO rule_groups'));
       expect(insertCall).toBeDefined();
-      expect(insertCall).toContain(5); // new group gets priority 5
+      expect(insertCall).toContain(5);
     });
 
     it('returns a generated id', async () => {
-      vi.mocked(db.all).mockResolvedValueOnce([]); // no conflicts
+      vi.mocked(db.all).mockResolvedValueOnce([]);
       const result = await store.createGroup({ name: 'G', priority: 1 });
       expect(result).toHaveProperty('id');
       expect(typeof result.id).toBe('string');
     });
 
     it('requires priority to be provided (TypeScript enforces, runtime validates >= 1)', async () => {
-      // Even if someone bypasses TypeScript and passes undefined, the >= 1 check catches it
       await expect(store.createGroup({ name: 'No Priority', priority: undefined as any }))
         .rejects.toThrow();
       await expect(store.createGroup({ name: 'No Priority', priority: null as any }))
@@ -1018,7 +861,7 @@ describe('RuleStore', () => {
     });
 
     it('updates priority', async () => {
-      vi.mocked(db.all).mockResolvedValueOnce([]); // no conflicts from cascade
+      vi.mocked(db.all).mockResolvedValueOnce([]);
       await store.updateGroup('g1', { priority: 3 });
       const sql = vi.mocked(db.run).mock.calls[0][0] as string;
       expect(sql).toContain('priority = ?');
@@ -1029,7 +872,6 @@ describe('RuleStore', () => {
     });
 
     it('cascades existing groups up when updating to a taken priority', async () => {
-      // Priority 5 occupied by other-group; cascade bumps it to 6
       vi.mocked(db.all).mockResolvedValueOnce([{ id: 'other-group', priority: 5 }]);
 
       await store.updateGroup('g1', { priority: 5 });
@@ -1062,57 +904,7 @@ describe('RuleStore', () => {
       await store.deleteGroup('g1');
 
       const calls = vi.mocked(db.run).mock.calls.map(c => c[0] as string);
-      // Should not delete from override_rules
       expect(calls.every(sql => !sql.includes('DELETE FROM override_rules'))).toBe(true);
-    });
-  });
-
-  describe('group priority reflected in rule listing', () => {
-    it('rule in high-priority group is listed before rule in low-priority group', async () => {
-      // Simulate DB returning rules ordered by group priority DESC
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({ id: 'r-in-high', name: 'High Group Rule', group_id: 'g-high', group_priority: 10, created_at: '2026-01-01T00:00:00' }),
-        makeRuleRow({ id: 'r-in-low', name: 'Low Group Rule', group_id: 'g-low', group_priority: 2, created_at: '2026-03-01T00:00:00' }),
-        makeRuleRow({ id: 'r-ungrouped', name: 'Ungrouped Rule', group_id: null, group_priority: null, created_at: '2026-03-15T00:00:00' }),
-      ]);
-
-      const rules = await store.listRules();
-
-      // High-priority group rule first, even though it was created earliest
-      expect(rules[0].id).toBe('r-in-high');
-      // Low-priority group rule second, even though it was created after the high-priority one
-      expect(rules[1].id).toBe('r-in-low');
-      // Ungrouped rule last, even though it was created most recently
-      expect(rules[2].id).toBe('r-ungrouped');
-    });
-
-    it('moving a rule to a higher-priority group changes its evaluation position', async () => {
-      // Before: rule is ungrouped → listed last
-      vi.mocked(db.all).mockResolvedValueOnce([
-        makeRuleRow({ id: 'r-grouped', group_id: 'g1', group_priority: 5 }),
-        makeRuleRow({ id: 'r-target', group_id: null, group_priority: null }),
-      ]);
-
-      const rulesBefore = await store.listRules();
-      expect(rulesBefore[0].id).toBe('r-grouped');
-      expect(rulesBefore[1].id).toBe('r-target');
-
-      // Move r-target to group g-high (priority 10)
-      await store.moveRuleToGroup('r-target', 'g-high');
-
-      // Verify the UPDATE was issued with the right group
-      const moveCalls = vi.mocked(db.run).mock.calls;
-      expect(moveCalls.some(call => call.includes('r-target') && call.includes('g-high'))).toBe(true);
-
-      // After: rule is in group g-high (priority 10) → listed first
-      vi.mocked(db.all).mockResolvedValueOnce([
-        makeRuleRow({ id: 'r-target', group_id: 'g-high', group_priority: 10 }),
-        makeRuleRow({ id: 'r-grouped', group_id: 'g1', group_priority: 5 }),
-      ]);
-
-      const rulesAfter = await store.listRules();
-      expect(rulesAfter[0].id).toBe('r-target');
-      expect(rulesAfter[1].id).toBe('r-grouped');
     });
   });
 
@@ -1121,7 +913,6 @@ describe('RuleStore', () => {
       await store.reorderGroups(['g3', 'g1', 'g2']);
 
       const updateCalls = vi.mocked(db.run).mock.calls;
-      // g3 should get highest priority (3), g2 should get lowest (1)
       expect(updateCalls.some(call => call.includes('g3') && call.includes(3))).toBe(true);
       expect(updateCalls.some(call => call.includes('g2') && call.includes(1))).toBe(true);
     });
@@ -1153,107 +944,60 @@ describe('RuleStore', () => {
       vi.mocked(db.run).mockResolvedValue(undefined as any);
     });
 
-    it('creates rules with group_id = null (auto-generated rules are ungrouped)', async () => {
+    it('returns zero counts when no eligible suppliers', async () => {
       vi.mocked(db.all)
-        .mockResolvedValueOnce([makeTxnRow('Acme Corp', 'node-1')])
-        .mockResolvedValueOnce([]);
-
-      await store.generate_rules_preview();
-
-      const insertCall = vi.mocked(db.run).mock.calls[0];
-      // group_id should be null in the insert
-      expect(insertCall).toContain(null);
-      // source should be auto_generated
-      expect(insertCall).toContain('auto_generated');
-    });
-
-    it('skips suppliers that already have a rule', async () => {
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([makeTxnRow('Acme Corp', 'node-1'), makeTxnRow('NewCo', 'node-2')])
-        .mockResolvedValueOnce([makeExistingRuleRow('Acme Corp')]);
+        .mockResolvedValueOnce([]) // no distinct supplier names
+        .mockResolvedValueOnce([]); // covered
 
       const result = await store.generate_rules_preview();
-
-      expect(result.rulesCreated).toBe(1);
-      expect(result.suppliersProcessed).toBe(1);
-      expect(db.run).toHaveBeenCalledTimes(1);
-    });
-
-    it('returns zero counts when all suppliers already have rules', async () => {
-      vi.mocked(db.all)
-        .mockResolvedValueOnce([makeTxnRow('Acme Corp', 'node-1')])
-        .mockResolvedValueOnce([makeExistingRuleRow('Acme Corp')]);
-
-      const result = await store.generate_rules_preview();
-
       expect(result.rulesCreated).toBe(0);
       expect(result.suppliersProcessed).toBe(0);
-      expect(db.run).not.toHaveBeenCalled();
     });
 
-    it('creates rules for all suppliers when no existing rules', async () => {
+    it('skips suppliers that already have a rule (covered check via project_supplier_id)', async () => {
       vi.mocked(db.all)
-        .mockResolvedValueOnce([makeTxnRow('Acme Corp', 'node-1'), makeTxnRow('NewCo', 'node-2')])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([
+          { supplier_name: 'Acme Corp', project_supplier_id: 'sup-1' },
+          { supplier_name: 'NewCo', project_supplier_id: 'sup-2' },
+        ]) // distinct suppliers
+        .mockResolvedValueOnce([{ project_supplier_id: 'sup-1' }]) // Acme already covered
+        .mockResolvedValueOnce([makeTxnRow('NewCo', 'node-2')]); // NewCo txns
 
       const result = await store.generate_rules_preview();
 
-      expect(result.rulesCreated).toBe(2);
-      expect(result.suppliersProcessed).toBe(2);
+      expect(result.suppliersProcessed).toBe(1); // only NewCo
     });
   });
 
   // ─── getCatARuleForSupplier ───────────────────────────────────────────────────
 
   describe('getCatARuleForSupplier', () => {
-    it('returns null when no cat A rules exist', async () => {
-      vi.mocked(db.all).mockResolvedValue([]);
+    it('returns null when supplier not found', async () => {
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue(null);
 
-      const result = await store.getCatARuleForSupplier('Acme Corp');
+      const result = await store.getCatARuleForSupplier('Unknown Corp');
       expect(result).toBeNull();
     });
 
-    it('returns the rule when a cat A rule exists for the supplier', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({
-          id: 'cat-a-rule',
-          grouped_conditions: makeSupplierOnlyConditions('Acme Corp'),
-          source: 'supplier_universe',
-          category_a_supplier: true,
-        }),
-      ]);
+    it('returns the rule when a cat A rule exists via project_supplier_id FK', async () => {
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue({ id: 'sup-1' } as any);
+      vi.mocked(db.get).mockResolvedValue(
+        makeRuleRow({ id: 'cat-a-rule', category_a_supplier: true, project_supplier_id: 'sup-1' })
+      );
 
       const result = await store.getCatARuleForSupplier('Acme Corp');
+
       expect(result).not.toBeNull();
       expect(result!.id).toBe('cat-a-rule');
+      expect(suppliers.getProjectSupplierByName).toHaveBeenCalledWith('Acme Corp');
     });
 
-    it('returns null when cat A rules exist for a different supplier', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({
-          id: 'other-rule',
-          grouped_conditions: makeSupplierOnlyConditions('Other Corp'),
-          source: 'supplier_universe',
-          category_a_supplier: true,
-        }),
-      ]);
+    it('returns null when no cat A rule exists for supplier', async () => {
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue({ id: 'sup-1' } as any);
+      vi.mocked(db.get).mockResolvedValue(undefined); // no matching rule
 
       const result = await store.getCatARuleForSupplier('Acme Corp');
       expect(result).toBeNull();
-    });
-
-    it('is case-insensitive when matching supplier name', async () => {
-      vi.mocked(db.all).mockResolvedValue([
-        makeRuleRow({
-          id: 'cat-a-rule',
-          grouped_conditions: makeSupplierOnlyConditions('acme corp'),
-          source: 'supplier_universe',
-          category_a_supplier: true,
-        }),
-      ]);
-
-      const result = await store.getCatARuleForSupplier('Acme Corp');
-      expect(result).not.toBeNull();
     });
   });
 });

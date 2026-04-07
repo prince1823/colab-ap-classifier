@@ -75,7 +75,7 @@ export default function OverrideRulesPage() {
 
   // Apply rules state
   const [applying, setApplying] = useState(false)
-  const [applyPreview, setApplyPreview] = useState<{ affectedRowCount: number; matchingRuleCount: number } | null>(null)
+  const [applyPreview, setApplyPreview] = useState<{ token: string; affectedRowCount: number; matchingRuleCount: number } | null>(null)
   const [applyResult, setApplyResult] = useState<{ matchedCount: number; ruleCount: number } | null>(null)
   const [inactiveApplyNames, setInactiveApplyNames] = useState<string[] | null>(null)
 
@@ -512,7 +512,7 @@ export default function OverrideRulesPage() {
     if (allSelectedIds.size === 0) return
     setApplying(true)
     try {
-      const result = await ipc.rules.apply(Array.from(allSelectedIds))
+      const result = await ipc.rules.apply(Array.from(allSelectedIds), applyPreview?.token)
       setApplyPreview(null)
       setApplyResult(result)
       setSelectedGroupedIds(new Set())

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Undo/Redo Deep Dive — Colab AP Classifier</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; color: #222; line-height: 1.55; }
+  h1 { border-bottom: 2px solid #333; padding-bottom: .3em; }
+  h2 { margin-top: 2.2em; border-bottom: 1px solid #ddd; padding-bottom: .2em; }
+  h3 { margin-top: 1.6em; color: #444; }
+  code { background: #f4f4f4; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
+  pre { background: #f7f7f7; padding: 1em; border-radius: 5px; overflow-x: auto; font-size: 0.85em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.88em; }
+  th, td { border: 1px solid #ddd; padding: 6px 9px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  tr:nth-child(even) { background: #fafafa; }
+  .yes { color: #1a7f37; font-weight: 600; }
+  .no { color: #b42318; font-weight: 600; }
+  .partial { color: #b07c00; font-weight: 600; }
+  .summary { background: #eef6ff; border-left: 4px solid #3b82f6; padding: .8em 1em; margin: 1em 0; }
+  .warn { background: #fff7e6; border-left: 4px solid #d97706; padding: .8em 1em; margin: 1em 0; }
+  .effort { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 0.78em; font-weight: 600; }
+  .e-low { background: #d1fae5; color: #065f46; }
+  .e-med { background: #fef3c7; color: #92400e; }
+  .e-high { background: #fee2e2; color: #991b1b; }
+</style>
+</head>
+<body>
+
+<h1>Undo / Redo Deep Dive</h1>
+<p><em>Generated 2026-04-07 — analysis of all state-mutating user actions in the Colab AP Classifier and their undo support.</em></p>
+
+<div class="summary">
+  <strong>TL;DR:</strong> The codebase has full undo/redo <em>infrastructure</em> (changelog table, revert service, keyboard-shortcut hook), but only <strong>1 of ~42 user actions</strong> is actually wired into the undo stack: <code>rules:createAndApply</code> (the reclassification modal). Several other actions write changelog entries but never push to the renderer-side undo stack. Most write paths don't log at all.
+</div>
+
+<h2>1. Existing Infrastructure</h2>
+
+<h3>1.1 The <code>change_log</code> table</h3>
+<p>Defined in <code>src/main/services/database.ts:628</code>. Schema:</p>
+<pre>id, source ('manual'|'pipeline'|'rule'|'feedback'),
+affected_table, affected_ids (JSON), affected_count,
+old_values (JSON), new_values (JSON),
+description, is_reverted, filter_context, rule_id, created_at</pre>
+
+<h3>1.2 ChangelogStore service</h3>
+<p><code>src/main/services/changelog.ts</code></p>
+<ul>
+  <li><code>logChange()</code> (line 137) — single insertion entry point; returns the new entry id.</li>
+  <li><code>revertChange()</code> (line 156) — restores <code>old_values</code> onto the affected rows and flips <code>is_reverted=TRUE</code>. Per commit <code>c7c4123</code>, missing rows no longer throw — they return a warning string so the undo stack stays consistent.</li>
+  <li><code>listChanges()</code> / <code>listChangesPaginated()</code> / <code>listByRuleId()</code> — read APIs used by Version History and rule deactivation modal.</li>
+</ul>
+<div class="warn"><strong>One-way revert:</strong> <code>is_reverted</code> is a flag, not a counter. An entry can be reverted only once. Redo works because the renderer keeps the entry on a separate stack and re-calls revert — but the backend treats it as idempotent.</div>
+
+<h3>1.3 Renderer hook: <code>useUndoRedo</code></h3>
+<p><code>src/renderer/hooks/useUndoRedo.ts</code></p>
+<ul>
+  <li>In-memory stacks (<code>undoStack</code>, <code>redoStack</code>), <code>MAX_STACK_SIZE = 20</code>.</li>
+  <li>Keyboard shortcuts: <code>Cmd/Ctrl+Z</code> undo, <code>Cmd/Ctrl+Shift+Z</code> redo. Disabled inside <code>INPUT</code>/<code>TEXTAREA</code>.</li>
+  <li>Entry shape is currently hard-coded to <code>{ type: 'reclassify'; changelogId: string }</code> — extending undo to other actions requires either widening this union or just reusing the same type.</li>
+  <li><strong>Stacks are lost on page refresh.</strong> Undo state is not persisted.</li>
+</ul>
+
+<h3>1.4 IPC surface</h3>
+<p><code>src/main/ipc/changelog.ts</code> exposes <code>changelog:list</code>, <code>changelog:revert</code>, <code>changelog:listByRule</code>. The Version History page (<code>src/renderer/pages/VersionHistoryPage.tsx</code>) and <code>RuleDeactivationModal</code> use these for manual revert UI.</p>
+
+<h3>1.5 Where undo is actually wired</h3>
+<p>Only one place: <code>src/renderer/hooks/useReclassification.ts:37-39</code> calls <code>pushUndo({ type: 'reclassify', changelogId })</code> after <code>rules:createAndApply</code>.</p>
+
+<h2>2. Action-by-Action Audit</h2>
+
+<p>Legend: <span class="yes">YES</span> = supported, <span class="partial">PARTIAL</span> = changelog written but not pushed to undo stack (only manual revert via Version History works), <span class="no">NO</span> = not tracked at all.</p>
+
+<h3>2.1 Transactions</h3>
+<table>
+<tr><th>Action</th><th>IPC channel</th><th>File</th><th>Logged?</th><th>Undo?</th></tr>
+<tr><td>Manual edit (cell update)</td><td><code>transactions:update</code></td><td><code>src/main/ipc/transactions.ts:18</code></td><td>YES (source='manual')</td><td class="partial">PARTIAL</td></tr>
+<tr><td>Mark all reviewed</td><td><code>transactions:markAllReviewed</code></td><td><code>src/main/ipc/transactions.ts:64</code></td><td>NO</td><td class="no">NO</td></tr>
+</table>
+
+<h3>2.2 Classification</h3>
+<table>
+<tr><th>Action</th><th>IPC channel</th><th>File</th><th>Logged?</th><th>Undo?</th></tr>
+<tr><td>Run AI classification pipeline</td><td><code>classification:start</code></td><td><code>src/main/ipc/classification.ts:6</code></td><td>YES (source='pipeline')</td><td class="partial">PARTIAL</td></tr>
+</table>
+
+<h3>2.3 Override Rules</h3>
+<table>
+<tr><th>Action</th><th>IPC channel</th><th>File</th><th>Logged?</th><th>Undo?</th></tr>
+<tr><td>Create rule</td><td><code>rules:create</code></td><td><code>src/main/ipc/rules.ts:61</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Create and apply rule (reclassify modal)</td><td><code>rules:createAndApply</code></td><td><code>src/main/ipc/rules.ts:65</code></td><td>YES</td><td class="yes">YES</td></tr>
+<tr><td>Update rule</td><td><code>rules:update</code></td><td><code>src/main/ipc/rules.ts:69</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Delete rule</td><td><code>rules:delete</code></td><td><code>src/main/ipc/rules.ts:74</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Apply existing rules</td><td><code>rules:apply</code></td><td><code>src/main/ipc/rules.ts:130</code></td><td>YES (source='rule')</td><td class="partial">PARTIAL</td></tr>
+<tr><td>Set Category-A flag</td><td><code>rules:setCategoryA</code></td><td><code>src/main/ipc/rules.ts:138</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Create / update / delete rule group</td><td><code>rules:createGroup</code> etc.</td><td><code>src/main/ipc/rules.ts:98-110</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Reorder groups, move rule, bulk assign</td><td><code>rules:reorderGroups</code>, <code>moveRule</code>, <code>assignToGroup</code>, <code>filterAssign</code></td><td><code>src/main/ipc/rules.ts:110-122</code></td><td>NO</td><td class="no">NO</td></tr>
+</table>
+
+<h3>2.4 Suppliers</h3>
+<table>
+<tr><th>Action</th><th>IPC channel</th><th>File</th><th>Logged?</th><th>Undo?</th></tr>
+<tr><td>Update supplier metadata</td><td><code>suppliers:update</code></td><td><code>src/main/ipc/suppliers.ts:26</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Confirm/reject supplier</td><td><code>suppliers:confirm</code></td><td><code>src/main/ipc/suppliers.ts:30</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Tail-spend filter (bulk)</td><td><code>suppliers:filterTailSpend</code></td><td><code>src/main/ipc/suppliers.ts:34</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Assign alias (remap raw name)</td><td><code>suppliers:assignAlias</code></td><td><code>src/main/ipc/suppliers.ts:55</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Rename supplier</td><td><code>suppliers:rename</code></td><td><code>src/main/ipc/suppliers.ts:59</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Merge suppliers</td><td><code>suppliers:merge</code></td><td><code>src/main/ipc/suppliers.ts:63</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Delete supplier</td><td><code>suppliers:delete</code></td><td><code>src/main/ipc/suppliers.ts:67</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Parent ops (add/assign/rename/delete/merge)</td><td><code>suppliers:*Parent*</code></td><td><code>src/main/ipc/suppliers.ts:76-94</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Import suppliers from CSV</td><td><code>suppliers:importCSV</code></td><td><code>src/main/ipc/suppliers.ts:100</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Apply CSV diff</td><td><code>suppliers:applyCsvDiff</code></td><td><code>src/main/ipc/suppliers.ts:108</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Sync to supplier universe</td><td><code>suppliers:syncToUniverse</code></td><td><code>src/main/ipc/suppliers.ts:112</code></td><td>NO</td><td class="no">NO</td></tr>
+</table>
+
+<h3>2.5 Taxonomy</h3>
+<table>
+<tr><th>Action</th><th>IPC channel</th><th>File</th><th>Logged?</th><th>Undo?</th></tr>
+<tr><td>Add node</td><td><code>taxonomy:addNode</code></td><td><code>src/main/ipc/taxonomy.ts:13</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Update node description</td><td><code>taxonomy:updateNode</code></td><td><code>src/main/ipc/taxonomy.ts:17</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Rename node (cascading)</td><td><code>taxonomy:renameNode</code></td><td><code>src/main/ipc/taxonomy.ts:21</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Merge nodes</td><td><code>taxonomy:mergeNodes</code></td><td><code>src/main/ipc/taxonomy.ts:25</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Delete node</td><td><code>taxonomy:deleteNode</code></td><td><code>src/main/ipc/taxonomy.ts:29</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Import taxonomy file</td><td><code>taxonomy:importFromFile</code></td><td><code>src/main/ipc/taxonomy.ts:33</code></td><td>NO</td><td class="no">NO</td></tr>
+</table>
+
+<h3>2.6 Feedback (V7)</h3>
+<table>
+<tr><th>Action</th><th>IPC channel</th><th>File</th><th>Logged?</th><th>Undo?</th></tr>
+<tr><td>Apply <code>update_taxonomy_description</code></td><td rowspan="5"><code>feedback:apply</code></td><td rowspan="5"><code>src/main/ipc/feedback.ts:50</code></td><td>YES</td><td class="partial">PARTIAL</td></tr>
+<tr><td>Apply <code>update_supplier_info</code></td><td>YES</td><td class="partial">PARTIAL</td></tr>
+<tr><td>Apply <code>update_company_context</code></td><td>YES</td><td class="partial">PARTIAL</td></tr>
+<tr><td>Apply <code>update_column_priority</code></td><td>YES</td><td class="partial">PARTIAL</td></tr>
+<tr><td>Apply <code>create_rule</code></td><td>YES</td><td class="partial">PARTIAL</td></tr>
+</table>
+
+<h3>2.7 Project / Ingest / Settings / Export</h3>
+<table>
+<tr><th>Action</th><th>IPC channel</th><th>File</th><th>Logged?</th><th>Undo?</th></tr>
+<tr><td>Create project</td><td><code>project:new</code></td><td><code>src/main/ipc/project.ts:6</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Set / delete project setting</td><td><code>project:setSetting</code>, <code>deleteSetting</code></td><td><code>src/main/ipc/project.ts:43</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Update project metadata (company context, threshold)</td><td><code>project:updateMetadata</code></td><td><code>src/main/ipc/project.ts:69</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>Import CSV (transactions)</td><td><code>ingest:importCSV</code></td><td><code>src/main/ipc/ingest.ts:18</code></td><td>NO</td><td class="no">NO — intentional; user deletes upload manually</td></tr>
+<tr><td>Delete upload</td><td><code>ingest:deleteUpload</code></td><td><code>src/main/ipc/ingest.ts:56</code></td><td>NO</td><td class="no">NO — intentional; this is itself the manual undo of an import</td></tr>
+<tr><td>QC run</td><td><code>qc:run</code></td><td><code>src/main/ipc/qc.ts:11</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>QC config</td><td><code>qc:setConfig</code></td><td><code>src/main/ipc/qc.ts:39</code></td><td>NO</td><td class="no">NO</td></tr>
+<tr><td>LLM API key / provider / model</td><td><code>settings:set*</code></td><td><code>src/main/ipc/settings.ts:106</code></td><td>NO</td><td class="no">NO (intentional)</td></tr>
+<tr><td>CSV export</td><td><code>export:csv</code></td><td><code>src/main/ipc/export.ts:11</code></td><td>n/a (read-only)</td><td>n/a</td></tr>
+</table>
+
+<h2>3. Summary Counts</h2>
+<table>
+<tr><th>Category</th><th>Mutating actions</th><th>Logged</th><th>Pushed to undo stack</th></tr>
+<tr><td>Transactions</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td>Classification</td><td>1</td><td>1</td><td>0</td></tr>
+<tr><td>Rules</td><td>13</td><td>2</td><td>1</td></tr>
+<tr><td>Suppliers</td><td>12</td><td>0</td><td>0</td></tr>
+<tr><td>Taxonomy</td><td>6</td><td>0</td><td>0</td></tr>
+<tr><td>Feedback</td><td>5 sub-types</td><td>5</td><td>0</td></tr>
+<tr><td>Project / Ingest / QC / Settings</td><td>~10</td><td>0</td><td>0</td></tr>
+<tr><th>Total</th><th>~49</th><th>9</th><th><strong>1</strong></th></tr>
+</table>
+
+<h2>4. What It Would Take to Add Undo</h2>
+
+<h3>4.1 Quick wins <span class="effort e-low">low effort</span></h3>
+<p>These already log to the changelog — the only change is in the renderer: capture the returned <code>changelogId</code> and call <code>pushUndo()</code>.</p>
+<ul>
+  <li><strong><code>rules:apply</code></strong> — wire up in whatever component triggers bulk rule application. Backend already returns a changelogId.</li>
+  <li><strong><code>transactions:update</code></strong> — wire up in DataReview / Review pages where cell edits happen.</li>
+  <li><strong><code>classification:start</code></strong> — slightly trickier because it's fire-and-forget over EventBus; the changelogId would have to be emitted on the completion event.</li>
+  <li><strong><code>feedback:apply</code></strong> (all 5 subtypes) — capture changelogId in the feedback panel.</li>
+</ul>
+<p>Also: widen <code>UndoEntry['type']</code> from <code>'reclassify'</code> to a broader union so the UI can label undo toasts meaningfully.</p>
+
+<h3>4.2 Medium effort <span class="effort e-med">medium</span> — single-table mutations</h3>
+<p>For each of these, follow the recipe: SELECT old row → write → call <code>changelog.logChange({source:'manual', oldValues, newValues, affectedIds, ...})</code> → return id → renderer pushes onto undo stack.</p>
+<ul>
+  <li>Supplier: <code>update</code>, <code>confirm</code>, <code>rename</code>, <code>delete</code>, <code>filterTailSpend</code>, parent ops</li>
+  <li>Taxonomy: <code>addNode</code>, <code>updateNode</code>, <code>deleteNode</code></li>
+  <li>Rules: <code>create</code>, <code>update</code>, <code>delete</code>, <code>setCategoryA</code>, all group ops</li>
+  <li>Project: <code>setSetting</code>, <code>updateMetadata</code>, QC config</li>
+  <li>Transactions: <code>markAllReviewed</code> (capture all affected ids before bulk update)</li>
+</ul>
+
+<h3>4.3 Harder <span class="effort e-high">high</span> — cascading / multi-table mutations</h3>
+<ul>
+  <li><strong><code>taxonomy:renameNode</code></strong> — cascades into <code>taxonomy</code> children, <code>project_suppliers.mapped_taxonomy_paths</code>, <code>l1_l2_path</code>, and possibly <code>transactions.taxonomy_node_id</code>. The changelog row would need to encode multiple table writes (or be split into multiple linked entries). The current schema only has one <code>affected_table</code> column — this is the main blocker. Options: (a) widen schema to support multi-table changes, or (b) write a parent entry plus N child entries with a shared <code>group_id</code>.</li>
+  <li><strong><code>taxonomy:mergeNodes</code></strong> / <strong><code>suppliers:merge</code></strong> — same multi-table problem plus deletion of the loser row, which has to be re-created on revert.</li>
+  <li><strong><code>suppliers:assignAlias</code></strong> — touches many transactions; large <code>old_values</code> payload but otherwise straightforward.</li>
+  <li><strong><code>suppliers:applyCsvDiff</code></strong>, <strong><code>suppliers:importCSV</code></strong>, <strong><code>taxonomy:importFromFile</code></strong> — bulk inserts of many rows. Realistic approach: store affected_ids only and treat undo as "delete what was inserted, restore what was overwritten".</li>
+  <li><strong><code>ingest:importCSV</code></strong> / <strong><code>ingest:deleteUpload</code></strong> — intentionally excluded from undo. Users delete uploads manually via the UI; no changelog or undo wiring needed.</li>
+</ul>
+
+<h3>4.4 Cross-cutting changes worth doing alongside</h3>
+<ol>
+  <li><strong>Backend should push, not the renderer.</strong> Today every caller has to remember to <code>pushUndo()</code>. A nicer pattern: have <code>logChange()</code> emit an EventBus event (e.g. <code>changelog:created</code>) and have <code>useUndoRedo</code> subscribe to it. Then any new logged mutation is automatically undoable, no per-call wiring.</li>
+  <li><strong>Persist the undo stack</strong> per project, e.g. as a row in <code>project_settings</code> or its own tiny table — currently a window reload wipes it.</li>
+  <li><strong>Multi-table changelog entries.</strong> Add a <code>group_id</code> column so cascading operations (rename, merge) can be reverted as a single logical undo step.</li>
+  <li><strong>Type the undo entries.</strong> Replace the hard-coded <code>'reclassify'</code> with a discriminated union so undo toasts can say "Undid: rename supplier" instead of always "Undid reclassification".</li>
+  <li><strong>Exclude actions that should never be undoable</strong> from the system explicitly (e.g. <code>settings:setApiKey</code>, project create/open/close, exports). A small allowlist/denylist on the backend prevents accidents.</li>
+</ol>
+
+<h2>5. Key files</h2>
+<ul>
+  <li><code>src/main/services/database.ts:628</code> — change_log schema</li>
+  <li><code>src/main/services/changelog.ts</code> — logChange / revertChange</li>
+  <li><code>src/main/ipc/changelog.ts</code> — IPC surface</li>
+  <li><code>src/renderer/hooks/useUndoRedo.ts</code> — client stacks + keyboard shortcuts</li>
+  <li><code>src/renderer/hooks/useReclassification.ts:37</code> — the only current consumer</li>
+  <li><code>src/renderer/pages/VersionHistoryPage.tsx</code> — manual revert UI</li>
+  <li><code>src/renderer/components/rules/RuleDeactivationModal.tsx</code> — per-rule revert UI</li>
+</ul>
+
+</body>
+</html>

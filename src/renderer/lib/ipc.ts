@@ -142,6 +142,7 @@ export const ipc = {
   // ── Suppliers (3 channels + research) ──
   suppliers: {
     list: (filter?: { conditions?: FilterCondition[]; groupedConditions?: import('../../shared/types/transactions').GroupedFilter }) => invoke('suppliers:list', filter),
+    listPaginated: (params: import('../../shared/types/suppliers').SupplierPaginationParams) => invoke('suppliers:listPaginated', params),
     update: (supplierId: string, updates: SupplierUpdateInput) =>
       invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
@@ -158,6 +159,8 @@ export const ipc = {
     getFilterFields: () => invoke('suppliers:getFilterFields'),
     distinctValues: (field: string, limit?: number) => invoke('suppliers:distinctValues', field, limit),
     getAliases: (supplierId: string) => invoke('suppliers:getAliases', supplierId),
+    getAliasesWithSpend: (supplierId: string) => invoke('suppliers:getAliasesWithSpend', supplierId),
+    getAliasesWithSpendBatch: (supplierIds: string[]) => invoke('suppliers:getAliasesWithSpendBatch', supplierIds),
     assignAlias: (supplierId: string, rawName: string) => invoke('suppliers:assignAlias', supplierId, rawName),
     rename: (supplierId: string, newName: string) => invoke('suppliers:rename', supplierId, newName),
     merge: (survivorId: string, losingIds: string[]) => invoke('suppliers:merge', survivorId, losingIds),
@@ -197,8 +200,9 @@ export const ipc = {
     assignToGroup: (ruleIds: string[], groupId: string | null) => invoke('rules:assignToGroup', ruleIds, groupId),
     filterAssign: (filter: import('../../shared/types/transactions').GroupedFilter, targetGroupId: string | null) => invoke('rules:filterAssign', filter, targetGroupId),
     previewConflicts: (candidateIds: string[], newRuleGroupId?: string | null) => invoke('rules:previewConflicts', candidateIds, newRuleGroupId),
+    listByGroup: (groupId: string, limit: number, offset: number) => invoke('rules:listByGroup', groupId, limit, offset),
     previewApply: (ruleIds: string[]) => invoke('rules:previewApply', ruleIds),
-    apply: (ruleIds: string[]) => invoke('rules:apply', ruleIds),
+    apply: (ruleIds: string[], token?: string) => invoke('rules:apply', ruleIds, token),
     setCategoryA: (ruleId: string, value: boolean) => invoke('rules:setCategoryA', ruleId, value),
   },
 

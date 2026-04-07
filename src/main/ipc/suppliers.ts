@@ -1,6 +1,6 @@
 import { registerHandler } from './register';
 import type { SupplierService, SupplierResearcher, IngestService } from '../../shared/types/services';
-import type { SupplierConfirmationStatus, SupplierUpdateInput, CsvApplyRow, CsvApplyDiff } from '../../shared/types/suppliers';
+import type { SupplierConfirmationStatus, SupplierUpdateInput, CsvApplyRow, CsvApplyDiff, SupplierPaginationParams } from '../../shared/types/suppliers';
 import type { FilterCondition, GroupedFilter } from '../../shared/types/transactions';
 
 export function registerSuppliersHandlers(
@@ -17,6 +17,10 @@ export function registerSuppliersHandlers(
       }
     }
     return suppliers.listProjectSuppliers(filter as { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter } | undefined);
+  });
+
+  registerHandler('suppliers:listPaginated', async (_event, params: unknown) => {
+    return suppliers.listProjectSuppliersPaginated(params as SupplierPaginationParams);
   });
 
   registerHandler('suppliers:update', async (_event, supplierId: unknown, updates: unknown) => {
@@ -42,6 +46,14 @@ export function registerSuppliersHandlers(
 
   registerHandler('suppliers:getAliases', async (_event, supplierId: unknown) => {
     return suppliers.getProjectAliases(supplierId as string);
+  });
+
+  registerHandler('suppliers:getAliasesWithSpend', async (_event, supplierId: unknown) => {
+    return suppliers.getProjectAliasesWithSpend(supplierId as string);
+  });
+
+  registerHandler('suppliers:getAliasesWithSpendBatch', async (_event, supplierIds: unknown) => {
+    return suppliers.getProjectAliasesWithSpendBatch(supplierIds as string[]);
   });
 
   registerHandler('suppliers:assignAlias', async (_event, supplierId: unknown, rawName: unknown) => {

@@ -3,6 +3,7 @@ import * as os from 'os';
 import { app } from 'electron';
 import type { IAppConfigService, ILicenseService, EventBus } from '../../shared/types/services';
 import { debugLog } from '../utils/debug-log';
+import { LICENSE_SERVER_URL, LICENSE_PUBLIC_KEY } from './license-config';
 import type {
   LicenseStatus,
   LicenseActivationResult,
@@ -145,13 +146,8 @@ export class LicenseService implements ILicenseService {
   }
 
   private async verifyWithServer(licenseKey: string): Promise<LicenseStatus> {
-    const serverUrl = this.appConfig.getLicenseServerUrl();
-    const publicKeyB64 = this.appConfig.getLicensePublicKey();
-
-    if (!serverUrl || !publicKeyB64) {
-      // No server configured — can't verify. Use grace logic.
-      return this.handleNetworkFailure(licenseKey, 'License server not configured');
-    }
+    const serverUrl = LICENSE_SERVER_URL;
+    const publicKeyB64 = LICENSE_PUBLIC_KEY;
 
     const nonce = crypto.randomUUID();
 
@@ -298,12 +294,9 @@ export class LicenseService implements ILicenseService {
       };
     }
 
-    // No previous valid check — can't grant grace
+    // No previous valid check — cannot grant grace, must re-verify online.
     return {
-      state: 'check_failed',
-      licenseKey: maskKey(licenseKey),
-      lastChecked: Date.now(),
-      graceDeadline: Date.now() + GRACE_PERIOD_MS,
+      state: 'unlicensed',
       message: `Could not verify license: ${reason}`,
     };
   }

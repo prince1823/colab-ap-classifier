@@ -3,6 +3,7 @@ import { X, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import type { ChangeLog } from '../../../shared/types/changelog'
 import type { Transaction } from '../../../shared/types/transactions'
+import { showWarning } from '../../lib/toast-errors'
 
 const TX_PAGE_SIZE = 20
 
@@ -53,7 +54,8 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
     setReverting(changeId)
     setError(null)
     try {
-      await ipc.changelog.revert(changeId)
+      const warning = await ipc.changelog.revert(changeId)
+      if (warning) showWarning('Revert', warning)
       await fetchEntries()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to revert')
@@ -70,7 +72,8 @@ export default function RuleDeactivationModal({ ruleId, ruleName, onClose }: Pro
     for (const entry of unrevertedEntries) {
       setReverting(entry.id)
       try {
-        await ipc.changelog.revert(entry.id)
+        const warning = await ipc.changelog.revert(entry.id)
+        if (warning) showWarning('Revert', warning)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to revert some changes')
         setReverting(null)

@@ -273,11 +273,13 @@ function MergePreviewContent({
   preview,
   isFirstUpload,
   columnSearch = '',
+  existingCanonicals = [],
 }: {
   columns: ColumnState[]
   preview: CSVPreview
   isFirstUpload: boolean
   columnSearch?: string
+  existingCanonicals?: string[]
 }) {
   const [existingRows, setExistingRows] = useState<FlatRow[]>([])
   const [existingTotalCount, setExistingTotalCount] = useState(0)
@@ -349,6 +351,46 @@ function MergePreviewContent({
 
   const totalAfterImport = existingTotalCount + preview.totalRows
 
+  // Schema diff: categorize each column
+  type ColDiffStatus = 'matched' | 'new' | 'missing'
+  const existingSet = useMemo(() => new Set(existingCanonicals), [existingCanonicals])
+
+  const columnDiffMap = useMemo(() => {
+    const map = new Map<string, ColDiffStatus>()
+    for (const col of canonicalNames) {
+      map.set(col, existingSet.has(col) ? 'matched' : 'new')
+    }
+    // Columns in existing but not included in new mapping
+    for (const col of existingCanonicals) {
+      if (!map.has(col)) map.set(col, 'missing')
+    }
+    return map
+  }, [canonicalNames, existingCanonicals, existingSet])
+
+  // All columns for display (included canonicals + missing existing ones)
+  const allDiffColumns = useMemo(() => {
+    const cols = [...filteredCanonicalNames]
+    if (!isFirstUpload) {
+      const q = columnSearch.toLowerCase()
+      for (const col of existingCanonicals) {
+        if (!canonicalNames.includes(col)) {
+          if (!q || col.toLowerCase().includes(q)) cols.push(col)
+        }
+      }
+    }
+    return cols
+  }, [filteredCanonicalNames, existingCanonicals, canonicalNames, isFirstUpload, columnSearch])
+
+  const diffCounts = useMemo(() => {
+    let matched = 0, added = 0, missing = 0
+    for (const [, status] of columnDiffMap) {
+      if (status === 'matched') matched++
+      else if (status === 'new') added++
+      else if (status === 'missing') missing++
+    }
+    return { matched, added, missing }
+  }, [columnDiffMap])
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -363,6 +405,27 @@ function MergePreviewContent({
     )
   }
 
+  // Header style helpers based on diff status
+  const colHeaderClass = (col: string) => {
+    const status = columnDiffMap.get(col)
+    if (status === 'new') return 'bg-green-50 border-b-2 border-green-400'
+    if (status === 'missing') return 'bg-red-50 border-b-2 border-red-300'
+    return ''
+  }
+  const colHeaderTextClass = (col: string) => {
+    const status = columnDiffMap.get(col)
+    if (status === 'new') return 'text-green-700'
+    if (status === 'missing') return 'text-red-400 line-through'
+    return 'text-gray-500'
+  }
+  const colCellClass = (col: string, source: 'existing' | 'new') => {
+    const status = columnDiffMap.get(col)
+    if (status === 'new' && source === 'new') return 'bg-green-50/60'
+    if (status === 'new' && source === 'existing') return 'bg-green-50/30'
+    if (status === 'missing') return 'bg-red-50/40'
+    return ''
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* First upload notice */}
@@ -372,9 +435,48 @@ function MergePreviewContent({
         </div>
       )}
 
+      {/* Schema diff summary bar */}
+      {!isFirstUpload && (
+        <div className="flex-shrink-0 mx-1 mt-1 mb-2 rounded-md border border-gray-200 bg-white px-3 py-2">
+          <div className="flex items-center gap-2 text-[11px] font-medium text-gray-500 mb-1.5">
+            <span>Schema Changes</span>
+            <div className="flex-1 h-px bg-gray-200"></div>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-gray-400"></span>
+              <span className="text-[11px] text-gray-600">
+                <strong>{diffCounts.matched}</strong> matched
+              </span>
+            </div>
+            {diffCounts.added > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+                <span className="text-[11px] text-green-700">
+                  <strong>+{diffCounts.added}</strong> new column{diffCounts.added !== 1 ? 's' : ''}
+                </span>
+              </div>
+            )}
+            {diffCounts.missing > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-red-400"></span>
+                <span className="text-[11px] text-red-600">
+                  <strong>-{diffCounts.missing}</strong> not in new file
+                </span>
+              </div>
+            )}
+          </div>
+          {diffCounts.missing > 0 && (
+            <div className="mt-1.5 text-[10px] text-gray-400">
+              Missing columns will be empty for the new rows after import.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Mismatch warnings */}
       {warnings.length > 0 && (
-        <div className="flex-shrink-0 mx-1 mt-1 mb-2 space-y-1">
+        <div className="flex-shrink-0 mx-1 mb-2 space-y-1">
           {warnings.map((w, i) => (
             <div key={i} className="rounded-md bg-amber-50 border border-amber-200 px-3 py-1.5 text-[11px] text-amber-700 flex items-start gap-1.5">
               <span className="flex-shrink-0 mt-0.5">&#9888;</span>
@@ -392,13 +494,27 @@ function MergePreviewContent({
               <th className="w-20 px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-gray-400 border-r border-gray-200">
                 Source
               </th>
-              {filteredCanonicalNames.map((col) => {
+              {allDiffColumns.map((col) => {
+                const status = columnDiffMap.get(col)
                 const csvCol = includedColumns.find((c) => c.canonical === col)?.csvColumn
                 return (
-                <th key={col} className="px-3 py-2 text-left min-w-[120px]">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500">{col}</div>
+                <th key={col} className={`px-3 py-2 text-left min-w-[120px] ${colHeaderClass(col)}`}>
+                  <div className="flex items-center gap-1">
+                    <span className={`text-[10px] font-medium uppercase tracking-wider ${colHeaderTextClass(col)}`}>
+                      {col}
+                    </span>
+                    {status === 'new' && (
+                      <span className="rounded px-1 py-0.5 text-[8px] font-bold bg-green-100 text-green-700 border border-green-200 flex-shrink-0">NEW</span>
+                    )}
+                    {status === 'missing' && (
+                      <span className="rounded px-1 py-0.5 text-[8px] font-bold bg-red-100 text-red-500 border border-red-200 flex-shrink-0">MISSING</span>
+                    )}
+                  </div>
                   {csvCol && csvCol !== col && (
                     <div className="text-[9px] text-gray-400 truncate" title={csvCol}>{csvCol}</div>
+                  )}
+                  {status === 'missing' && (
+                    <div className="text-[9px] text-red-300 italic">not mapped in new file</div>
                   )}
                 </th>
                 )
@@ -420,9 +536,9 @@ function MergePreviewContent({
                     </div>
                   </td>
                 ) : null}
-                {filteredCanonicalNames.map((col) => (
-                  <td key={col} className="px-3 py-2 text-xs text-gray-500 truncate max-w-[150px]" title={row[col]}>
-                    {row[col]}
+                {allDiffColumns.map((col) => (
+                  <td key={col} className={`px-3 py-2 text-xs text-gray-500 truncate max-w-[150px] ${colCellClass(col, 'existing')}`} title={row[col]}>
+                    {row[col] ?? '\u2014'}
                   </td>
                 ))}
               </tr>
@@ -431,7 +547,7 @@ function MergePreviewContent({
             {/* Divider */}
             {existingRows.length > 0 && newRows.length > 0 && (
               <tr>
-                <td colSpan={filteredCanonicalNames.length + 1} className="px-3 py-1 bg-gray-100 border-y-2 border-gray-200">
+                <td colSpan={allDiffColumns.length + 1} className="px-3 py-1 bg-gray-100 border-y-2 border-gray-200">
                   <div className="flex items-center gap-3">
                     <div className="flex-1 h-px bg-gray-300"></div>
                     <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
@@ -443,7 +559,7 @@ function MergePreviewContent({
               </tr>
             )}
 
-            {/* New rows (yellow) */}
+            {/* New rows (green-tinted for new cols, yellow for rest) */}
             {newRows.map((row, i) => (
               <tr key={`new-${i}`} className="bg-yellow-50 hover:bg-yellow-100/70">
                 {i === 0 ? (
@@ -457,11 +573,21 @@ function MergePreviewContent({
                     </div>
                   </td>
                 ) : null}
-                {filteredCanonicalNames.map((col) => (
-                  <td key={col} className="px-3 py-2 text-xs text-gray-700 truncate max-w-[150px]" title={row[col]}>
-                    {row[col]}
-                  </td>
-                ))}
+                {allDiffColumns.map((col) => {
+                  const status = columnDiffMap.get(col)
+                  const isMissing = status === 'missing'
+                  return (
+                    <td
+                      key={col}
+                      className={`px-3 py-2 text-xs truncate max-w-[150px] ${colCellClass(col, 'new')} ${
+                        isMissing ? 'text-red-300 italic' : 'text-gray-700'
+                      }`}
+                      title={isMissing ? 'No data — column not mapped in new file' : row[col]}
+                    >
+                      {isMissing ? '\u2014' : row[col]}
+                    </td>
+                  )
+                })}
               </tr>
             ))}
           </tbody>
@@ -797,6 +923,7 @@ export default function DataMappingStep({
                 preview={preview}
                 isFirstUpload={isFirstUpload}
                 columnSearch={columnSearch}
+                existingCanonicals={derivedMappings.existingCanonicals}
               />
             )}
           </div>

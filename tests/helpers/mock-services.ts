@@ -31,6 +31,7 @@ export function createMockDatabase(): Database {
     getExpectedTables: vi.fn().mockReturnValue([
       'project_settings', 'taxonomy', 'transactions',
       'override_rules', 'change_log', 'uploads', 'project_suppliers',
+      'rule_conditions',
     ]),
     run: vi.fn(),
     exec: vi.fn(),
@@ -202,6 +203,7 @@ export function createMockSupplierService(): SupplierService {
     deleteParent: vi.fn(),
     mergeParents: vi.fn(),
     syncToUniverse: vi.fn().mockResolvedValue({ synced: 0, failed: 0, errors: [] }),
+    getProjectSupplierByName: vi.fn().mockResolvedValue(null),
   };
 }
 
@@ -209,13 +211,15 @@ export function createMockRuleStore(): RuleStore {
   return {
     listRules: vi.fn().mockResolvedValue([]),
     listRulesPaginated: vi.fn().mockResolvedValue({ rules: [], total: 0 }),
+    listRulesByGroup: vi.fn().mockResolvedValue({ rules: [], total: 0 }),
     getRule: vi.fn().mockResolvedValue(null),
     createRule: vi.fn().mockResolvedValue({ id: 'rule-1' }),
     createAndApplyRule: vi.fn().mockResolvedValue({ id: 'rule-1', matchedCount: 0 }),
     updateRule: vi.fn(),
     deleteRule: vi.fn(),
     evaluateRules: vi.fn().mockResolvedValue(new Map()),
-    previewRules: vi.fn().mockResolvedValue({ affectedRowCount: 0, matchingRuleCount: 0 }),
+    evaluateRulesBulk: vi.fn().mockResolvedValue(new Map()),
+    previewRules: vi.fn().mockResolvedValue({ token: 'mock-token', affectedRowCount: 0, matchingRuleCount: 0 }),
     applyRules: vi.fn().mockResolvedValue({ matchedCount: 0, ruleCount: 0 }),
     generate_rules_preview: vi.fn().mockResolvedValue({ rulesCreated: 0, suppliersProcessed: 0 }),
     listGroups: vi.fn().mockResolvedValue([]),
@@ -227,6 +231,7 @@ export function createMockRuleStore(): RuleStore {
     assignToGroup: vi.fn(),
     filterAndAssignToGroup: vi.fn().mockResolvedValue({ matched: 0 }),
     getCatARuleForSupplier: vi.fn().mockResolvedValue(null),
+    reassignSupplierRules: vi.fn(),
   };
 }
 

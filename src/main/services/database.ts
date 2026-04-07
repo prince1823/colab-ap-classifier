@@ -37,7 +37,7 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents', 'rule_groups'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents', 'rule_groups', 'rule_conditions'];
 
 export { convertPlaceholders };
 
@@ -388,6 +388,94 @@ export class DuckDBDatabase implements Database {
     if (!hasGroupId) {
       await this.exec('ALTER TABLE override_rules ADD COLUMN group_id VARCHAR');
     }
+
+    // Migrate: ensure project_supplier_id column exists on override_rules
+    const hasProjectSupplierId = (await this.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'override_rules' AND column_name = 'project_supplier_id'"
+    )).length > 0;
+    if (!hasProjectSupplierId) {
+      await this.exec('ALTER TABLE override_rules ADD COLUMN project_supplier_id VARCHAR');
+    }
+
+    // Migrate: create rule_conditions table and backfill from grouped_conditions JSON
+    const ruleConditionsExists = (await this.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_name = 'rule_conditions'"
+    )).length > 0;
+    if (!ruleConditionsExists) {
+      await this.exec(`
+        CREATE TABLE rule_conditions (
+          rule_id VARCHAR NOT NULL,
+          group_idx INTEGER NOT NULL,
+          condition_idx INTEGER NOT NULL,
+          field VARCHAR NOT NULL,
+          operator VARCHAR NOT NULL,
+          value VARCHAR,
+          group_connector VARCHAR DEFAULT 'AND',
+          condition_connector VARCHAR DEFAULT 'AND',
+          PRIMARY KEY (rule_id, group_idx, condition_idx)
+        );
+        CREATE INDEX idx_rc_field_value ON rule_conditions(field, value);
+        CREATE INDEX idx_rc_rule_id ON rule_conditions(rule_id);
+      `);
+
+      // Backfill from existing rules' grouped_conditions JSON
+      const existingRules = await this.all<{ id: string; grouped_conditions: string }>(
+        'SELECT id, grouped_conditions FROM override_rules'
+      );
+      for (const rule of existingRules) {
+        try {
+          const grouped = typeof rule.grouped_conditions === 'string'
+            ? JSON.parse(rule.grouped_conditions)
+            : rule.grouped_conditions;
+          if (!grouped?.groups) continue;
+          for (let gi = 0; gi < grouped.groups.length; gi++) {
+            const group = grouped.groups[gi];
+            const conditions = group.conditions ?? [];
+            for (let ci = 0; ci < conditions.length; ci++) {
+              const c = conditions[ci];
+              await this.run(
+                'INSERT INTO rule_conditions (rule_id, group_idx, condition_idx, field, operator, value, group_connector, condition_connector) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                rule.id, gi, ci, c.field, c.operator, c.value ?? null,
+                grouped.groupConnector ?? 'AND', group.connector ?? 'AND'
+              );
+            }
+          }
+        } catch { /* skip malformed rules */ }
+      }
+    }
+
+    // Migrate: backfill project_supplier_id on override_rules from supplier_name conditions
+    const needsSupplierBackfill = hasProjectSupplierId ? false : true;
+    if (needsSupplierBackfill) {
+      try {
+        await this.exec(`
+          UPDATE override_rules SET project_supplier_id = (
+            SELECT ps.id FROM project_suppliers ps
+            WHERE LOWER(ps.supplier_name) = LOWER(
+              json_extract_string(
+                json_extract(grouped_conditions, '$.groups[0].conditions[0]'),
+                '$.value'
+              )
+            )
+            AND json_extract_string(
+              json_extract(grouped_conditions, '$.groups[0].conditions[0]'),
+              '$.field'
+            ) = 'supplier_name'
+            LIMIT 1
+          )
+          WHERE project_supplier_id IS NULL
+        `);
+      } catch { /* ignore — best-effort backfill */ }
+    }
+
+    // Create missing indexes for existing projects
+    try { await this.exec('CREATE INDEX IF NOT EXISTS idx_rules_group ON override_rules(group_id)'); } catch { /* already exists */ }
+    try { await this.exec('CREATE INDEX IF NOT EXISTS idx_rules_active ON override_rules(is_active)'); } catch { /* already exists */ }
+    try { await this.exec('CREATE INDEX IF NOT EXISTS idx_rules_cat_a ON override_rules(category_a_supplier)'); } catch { /* already exists */ }
+    try { await this.exec('CREATE INDEX IF NOT EXISTS idx_rules_supplier ON override_rules(project_supplier_id)'); } catch { /* already exists */ }
+    try { await this.exec('CREATE INDEX IF NOT EXISTS idx_txn_rule ON transactions(applied_rule_id)'); } catch { /* already exists */ }
+    try { await this.exec('CREATE INDEX IF NOT EXISTS idx_txn_status ON transactions(classification_status)'); } catch { /* already exists */ }
+    try { await this.exec('CREATE INDEX IF NOT EXISTS idx_txn_supplier ON transactions(project_supplier_id)'); } catch { /* already exists */ }
   }
 
   async closeDatabase(): Promise<void> {
@@ -511,8 +599,31 @@ export class DuckDBDatabase implements Database {
         is_active BOOLEAN DEFAULT TRUE,
         source VARCHAR DEFAULT 'manual',
         category_a_supplier BOOLEAN DEFAULT FALSE,
+        project_supplier_id VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS rule_conditions (
+        rule_id VARCHAR NOT NULL,
+        group_idx INTEGER NOT NULL,
+        condition_idx INTEGER NOT NULL,
+        field VARCHAR NOT NULL,
+        operator VARCHAR NOT NULL,
+        value VARCHAR,
+        group_connector VARCHAR DEFAULT 'AND',
+        condition_connector VARCHAR DEFAULT 'AND',
+        PRIMARY KEY (rule_id, group_idx, condition_idx)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_rc_field_value ON rule_conditions(field, value);
+      CREATE INDEX IF NOT EXISTS idx_rc_rule_id ON rule_conditions(rule_id);
+      CREATE INDEX IF NOT EXISTS idx_rules_group ON override_rules(group_id);
+      CREATE INDEX IF NOT EXISTS idx_rules_active ON override_rules(is_active);
+      CREATE INDEX IF NOT EXISTS idx_rules_cat_a ON override_rules(category_a_supplier);
+      CREATE INDEX IF NOT EXISTS idx_rules_supplier ON override_rules(project_supplier_id);
+      CREATE INDEX IF NOT EXISTS idx_txn_rule ON transactions(applied_rule_id);
+      CREATE INDEX IF NOT EXISTS idx_txn_status ON transactions(classification_status);
+      CREATE INDEX IF NOT EXISTS idx_txn_supplier ON transactions(project_supplier_id);
 
       CREATE TABLE IF NOT EXISTS change_log (
         id VARCHAR PRIMARY KEY,

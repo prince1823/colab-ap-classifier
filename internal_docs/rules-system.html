@@ -1,0 +1,3063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Override Rules System — Complete Breakdown</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f8f9fb;
+    --surface2: #f0f1f4;
+    --border: #d4d7e0;
+    --text: #1a1d27;
+    --text-muted: #5f6478;
+    --accent: #4a56c9;
+    --accent-dim: #3b46a8;
+    --green: #16a34a;
+    --amber: #b45309;
+    --red: #dc2626;
+    --cyan: #0e7490;
+    --purple: #7c3aed;
+    --pink: #db2777;
+    --orange: #c2410c;
+    --warn-bg: #fef3c7;
+    --warn-border: #f59e0b;
+    --danger-bg: #fef2f2;
+    --danger-border: #ef4444;
+    --info-bg: #eff6ff;
+    --info-border: #3b82f6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+  }
+  pre {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 8px 0;
+  }
+  code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre code { background: none; padding: 0; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 32px 0;
+    margin-bottom: 32px;
+  }
+  header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+  header p { color: var(--text-muted); font-size: 1.05rem; }
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 40px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--accent);
+    color: var(--accent-dim);
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 24px 0 12px;
+    color: var(--text);
+  }
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 16px 0 8px;
+    color: var(--text-muted);
+  }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 8px 24px; }
+  li { margin: 4px 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 0.92em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+  }
+  th { background: var(--surface); font-weight: 600; }
+
+  .file-loc {
+    display: inline-block;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8em;
+    color: var(--cyan);
+    margin: 4px 4px 4px 0;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 16px 0;
+  }
+  .card h3 { margin-top: 0; }
+
+  .flow {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 16px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    line-height: 1.8;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  /* ── Scale warning popups ─────────────────────────────── */
+  .scale-warn {
+    position: relative;
+    display: inline;
+  }
+  .scale-warn .trigger {
+    display: inline-block;
+    background: var(--danger-bg);
+    border: 2px solid var(--danger-border);
+    border-radius: 6px;
+    padding: 2px 10px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--red);
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .scale-warn .trigger:hover {
+    background: #fee2e2;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239,68,68,0.2);
+  }
+  .popup {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border: 2px solid var(--danger-border);
+    border-radius: 12px;
+    padding: 24px 28px 20px;
+    max-width: 720px;
+    width: 92vw;
+    max-height: 88vh;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  .scale-warn.active .popup { display: block; }
+  .popup h4 {
+    color: var(--red);
+    font-size: 1.05rem;
+    margin: 0 0 14px;
+  }
+  .popup .close-btn {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    line-height: 1;
+  }
+  .popup .close-btn:hover { color: var(--red); }
+  .metric {
+    display: flex;
+    gap: 12px;
+    margin: 8px 0;
+    padding: 10px 12px;
+    background: var(--danger-bg);
+    border-radius: 6px;
+    font-size: 0.88em;
+  }
+  .metric .label { font-weight: 600; min-width: 110px; color: var(--red); flex-shrink: 0; }
+  .fix-block {
+    margin-top: 14px;
+    padding: 14px;
+    background: #f0fdf4;
+    border: 1px solid var(--green);
+    border-radius: 8px;
+    font-size: 0.9em;
+  }
+  .fix-block h5 {
+    color: var(--green);
+    margin-bottom: 8px;
+    font-size: 0.95em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .fix-block p { margin: 4px 0 8px; }
+  .fix-block pre {
+    background: #dcfce7;
+    border-color: #86efac;
+    font-size: 0.82em;
+    margin: 6px 0 0;
+  }
+
+  /* Amber variant */
+  .scale-amber .trigger {
+    background: var(--warn-bg);
+    border-color: var(--warn-border);
+    color: var(--amber);
+  }
+  .scale-amber .trigger:hover {
+    background: #fef9c3;
+    box-shadow: 0 4px 12px rgba(245,158,11,0.2);
+  }
+  .scale-amber .popup { border-color: var(--warn-border); }
+  .scale-amber .popup h4 { color: var(--amber); }
+  .scale-amber .metric { background: var(--warn-bg); }
+  .scale-amber .metric .label { color: var(--amber); }
+
+  /* Low / dismissed variant */
+  .scale-low .trigger {
+    background: #f0fdf4;
+    border-color: var(--green);
+    color: var(--green);
+  }
+  .scale-low .trigger:hover {
+    background: #dcfce7;
+    box-shadow: 0 4px 12px rgba(22,163,74,0.15);
+  }
+  .scale-low .popup { border-color: var(--green); }
+  .scale-low .popup h4 { color: var(--green); }
+  .scale-low .metric { background: #f0fdf4; }
+  .scale-low .metric .label { color: var(--green); }
+
+  /* Overlay */
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 999;
+  }
+  .overlay.active { display: block; }
+
+  /* ── Duplication section ──────────────────────────────── */
+  .dup-card {
+    background: #faf5ff;
+    border: 1px solid #c4b5fd;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 16px 0;
+  }
+  .dup-card h3 { margin-top: 0; color: var(--purple); }
+  .dup-card .sites { margin: 8px 0; }
+  .dup-card .sites .site {
+    display: inline-block;
+    background: #ede9fe;
+    border: 1px solid #c4b5fd;
+    border-radius: 4px;
+    padding: 1px 8px;
+    font-size: 0.82em;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--purple);
+    margin: 2px 4px 2px 0;
+  }
+  .dup-fix {
+    margin-top: 12px;
+    padding: 12px;
+    background: #ede9fe;
+    border: 1px solid #c4b5fd;
+    border-radius: 6px;
+    font-size: 0.9em;
+  }
+  .dup-fix h5 { color: var(--purple); margin-bottom: 6px; }
+
+  /* TOC */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 16px 0;
+  }
+  .toc h3 { margin-top: 0; }
+  .toc ol { margin-left: 20px; }
+  .toc li { margin: 6px 0; }
+  .toc a { font-weight: 500; }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin: 16px 0;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9em;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+
+  .pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+  }
+  .pill-red    { background: var(--danger-bg); color: var(--red);    border: 1px solid var(--danger-border); }
+  .pill-amber  { background: var(--warn-bg);   color: var(--amber);  border: 1px solid var(--warn-border); }
+  .pill-green  { background: #f0fdf4;          color: var(--green);  border: 1px solid var(--green); }
+  .pill-blue   { background: var(--info-bg);   color: #2563eb;       border: 1px solid var(--info-border); }
+  .pill-purple { background: #f5f3ff;          color: var(--purple); border: 1px solid #c4b5fd; }
+
+  /* ── Tab system ─────────────────────────────────────── */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 32px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 50;
+    padding-top: 8px;
+  }
+  .tab-btn {
+    padding: 12px 28px;
+    border: none;
+    background: none;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+  .tab-btn:hover { color: var(--text); background: var(--surface); }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Proposed flow styles ───────────────────────────── */
+  .proposed-flow {
+    background: #f0fdf4;
+    border: 1px solid #86efac;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 16px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    line-height: 1.8;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .arch-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 16px 0;
+  }
+  .arch-card h3 { margin-top: 0; }
+  .new-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 0.7em;
+    font-weight: 700;
+    background: #dcfce7;
+    color: var(--green);
+    border: 1px solid #86efac;
+    vertical-align: middle;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .changed-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 0.7em;
+    font-weight: 700;
+    background: var(--info-bg);
+    color: #2563eb;
+    border: 1px solid var(--info-border);
+    vertical-align: middle;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .removed-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 0.7em;
+    font-weight: 700;
+    background: var(--danger-bg);
+    color: var(--red);
+    border: 1px solid var(--danger-border);
+    vertical-align: middle;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .unchanged-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 0.7em;
+    font-weight: 700;
+    background: var(--surface2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    vertical-align: middle;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .comparison-table td:first-child { font-weight: 600; width: 140px; }
+  .comparison-table .old { background: var(--danger-bg); }
+  .comparison-table .new { background: #f0fdf4; }
+</style>
+</head>
+<body>
+<div class="overlay" id="overlay" onclick="closeAll()"></div>
+<div class="container">
+
+<header>
+  <h1>Override Rules System</h1>
+  <p>Complete breakdown of every location where rules are handled, the logic for each operation, scale analysis for 500K rules / 5M transactions, and a duplication audit.</p>
+</header>
+
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('current')">Current System</button>
+  <button class="tab-btn" onclick="switchTab('proposed')">Proposed System</button>
+  <button class="tab-btn" onclick="switchTab('decisions')">Decisions</button>
+</div>
+
+<!-- ================================================================ -->
+<!-- TAB 1: CURRENT SYSTEM                                            -->
+<!-- ================================================================ -->
+<div class="tab-panel active" id="tab-current">
+
+<div class="legend">
+  <div class="legend-item"><span class="pill pill-red">BREAKS</span> Fails or wrong results at scale</div>
+  <div class="legend-item"><span class="pill pill-amber">SLOW</span> Works but unacceptably slow</div>
+  <div class="legend-item"><span class="pill pill-green">NOT AN ISSUE</span> Acceptable given real constraints</div>
+  <div class="legend-item"><span class="pill pill-purple">DUPLICATION</span> Repeated logic across the codebase</div>
+</div>
+
+<div class="toc">
+  <h3>Contents</h3>
+  <ol>
+    <li><a href="#schema">Database Schema</a></li>
+    <li><a href="#types">Type Definitions</a></li>
+    <li><a href="#create">Creating Rules</a></li>
+    <li><a href="#priority">Priority &amp; Group Evaluation</a></li>
+    <li><a href="#evaluate">Rule Evaluation Engine</a></li>
+    <li><a href="#apply">Applying Rules (preview + apply)</a></li>
+    <li><a href="#create-and-apply">Create + Apply (Atomic)</a></li>
+    <li><a href="#conflicts">Conflict Detection</a></li>
+    <li><a href="#inactive">Activation / Deactivation</a></li>
+    <li><a href="#generate">AI Rule Generation</a></li>
+    <li><a href="#classification">Classification Integration (Phase 1)</a></li>
+    <li><a href="#groups">Group Management</a></li>
+    <li><a href="#filter-assign">Filter &amp; Assign to Group</a></li>
+    <li><a href="#category-a">Category A Supplier Logic</a></li>
+    <li><a href="#delete">Deletion &amp; Cascade Cleanup</a></li>
+    <li><a href="#frontend">Frontend Components</a></li>
+    <li><a href="#query-builder">Query Builder (SQL Generation)</a></li>
+    <li><a href="#ipc">IPC Contract</a></li>
+    <li><a href="#duplication">Duplication Audit</a></li>
+    <li><a href="#scale-summary">Scale Analysis Summary</a></li>
+  </ol>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="schema">1. Database Schema</h2>
+
+<div class="file-loc">src/main/services/database.ts:496-515</div>
+
+<pre><code>CREATE TABLE IF NOT EXISTS rule_groups (
+  id VARCHAR PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  priority INTEGER NOT NULL,             -- higher = evaluated first
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_groups_priority ON rule_groups(priority);
+
+CREATE TABLE IF NOT EXISTS override_rules (
+  id VARCHAR PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  grouped_conditions JSON NOT NULL,      -- GroupedFilter serialized as JSON
+  target_taxonomy_node_id VARCHAR NOT NULL,
+  group_id VARCHAR,                      -- FK to rule_groups.id (NULL = ungrouped)
+  is_active BOOLEAN DEFAULT TRUE,
+  source VARCHAR DEFAULT 'manual',       -- 'manual' | 'auto_generated' | 'supplier_universe'
+  category_a_supplier BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- On transactions:
+--   applied_rule_id VARCHAR              -- which rule classified this txn
+--   classification_status VARCHAR        -- includes 'classified_by_rule'</code></pre>
+
+<div class="card">
+  <h3>Key Schema Facts</h3>
+  <ul>
+    <li><strong>No FK constraint</strong> between <code>override_rules.group_id</code> and <code>rule_groups.id</code> — enforced in app code only</li>
+    <li><strong>No secondary indexes</strong> on <code>group_id</code>, <code>is_active</code>, <code>source</code>, <code>category_a_supplier</code></li>
+    <li><strong>Conditions stored as a JSON blob</strong> — not directly queryable without extraction</li>
+    <li><strong>No index</strong> on <code>transactions.applied_rule_id</code> or <code>transactions.classification_status</code></li>
+  </ul>
+
+  <div class="scale-warn scale-amber" onclick="toggle(this)">
+    <span class="trigger">SLOW: Missing Indexes</span>
+    <div class="popup">
+      <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+      <h4>Missing Indexes at 500K Rules / 5M Transactions</h4>
+      <div class="metric"><span class="label">override_rules</span>No index on <code>group_id</code>, <code>is_active</code>, or <code>source</code>. The JOIN to rule_groups and all filtered queries full-scan 500K rows every time.</div>
+      <div class="metric"><span class="label">transactions</span>No index on <code>applied_rule_id</code> or <code>classification_status</code>. Deactivation lookups and per-supplier queries scan 5M rows.</div>
+      <div class="fix-block">
+        <h5>Fix — add these indexes</h5>
+        <p>Add to <code>database.ts</code> in the schema creation block (and a migration guard for existing projects):</p>
+        <pre><code>-- In migration / schema init:
+CREATE INDEX IF NOT EXISTS idx_rules_group    ON override_rules(group_id);
+CREATE INDEX IF NOT EXISTS idx_rules_active   ON override_rules(is_active);
+CREATE INDEX IF NOT EXISTS idx_rules_cat_a    ON override_rules(category_a_supplier);
+CREATE INDEX IF NOT EXISTS idx_txn_rule       ON transactions(applied_rule_id);
+CREATE INDEX IF NOT EXISTS idx_txn_status     ON transactions(classification_status);
+CREATE INDEX IF NOT EXISTS idx_txn_supplier   ON transactions(project_supplier_id);</code></pre>
+        <p>Each index is a one-time cost at creation; all subsequent filtered reads become fast index scans.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="types">2. Type Definitions</h2>
+
+<div class="file-loc">src/shared/types/rules.ts</div>
+
+<pre><code>interface OverrideRule {
+  id: string;
+  name: string;
+  groupedConditions: GroupedFilter;    // nested AND/OR condition groups
+  targetTaxonomyNodeId: string;        // what this rule classifies to
+  groupId: string | null;              // priority group (null = ungrouped = lowest priority)
+  isActive: boolean;
+  source: RuleSource;                  // 'manual' | 'auto_generated' | 'supplier_universe'
+  categoryASupplier: boolean;
+  createdAt: string;
+}
+
+interface RuleGroup {
+  id: string;
+  name: string;
+  priority: number;                    // >= 1; higher = evaluated first
+  createdAt: string;
+  ruleCount: number;
+}
+
+interface GroupedFilter {
+  groupConnector: 'AND' | 'OR';       // joins groups together
+  groups: ConditionGroup[];
+}
+interface ConditionGroup {
+  connector: 'AND' | 'OR';            // joins conditions within the group
+  conditions: FilterCondition[];
+  groupConnector?: 'AND' | 'OR';      // per-group override connector to previous group
+}
+interface FilterCondition {
+  field: string;
+  operator: string;                    // equals, contains, regex, in_list, is_null, etc.
+  value: unknown;
+  connector?: 'AND' | 'OR';           // per-condition override connector
+}</code></pre>
+
+<!-- ============================================================== -->
+<h2 id="create">3. Creating Rules</h2>
+
+<div class="file-loc">src/main/services/rules.ts:240-254</div>
+<div class="file-loc">src/main/ipc/rules.ts:19-21</div>
+
+<h3>Flow: <code>rules:create</code></h3>
+<div class="flow">IPC: rules:create(input: OverrideRuleCreate)
+    │
+    └── RuleStore.createRule(input)
+          ├── Generate UUID
+          ├── Default: groupId=null, source='manual', categoryASupplier=false
+          ├── INSERT INTO override_rules (...)
+          └── Return { id }
+
+    ⚠ Does NOT apply the rule to any transactions.
+      The rule exists but is dormant until explicitly applied.</div>
+
+<h4>Preconditions / Constraints</h4>
+<ul>
+  <li>None enforced — name can be duplicate, conditions not validated</li>
+  <li><code>targetTaxonomyNodeId</code> is not checked to exist in the taxonomy table</li>
+  <li><code>groupId</code> (if provided) is not validated against rule_groups</li>
+</ul>
+
+<div class="scale-warn scale-amber" onclick="toggle(this)">
+  <span class="trigger">SLOW: No Validation — Orphan Accumulation</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>No Validation at Create Can Produce Orphaned Rules</h4>
+    <div class="metric"><span class="label">Orphan risk</span>At 500K rules, stale <code>targetTaxonomyNodeId</code> or <code>groupId</code> values silently accumulate. No FK cascade means no cleanup.</div>
+    <div class="metric"><span class="label">Duplicate names</span>No unique constraint on <code>(name, group_id)</code> makes the rule list unusable at scale — identical names everywhere.</div>
+    <div class="fix-block">
+      <h5>Fix — guard at INSERT</h5>
+      <p>Add lightweight existence checks before inserting, and optionally a unique constraint:</p>
+      <pre><code>// In createRule(), before the INSERT:
+if (input.targetTaxonomyNodeId) {
+  const node = await this.db.get(
+    'SELECT id FROM taxonomy WHERE id = ?', input.targetTaxonomyNodeId
+  );
+  if (!node) throw new Error(`Taxonomy node not found: ${input.targetTaxonomyNodeId}`);
+}
+if (input.groupId) {
+  const grp = await this.db.get(
+    'SELECT id FROM rule_groups WHERE id = ?', input.groupId
+  );
+  if (!grp) throw new Error(`Rule group not found: ${input.groupId}`);
+}
+
+// Schema:
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rules_name_group
+  ON override_rules(name, COALESCE(group_id, ''));</code></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="priority">4. Priority &amp; Group Evaluation</h2>
+
+<div class="file-loc">src/main/services/rules.ts:356-365 (listAllRules)</div>
+
+<div class="card">
+  <h3>Priority Model</h3>
+  <table>
+    <tr><th>Priority</th><th>Meaning</th><th>Evaluated</th></tr>
+    <tr><td>Group priority 5</td><td>Highest priority group</td><td>1st</td></tr>
+    <tr><td>Group priority 3</td><td>Mid priority group</td><td>2nd</td></tr>
+    <tr><td>Group priority 1</td><td>Low priority group</td><td>3rd</td></tr>
+    <tr><td>Ungrouped (NULL)</td><td><code>COALESCE(priority, 0) = 0</code></td><td>Last</td></tr>
+  </table>
+  <h4>Within a Group</h4>
+  <p>Rules within the same group are ordered by <code>created_at DESC</code> (newest first). <strong>First-match-wins</strong>: once a transaction matches any rule, no later rule can overwrite that match.</p>
+  <pre><code>SELECT r.*, rg.priority AS group_priority
+FROM override_rules r
+LEFT JOIN rule_groups rg ON r.group_id = rg.id
+ORDER BY COALESCE(rg.priority, 0) DESC, r.created_at DESC</code></pre>
+</div>
+
+<div class="card">
+  <h3>Priority Cascade Logic</h3>
+  <div class="file-loc">src/main/services/rules.ts:557-583</div>
+  <p>When creating/updating a group at priority N and that slot is already taken:</p>
+  <ol>
+    <li>Find all groups with priority &ge; N, ordered ASC</li>
+    <li>Walk forward: each consecutive match gets bumped +1</li>
+    <li>Stop at the first gap</li>
+    <li>Apply bumps in reverse order (highest first) to avoid unique constraint violations</li>
+  </ol>
+  <pre><code>// Example: Insert at priority 3 into existing [1, 2, 3, 4, 7]
+// Cascade: 3→4, 4→5 (stop — gap before 7)
+// Result: [1, 2, 3, 4, 5, 7]  ← new group takes slot 3</code></pre>
+
+  <div class="scale-warn scale-low" onclick="toggle(this)">
+    <span class="trigger">NOT AN ISSUE: Sequential Priority Updates</span>
+    <div class="popup">
+      <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+      <h4>Cascade is Fine at ≤100 Groups</h4>
+      <div class="metric"><span class="label">Reality</span>Max ~100 rule groups. Worst case: 100 consecutive groups cascade = 100 sequential UPDATE queries. At &lt;1ms each that's &lt;100ms total — well within acceptable range for an infrequent admin operation.</div>
+      <div class="metric"><span class="label">No action needed</span>This would only be a concern with thousands of groups. The existing sequential approach is fine here.</div>
+      <div class="fix-block">
+        <h5>No fix needed</h5>
+        <p>Documented here for completeness only. The cascade approach is correct and performant at ≤100 groups.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="evaluate">5. Rule Evaluation Engine</h2>
+
+<div class="file-loc">src/main/services/rules.ts:367-395</div>
+
+<h3>Core Algorithm: <code>evaluateRules(transactionIds?, ruleIds?)</code></h3>
+
+<div class="flow">evaluateRules(transactionIds?, ruleIds?)
+    │
+    ├── 1. listAllRules()  → SELECT all rules + join group priority → loads ALL 500K into JS
+    │
+    ├── 2. .filter(r => r.isActive)          — in-memory
+    │
+    ├── 3. If ruleIds provided → .filter()   — in-memory
+    │
+    └── 4. For EACH active rule (sequential loop):
+              │
+              ├── getIdsByGroupedConditions(rule.groupedConditions, transactionIds)
+              │       → Build SQL WHERE clause from JSON conditions
+              │       → Execute: SELECT t.id FROM transactions t ... WHERE (...)
+              │       → Returns matching IDs
+              │
+              └── For each matched ID:
+                    if (!matched.has(id)) → record match   ← first-match-wins</div>
+
+<div class="scale-warn" onclick="toggle(this)">
+  <span class="trigger">BREAKS: N+1 Query Problem — One SQL Query Per Rule</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>500K Rules = 500K Sequential SQL Queries</h4>
+    <div class="metric"><span class="label">Query count</span><strong>500,000 sequential queries</strong>, each scanning up to 5M transactions. At 2ms each = 16+ minutes per evaluation.</div>
+    <div class="metric"><span class="label">Memory</span><code>listAllRules()</code> loads all 500K rules into a JS array with parsed JSON. ~500 bytes/rule × 500K = ~250MB just for rule objects.</div>
+    <div class="metric"><span class="label">Map growth</span>The <code>matched</code> Map can hold up to 5M entries (~500MB at ~100 bytes/entry).</div>
+    <div class="fix-block">
+      <h5>Fix — Single-Pass SQL Evaluation via Temp Table</h5>
+      <p>Instead of querying once per rule, materialize all rules into a temp table and use DuckDB's JOIN engine to match everything in one pass:</p>
+      <pre><code>-- 1. Create temp table with one row per rule-condition
+CREATE TEMP TABLE _rule_conditions AS
+SELECT
+  r.id          AS rule_id,
+  r.target_taxonomy_node_id,
+  rg.priority   AS group_priority,
+  r.created_at,
+  -- Denormalize the single most common condition type for fast SQL matching:
+  json_extract_string(r.grouped_conditions, '$.groups[0].conditions[0].field')  AS field0,
+  json_extract_string(r.grouped_conditions, '$.groups[0].conditions[0].value')  AS value0
+FROM override_rules r
+LEFT JOIN rule_groups rg ON r.group_id = rg.id
+WHERE r.is_active = TRUE
+ORDER BY COALESCE(rg.priority, 0) DESC, r.created_at DESC;
+
+-- 2. For simple supplier-name rules (the majority), one JOIN matches everything:
+SELECT DISTINCT ON (t.id)
+  t.id            AS txn_id,
+  rc.rule_id,
+  rc.target_taxonomy_node_id
+FROM transactions t
+JOIN _rule_conditions rc
+  ON rc.field0 = 'supplier_name'
+  AND ps.supplier_name = rc.value0
+JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+ORDER BY t.id, rc.group_priority DESC, rc.created_at DESC;</code></pre>
+      <p>Rules with complex multi-condition logic still need per-rule evaluation, but simple supplier-name rules (likely 80%+ of all rules) collapse to a single JOIN.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="apply">6. Applying Rules</h2>
+
+<div class="file-loc">src/main/services/rules.ts:397-426</div>
+
+<h3>Flow: <code>rules:previewApply</code> and <code>rules:apply</code></h3>
+
+<div class="flow">rules:previewApply(ruleIds)          rules:apply(ruleIds)
+    │                                      │
+    └── previewRules(ruleIds)              └── applyRules(ruleIds)
+          │                                      │
+          ├── evaluateRules(undefined, ruleIds)   ├── evaluateRules(undefined, ruleIds)
+          │   [scans ALL 5M transactions]         │   [SAME full scan — no caching]
+          │                                      │
+          └── Return counts only                 ├── Group by (ruleId, targetNodeId)
+              (no DB writes)                     ├── updateTransactions() per batch
+                                                 └── Return { matchedCount, ruleCount }</div>
+
+<div class="scale-warn" onclick="toggle(this)">
+  <span class="trigger">BREAKS: Preview + Apply Runs Full Evaluation Twice</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>No Caching Between Preview and Apply</h4>
+    <div class="metric"><span class="label">Double cost</span>The preview result (which transactions match which rules) is discarded. Apply runs the identical <code>evaluateRules</code> from scratch. At 500K rules, this runs the N+1 problem twice.</div>
+    <div class="metric"><span class="label">Batch updates</span><code>applyRules</code> calls <code>updateTransactions</code> once per (ruleId, targetNodeId) batch. If 500K rules each match distinct transactions = 500K sequential UPDATEs.</div>
+    <div class="fix-block">
+      <h5>Fix — Return a Batch Token from Preview</h5>
+      <p>Store the evaluation result server-side keyed by a short-lived token. Apply references the token instead of re-evaluating:</p>
+      <pre><code>// previewRules returns a token:
+async previewRules(ruleIds: string[]): Promise<{
+  token: string;
+  affectedRowCount: number;
+  matchingRuleCount: number;
+}> {
+  const matched = await this.evaluateRules(undefined, ruleIds);
+  const token = uuidv4();
+  this.previewCache.set(token, { matched, expiresAt: Date.now() + 5 * 60_000 });
+  return { token, affectedRowCount: matched.size, ... };
+}
+
+// applyRules accepts optional token:
+async applyRules(ruleIds: string[], token?: string): Promise<...> {
+  const matched = token && this.previewCache.get(token)?.matched
+    ?? await this.evaluateRules(undefined, ruleIds);
+  this.previewCache.delete(token!);
+  // ... batch updates
+}</code></pre>
+      <p>For batch UPDATEs: collect all (txnId → targetNodeId) pairs and run a single <code>UPDATE transactions SET ... WHERE id IN (...)</code> per target node, rather than one per rule.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="create-and-apply">7. Create + Apply (Atomic)</h2>
+
+<div class="file-loc">src/main/services/rules.ts:299-326</div>
+
+<h3>Flow: <code>rules:createAndApply</code></h3>
+
+<div class="flow">createAndApplyRule(input)
+    │
+    ├── 1. getIdsByGroupedConditions(input.conditions)
+    │         → Single SQL query — get candidate transaction IDs  ✓
+    │
+    ├── 2. previewRuleConflicts(candidateIds, input.groupId)
+    │         │
+    │         ├── evaluateRules(candidateIds)   ← runs ALL 500K rules against candidates
+    │         │     (even though we only need rules at HIGHER priority than the new rule)
+    │         │
+    │         └── listAllRules()               ← loads all 500K rules AGAIN for name/group lookups
+    │
+    ├── 3. createRule(input) → INSERT
+    │
+    └── 4. updateTransactions(eligibleIds, ...) → classify</div>
+
+<div class="scale-warn" onclick="toggle(this)">
+  <span class="trigger">BREAKS: Full Rule Eval + Double listAllRules for Conflict Check</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>Two Problems in previewRuleConflicts</h4>
+    <div class="metric"><span class="label">Problem 1</span><code>evaluateRules(candidateIds)</code> runs all 500K rules against the candidates. If the new rule matches 200 txns and goes into group priority 3, only rules in groups with priority &gt; 3 can block. But all 500K are evaluated anyway.</div>
+    <div class="metric"><span class="label">Problem 2</span><code>previewRuleConflicts</code> calls <code>evaluateRules</code> (which calls <code>listAllRules</code>) and then calls <code>listAllRules()</code> <em>again</em> directly to build the name/group maps. 500K rules loaded and parsed twice in the same method.</div>
+    <div class="fix-block">
+      <h5>Fix — Pre-filter to Higher-Priority Rules Only</h5>
+      <p>Before evaluating, discard any rule that cannot possibly block (priority &le; new rule's priority). This can reduce 500K to near zero if the new rule is placed in the highest-priority group:</p>
+      <pre><code>async previewRuleConflicts(candidateIds, newRuleGroupId) {
+  // Resolve new rule's priority up front
+  const groupRows = await this.db.all&lt;{id:string; priority:number}&gt;(
+    'SELECT id, priority FROM rule_groups'
+  );
+  const groupPriorityById = new Map(groupRows.map(g => [g.id, g.priority]));
+  const newPriority = newRuleGroupId
+    ? (groupPriorityById.get(newRuleGroupId) ?? 0)
+    : 0;
+
+  // Load ALL rules once (for both evaluation and name lookup)
+  const allRules = await this.listAllRules();
+
+  // Filter to only rules that can block (strictly higher priority)
+  const blockingRules = allRules.filter(r => {
+    const p = r.groupId ? (groupPriorityById.get(r.groupId) ?? 0) : 0;
+    return r.isActive && p > newPriority;
+  });
+
+  // Evaluate only blocking rules — pass directly instead of re-calling listAllRules
+  const ruleNameById = new Map(allRules.map(r => [r.id, r.name]));
+  const matched = await this.evaluateRulesFromList(blockingRules, candidateIds);
+
+  // ... same covered/eligible split as before
+}</code></pre>
+      <p><code>evaluateRulesFromList</code> is a small refactor of <code>evaluateRules</code> that accepts a pre-built rule list instead of calling <code>listAllRules</code> internally — removing the double-load.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="conflicts">8. Conflict Detection</h2>
+
+<div class="file-loc">src/main/services/rules.ts:256-297</div>
+
+<div class="card">
+  <h3>How Conflicts Work</h3>
+  <ol>
+    <li>Run <code>evaluateRules(candidateIds)</code> — which existing rule wins each candidate?</li>
+    <li>Look up that existing rule's group priority</li>
+    <li>Compare against new rule's group priority:
+      <ul>
+        <li>Existing priority <strong>&gt;</strong> new priority → <strong>BLOCKED</strong> (conflict)</li>
+        <li>Existing priority <strong>&le;</strong> new priority → <strong>eligible</strong> (new rule supersedes)</li>
+      </ul>
+    </li>
+  </ol>
+  <h4>Key Point</h4>
+  <p><strong>Equal priority = no conflict.</strong> A new rule at the same priority level can take over. Only strictly-higher-priority existing rules block. However, the conflict preview doesn't show which rule within the same group would win (determined by <code>created_at DESC</code> ordering) — it just marks all same-priority transactions as eligible.</p>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="inactive">9. Activation / Deactivation</h2>
+
+<div class="file-loc">src/main/services/rules.ts:328-346 (updateRule)</div>
+<div class="file-loc">src/renderer/components/rules/RuleDeactivationModal.tsx</div>
+
+<h3>Deactivation Flow</h3>
+
+<div class="flow">User clicks "Deactivate"
+    │
+    └── RuleDeactivationModal opens
+          │
+          ├── Load ALL changelog entries for this rule
+          ├── Show affected transactions + "revert to" classification
+          │
+          └── User chooses one of:
+                (a) Revert individual entries
+                (b) Revert all entries → bulk reclassify
+                (c) Deactivate without reverting (keep existing classifications)
+                    │
+                    └── rules:update(ruleId, { isActive: false })
+                              → UPDATE override_rules SET is_active = ? WHERE id = ?
+
+    ⚠ Transactions already classified by this rule are NOT automatically
+      reclassified. User must explicitly revert via changelog.</div>
+
+<h4>Reactivation</h4>
+<p><code>rules:update(ruleId, { isActive: true })</code> — the rule re-participates in future evaluations, but existing transactions are not retroactively reclassified. User must re-apply.</p>
+
+<div class="scale-warn scale-amber" onclick="toggle(this)">
+  <span class="trigger">SLOW: Changelog Scan for Deactivation Modal</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>Deactivation Modal Loads All Changelog Entries at Once</h4>
+    <div class="metric"><span class="label">Volume</span>If a rule was applied to 100K transactions, the modal loads all 100K changelog entries into React state. ~200 bytes/entry × 100K = ~20MB in renderer, plus IPC serialization cost.</div>
+    <div class="metric"><span class="label">Rendering</span>Rendering 100K entries in a list (even a scrollable one) without virtualization causes UI freeze.</div>
+    <div class="fix-block">
+      <h5>Fix — Paginate the Changelog in the Modal</h5>
+      <p>Show a summary count first, then load entries lazily on scroll:</p>
+      <pre><code>// New IPC handler:
+'changelog:listForRule': {
+  args: [ruleId: string, limit: number, offset: number],
+  result: { entries: ChangelogEntry[]; total: number }
+}
+
+// In the modal — load page 1 on open, load more on scroll:
+const [page, setPage] = useState(0);
+const PAGE_SIZE = 50;
+
+useEffect(() => {
+  ipc('changelog:listForRule', ruleId, PAGE_SIZE, page * PAGE_SIZE)
+    .then(({ entries, total }) => {
+      setEntries(prev => [...prev, ...entries]);
+      setTotal(total);
+    });
+}, [page]);</code></pre>
+      <p>This makes the modal open instantly regardless of how many transactions the rule matched.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="generate">10. AI Rule Generation</h2>
+
+<div class="file-loc">src/main/services/rules.ts:428-527</div>
+
+<h3>Flow: <code>rules:generate</code></h3>
+
+<div class="flow">generate_rules_preview()
+    │
+    ├── 1. Load column_priorities from project_settings
+    ├── 2. Validate columns exist in transactions table
+    │
+    ├── 3. Query ALL eligible transactions into memory:
+    │         SELECT t.id, ps.supplier_name, t.taxonomy_node_id, tax.full_path,
+    │                spend_amount, ...priority_columns
+    │         WHERE t.human_reviewed = TRUE
+    │           AND t.classification_status != 'classified_by_rule'
+    │           AND t.taxonomy_node_id IS NOT NULL
+    │         → Full result set loaded into JS array  ⚠
+    │
+    ├── 4. Group rows by supplier_name → taxonomy_node_id (in-memory)
+    │
+    ├── 5. Check existing rules to find covered suppliers:
+    │         SELECT grouped_conditions FROM override_rules   ← ALL 500K rules loaded
+    │         → Parse each rule's JSON in JS, extract supplier_name conditions  ⚠
+    │
+    └── 6. For each uncovered supplier:
+              ├── Single category → generateSingleCategoryRule()
+              ├── Multi category  → generateMultiCategoryRules()
+              │                       └── detectDistinguishingField() per category
+              └── await createRule() for each draft  ← sequential INSERTs  ⚠</div>
+
+<div class="scale-warn" onclick="toggle(this)">
+  <span class="trigger">BREAKS: Full Table Loads in Rule Generation</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>Three Separate Scale Problems in generate_rules_preview</h4>
+    <div class="metric"><span class="label">Step 3 — Txns</span>Loads ALL human-reviewed transactions into JS. At 5M total, 20% reviewed = 1M rows × ~500 bytes = ~500MB in memory at once.</div>
+    <div class="metric"><span class="label">Step 5 — Rules</span>Loads ALL 500K rules' raw JSON, then calls <code>JSON.parse()</code> on each and scans conditions for <code>supplier_name</code>. That's 500K parses + condition scans to build a Set of strings.</div>
+    <div class="metric"><span class="label">Step 6 — INSERTs</span>Each generated rule is a separate sequential INSERT. With 50K suppliers generating ~2 rules each = 100K individual INSERT calls.</div>
+    <div class="fix-block">
+      <h5>Fix — Three Targeted Changes</h5>
+      <p><strong>Step 3 — stream/aggregate in SQL:</strong> Process suppliers one-at-a-time using a cursor or GROUP BY, never loading the full result set:</p>
+      <pre><code>-- Get distinct suppliers first (tiny result set)
+SELECT DISTINCT ps.supplier_name
+FROM transactions t
+JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+WHERE t.human_reviewed = TRUE AND ...
+
+-- Then for each supplier, query only its transactions:
+SELECT ... FROM transactions t WHERE t.project_supplier_id = ?</code></pre>
+      <p><strong>Step 5 — use SQL for covered-supplier check:</strong></p>
+      <pre><code>-- DuckDB can extract from JSON natively:
+SELECT DISTINCT
+  json_extract_string(
+    json_each.value, '$.value'
+  ) AS supplier_name
+FROM override_rules,
+     json_each(json_extract(grouped_conditions, '$.groups[0].conditions'))
+WHERE json_extract_string(
+        json_each.value, '$.field'
+      ) = 'supplier_name';</code></pre>
+      <p><strong>Step 6 — batch INSERT:</strong></p>
+      <pre><code>// Collect all drafts first, then single multi-row INSERT:
+const values = drafts.map(d =>
+  `('${uuidv4()}', '${d.name}', '${JSON.stringify(d.groupedConditions)}',
+    '${d.targetTaxonomyNodeId}', NULL, TRUE, 'auto_generated', FALSE, NOW())`
+).join(', ');
+await this.db.exec(`INSERT INTO override_rules VALUES ${values}`);</code></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="classification">11. Classification Integration (Phase 1)</h2>
+
+<div class="file-loc">src/main/services/classification.ts:188-229</div>
+
+<h3>How Rules Run During Classification</h3>
+
+<div class="flow">ClassificationRunner.classifyAll()
+    │
+    └── For EACH supplier (sequential loop over 10K+ suppliers):
+              │
+              ├── getSupplierTransactions(supplier.id, scopedIds)
+              │
+              ├── evaluateRules(txnIds)    ← ALL 500K rules, scoped to this supplier's txns
+              │         (each rule gets: SELECT t.id ... AND t.id IN (?,...))
+              │
+              ├── Group matches by (ruleId, targetNodeId)
+              ├── updateTransactions(... 'classified_by_rule')
+              │
+              └── Remaining unmatched → AI classification (Phase 2+)</div>
+
+<div class="scale-warn" onclick="toggle(this)">
+  <span class="trigger">BREAKS: Rules Evaluated Independently Per Supplier</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>10K Suppliers × 500K Rules = 5 Billion SQL Queries</h4>
+    <div class="metric"><span class="label">Multiplier</span><code>evaluateRules</code> is called once per supplier. Each call runs all 500K active rules. 10K suppliers × 500K rules = 5B queries. At 0.5ms each = <strong>29 days</strong>.</div>
+    <div class="metric"><span class="label">listAllRules</span>Called once per supplier too. 10K supplier loops × SELECT + parse of 500K rules = 5B row materializations just for loading.</div>
+    <div class="metric"><span class="label">Scoping helps partially</span>The <code>AND t.id IN (...)</code> scope limits what each query returns, but the query still runs. 500K queries per supplier remain.</div>
+    <div class="fix-block">
+      <h5>Fix — Pre-index Rules by Supplier, Evaluate Once</h5>
+      <p>Most rules have a <code>supplier_name equals X</code> condition. Build an in-memory index before the supplier loop, then only evaluate rules relevant to each supplier:</p>
+      <pre><code>// Before the supplier loop — build supplier → ruleIds index:
+const allRules = await this.rules.listAllRules();
+const rulesBySupplier = new Map&lt;string, OverrideRule[]&gt;();
+const rulesWithoutSupplier: OverrideRule[] = [];
+
+for (const rule of allRules.filter(r => r.isActive)) {
+  const supplierCond = rule.groupedConditions.groups
+    .flatMap(g => g.conditions)
+    .find(c => c.field === 'supplier_name' && c.operator === 'equals');
+
+  if (supplierCond) {
+    const name = String(supplierCond.value).toLowerCase();
+    if (!rulesBySupplier.has(name)) rulesBySupplier.set(name, []);
+    rulesBySupplier.get(name)!.push(rule);
+  } else {
+    rulesWithoutSupplier.push(rule); // multi-condition rules — must run for all
+  }
+}
+
+// Inside the supplier loop — evaluate only relevant rules:
+const relevantRules = [
+  ...(rulesBySupplier.get(supplier.supplier_name.toLowerCase()) ?? []),
+  ...rulesWithoutSupplier,
+];
+const ruleMatches = await this.rules.evaluateRulesFromList(relevantRules, txnIds);</code></pre>
+      <p>For a typical dataset where 95%+ of rules are supplier-name rules, this reduces 500K evaluations per supplier down to ~2-5. The 5B queries becomes ~50K-100K.</p>
+    </div>
+  </div>
+</div>
+
+<div class="scale-warn scale-low" onclick="toggle(this)">
+  <span class="trigger">NOTE: Implicit Scoping via null Check</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>getSupplierTransactions Has Two Behaviors Based on null</h4>
+    <div class="metric"><span class="label">Observation</span><code>getSupplierTransactions(supplierId, scopedTxnIds)</code> returns ALL txns when <code>scopedTxnIds</code> is non-null (any status — enables re-classification), but only UNCLASSIFIED txns when null. This is intentional but invisible from the method signature.</div>
+    <div class="metric"><span class="label">Impact</span>Low. The pattern works correctly. The proposed rule pre-step handles this with a simple 2-line <code>if/else</code> that converts <code>resolveScopedIds</code> output to a concrete ID list.</div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="groups">12. Group Management</h2>
+
+<div class="file-loc">src/main/services/rules.ts:529-653</div>
+
+<h3>Operations</h3>
+
+<table>
+  <tr><th>Operation</th><th>Method</th><th>Logic</th></tr>
+  <tr><td><code>rules:listGroups</code></td><td><code>listGroups()</code></td><td>SELECT with COUNT(rules) per group, ordered priority DESC</td></tr>
+  <tr><td><code>rules:createGroup</code></td><td><code>createGroup()</code></td><td>Validate priority &ge; 1 → cascade → INSERT</td></tr>
+  <tr><td><code>rules:updateGroup</code></td><td><code>updateGroup()</code></td><td>If priority changes, cascade (excluding self) → UPDATE</td></tr>
+  <tr><td><code>rules:deleteGroup</code></td><td><code>deleteGroup()</code></td><td>Ungroup all rules (set group_id = NULL) → DELETE group</td></tr>
+  <tr><td><code>rules:reorderGroups</code></td><td><code>reorderGroups()</code></td><td>Drop unique index → BEGIN → update all priorities → COMMIT → recreate index</td></tr>
+  <tr><td><code>rules:moveRule</code></td><td><code>moveRuleToGroup()</code></td><td>Simple UPDATE of group_id on one rule</td></tr>
+  <tr><td><code>rules:assignToGroup</code></td><td><code>assignToGroup()</code></td><td>Bulk UPDATE: <code>SET group_id = ? WHERE id IN (...)</code></td></tr>
+</table>
+
+<div class="scale-warn scale-low" onclick="toggle(this)">
+  <span class="trigger">NOT AN ISSUE: Reorder Sequential Updates</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>Reorder is Fine at ≤100 Groups</h4>
+    <div class="metric"><span class="label">Reality</span>At max 100 groups, the reorder loop runs 100 UPDATE queries inside a transaction. At &lt;1ms each = &lt;100ms total. The drop/recreate index pattern is also correct — the transaction rollback guarantees clean data if anything fails mid-loop.</div>
+    <div class="metric"><span class="label">No action needed</span>This pattern would only be a concern with thousands of groups. Documented here for completeness only.</div>
+    <div class="fix-block">
+      <h5>No fix needed</h5>
+      <p>The existing sequential approach is correct and performant at ≤100 groups.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="filter-assign">13. Filter &amp; Assign to Group</h2>
+
+<div class="file-loc">src/main/services/rules.ts:670-689</div>
+
+<h3>Flow: <code>rules:filterAssign</code></h3>
+
+<div class="flow">filterAndAssignToGroup(filter: GroupedFilter, targetGroupId)
+    │
+    ├── 1. listAllRules()    → Load ALL 500K rules into memory
+    ├── 2. Load all group names
+    │
+    ├── 3. For EACH rule (in-memory loop over 500K):
+    │         matchesRuleFilter(rule, filter, groupNameById)
+    │           → Check rule properties (name, source, isActive, group, categoryA)
+    │           → Check transaction condition fields within rule's conditions
+    │           → Evaluate grouped AND/OR logic
+    │           → If match → add to matchingIds
+    │
+    └── 4. assignToGroup(matchingIds, targetGroupId)
+              → UPDATE override_rules SET group_id = ? WHERE id IN (...)</div>
+
+<div class="scale-warn" onclick="toggle(this)">
+  <span class="trigger">BREAKS: 500K Rules Filtered In-Memory</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>Full Rule List Loaded and Looped In JS</h4>
+    <div class="metric"><span class="label">Memory</span>500K rules + parsed JSON conditions loaded into JS. ~250MB.</div>
+    <div class="metric"><span class="label">CPU</span><code>matchesRuleFilter</code> runs AND/OR evaluation on each rule's conditions. ~50 comparisons/rule × 500K = 25M string comparisons per filter-assign call.</div>
+    <div class="metric"><span class="label">SQL limit</span>If 100K rules match, the final <code>WHERE id IN (?×100K)</code> creates 100K placeholders in one query. DuckDB handles it but parameter binding overhead is real.</div>
+    <div class="fix-block">
+      <h5>Fix — Push Filterable Conditions to SQL</h5>
+      <p>Rule property fields (<code>rule_name</code>, <code>rule_source</code>, <code>rule_is_active</code>, <code>rule_category_a</code>) can be translated directly to SQL WHERE clauses, avoiding the JS load entirely for most use cases:</p>
+      <pre><code>// Translate property-based filter conditions to SQL before loading:
+function buildRulePropertySQL(filter: GroupedFilter): string | null {
+  const clauses: string[] = [];
+  for (const group of filter.groups) {
+    for (const cond of group.conditions) {
+      switch (cond.field) {
+        case 'rule_name':
+          clauses.push(`LOWER(r.name) LIKE LOWER('%${cond.value}%')`); break;
+        case 'rule_source':
+          clauses.push(`r.source = '${cond.value}'`); break;
+        case 'rule_is_active':
+          clauses.push(`r.is_active = ${cond.operator === 'is_true'}`); break;
+        case 'rule_category_a':
+          clauses.push(`r.category_a_supplier = ${cond.operator === 'is_true'}`); break;
+        case 'rule_group':
+          // handled via JOIN
+          break;
+      }
+    }
+  }
+  return clauses.length ? clauses.join(' AND ') : null;
+}
+
+// Apply SQL filter first, then do in-memory match only for complex conditions:
+const sqlWhere = buildRulePropertySQL(filter);
+const rows = sqlWhere
+  ? await this.db.all(`SELECT ... FROM override_rules r WHERE ${sqlWhere}`)
+  : await this.listAllRules();</code></pre>
+      <p>For filters that only use property fields (the common case), this avoids loading the JS rule objects entirely.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="category-a">14. Category A Supplier Logic</h2>
+
+<div class="file-loc">src/main/ipc/rules.ts:128-176 (setCategoryA handler)</div>
+<div class="file-loc">src/main/services/rules.ts:655-668 (getCatARuleForSupplier)</div>
+
+<h3>Flow: <code>rules:setCategoryA</code></h3>
+
+<div class="flow">rules:setCategoryA(ruleId, value: boolean)
+    │
+    ├── 1. Get rule → extract supplier_name from conditions
+    │         (must be a supplier-only rule)
+    │
+    ├── 2. If setting TRUE → getCatARuleForSupplier(supplierName)
+    │         → SELECT ALL rules WHERE category_a_supplier = TRUE
+    │         → Parse each rule's JSON conditions in JS
+    │         → String-match supplier name
+    │         → If another Cat A rule exists → throw
+    │
+    ├── 3. updateRule(id, { categoryASupplier: value })
+    │
+    ├── 4. listProjectSuppliers() → full scan → .find() by name (case-insensitive)
+    │
+    └── 5. updateSupplier(projectSupplier.id, { categoryASupplier, mappedTaxonomyPaths })</div>
+
+<div class="scale-warn scale-amber" onclick="toggle(this)">
+  <span class="trigger">SLOW: Full Scans for Cat A Check and Supplier Lookup</span>
+  <div class="popup">
+    <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+    <h4>Two Unnecessary Full Scans in setCategoryA</h4>
+    <div class="metric"><span class="label">Step 2</span><code>getCatARuleForSupplier</code> loads ALL Cat A rules (could be 50K if 10% of 500K are Cat A), calls <code>JSON.parse()</code> on each, and string-matches supplier names to find one.</div>
+    <div class="metric"><span class="label">Step 4</span><code>listProjectSuppliers()</code> loads all suppliers into memory just to find one by name. With 100K suppliers that's unnecessary.</div>
+    <div class="fix-block">
+      <h5>Fix — Direct SQL Lookups</h5>
+      <p><strong>Step 2:</strong> Add a <code>project_supplier_id</code> FK column on <code>override_rules</code> (resolved at INSERT time via supplier name lookup). Then the Cat A check is a single indexed query instead of a JS parse loop:</p>
+      <pre><code>-- Schema addition:
+ALTER TABLE override_rules ADD COLUMN project_supplier_id VARCHAR
+  REFERENCES project_suppliers(id);
+CREATE INDEX idx_rules_supplier ON override_rules(project_supplier_id);
+
+-- getCatARuleForSupplier becomes:
+SELECT id FROM override_rules
+WHERE category_a_supplier = TRUE
+  AND project_supplier_id = ?
+LIMIT 1;</code></pre>
+      <p><strong>Step 4:</strong> Query directly instead of loading all suppliers:</p>
+      <pre><code>// Replace listProjectSuppliers().find() with:
+const projectSupplier = await this.db.get(
+  'SELECT * FROM project_suppliers WHERE LOWER(supplier_name) = LOWER(?)',
+  supplierName
+);</code></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="delete">15. Deletion — Replaced by Active/Inactive</h2>
+
+<div class="file-loc">src/main/ipc/rules.ts:31-72</div>
+<div class="file-loc">src/main/services/rules.ts:348-350</div>
+
+<div class="card" style="background: var(--warn-bg); border-color: var(--warn-border);">
+  <h3 style="color: var(--amber);">Decision: Remove Delete Rule</h3>
+  <p>The <strong>delete rule</strong> option should be removed from the UI. The <strong>active/inactive</strong> flow (section 9) is sufficient and avoids the problems below:</p>
+  <ul>
+    <li><strong>Orphaned references:</strong> Deleted rules leave stale <code>applied_rule_id</code> values on transactions and orphaned changelog entries. Deactivation avoids this — the rule still exists as an audit trail.</li>
+    <li><strong>No undo:</strong> Deletion is irreversible. Deactivation is trivially reversible (re-activate).</li>
+    <li><strong>Cat A cascade complexity:</strong> The delete handler contains 40 lines of Cat A cleanup logic (extract supplier name from conditions → load all suppliers → find by name → load taxonomy → update paths → check remaining Cat A rules → clear flag). Deactivation doesn't need any of this.</li>
+    <li><strong>Scale concern eliminated:</strong> The Cat A cascade in the delete handler triggers <code>getCatARuleForSupplier</code> (loads + parses all Cat A rules) and <code>listProjectSuppliers</code> (full supplier scan) — both scale problems that disappear if delete is removed.</li>
+  </ul>
+  <h4>What to Remove</h4>
+  <table>
+    <tr><th>Layer</th><th>What to Remove</th><th>File</th></tr>
+    <tr><td>IPC handler</td><td><code>rules:delete</code> handler (with Cat A cascade)</td><td>src/main/ipc/rules.ts:31-72</td></tr>
+    <tr><td>IPC contract</td><td><code>'rules:delete'</code> type definition</td><td>src/shared/types/ipc-contract.ts</td></tr>
+    <tr><td>Store method</td><td><code>deleteRule()</code></td><td>src/main/services/rules.ts:348-350</td></tr>
+    <tr><td>Frontend</td><td>Delete button/menu item + any confirmation dialog</td><td>src/renderer/pages/OverrideRulesPage.tsx</td></tr>
+    <tr><td>Preload</td><td><code>rules:delete</code> in exposed IPC channels (if listed)</td><td>src/preload.ts</td></tr>
+  </table>
+  <h4>What to Keep</h4>
+  <p>The <code>deleteRule()</code> method on the store can remain as a private/internal method for use only during group deletion cleanup or future admin-only operations — just not exposed through IPC to the UI.</p>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="frontend">16. Frontend Components</h2>
+
+<h3>OverrideRulesPage</h3>
+<div class="file-loc">src/renderer/pages/OverrideRulesPage.tsx (~1000 lines)</div>
+
+<div class="card">
+  <h3>Data Loading Strategy</h3>
+  <table>
+    <tr><th>Data</th><th>Source</th><th>Loading</th></tr>
+    <tr><td>Grouped rules</td><td><code>rules:list</code></td><td>All at once (grouped rules only)</td></tr>
+    <tr><td>Ungrouped rules</td><td><code>rules:listPaginated</code></td><td>100/page, infinite scroll</td></tr>
+    <tr><td>Groups</td><td><code>rules:listGroups</code></td><td>All at once</td></tr>
+    <tr><td>Taxonomy nodes</td><td><code>taxonomy:getNodes</code></td><td>All at once</td></tr>
+  </table>
+  <h4>Search</h4>
+  <ul>
+    <li><strong>Grouped rules:</strong> client-side filter (already in memory)</li>
+    <li><strong>Ungrouped rules:</strong> debounced server-side search via <code>listRulesPaginated</code></li>
+  </ul>
+
+  <div class="scale-warn scale-amber" onclick="toggle(this)">
+    <span class="trigger">SLOW: All Grouped Rules Loaded to Renderer</span>
+    <div class="popup">
+      <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+      <h4>listRules() Dumps All Grouped Rules Into React State</h4>
+      <div class="metric"><span class="label">Memory</span>If 400K of 500K rules are grouped, <code>rules:list</code> loads 400K objects into the renderer. ~500 bytes × 400K = ~200MB in renderer process memory.</div>
+      <div class="metric"><span class="label">IPC transfer</span>Electron serializes 400K objects through <code>contextBridge</code> as JSON. Serialization + deserialization could take 5-10 seconds, freezing the UI.</div>
+      <div class="metric"><span class="label">React reconciliation</span>Any state update (selection, search, toggle) triggers reconciliation across all 400K rule objects in state.</div>
+      <div class="fix-block">
+        <h5>Fix — Paginate Per Group, Virtualize Lists</h5>
+        <p>Only load rules for expanded groups, and paginate within each group:</p>
+        <pre><code>// New IPC handler:
+'rules:listByGroup': {
+  args: [groupId: string, limit: number, offset: number],
+  result: { rules: OverrideRule[]; total: number }
+}
+
+// In OverrideRulesPage — only fetch when group is expanded:
+const toggleGroup = async (groupId: string) => {
+  if (!collapsedGroups.has(groupId)) {
+    // collapsing — no fetch needed
+  } else {
+    // expanding — load first page
+    const { rules, total } = await ipc('rules:listByGroup', groupId, 100, 0);
+    setGroupRules(prev => ({ ...prev, [groupId]: { rules, total } }));
+  }
+  setCollapsedGroups(prev => toggle(prev, groupId));
+};</code></pre>
+        <p>Pair with <code>react-virtuoso</code> or <code>react-window</code> for the rule list inside each group.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>CreateRuleModal</h3>
+<div class="file-loc">src/renderer/components/review/CreateRuleModal.tsx (~545 lines)</div>
+<div class="card">
+  <h3>Create Rule Flow (from Pivot Table)</h3>
+  <ol>
+    <li>User selects rows in pivot table</li>
+    <li>Modal opens with pre-filled conditions from selected rows</li>
+    <li>User configures conditions, name, target classification, group</li>
+    <li>Click "Preview" → <code>rules:previewConflicts(candidateIds, groupId)</code></li>
+    <li>Shows conflict summary (blocked vs eligible transactions)</li>
+    <li>Click "Create &amp; Apply" → <code>rules:createAndApply(input)</code></li>
+    <li>Shows result: matched count, skipped count</li>
+  </ol>
+</div>
+
+<h3>RuleDeactivationModal</h3>
+<div class="file-loc">src/renderer/components/rules/RuleDeactivationModal.tsx (~501 lines)</div>
+<div class="card">
+  <h3>Deactivation Modal Features</h3>
+  <ul>
+    <li>Lists changelog entries for the rule being deactivated</li>
+    <li>Shows "revert to" classification for each affected transaction</li>
+    <li>Revert individual entries or bulk revert all</li>
+    <li>Tracks which entries have been reverted vs not</li>
+    <li>Allows deactivation without reverting</li>
+  </ul>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="query-builder">17. Query Builder (SQL Generation)</h2>
+
+<div class="file-loc">src/main/utils/query-builder.ts</div>
+
+<div class="card">
+  <p>Each rule's <code>groupedConditions</code> is converted to a SQL WHERE clause via <code>buildGroupedWhereClause()</code>:</p>
+  <pre><code>// GroupedFilter input:
+{
+  groupConnector: 'AND',
+  groups: [
+    { connector: 'AND', conditions: [
+      { field: 'supplier_name', operator: 'equals',   value: 'Acme' },
+      { field: 'gl_description', operator: 'contains', value: 'software' }
+    ]},
+    { groupConnector: 'OR', conditions: [
+      { field: 'spend_amount', operator: 'greater_than', value: '1000' }
+    ]}
+  ]
+}
+
+// SQL output:
+(ps.supplier_name = ? AND t."gl_description" ILIKE ?)
+  OR (CAST(t."spend_amount" AS DOUBLE) > ?)</code></pre>
+
+  <table>
+    <tr><th>Operator</th><th>SQL</th></tr>
+    <tr><td><code>equals</code></td><td><code>col = ?</code></td></tr>
+    <tr><td><code>not_equals</code></td><td><code>(col IS NULL OR col != ?)</code></td></tr>
+    <tr><td><code>contains</code></td><td><code>col ILIKE '%val%'</code></td></tr>
+    <tr><td><code>not_contains</code></td><td><code>(col IS NULL OR col NOT ILIKE '%val%')</code></td></tr>
+    <tr><td><code>starts_with</code></td><td><code>col ILIKE 'val%'</code></td></tr>
+    <tr><td><code>ends_with</code></td><td><code>col ILIKE '%val'</code></td></tr>
+    <tr><td><code>regex</code></td><td><code>regexp_matches(col, ?)</code></td></tr>
+    <tr><td><code>is_null</code></td><td><code>col IS NULL</code></td></tr>
+    <tr><td><code>in_list</code></td><td><code>col IN (?, ?, ...)</code></td></tr>
+    <tr><td><code>greater_than</code></td><td><code>CAST(col AS DOUBLE) > ?</code></td></tr>
+    <tr><td><code>less_than</code></td><td><code>CAST(col AS DOUBLE) &lt; ?</code></td></tr>
+  </table>
+
+  <div class="scale-warn scale-amber" onclick="toggle(this)">
+    <span class="trigger">SLOW: ILIKE and CAST on 5M Rows Per Query</span>
+    <div class="popup">
+      <button class="close-btn" onclick="event.stopPropagation(); closeAll()">&times;</button>
+      <h4>Pattern Matching and CAST on Every Row</h4>
+      <div class="metric"><span class="label">ILIKE</span><code>contains</code>, <code>starts_with</code>, <code>ends_with</code> all do full column scans with pattern matching. On 5M rows: ~50-200ms per query in DuckDB. Multiplied by 500K rules = prohibitive.</div>
+      <div class="metric"><span class="label">CAST(col AS DOUBLE)</span>Numeric comparisons cast VARCHAR columns on every row. If <code>spend_amount</code> is stored as VARCHAR (dynamic schema), 5M casts per query.</div>
+      <div class="metric"><span class="label">Context</span>Individual queries are tolerable (DuckDB columnar is fast). The problem is running these 500K times in the evaluation loop. Fix the N+1 problem first — this becomes manageable.</div>
+      <div class="fix-block">
+        <h5>Fix — Depends on N+1 Fix</h5>
+        <p>Once <code>evaluateRules</code> is restructured to run fewer queries, these costs become acceptable. If performance is still tight after that, consider:</p>
+        <pre><code>-- Pre-cast numeric columns at import time (store as DOUBLE not VARCHAR):
+ALTER TABLE transactions ALTER COLUMN spend_amount TYPE DOUBLE
+  USING TRY_CAST(spend_amount AS DOUBLE);
+
+-- Or: create a pre-computed normalized column:
+ALTER TABLE transactions ADD COLUMN spend_amount_num DOUBLE
+  GENERATED ALWAYS AS (TRY_CAST(spend_amount AS DOUBLE));</code></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="ipc">18. IPC Contract</h2>
+
+<div class="file-loc">src/shared/types/ipc-contract.ts</div>
+<div class="file-loc">src/main/ipc/rules.ts</div>
+
+<table>
+  <tr><th>Channel</th><th>Args</th><th>Returns</th><th>Notes</th></tr>
+  <tr><td><code>rules:list</code></td><td>none</td><td><code>OverrideRule[]</code></td><td>Grouped rules only</td></tr>
+  <tr><td><code>rules:listPaginated</code></td><td><code>{limit, offset, search?}</code></td><td><code>{rules, total}</code></td><td>Ungrouped, paginated</td></tr>
+  <tr><td><code>rules:create</code></td><td><code>OverrideRuleCreate</code></td><td><code>{id}</code></td><td>Does not apply</td></tr>
+  <tr><td><code>rules:createAndApply</code></td><td><code>OverrideRuleCreate</code></td><td><code>{id, matchedCount, skippedCount, changelogId?}</code></td><td>Creates + applies atomically</td></tr>
+  <tr><td><code>rules:update</code></td><td><code>ruleId, OverrideRuleUpdate</code></td><td><code>void</code></td><td>Partial update</td></tr>
+  <tr><td><code>rules:delete</code></td><td><code>ruleId</code></td><td><code>void</code></td><td>With Cat A cascade</td></tr>
+  <tr><td><code>rules:previewConflicts</code></td><td><code>candidateIds, groupId?</code></td><td><code>{covered, eligibleIds}</code></td><td>Full eval of all rules</td></tr>
+  <tr><td><code>rules:generate</code></td><td>none</td><td><code>{rulesCreated, suppliersProcessed}</code></td><td>AI generation from reviewed txns</td></tr>
+  <tr><td><code>rules:previewApply</code></td><td><code>ruleIds</code></td><td><code>{affectedRowCount, matchingRuleCount}</code></td><td>Read-only evaluation</td></tr>
+  <tr><td><code>rules:apply</code></td><td><code>ruleIds</code></td><td><code>{matchedCount, ruleCount}</code></td><td>Apply rules to transactions</td></tr>
+  <tr><td><code>rules:listGroups</code></td><td>none</td><td><code>RuleGroup[]</code></td><td></td></tr>
+  <tr><td><code>rules:createGroup</code></td><td><code>RuleGroupCreate</code></td><td><code>{id}</code></td><td>With priority cascade</td></tr>
+  <tr><td><code>rules:updateGroup</code></td><td><code>groupId, RuleGroupUpdate</code></td><td><code>void</code></td><td>With priority cascade</td></tr>
+  <tr><td><code>rules:deleteGroup</code></td><td><code>groupId</code></td><td><code>void</code></td><td>Ungroups rules first</td></tr>
+  <tr><td><code>rules:reorderGroups</code></td><td><code>orderedIds</code></td><td><code>void</code></td><td>Drop/recreate index</td></tr>
+  <tr><td><code>rules:moveRule</code></td><td><code>ruleId, targetGroupId</code></td><td><code>void</code></td><td></td></tr>
+  <tr><td><code>rules:assignToGroup</code></td><td><code>ruleIds, groupId</code></td><td><code>void</code></td><td>Bulk</td></tr>
+  <tr><td><code>rules:filterAssign</code></td><td><code>filter, targetGroupId</code></td><td><code>{matched}</code></td><td>In-memory filter</td></tr>
+  <tr><td><code>rules:setCategoryA</code></td><td><code>ruleId, value</code></td><td><code>void</code></td><td>With supplier sync</td></tr>
+</table>
+
+<!-- ============================================================== -->
+<h2 id="duplication">19. Duplication Audit</h2>
+
+<p>Four distinct patterns of repeated logic found across <code>rules.ts</code> and <code>ipc/rules.ts</code>:</p>
+
+<!-- DUP 1 -->
+<div class="dup-card">
+  <h3>Duplication 1 — <code>listAllRules()</code> Called Multiple Times in One Operation</h3>
+  <div class="sites">
+    <span class="site">rules.ts:260 (previewRuleConflicts → evaluateRules → listAllRules)</span>
+    <span class="site">rules.ts:261 (previewRuleConflicts → listAllRules directly)</span>
+    <span class="site">rules.ts:374 (evaluateRules → listAllRules)</span>
+    <span class="site">rules.ts:672 (filterAndAssignToGroup → listAllRules)</span>
+  </div>
+  <p><strong>Problem:</strong> <code>previewRuleConflicts</code> calls <code>evaluateRules(candidateIds)</code>, which internally calls <code>listAllRules()</code>. Then <em>immediately after</em>, <code>previewRuleConflicts</code> calls <code>listAllRules()</code> again directly to build the name/group lookup maps. The same 500K rules are loaded, parsed, and discarded twice in a single method call.</p>
+  <div class="dup-fix">
+    <h5>Fix</h5>
+    <p>Refactor <code>evaluateRules</code> to accept an optional pre-loaded rule list. Pass it from the caller when the list is already available:</p>
+    <pre><code>// Add an internal overload that accepts a pre-built list:
+private async evaluateRulesFromList(
+  rules: OverrideRule[],
+  transactionIds?: string[]
+): Promise&lt;Map&lt;string, { ruleId: string; targetTaxonomyNodeId: string }&gt;&gt; {
+  const matched = new Map();
+  for (const rule of rules.filter(r => r.isActive)) {
+    const ids = await this.transactions.getIdsByGroupedConditions(
+      rule.groupedConditions, transactionIds
+    );
+    for (const id of ids) {
+      if (!matched.has(id)) matched.set(id, { ruleId: rule.id, targetTaxonomyNodeId: rule.targetTaxonomyNodeId });
+    }
+  }
+  return matched;
+}
+
+// previewRuleConflicts loads once, passes to both:
+const allRules = await this.listAllRules();
+const ruleNameById = new Map(allRules.map(r => [r.id, r.name]));
+const blockingRules = allRules.filter(r => /* priority check */);
+const ruleMap = await this.evaluateRulesFromList(blockingRules, candidateIds);</code></pre>
+  </div>
+</div>
+
+<!-- DUP 2 -->
+<div class="dup-card">
+  <h3>Duplication 2 — Supplier Name Extraction from Conditions</h3>
+  <div class="sites">
+    <span class="site">ipc/rules.ts:39 (delete handler)</span>
+    <span class="site">ipc/rules.ts:137 (setCategoryA handler)</span>
+    <span class="site">rules.ts:662 (getCatARuleForSupplier)</span>
+    <span class="site">rules.ts:484 (generate_rules_preview, step 5)</span>
+  </div>
+  <p><strong>Problem:</strong> The same pattern — "find a <code>supplier_name equals X</code> condition inside a rule's <code>groupedConditions</code>" — is written four times in slightly different ways. Two handlers in <code>ipc/rules.ts</code> use <code>rule.groupedConditions.groups.flatMap(g => g.conditions).find(c => c.field === 'supplier_name' && c.operator === 'equals')</code>. <code>getCatARuleForSupplier</code> does the same after loading all Cat A rules. The generate function does a manual nested loop with the same intent.</p>
+  <div class="dup-fix">
+    <h5>Fix — One Helper Function</h5>
+    <pre><code>// In rules.ts or a shared util:
+function extractSupplierNameCondition(
+  rule: OverrideRule
+): string | null {
+  for (const group of rule.groupedConditions.groups) {
+    for (const cond of group.conditions) {
+      if (cond.field === 'supplier_name' && cond.operator === 'equals') {
+        return String(cond.value);
+      }
+    }
+  }
+  return null;
+}
+
+// All four sites become one line:
+const supplierName = extractSupplierNameCondition(rule);</code></pre>
+  </div>
+</div>
+
+<!-- DUP 3 -->
+<div class="dup-card">
+  <h3>Duplication 3 — <code>listProjectSuppliers().find()</code> by Name</h3>
+  <div class="sites">
+    <span class="site">ipc/rules.ts:44-46 (delete handler)</span>
+    <span class="site">ipc/rules.ts:154-156 (setCategoryA handler)</span>
+  </div>
+  <p><strong>Problem:</strong> Both handlers do exactly the same thing: load all project suppliers, then use <code>.find(s => s.supplierName.toLowerCase() === supplierName.toLowerCase())</code> to locate one supplier by name. This is copy-pasted verbatim across two handlers.</p>
+  <div class="dup-fix">
+    <h5>Fix — Add a <code>getSupplierByName</code> method to SupplierService</h5>
+    <pre><code>// In SupplierService:
+async getProjectSupplierByName(name: string): Promise&lt;ProjectSupplier | null&gt; {
+  return this.db.get&lt;ProjectSupplierRow&gt;(
+    'SELECT * FROM project_suppliers WHERE LOWER(supplier_name) = LOWER(?)',
+    name
+  ).then(row => row ? rowToSupplier(row) : null);
+}
+
+// Both IPC handlers become:
+const projectSupplier = await suppliers.getProjectSupplierByName(supplierName);</code></pre>
+    <p>This also eliminates the full-table load (see Cat A scale issue above).</p>
+  </div>
+</div>
+
+<!-- DUP 4 -->
+<div class="dup-card">
+  <h3>Duplication 4 — Cat A Supplier Sync Logic</h3>
+  <div class="sites">
+    <span class="site">ipc/rules.ts:36-68 (delete handler — Cat A branch)</span>
+    <span class="site">ipc/rules.ts:128-176 (setCategoryA handler)</span>
+  </div>
+  <p><strong>Problem:</strong> Both handlers share the same multi-step logic for Cat A state management: (1) extract supplier name from conditions, (2) find project supplier, (3) load taxonomy nodes, (4) update <code>mappedTaxonomyPaths</code>, (5) update <code>categoryASupplier</code> flag. The delete handler is a partial version of the setCategoryA handler. When one changes, the other needs to be updated in sync.</p>
+  <div class="dup-fix">
+    <h5>Fix — Extract a Shared <code>syncCatAState</code> Helper in the IPC File</h5>
+    <pre><code>// Private helper in registerRulesHandlers (or a separate service method):
+async function syncCatAState(
+  rule: OverrideRule,
+  categoryA: boolean,
+  rules: RuleStore,
+  suppliers: SupplierService,
+  taxonomy: TaxonomyStore,
+): Promise&lt;void&gt; {
+  const supplierName = extractSupplierNameCondition(rule);
+  if (!supplierName) return;
+
+  const projectSupplier = await suppliers.getProjectSupplierByName(supplierName);
+  if (!projectSupplier) return;
+
+  const nodes = await taxonomy.getNodes();
+  const node = nodes.find(n => n.id === rule.targetTaxonomyNodeId);
+  if (node) {
+    const paths = projectSupplier.mappedTaxonomyPaths ?? [];
+    const updatedPaths = categoryA
+      ? (paths.includes(node.fullPath) ? paths : [...paths, node.fullPath])
+      : paths.filter(p => p !== node.fullPath);
+    await suppliers.updateSupplier(projectSupplier.id, { mappedTaxonomyPaths: updatedPaths });
+  }
+
+  // Check remaining Cat A rules before clearing the supplier flag
+  const remainingCatA = await rules.getCatARuleForSupplier(supplierName);
+  const effectiveCatA = categoryA || (remainingCatA !== null && remainingCatA.id !== rule.id);
+  await suppliers.updateSupplier(projectSupplier.id, { categoryASupplier: effectiveCatA });
+}
+
+// Both handlers reduce to:
+await syncCatAState(rule, false, rules, suppliers, taxonomy); // delete
+await syncCatAState(rule, categoryA, rules, suppliers, taxonomy); // setCategoryA</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="scale-summary">20. Scale Analysis Summary</h2>
+
+<p>Analysis for <strong>500K rules, 5M transactions, ~100 rule groups, 10K+ suppliers</strong>.</p>
+
+<table>
+  <tr>
+    <th>Component</th>
+    <th>Severity</th>
+    <th>Problem</th>
+    <th>Root Cause</th>
+  </tr>
+  <tr>
+    <td><code>evaluateRules()</code></td>
+    <td><span class="pill pill-red">BREAKS</span></td>
+    <td>One SQL query per rule — 500K sequential queries</td>
+    <td>N+1 loop; no bulk evaluation path</td>
+  </tr>
+  <tr>
+    <td>Classification Phase 1</td>
+    <td><span class="pill pill-red">BREAKS</span></td>
+    <td>evaluateRules per-supplier × 10K suppliers = 5B queries</td>
+    <td>No pre-filtering of rules by supplier before loop</td>
+  </tr>
+  <tr>
+    <td><code>listAllRules()</code></td>
+    <td><span class="pill pill-red">BREAKS</span></td>
+    <td>250MB+ memory; called multiple times per operation</td>
+    <td>No streaming, full materialisation; duplicated calls</td>
+  </tr>
+  <tr>
+    <td><code>generate_rules_preview()</code></td>
+    <td><span class="pill pill-red">BREAKS</span></td>
+    <td>All reviewed txns + all rules loaded into memory; 100K sequential INSERTs</td>
+    <td>No streaming, no batch INSERT</td>
+  </tr>
+  <tr>
+    <td><code>filterAndAssignToGroup()</code></td>
+    <td><span class="pill pill-red">BREAKS</span></td>
+    <td>500K rules filtered in JS memory</td>
+    <td>JSON conditions not queryable in SQL directly</td>
+  </tr>
+  <tr>
+    <td><code>previewRuleConflicts()</code></td>
+    <td><span class="pill pill-red">BREAKS</span></td>
+    <td>Full evaluateRules for conflict check; listAllRules called twice</td>
+    <td>No pre-filter to higher-priority rules only; duplicated list load</td>
+  </tr>
+  <tr>
+    <td>Preview → Apply double eval</td>
+    <td><span class="pill pill-amber">SLOW</span></td>
+    <td>No caching between preview and apply</td>
+    <td>evaluateRules re-run from scratch on apply</td>
+  </tr>
+  <tr>
+    <td><code>getCatARuleForSupplier()</code></td>
+    <td><span class="pill pill-amber">SLOW</span></td>
+    <td>Loads all Cat A rules, parses JSON, string-matches</td>
+    <td>No denormalized supplier_name column; no index</td>
+  </tr>
+  <tr>
+    <td>Frontend: grouped rules</td>
+    <td><span class="pill pill-amber">SLOW</span></td>
+    <td>All grouped rules loaded to renderer memory</td>
+    <td>No per-group pagination</td>
+  </tr>
+  <tr>
+    <td>Deactivation modal</td>
+    <td><span class="pill pill-amber">SLOW</span></td>
+    <td>All changelog entries for rule loaded at once</td>
+    <td>No pagination on changelog</td>
+  </tr>
+  <tr>
+    <td>Missing indexes</td>
+    <td><span class="pill pill-amber">SLOW</span></td>
+    <td>Full scans on group_id, is_active, applied_rule_id, etc.</td>
+    <td>No secondary indexes defined</td>
+  </tr>
+  <tr>
+    <td>Query builder (per query)</td>
+    <td><span class="pill pill-green">OK</span></td>
+    <td>Individual queries are fast in DuckDB columnar engine</td>
+    <td>Problem is frequency (N+1), not individual speed</td>
+  </tr>
+  <tr>
+    <td>Group cascade / reorder</td>
+    <td><span class="pill pill-green">NOT AN ISSUE</span></td>
+    <td>Sequential updates — fine at ≤100 groups</td>
+    <td>Would matter at thousands of groups, not hundreds</td>
+  </tr>
+  <tr>
+    <td><code>createRule()</code></td>
+    <td><span class="pill pill-green">OK</span></td>
+    <td>Single INSERT</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><code>listRulesPaginated()</code></td>
+    <td><span class="pill pill-green">OK</span></td>
+    <td>Paginated with LIMIT/OFFSET</td>
+    <td>DuckDB handles well</td>
+  </tr>
+  <tr>
+    <td>Supplier name extraction</td>
+    <td><span class="pill pill-purple">DUPLICATION</span></td>
+    <td>Same condition-scan pattern written 4 times</td>
+    <td>No shared helper function</td>
+  </tr>
+  <tr>
+    <td>listProjectSuppliers().find()</td>
+    <td><span class="pill pill-purple">DUPLICATION</span></td>
+    <td>Same pattern in delete and setCategoryA handlers</td>
+    <td>No <code>getSupplierByName</code> method</td>
+  </tr>
+  <tr>
+    <td>Cat A sync logic</td>
+    <td><span class="pill pill-purple">DUPLICATION</span></td>
+    <td>Multi-step sync duplicated across delete and setCategoryA</td>
+    <td>No shared helper; logic lives in IPC layer</td>
+  </tr>
+  <tr>
+    <td>listAllRules double-call</td>
+    <td><span class="pill pill-purple">DUPLICATION</span></td>
+    <td>previewRuleConflicts loads all rules twice in one call</td>
+    <td>Fixed: <code>evaluateRules()</code> eliminated; only <code>evaluateRulesFromList()</code> remains — caller loads once and passes in</td>
+  </tr>
+</table>
+
+<div class="card">
+  <h3>Recommended Fix Order</h3>
+  <ol>
+    <li><strong>Add indexes</strong> (§1) — 30 minutes, immediate wins on all filtered queries</li>
+    <li><strong>Extract shared helpers</strong> (§19) — 1-2 hours, reduces bug surface and makes further refactors safer: <code>extractSupplierNameCondition</code>, <code>getProjectSupplierByName</code>, <code>syncCatAState</code></li>
+    <li><strong>Replace <code>evaluateRules</code> with <code>evaluateRulesFromList</code></strong> (§5) — 2-3 hours, every caller narrows before evaluating; eliminates N+1 and duplicate loads</li>
+    <li><strong>Fix previewRuleConflicts: pre-filter to higher-priority rules only</strong> (§7) — 1-2 hours, trivial once evaluateRulesFromList exists</li>
+    <li><strong>Classification pre-pass: complex rules once, supplier rules per-supplier</strong> (§11) — 2-3 hours, the single biggest real-world improvement (5B queries → 60K)</li>
+    <li><strong>Preview/apply token caching</strong> (§6) — 2 hours, eliminates double evaluation in the common UX flow</li>
+    <li><strong>Frontend pagination for grouped rules</strong> (§16) — 1 day, needed for UI responsiveness at scale</li>
+  </ol>
+</div>
+
+</div> <!-- end tab-current -->
+
+
+<!-- ================================================================ -->
+<!-- TAB 2: PROPOSED SYSTEM                                           -->
+<!-- ================================================================ -->
+<div class="tab-panel" id="tab-proposed">
+
+<div class="legend">
+  <div class="legend-item"><span class="new-badge">new</span> New component / method</div>
+  <div class="legend-item"><span class="changed-badge">changed</span> Modified from current</div>
+  <div class="legend-item"><span class="removed-badge">removed</span> Eliminated</div>
+  <div class="legend-item"><span class="unchanged-badge">unchanged</span> No changes needed</div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>1. Schema Changes</h2>
+
+<div class="arch-card">
+  <h3>Indexes &amp; FK on <code>override_rules</code> / <code>transactions</code></h3>
+  <pre><code>-- New indexes:
+CREATE INDEX idx_rules_group     ON override_rules(group_id);
+CREATE INDEX idx_rules_active    ON override_rules(is_active);
+CREATE INDEX idx_rules_cat_a     ON override_rules(category_a_supplier) WHERE category_a_supplier = TRUE;
+CREATE INDEX idx_rules_supplier  ON override_rules(project_supplier_id);
+CREATE INDEX idx_txn_rule        ON transactions(applied_rule_id);
+CREATE INDEX idx_txn_status      ON transactions(classification_status);
+CREATE INDEX idx_txn_supplier    ON transactions(project_supplier_id);
+
+-- New FK column (populated at INSERT time via supplier name lookup):
+ALTER TABLE override_rules ADD COLUMN project_supplier_id VARCHAR
+  REFERENCES project_suppliers(id);</code></pre>
+</div>
+
+<div class="arch-card">
+  <h3><code>rule_conditions</code> Table <span class="new-badge">new</span></h3>
+  <p>Persistent relational projection of <code>grouped_conditions</code> JSON. The JSON column is retained as source of truth for UI display; this table enables SQL-native evaluation.</p>
+  <pre><code>CREATE TABLE IF NOT EXISTS rule_conditions (
+  rule_id              VARCHAR NOT NULL REFERENCES override_rules(id),
+  group_idx            INTEGER NOT NULL,    -- which condition group (0-based)
+  condition_idx        INTEGER NOT NULL,    -- position within group (0-based)
+  field                VARCHAR NOT NULL,    -- 'supplier_name', 'spend_amount', etc.
+  operator             VARCHAR NOT NULL,    -- 'equals', 'greater_than', 'contains', etc.
+  value                VARCHAR,             -- comparison value (NULL for is_null operator)
+  group_connector      VARCHAR DEFAULT 'AND',  -- AND/OR between groups
+  condition_connector  VARCHAR DEFAULT 'AND',  -- AND/OR within group
+  PRIMARY KEY (rule_id, group_idx, condition_idx)
+);
+
+-- Indexes for equi-JOIN fast path
+CREATE INDEX idx_rc_field_value ON rule_conditions(field, value);
+CREATE INDEX idx_rc_rule_id ON rule_conditions(rule_id);</code></pre>
+
+  <h4>Sync Points</h4>
+  <p>Every write to <code>override_rules.grouped_conditions</code> also updates <code>rule_conditions</code> in the same transaction:</p>
+  <ul>
+    <li><code>createRule()</code> &rarr; INSERT decomposed conditions</li>
+    <li><code>updateRule()</code> &rarr; DELETE old + INSERT new conditions</li>
+    <li><code>deleteRule()</code> &rarr; CASCADE delete (FK constraint)</li>
+    <li><code>importRules()</code> &rarr; Batch decompose + INSERT</li>
+  </ul>
+
+  <pre><code>/**
+ * Pure function: decompose GroupedFilter into relational rows.
+ * Called at write time + once for backfill migration.
+ */
+function decomposeConditions(
+  ruleId: string,
+  grouped: GroupedFilter
+): ConditionRow[] {
+  const rows: ConditionRow[] = [];
+  for (let gi = 0; gi &lt; grouped.groups.length; gi++) {
+    const group = grouped.groups[gi];
+    for (let ci = 0; ci &lt; group.conditions.length; ci++) {
+      const c = group.conditions[ci];
+      rows.push({
+        rule_id: ruleId,
+        group_idx: gi,
+        condition_idx: ci,
+        field: c.field,
+        operator: c.operator,
+        value: c.value ?? null,
+        group_connector: grouped.groupConnector ?? 'AND',
+        condition_connector: 'AND',
+      });
+    }
+  }
+  return rows;
+}</code></pre>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>2. Shared Helpers <span class="new-badge">new</span></h2>
+
+<div class="arch-card">
+  <h3>Replace duplicated patterns across 8 call sites</h3>
+
+  <pre><code>// ─── rules.ts (or shared util) ───────────────────────────────────
+
+/**
+ * Extract supplier_name from a rule's conditions — only when safe to scope.
+ * Returns null when: multiple groups, OR group, or no supplier_name condition.
+ */
+function extractSupplierNameCondition(
+  input: OverrideRule | OverrideRuleCreate
+): string | null {
+  const groups = 'groupedConditions' in input
+    ? input.groupedConditions?.groups ?? []
+    : [];
+  if (groups.length !== 1) return null;
+  if (groups[0].connector === 'OR') return null;
+  for (const cond of groups[0].conditions) {
+    if (cond.field === 'supplier_name' && cond.operator === 'equals') {
+      return String(cond.value);
+    }
+  }
+  return null;
+}
+
+// ─── SupplierService ─────────────────────────────────────────────
+
+/** Direct SQL lookup instead of listAll().find() */
+async getProjectSupplierByName(name: string): Promise&lt;ProjectSupplier | null&gt; {
+  const row = await this.db.get(
+    'SELECT * FROM project_suppliers WHERE LOWER(supplier_name) = LOWER(?)',
+    name
+  );
+  return row ? rowToSupplier(row) : null;
+}
+
+// ─── ipc/rules.ts ────────────────────────────────────────────────
+
+/** Shared Cat A sync (replaces 40-line duplication in delete + setCategoryA) */
+async function syncCatAState(
+  rule: OverrideRule,
+  categoryA: boolean,
+  rules: RuleStore,
+  suppliers: SupplierService,
+  taxonomy: TaxonomyStore,
+): Promise&lt;void&gt; {
+  const supplierName = extractSupplierNameCondition(rule);
+  if (!supplierName) return;
+  const projectSupplier = await suppliers.getProjectSupplierByName(supplierName);
+  if (!projectSupplier) return;
+  // ... taxonomy path sync + remaining Cat A check (single implementation)
+}</code></pre>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>3. Creating Rules <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">rules:create(input: OverrideRuleCreate)
+    │
+    └── RuleStore.createRule(input)
+          ├── Validate targetTaxonomyNodeId exists in taxonomy
+          ├── Validate groupId exists in rule_groups (if provided)
+          ├── Resolve + store project_supplier_id from conditions
+          ├── Generate UUID
+          ├── INSERT INTO override_rules (... project_supplier_id)
+          ├── decomposeConditions() → INSERT INTO rule_conditions       ← NEW
+          └── Return { id }</div>
+
+<pre><code>async createRule(input: OverrideRuleCreate): Promise&lt;{ id: string }&gt; {
+  // Validate FK targets
+  if (input.targetTaxonomyNodeId) {
+    const node = await this.db.get('SELECT id FROM taxonomy WHERE id = ?', input.targetTaxonomyNodeId);
+    if (!node) throw new Error(`Taxonomy node not found: ${input.targetTaxonomyNodeId}`);
+  }
+  if (input.groupId) {
+    const grp = await this.db.get('SELECT id FROM rule_groups WHERE id = ?', input.groupId);
+    if (!grp) throw new Error(`Rule group not found: ${input.groupId}`);
+  }
+
+  const id = uuidv4();
+  const supplierName = extractSupplierNameCondition(input);
+  const supplierId = supplierName
+    ? (await this.suppliers.getProjectSupplierByName(supplierName))?.id ?? null
+    : null;
+
+  // Single transaction: rule + conditions
+  await this.db.run('BEGIN TRANSACTION');
+  try {
+    await this.db.run(
+      `INSERT INTO override_rules
+         (id, name, grouped_conditions, target_taxonomy_node_id,
+          group_id, is_active, source, category_a_supplier, project_supplier_id)
+       VALUES (?, ?, ?, ?, CAST(? AS VARCHAR), TRUE, ?, ?, ?)`,
+      id, input.name, JSON.stringify(input.groupedConditions),
+      input.targetTaxonomyNodeId, input.groupId ?? null,
+      input.source ?? 'manual', input.categoryASupplier ?? false,
+      supplierId
+    );
+
+    // Decompose and insert conditions
+    const condRows = decomposeConditions(id, input.groupedConditions);
+    for (const chunk of chunks(condRows, 500)) {
+      const placeholders = chunk.map(() =&gt; '(?, ?, ?, ?, ?, ?, ?, ?)').join(',');
+      const params = chunk.flatMap(r =&gt; [
+        r.rule_id, r.group_idx, r.condition_idx,
+        r.field, r.operator, r.value,
+        r.group_connector, r.condition_connector
+      ]);
+      await this.db.run(
+        `INSERT INTO rule_conditions VALUES ${placeholders}`, ...params
+      );
+    }
+
+    await this.db.run('COMMIT');
+  } catch (e) {
+    await this.db.run('ROLLBACK');
+    throw e;
+  }
+  return { id };
+}</code></pre>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>4. Rule Evaluation Engine <span class="changed-badge">changed</span></h2>
+
+<div class="arch-card">
+  <h3>Single Method: <code>evaluateRulesBulk()</code> <span class="new-badge">new</span></h3>
+  <p>Replaces <code>evaluateRules()</code>, <code>evaluateBulkSupplierRules()</code>, <code>evaluateComplexRules()</code>, and <code>mergeByPriority()</code>. All rule types evaluated in one SQL pass with correct priority ordering.</p>
+</div>
+
+<div class="arch-card">
+  <h3>Step 1: Build Equi-JOIN CTEs from Registries</h3>
+  <p>One CTE per distinct <code>(field, operator)</code> pair in <code>rule_conditions</code>. Each CTE uses a proper equi-JOIN that DuckDB can optimize with hash-joins and predicate pushdown.</p>
+
+  <pre><code>import { FILTER_VIRTUAL_EXPRS } from './transactions';
+
+const OPERATOR_JOIN_TEMPLATES: Record&lt;string, (col: string) =&gt; string&gt; = {
+  equals:             col =&gt; `${col} = rc.value`,
+  not_equals:         col =&gt; `${col} != rc.value`,
+  contains:           col =&gt; `${col} ILIKE '%' || rc.value || '%'`,
+  not_contains:       col =&gt; `${col} NOT ILIKE '%' || rc.value || '%'`,
+  starts_with:        col =&gt; `${col} ILIKE rc.value || '%'`,
+  ends_with:          col =&gt; `${col} ILIKE '%' || rc.value`,
+  regex:              col =&gt; `regexp_matches(${col}, rc.value)`,
+  greater_than:       col =&gt; `TRY_CAST(${col} AS DECIMAL) &gt; TRY_CAST(rc.value AS DECIMAL)`,
+  less_than:          col =&gt; `TRY_CAST(${col} AS DECIMAL) &lt; TRY_CAST(rc.value AS DECIMAL)`,
+  greater_than_or_equal: col =&gt; `TRY_CAST(${col} AS DECIMAL) &gt;= TRY_CAST(rc.value AS DECIMAL)`,
+  less_than_or_equal: col =&gt; `TRY_CAST(${col} AS DECIMAL) &lt;= TRY_CAST(rc.value AS DECIMAL)`,
+  is_null:            col =&gt; `${col} IS NULL`,
+  is_true:            col =&gt; `${col} = TRUE`,
+  is_false:           col =&gt; `${col} = FALSE`,
+};
+
+function buildFieldOperatorCTEs(
+  pairs: { field: string; operator: string }[]
+): { ctes: string[]; requiredJoins: Set&lt;string&gt; } {
+  const ctes: string[] = [];
+  const requiredJoins = new Set&lt;string&gt;();
+
+  for (let i = 0; i &lt; pairs.length; i++) {
+    const { field, operator } = pairs[i];
+    const colExpr = FILTER_VIRTUAL_EXPRS[field] ?? `t."${field}"`;
+    const predicate = OPERATOR_JOIN_TEMPLATES[operator]?.(colExpr);
+    if (!predicate) continue;
+
+    const joinKey = VIRTUAL_COLUMN_REGISTRY[field]?.requiredJoin;
+    if (joinKey) requiredJoins.add(joinKey);
+
+    const isNullaryOp = ['is_null', 'is_true', 'is_false'].includes(operator);
+
+    ctes.push(`fo_${i} AS (
+    SELECT rc.rule_id, rc.group_idx, rc.condition_idx, t.id AS txn_id
+    FROM rule_conditions rc
+    JOIN transactions t ON ${isNullaryOp ? 'TRUE' : predicate}
+    ${buildJoinsForField(field)}
+    JOIN override_rules r ON rc.rule_id = r.id AND r.is_active = TRUE
+    WHERE rc.field = '${field}' AND rc.operator = '${operator}'
+    ${isNullaryOp ? `AND ${predicate}` : ''}
+  )`);
+  }
+
+  return { ctes, requiredJoins };
+}</code></pre>
+</div>
+
+<div class="arch-card">
+  <h3>Step 2: Full Evaluation Query</h3>
+  <pre><code>WITH
+  ${fieldOperatorCTEs},  -- fo_0, fo_1, ... (one per field×operator pair)
+
+  -- Union all matched conditions into a single stream
+  condition_evals AS (
+    SELECT rule_id, group_idx, condition_idx, txn_id FROM fo_0
+    UNION ALL
+    SELECT rule_id, group_idx, condition_idx, txn_id FROM fo_1
+    -- ... (one SELECT per CTE)
+  ),
+
+  -- AND-within-group: all conditions in the group must match
+  group_evals AS (
+    SELECT
+      ce.rule_id, ce.txn_id, ce.group_idx,
+      rc_meta.group_connector,
+      COUNT(*) = MAX(rc_meta.total_conditions) AS group_matched
+    FROM condition_evals ce
+    JOIN (
+      SELECT rule_id, group_idx, group_connector,
+             COUNT(*) AS total_conditions
+      FROM rule_conditions
+      GROUP BY rule_id, group_idx, group_connector
+    ) rc_meta ON ce.rule_id = rc_meta.rule_id
+            AND ce.group_idx = rc_meta.group_idx
+    GROUP BY ce.rule_id, ce.txn_id, ce.group_idx, rc_meta.group_connector,
+             rc_meta.total_conditions
+  ),
+
+  -- Aggregate across groups (AND/OR connectors)
+  rule_evals AS (
+    SELECT rule_id, txn_id,
+      BOOL_OR(group_matched) AS any_group_matched,
+      BOOL_AND(group_matched) AS all_groups_matched,
+      BOOL_OR(group_connector = 'OR') AS has_or_connector
+    FROM group_evals
+    GROUP BY rule_id, txn_id
+  ),
+
+  rule_matches AS (
+    SELECT rule_id, txn_id FROM rule_evals
+    WHERE CASE WHEN has_or_connector THEN any_group_matched
+               ELSE all_groups_matched END
+  )
+
+-- First-match-wins: highest priority per transaction
+SELECT DISTINCT ON (rm.txn_id)
+  rm.txn_id, rm.rule_id, r.target_taxonomy_node_id
+FROM rule_matches rm
+JOIN override_rules r ON rm.rule_id = r.id
+LEFT JOIN rule_groups rg ON r.group_id = rg.id
+ORDER BY rm.txn_id, COALESCE(rg.priority, 0) DESC, r.created_at DESC;</code></pre>
+</div>
+
+<div class="arch-card">
+  <h3>Step 3: Entry Point</h3>
+  <pre><code>async evaluateRulesBulk(
+  opts: { scopeTable?: string; scopeIds?: string[] } = {}
+): Promise&lt;Map&lt;string, { ruleId: string; targetTaxonomyNodeId: string }&gt;&gt; {
+
+  // 1. Get distinct (field, operator) pairs from active rules
+  const pairs = await this.db.all&lt;{ field: string; operator: string }&gt;(`
+    SELECT DISTINCT rc.field, rc.operator
+    FROM rule_conditions rc
+    JOIN override_rules r ON rc.rule_id = r.id
+    WHERE r.is_active = TRUE
+  `);
+  if (pairs.length === 0) return new Map();
+
+  // 2. Generate equi-JOIN CTEs
+  const { ctes } = buildFieldOperatorCTEs(pairs);
+
+  // 3. Build scope constraint
+  const scopeJoin = opts.scopeTable
+    ? `JOIN ${opts.scopeTable} tt ON t.id = tt.id`
+    : '';
+  const scopeWhere = !opts.scopeTable &amp;&amp; opts.scopeIds
+    ? `AND t.id IN (${opts.scopeIds.map(() =&gt; '?').join(',')})`
+    : '';
+
+  // 4. Assemble + execute
+  const sql = buildEvaluationQuery(ctes, scopeJoin, scopeWhere);
+  const params = !opts.scopeTable ? (opts.scopeIds ?? []) : [];
+  const rows = await this.db.all(sql, ...params);
+  return rowsToMatchMap(rows);
+}</code></pre>
+</div>
+
+<div class="arch-card">
+  <h3>Negation Operators (not_equals, not_contains)</h3>
+  <p>Negation operators use an anti-join pattern instead of equi-JOIN:</p>
+  <pre><code>fo_neg_0 AS (
+  SELECT rc.rule_id, rc.group_idx, rc.condition_idx, t.id AS txn_id
+  FROM rule_conditions rc
+  CROSS JOIN transactions t
+  LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+  WHERE rc.field = 'supplier_name' AND rc.operator = 'not_equals'
+    AND (ps.supplier_name IS NULL OR ps.supplier_name != rc.value)
+)</code></pre>
+  <p>Negation operators are &lt;1% of real rules. A CROSS JOIN for just these few conditions is cheap.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>5. Preview + Apply <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">rules:previewApply(ruleIds)
+    │
+    └── previewRules(ruleIds)
+          ├── matched = evaluateRulesBulk({ scopeIds })
+          ├── token = uuidv4()
+          ├── previewCache.set(token, { matched, expiresAt: now + 5min })
+          └── Return { token, affectedRowCount, matchingRuleCount }
+
+rules:apply(ruleIds, token?)
+    │
+    └── applyRules(ruleIds, token?)
+          ├── matched = previewCache.get(token)?.matched
+          │     ?? evaluateRulesBulk({ scopeIds })               ← fallback
+          ├── previewCache.delete(token)
+          ├── Batch by targetNodeId (one UPDATE per distinct target)
+          └── Return { matchedCount, ruleCount }</div>
+
+<pre><code>private previewCache = new Map&lt;string, {
+  matched: Map&lt;string, { ruleId: string; targetTaxonomyNodeId: string }&gt;;
+  expiresAt: number;
+}&gt;();
+
+async previewRules(ruleIds: string[]) {
+  const matched = await this.evaluateRulesBulk({ scopeIds: ruleIds });
+  const token = uuidv4();
+  this.previewCache.set(token, { matched, expiresAt: Date.now() + 5 * 60_000 });
+  for (const [k, v] of this.previewCache) { if (v.expiresAt &lt; Date.now()) this.previewCache.delete(k); }
+  return { token, affectedRowCount: matched.size, matchingRuleCount: new Set([...matched.values()].map(v => v.ruleId)).size };
+}
+
+async applyRules(ruleIds: string[], token?: string) {
+  const cached = token ? this.previewCache.get(token) : undefined;
+  const matched = cached?.matched ?? await this.evaluateRulesBulk({ scopeIds: ruleIds });
+  if (token) this.previewCache.delete(token);
+
+  // Batch by targetNodeId — fewer, larger UPDATEs:
+  const byNode = new Map&lt;string, { ruleId: string; ids: string[] }&gt;();
+  for (const [txId, { ruleId, targetTaxonomyNodeId }] of matched) {
+    const entry = byNode.get(targetTaxonomyNodeId) ?? { ruleId, ids: [] };
+    entry.ids.push(txId);
+    byNode.set(targetTaxonomyNodeId, entry);
+  }
+  // ...
+}</code></pre>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>6. Create + Apply with Conflict Detection <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">createAndApplyRule(input)
+    │
+    ├── 1. getIdsByGroupedConditions(input.conditions)          — single SQL
+    │
+    ├── 2. previewRuleConflicts(candidateIds, input.groupId)
+    │         ├── Resolve newRulePriority
+    │         ├── blockingRuleIds = rules with higher priority     ← pre-filter
+    │         ├── evaluateRulesBulk({ scopeIds: candidateIds })   ← scoped bulk query
+    │         └── Return { covered, eligibleIds }
+    │
+    ├── 3. createRule(input) → INSERT rule + rule_conditions
+    │
+    └── 4. updateTransactions(eligibleIds) → classify</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>7. Classification — Rules Decoupled from Supplier Loop <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">classifyAll(groupedFilter?)
+    │
+    ├── scopedIds = resolveScopedIds(groupedFilter)              — unchanged
+    ├── allTxnIds = scopedIds ? Array.from(scopedIds)
+    │              : transactions.getUnclassifiedIds()
+    ├── Create temp table (scopeTable)
+    │
+    ├── ═══════════════════════════════════════════════════
+    │   PHASE 1: Rule Evaluation (one call)
+    │   ═══════════════════════════════════════════════════
+    │   │
+    │   └── rules.evaluateRulesBulk({ scopeTable })
+    │         → Generates equi-JOIN CTEs from rule_conditions
+    │         → DISTINCT ON picks highest-priority per txn
+    │         → Returns Map&lt;txnId, {ruleId, targetNodeId}&gt;
+    │
+    ├── Batch UPDATE:
+    │     UPDATE transactions SET taxonomy_node_id = ?,
+    │       classification_status = 'classified_by_rule',
+    │       applied_rule_id = ?
+    │     WHERE id IN (...)
+    │
+    ├── ═══════════════════════════════════════════════════
+    │   PHASE 2+: Per-supplier AI Classification             — unchanged
+    │   ═══════════════════════════════════════════════════
+    │   └── Supplier loop sees fewer unclassified txns</div>
+
+<pre><code>async classifyAll(groupedFilter?: GroupedFilter): Promise&lt;void&gt; {
+  const scopedIds = await this.resolveScopedIds(groupedFilter);
+  const allTxnIds = scopedIds
+    ? Array.from(scopedIds)
+    : await this.transactions.getUnclassifiedIds();
+  if (allTxnIds.length === 0) { /* early return */ }
+
+  const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+  const scopeTable = `_target_txns_${runId}`;
+  try {
+    // Create and populate temp table
+    await this.db.run(`CREATE TEMP TABLE ${scopeTable} (id VARCHAR PRIMARY KEY)`);
+    for (const chunk of chunks(allTxnIds, 10_000)) {
+      const placeholders = chunk.map(() =&gt; '(?)').join(',');
+      await this.db.run(`INSERT INTO ${scopeTable} VALUES ${placeholders}`, ...chunk);
+    }
+
+    // Phase 1: Single bulk evaluation
+    const matched = await this.rules.evaluateRulesBulk({ scopeTable });
+
+    // Batch UPDATE
+    for (const [targetNodeId, batch] of groupByTarget(matched)) {
+      await this.transactions.updateTransactions({
+        ids: batch.ids,
+        taxonomyNodeId: targetNodeId,
+        classificationStatus: 'classified_by_rule',
+        appliedRuleId: batch.ruleId,
+      }, 'rule');
+    }
+
+    // Phase 2+: Supplier loop UNCHANGED
+    for (const supplier of supplierRows) {
+      const txnRows = await this.getUnmatchedTransactions(supplier.id);
+      if (txnRows.length === 0) { processedSuppliers++; continue; }
+      // ... tail-spend check, LLM classification, etc.
+    }
+
+  } finally {
+    await this.db.run(`DROP TABLE IF EXISTS ${scopeTable}`);
+  }
+}</code></pre>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>8. AI Rule Generation <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">generate_rules_preview()
+    │
+    ├── 1. Load column_priorities                                 — unchanged
+    ├── 2. Validate columns                                       — unchanged
+    │
+    ├── 3. Get distinct supplier names (not all txns):
+    │         SELECT DISTINCT ps.supplier_name
+    │         FROM transactions t JOIN project_suppliers ps ...
+    │
+    ├── 4. Get covered suppliers via SQL (not JS parse):
+    │         SELECT DISTINCT project_supplier_id
+    │         FROM override_rules
+    │         WHERE project_supplier_id IS NOT NULL
+    │
+    ├── 5. For each uncovered supplier:
+    │         ├── Query only this supplier's txns
+    │         ├── generateSingleCategoryRule() or generateMultiCategoryRules()
+    │         └── Collect drafts + decomposeConditions() for each
+    │
+    └── 6. Batch INSERT rules + rule_conditions at once</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>9. Filter &amp; Assign to Group <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">filterAndAssignToGroup(filter, targetGroupId)
+    │
+    ├── 1. Analyze filter: property conditions vs condition-content
+    │
+    ├── 2. Property-only (common case):                            ← fast path
+    │         UPDATE override_rules SET group_id = ?
+    │           WHERE {sqlWhere}
+    │         → Zero JS loading, single SQL statement
+    │
+    └── 3. Has condition-content filters (rare):
+              Load pre-filtered subset → in-memory match</div>
+
+<pre><code>async filterAndAssignToGroup(filter: GroupedFilter, targetGroupId: string | null) {
+  const { propertyClauses, hasContentFilters } = analyzeFilterConditions(filter);
+
+  if (!hasContentFilters && propertyClauses.length > 0) {
+    // Fast path: pure SQL update
+    const sqlWhere = propertyClauses.join(' AND ');
+    const result = await this.db.run(
+      `UPDATE override_rules SET group_id = CAST(? AS VARCHAR) WHERE ${sqlWhere}`,
+      targetGroupId
+    );
+    return { matched: result.changes };
+  }
+
+  // Slow path: pre-filter with SQL, then in-memory match
+  const sqlWhere = propertyClauses.length ? propertyClauses.join(' AND ') : '1=1';
+  const preFiltered = await this.db.all(
+    `SELECT r.* FROM override_rules r WHERE ${sqlWhere}`
+  );
+  // ... in-memory content matching on pre-filtered set
+}</code></pre>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>10. Category A Supplier Logic <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">rules:setCategoryA(ruleId, value)
+    │
+    ├── 1. getRule(ruleId) → extractSupplierNameCondition(rule)   — shared helper
+    │
+    ├── 2. If TRUE → check existing Cat A via indexed SQL:
+    │         SELECT id FROM override_rules
+    │         WHERE category_a_supplier = TRUE
+    │           AND project_supplier_id = ?
+    │           AND id != ?
+    │         LIMIT 1
+    │
+    ├── 3. updateRule(id, { categoryASupplier: value })
+    │
+    └── 4. syncCatAState(rule, value, ...)                         ← shared helper</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>11. Deactivation <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">User clicks "Deactivate"
+    │
+    └── RuleDeactivationModal opens
+          ├── Load summary counts ONLY on open
+          ├── Paginated entry loading (50/page on scroll)
+          │     changelog:listForRule(ruleId, limit, offset)
+          └── User chooses revert / deactivate                      — unchanged</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>12. Delete Rule <span class="removed-badge">removed</span></h2>
+
+<div class="arch-card" style="background: var(--danger-bg); border-color: var(--danger-border);">
+  <h3 style="color: var(--red);">Removed from UI</h3>
+  <p>Active/Inactive is the only lifecycle exposed to users. <code>deleteRule()</code> retained internally for admin/migration use only. Preserves audit trail, eliminates orphaned <code>applied_rule_id</code> references, and removes 40 lines of Cat A cascade cleanup.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>13. Frontend: Rules Page <span class="changed-badge">changed</span></h2>
+
+<div class="proposed-flow">OverrideRulesPage loads
+    │
+    ├── rules:listGroups()                       — all groups (max 100)
+    │
+    ├── Grouped rules: per-group lazy loading
+    │     ├── Collapsed group: name + rule count only (no rules loaded)
+    │     └── User expands group → rules:listByGroup(groupId, 100, 0)
+    │           → Infinite scroll within group, react-virtuoso rendering
+    │
+    ├── Ungrouped rules: rules:listPaginated()   — unchanged
+    │
+    └── Search: server-side per-group + paginated</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>14. Supplier Merge &rarr; Rule FK Update <span class="new-badge">new</span></h2>
+
+<div class="arch-card">
+  <h3>Why FK Eliminates the Rename Problem</h3>
+  <p><code>project_supplier_id</code> FK means renames are free &mdash; the FK still points to the same row. The only remaining problem is <strong>supplier merges</strong>: <code>mergeSuppliers(survivorId, losingIds)</code> deletes losing <code>project_suppliers</code> rows, orphaning any rules that pointed to them.</p>
+
+  <h3>Fix: Update FK Before Delete</h3>
+  <pre><code>// Add to mergeSuppliers() or the IPC handler:
+await this.db.run(
+  `UPDATE override_rules SET project_supplier_id = ?
+   WHERE project_supplier_id IN (${placeholders})`,
+  survivorId, ...losingIds
+);</code></pre>
+  <p>Single UPDATE statement. Exposed as <code>RuleStore.reassignSupplierRules(losingIds, survivorId)</code>, called from the <code>suppliers:merge</code> IPC handler.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>15. Temp Table Scoping <span class="new-badge">new</span></h2>
+
+<div class="arch-card">
+  <p><code>ClassificationRunner</code> owns the temp table lifecycle. Other services receive an optional <code>scopeTable?: string</code> parameter &mdash; they JOIN against it if present, otherwise fall back to <code>IN (...)</code>.</p>
+  <ul>
+    <li><strong>Created</strong> before Phase 1, <strong>dropped</strong> in <code>finally</code> block</li>
+    <li>UUID suffix prevents collision if concurrency is ever introduced</li>
+    <li>DuckDB temp tables are session-scoped &mdash; cleaned up on connection close even without explicit drop</li>
+    <li>All services share the same DuckDB connection (DI container) &mdash; temp table visible to all</li>
+  </ul>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>16. Group Management <span class="unchanged-badge">unchanged</span></h2>
+
+<div class="arch-card">
+  <p>All group operations (create, update, delete, reorder, cascade) remain as-is. At &le;100 groups, existing approach is correct and performant.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>17. IPC Contract</h2>
+
+<table>
+  <tr><th>Channel</th><th>Status</th><th>Change</th></tr>
+  <tr><td><code>rules:create</code></td><td><span class="changed-badge">changed</span></td><td>Validates FK targets + resolves <code>project_supplier_id</code> + syncs <code>rule_conditions</code></td></tr>
+  <tr><td><code>rules:previewApply</code></td><td><span class="changed-badge">changed</span></td><td>Returns <code>token</code> for cached reuse</td></tr>
+  <tr><td><code>rules:apply</code></td><td><span class="changed-badge">changed</span></td><td>Accepts optional <code>token</code> arg to skip re-evaluation</td></tr>
+  <tr><td><code>rules:delete</code></td><td><span class="removed-badge">removed</span></td><td>Removed from UI; internal only</td></tr>
+  <tr><td><code>rules:listByGroup</code></td><td><span class="new-badge">new</span></td><td><code>(groupId, limit, offset) &rarr; { rules, total }</code></td></tr>
+  <tr><td><code>changelog:listForRule</code></td><td><span class="new-badge">new</span></td><td><code>(ruleId, limit, offset) &rarr; { entries, total }</code></td></tr>
+  <tr><td><code>rules:list</code></td><td><span class="unchanged-badge">unchanged</span></td><td>Still returns grouped rules (used less by frontend)</td></tr>
+  <tr><td><code>rules:listPaginated</code></td><td><span class="unchanged-badge">unchanged</span></td><td></td></tr>
+  <tr><td><code>rules:createAndApply</code></td><td><span class="unchanged-badge">unchanged</span></td><td>Internal logic changed but API stays the same</td></tr>
+  <tr><td><code>rules:previewConflicts</code></td><td><span class="unchanged-badge">unchanged</span></td><td>Internal logic changed but API stays the same</td></tr>
+  <tr><td><code>rules:generate</code></td><td><span class="unchanged-badge">unchanged</span></td><td>Internal logic changed but API stays the same</td></tr>
+  <tr><td><code>rules:filterAssign</code></td><td><span class="unchanged-badge">unchanged</span></td><td>Internal logic changed but API stays the same</td></tr>
+  <tr><td><code>rules:setCategoryA</code></td><td><span class="unchanged-badge">unchanged</span></td><td>Internal logic changed but API stays the same</td></tr>
+  <tr><td>All group channels</td><td><span class="unchanged-badge">unchanged</span></td><td>No changes needed</td></tr>
+</table>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>18. Implementation Plan</h2>
+
+<div class="card">
+  <ol>
+    <li><strong>Add <code>rule_conditions</code> table</strong> &mdash; Schema migration in <code>database.ts</code>. Add indexes. Backfill from existing <code>grouped_conditions</code> JSON.</li>
+    <li><strong><code>decomposeConditions()</code> pure function</strong> &mdash; Used at write-time and for backfill.</li>
+    <li><strong>Wire sync points</strong> &mdash; <code>createRule</code>, <code>updateRule</code>, delete handlers maintain <code>rule_conditions</code> in same transaction.</li>
+    <li><strong><code>buildFieldOperatorCTEs()</code></strong> &mdash; Auto-generates SQL from <code>FILTER_VIRTUAL_EXPRS</code> &times; <code>OPERATOR_JOIN_TEMPLATES</code>.</li>
+    <li><strong><code>evaluateRulesBulk()</code></strong> &mdash; Single entry point. Same <code>Map</code> return type as current <code>evaluateRules()</code>.</li>
+    <li><strong>Swap callers</strong> &mdash; previewRules, applyRules, previewRuleConflicts, classification Phase 1 all use <code>evaluateRulesBulk()</code>.</li>
+    <li><strong>Remove</strong> <code>evaluateRules()</code>, <code>evaluateBulkSupplierRules()</code>, <code>evaluateComplexRules()</code>, <code>listAllRules()</code> from evaluation path.</li>
+    <li><strong>Add shared helpers</strong> &mdash; <code>extractSupplierNameCondition()</code>, <code>getProjectSupplierByName()</code>, <code>syncCatAState()</code>.</li>
+    <li><strong>Add <code>project_supplier_id</code> FK</strong> on <code>override_rules</code> + indexes + <code>reassignSupplierRules()</code> for merge.</li>
+    <li><strong>Token-based preview &rarr; apply caching.</strong></li>
+    <li><strong>Decouple classification</strong> &mdash; Phase 1 calls <code>evaluateRulesBulk({ scopeTable })</code>, temp table lifecycle in <code>ClassificationRunner</code>.</li>
+    <li><strong>AI rule generation</strong> &mdash; Per-supplier streaming, batch INSERT, SQL covered check.</li>
+    <li><strong>Frontend pagination</strong> &mdash; Per-group lazy loading, <code>rules:listByGroup</code>, react-virtuoso.</li>
+    <li><strong>IPC contract updates</strong> &mdash; Add/remove/change channels per &sect;17.</li>
+    <li><strong>Interface updates in <code>services.ts</code></strong> &mdash; All new public methods on interfaces before implementation.</li>
+  </ol>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>19. Scale Comparison: Current vs Proposed</h2>
+
+<p>All numbers for <strong>500K rules, 5M transactions, 10K suppliers, ~100 groups</strong>.</p>
+
+<table>
+  <tr>
+    <th>Operation</th>
+    <th>Current</th>
+    <th>Proposed</th>
+    <th>Improvement</th>
+  </tr>
+  <tr>
+    <td>Rule evaluation (full)</td>
+    <td style="background:var(--danger-bg)">500K sequential queries / 16+ min</td>
+    <td style="background:#f0fdf4">1 query with N equi-JOIN CTEs (N &asymp; 2-5)</td>
+    <td>10,000x+</td>
+  </tr>
+  <tr>
+    <td>Classification Phase 1</td>
+    <td style="background:var(--danger-bg)">5B queries / 29 days</td>
+    <td style="background:#f0fdf4">1 bulk query / seconds</td>
+    <td>~83,000x</td>
+  </tr>
+  <tr>
+    <td>createAndApply conflict check</td>
+    <td style="background:var(--danger-bg)">500K queries + 2&times; listAllRules</td>
+    <td style="background:#f0fdf4">1 scoped bulk query (higher-priority only)</td>
+    <td>10,000x+</td>
+  </tr>
+  <tr>
+    <td>Preview &rarr; Apply flow</td>
+    <td style="background:var(--warn-bg)">Full eval runs twice</td>
+    <td style="background:#f0fdf4">Eval runs once (token cache)</td>
+    <td>2x</td>
+  </tr>
+  <tr>
+    <td>Rule generation (50K suppliers)</td>
+    <td style="background:var(--danger-bg)">1M rows + 500K rules in memory; 100K INSERTs</td>
+    <td style="background:#f0fdf4">Per-supplier streaming; batch INSERT</td>
+    <td>~1000x memory</td>
+  </tr>
+  <tr>
+    <td>filterAndAssignToGroup</td>
+    <td style="background:var(--danger-bg)">500K rules in JS memory</td>
+    <td style="background:#f0fdf4">Single SQL UPDATE (property filters)</td>
+    <td>~10,000x</td>
+  </tr>
+  <tr>
+    <td>getCatARuleForSupplier</td>
+    <td style="background:var(--warn-bg)">50K Cat A rules loaded + parsed</td>
+    <td style="background:#f0fdf4">1 indexed SQL query</td>
+    <td>~50,000x</td>
+  </tr>
+  <tr>
+    <td>Frontend initial load</td>
+    <td style="background:var(--warn-bg)">400K objects via IPC (~200MB)</td>
+    <td style="background:#f0fdf4">100 group objects (~50KB)</td>
+    <td>~4000x payload</td>
+  </tr>
+  <tr>
+    <td>Deactivation modal</td>
+    <td style="background:var(--warn-bg)">100K changelog entries at once</td>
+    <td style="background:#f0fdf4">Summary count + 50 entries/page</td>
+    <td>~2000x initial</td>
+  </tr>
+</table>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>20. Test Matrix</h2>
+
+<div class="card">
+  <h3>Passing Tests &mdash; Benchmarked on <code>lifepoint-100k-03-24.c91</code> (100K txns, ~1000 rules)</h3>
+  <p>Scripts: <code>scripts/bench-rules-v3-full-matrix.ts</code>, <code>scripts/bench-rules-v3-generate.ts</code></p>
+
+  <table>
+    <tr><th>#</th><th>Scenario</th><th>What It Tests</th><th>Expected Behavior</th><th>Status</th></tr>
+    <tr>
+      <td>1</td>
+      <td>Simple rule &mdash; single <code>supplier_name = X</code></td>
+      <td>Basic equi-JOIN CTE match</td>
+      <td>All txns for that supplier matched</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Higher priority group wins over lower</td>
+      <td><code>DISTINCT ON ... ORDER BY priority DESC</code></td>
+      <td>P=10 rule gets all txns; P=2 rule gets 0</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>Same group &mdash; <code>created_at</code> tiebreak</td>
+      <td><code>ORDER BY ... created_at DESC</code></td>
+      <td>Newer rule wins; older rule gets 0</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>AND within group &mdash; supplier AND account_description</td>
+      <td><code>COUNT(*) = total_conditions</code></td>
+      <td>Only intersection of both conditions matched</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>AND partial match &mdash; one condition fails</td>
+      <td>Incomplete group &rarr; group_matched = FALSE</td>
+      <td>Zero matches (not partial)</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>OR across groups &mdash; either group passes</td>
+      <td><code>BOOL_OR(group_matched)</code></td>
+      <td>Union of both groups' matches</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>OR partial &mdash; only one group matches</td>
+      <td>One group nonexistent; other matches</td>
+      <td>Still passes &mdash; OR needs only one group</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>Ungrouped (NULL group, P=0) vs grouped (P=2)</td>
+      <td><code>COALESCE(rg.priority, 0)</code></td>
+      <td>Grouped wins all; ungrouped gets 0</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>Zero-match rule &mdash; nonexistent supplier</td>
+      <td>No false positives from JOIN</td>
+      <td>0 matches, doesn't pollute others</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>Unmatched transactions absent from results</td>
+      <td>DISTINCT ON only emits matched txns</td>
+      <td>Result count &lt; total txn count</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td>Three-way priority cascade (P=10 &gt; P=5 &gt; P=2)</td>
+      <td>Multi-level priority ordering</td>
+      <td>Only P=10 wins; P=5 and P=2 get 0</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td>Complex (AND, high) vs simple (low) &mdash; different groups</td>
+      <td>Priority across rule types</td>
+      <td>Complex high wins overlap; simple low gets remainder</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td><code>contains</code> operator &mdash; partial string match</td>
+      <td>ILIKE equi-JOIN CTE</td>
+      <td>All rows with substring match returned</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td>Two simple rules, different groups</td>
+      <td>Priority beats <code>created_at</code></td>
+      <td>Higher-priority simple rule wins</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+    <tr>
+      <td>15</td>
+      <td>Two complex (AND) rules, different groups</td>
+      <td>Priority for multi-condition rules</td>
+      <td>Higher-priority complex rule wins</td>
+      <td style="color:var(--green)">&check;</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>End-to-End: generate_rules_preview &rarr; Evaluation</h3>
+  <table>
+    <tr><th>Metric</th><th>Value</th></tr>
+    <tr><td>Rules generated</td><td>998 (996 single-category + 2 multi-category)</td></tr>
+    <tr><td>Conditions total</td><td>999</td></tr>
+    <tr><td>Bulk INSERT (rules + conditions)</td><td>81ms</td></tr>
+    <tr><td>Evaluation time</td><td>193ms</td></tr>
+    <tr><td>CTEs generated</td><td>2 (<code>supplier_name:equals</code>, <code>account_description:equals</code>)</td></tr>
+    <tr><td>Matched transactions</td><td>99,988 / 100,000</td></tr>
+    <tr><td>Rules with &ge;1 match</td><td>998 / 998 (100%)</td></tr>
+    <tr><td>Unmatched txns</td><td>12 (suppliers with no <code>human_reviewed</code> txns &mdash; correct)</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Tests Still Needed</h3>
+  <table>
+    <tr><th>#</th><th>Scenario</th><th>What It Tests</th><th>Why It Matters</th></tr>
+    <tr>
+      <td>16</td>
+      <td><code>not_equals</code> operator (anti-join)</td>
+      <td>Negation via anti-join or filtered CROSS JOIN</td>
+      <td>Verify anti-join pattern works without blowing up intermediate rows</td>
+    </tr>
+    <tr>
+      <td>17</td>
+      <td><code>greater_than</code> / <code>less_than</code> on numeric column</td>
+      <td>Range predicates with <code>TRY_CAST</code></td>
+      <td>Ensures <code>TRY_CAST</code> handles non-numeric values gracefully</td>
+    </tr>
+    <tr>
+      <td>18</td>
+      <td><code>is_null</code> operator (nullary)</td>
+      <td><code>JOIN ... ON TRUE</code> + <code>WHERE col IS NULL</code></td>
+      <td>Verify doesn't degrade to full CROSS JOIN</td>
+    </tr>
+    <tr>
+      <td>19</td>
+      <td>AND group with 3+ conditions across different fields</td>
+      <td><code>COUNT(*) = 3</code> in group_evals</td>
+      <td>Conditions from different CTEs must all be present</td>
+    </tr>
+    <tr>
+      <td>20</td>
+      <td>OR group where both groups match overlapping txns</td>
+      <td>Deduplication in OR mode</td>
+      <td>Same txn should appear once, not duplicated</td>
+    </tr>
+    <tr>
+      <td>21</td>
+      <td>Mixed AND/OR: <code>(supplier=X AND acct=Y) OR (supplier=X AND acct=Z)</code></td>
+      <td>Multiple AND groups connected by OR</td>
+      <td>Common pattern for multi-category supplier rules</td>
+    </tr>
+    <tr>
+      <td>22</td>
+      <td>Rule with virtual column (<code>classification_l1</code>)</td>
+      <td>Taxonomy JOIN in equi-JOIN CTE</td>
+      <td>Virtual columns require extra JOINs</td>
+    </tr>
+    <tr>
+      <td>23</td>
+      <td>Inactive rule ignored</td>
+      <td><code>r.is_active = TRUE</code> filter</td>
+      <td>Deactivated rules must not match any transactions</td>
+    </tr>
+    <tr>
+      <td>24</td>
+      <td>Sync drift &mdash; rule created without conditions</td>
+      <td><code>rule_conditions</code> matches JSON</td>
+      <td>Both writes must happen in a single transaction</td>
+    </tr>
+    <tr>
+      <td>25</td>
+      <td>Scale test: 10K+ rules, 500K+ transactions</td>
+      <td>Linear scaling (not quadratic)</td>
+      <td>Target: &lt;5s at 500K &times; 10K</td>
+    </tr>
+    <tr>
+      <td>26</td>
+      <td><code>starts_with</code> / <code>ends_with</code> operators</td>
+      <td>ILIKE prefix/suffix as JOIN predicates</td>
+      <td>Verify DuckDB optimizes as prefix scan</td>
+    </tr>
+    <tr>
+      <td>27</td>
+      <td><code>regex</code> operator</td>
+      <td><code>regexp_matches(col, rc.value)</code></td>
+      <td>Can't be equi-join; must fall back to filtered join</td>
+    </tr>
+    <tr>
+      <td>28</td>
+      <td>Backfill migration: existing JSON &rarr; <code>rule_conditions</code></td>
+      <td><code>decomposeConditions()</code> correctness</td>
+      <td>All existing rules must round-trip correctly</td>
+    </tr>
+    <tr>
+      <td>29</td>
+      <td>Rule update: conditions change &rarr; re-synced</td>
+      <td>DELETE + re-INSERT on update</td>
+      <td>No stale conditions after update</td>
+    </tr>
+    <tr>
+      <td>30</td>
+      <td>Scoped evaluation: temp table JOIN</td>
+      <td><code>evaluateRulesBulk({ scopeTable })</code></td>
+      <td>Must JOIN against temp table, no unscoped leakage</td>
+    </tr>
+  </table>
+</div>
+
+</div> <!-- end tab-proposed -->
+
+<!-- ================================================================ -->
+<!-- TAB 3: DECISIONS                                                  -->
+<!-- ================================================================ -->
+<div class="tab-panel" id="tab-decisions">
+
+<div class="arch-card">
+  <h3>About This Tab</h3>
+  <p>This tab documents the reasoning behind the key decisions in the Proposed System. The proposed tab contains the <em>what</em>; this tab contains the <em>why</em>.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>1. Why <code>rule_conditions</code> (Persistent Relational Table)</h2>
+
+<div class="card">
+  <h3>Problem</h3>
+  <p>The current system stores conditions as a JSON blob (<code>grouped_conditions</code>) on each rule. Every evaluation requires JS to parse the JSON, generate SQL per rule, and execute it &mdash; creating an N+1 loop (one query per rule).</p>
+
+  <h3>Decision</h3>
+  <p>Add a <code>rule_conditions</code> table as a <strong>materialized projection</strong> of the JSON. The JSON column is kept as source of truth for UI/editing; the relational table enables SQL-native bulk evaluation.</p>
+
+  <h3>Alternatives Considered</h3>
+  <ul>
+    <li><strong>Replace JSON entirely:</strong> Would require migrating all UI code that reads/writes <code>grouped_conditions</code>. Too much churn for the same result.</li>
+    <li><strong>DuckDB JSON functions:</strong> DuckDB can query JSON directly, but can't optimize JOIN predicates through JSON extraction. Still requires full table scans.</li>
+  </ul>
+
+  <h3>Risk: Sync Drift</h3>
+  <p>If <code>grouped_conditions</code> JSON and <code>rule_conditions</code> rows diverge, evaluation produces wrong results silently. Mitigated by wrapping both writes in a single DuckDB transaction and adding a startup validation check that compares row counts.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>2. Why Equi-JOIN Per (Field, Operator) &mdash; Not CROSS JOIN</h2>
+
+<div class="card">
+  <h3>The CROSS JOIN Failure</h3>
+  <p>The initial V2 design used a single CROSS JOIN with a CASE WHEN dispatch to evaluate all conditions against all transactions in one query. Benchmarked on <code>lifepoint-100k-03-24.c91</code> (100K transactions, 1000 rules, 1001 conditions):</p>
+
+  <table>
+    <tr><th>Approach</th><th>Time</th><th>Intermediate Rows</th></tr>
+    <tr><td>Current N+1 loop (1000 sequential queries)</td><td><strong>552ms</strong></td><td>N/A</td></tr>
+    <tr><td>V2 CROSS JOIN + CASE WHEN</td><td><strong>157,005ms</strong> (2.6 min)</td><td>100.1M</td></tr>
+    <tr><td style="background:#f0fdf4"><strong>Equi-JOIN CTEs</strong></td><td style="background:#f0fdf4"><strong>220ms</strong></td><td style="background:#f0fdf4">~100K (matches only)</td></tr>
+  </table>
+
+  <h3>Root Cause</h3>
+  <p>The CASE WHEN dispatch is a <em>row-level scalar expression</em>, not a <em>join predicate</em>. DuckDB cannot look inside <code>CASE rc.operator WHEN 'equals' THEN CASE rc.field WHEN 'supplier_name' THEN ps.supplier_name = rc.value END END</code> and recognize it as an equi-join. It must materialize every (condition &times; transaction) pair and evaluate the expression on each.</p>
+
+  <h3>The Fix</h3>
+  <p>Instead of one CROSS JOIN with opaque CASE WHEN, generate a separate CTE for each <code>(field, operator)</code> pair with a proper join predicate:</p>
+  <ul>
+    <li><strong>Hash-join complexity:</strong> O(conditions + transactions) per CTE, not O(conditions &times; transactions)</li>
+    <li><strong>Only matching rows flow through</strong></li>
+    <li><strong>Predicate pushdown:</strong> DuckDB pushes <code>rc.field = 'supplier_name'</code> into the scan</li>
+    <li><strong>Constant CTE count:</strong> Even 500K rules using <code>supplier_name = X</code> produce 1 CTE</li>
+  </ul>
+
+  <h3>Scaling Projections</h3>
+  <table>
+    <tr><th>Scenario</th><th>Current (N+1)</th><th>CROSS JOIN</th><th>Equi-JOIN</th></tr>
+    <tr>
+      <td>100K txns &times; 1K rules</td>
+      <td>547ms</td>
+      <td style="background:var(--danger-bg)">157,005ms</td>
+      <td style="background:#f0fdf4"><strong>220ms</strong></td>
+    </tr>
+    <tr>
+      <td>5M txns &times; 500K rules</td>
+      <td style="background:var(--danger-bg)">~16 min</td>
+      <td style="background:var(--danger-bg)">OOM / hours</td>
+      <td style="background:#f0fdf4"><strong>seconds to low minutes</strong></td>
+    </tr>
+  </table>
+
+  <p><strong>Why the 100K benchmark gain is modest (2.5x):</strong> With only 2 distinct field&times;operator pairs and 1000 rules, the N+1 loop is already fast (~0.5ms/query). The advantage grows with rule count &mdash; at 500K rules, N+1 takes 16 min while equi-JOIN remains a single query.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>3. Why Single <code>evaluateRulesBulk()</code> &mdash; Not Split Evaluation</h2>
+
+<div class="card">
+  <h3>The Split Evaluation Problem</h3>
+  <p>An earlier design split evaluation into two passes: a fast equi-JOIN for simple supplier-name rules, and a per-rule loop for complex multi-condition rules. This breaks when a complex rule in a <strong>higher-priority group</strong> should win over a simple rule in a lower-priority group.</p>
+
+  <h4>Example</h4>
+  <table>
+    <tr><th>Rule</th><th>Group Priority</th><th>Type</th><th>Conditions</th><th>Target</th></tr>
+    <tr><td>rule-A</td><td>10 (high)</td><td>Complex</td><td>supplier = 'Acme' AND amount &gt; 50K</td><td>tax-Strategic-IT</td></tr>
+    <tr><td>rule-B</td><td>1 (low)</td><td>Simple</td><td>supplier = 'Acme'</td><td>tax-IT-General</td></tr>
+  </table>
+  <p>Transaction tx-1: supplier = Acme, amount = $100K.</p>
+  <ul>
+    <li><strong>Correct:</strong> rule-A wins (priority 10 &gt; 1) &rarr; tax-Strategic-IT</li>
+    <li><strong>Split-eval:</strong> If simple JOIN runs first and claims tx-1 for rule-B, the complex pass never gets a chance.</li>
+  </ul>
+  <p><strong>First-match-wins semantics require a single ordered evaluation across all rule types.</strong> The equi-JOIN CTE approach achieves this &mdash; all rule types contribute CTEs to the same query, and <code>DISTINCT ON ... ORDER BY priority</code> picks the winner in one pass.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>4. COUNT vs BOOL_AND in group_evals</h2>
+
+<div class="card">
+  <h3>Problem</h3>
+  <p>The CROSS JOIN approach (V2) produced a <code>matched</code> boolean for every (condition &times; transaction) pair &mdash; including non-matches. <code>BOOL_AND(matched)</code> naturally checked "did all conditions pass?"</p>
+  <p>With equi-JOINs, non-matching pairs <strong>don't appear in the result at all</strong> (filtered out by the JOIN predicate). There's nothing to <code>BOOL_AND</code> over &mdash; only matches exist.</p>
+
+  <h3>Solution</h3>
+  <p>Count how many conditions in each group matched and compare against the total:</p>
+  <pre><code>COUNT(*) = MAX(rc_meta.total_conditions) AS group_matched</code></pre>
+  <p>If 3 out of 3 conditions matched &rarr; the group passes. If only 2 out of 3 appeared in condition_evals &rarr; one condition didn't match &rarr; group fails. Semantically equivalent to <code>BOOL_AND</code> but works with inner-join results.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>5. NOT Operator Strategy</h2>
+
+<div class="card">
+  <p>Negation operators (<code>not_equals</code>, <code>not_contains</code>) present a subtlety: <code>supplier_name != 'Acme'</code> as a JOIN predicate matches every <em>other</em> supplier, producing a massive result set.</p>
+
+  <h3>Decision: Anti-JOIN Pattern</h3>
+  <p>For negation, find rows that DO match the positive version, then exclude them. Alternatively, use a small CROSS JOIN scoped to just the negation conditions.</p>
+  <p><strong>Practical observation:</strong> Negation operators are &lt;1% of real rules. A CROSS JOIN for just these few conditions is cheap &mdash; the expense of the V2 CROSS JOIN was applying it to <em>all</em> conditions.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>6. Auto-Generated SQL from Registries</h2>
+
+<div class="card">
+  <p>The app already has column resolution infrastructure:</p>
+  <ol>
+    <li><code>VIRTUAL_COLUMN_REGISTRY</code> (<span class="file-loc">src/shared/virtual-columns.ts:17-28</span>) &mdash; field &rarr; <code>selectExpr</code> + <code>requiredJoin</code></li>
+    <li><code>FILTER_VIRTUAL_EXPRS</code> (<span class="file-loc">src/main/services/transactions.ts:46-57</span>) &mdash; field &rarr; SQL WHERE expression</li>
+    <li><code>resolveColumn()</code> (<span class="file-loc">src/main/services/transactions.ts:101-103</span>) &mdash; fallback: virtual or <code>t."column"</code></li>
+  </ol>
+  <p><code>buildFieldOperatorCTEs()</code> generates SQL from <code>FILTER_VIRTUAL_EXPRS</code> &times; <code>OPERATOR_JOIN_TEMPLATES</code>. Adding a new column or operator to the registries automatically extends rule evaluation. No hardcoded SQL to maintain.</p>
+
+  <h3>Virtual Columns</h3>
+  <p>Virtual columns (e.g., <code>supplier_name</code> lives on <code>project_suppliers</code>, not <code>transactions</code>) require subqueries to materialize the resolved column:</p>
+  <pre><code>-- For supplier_name (virtual column via JOIN):
+SELECT rc.rule_id, rc.group_idx, rc.condition_idx, txn.id AS txn_id
+FROM rule_conditions rc
+JOIN (
+  SELECT t.id, ps.supplier_name
+  FROM transactions t
+  LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+) txn ON txn.supplier_name = rc.value
+JOIN override_rules r ON rc.rule_id = r.id AND r.is_active = TRUE
+WHERE rc.field = 'supplier_name' AND rc.operator = 'equals'
+
+-- For physical columns (direct join):
+SELECT rc.rule_id, rc.group_idx, rc.condition_idx, t.id AS txn_id
+FROM rule_conditions rc
+JOIN transactions t ON t."account_description" = rc.value
+JOIN override_rules r ON rc.rule_id = r.id AND r.is_active = TRUE
+WHERE rc.field = 'account_description' AND rc.operator = 'equals'</code></pre>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>7. OR-Within-Group</h2>
+
+<div class="card">
+  <p>Current data uses AND-within-group universally. The <code>COUNT = total_conditions</code> check in group_evals implements AND semantics. If OR-within-group is ever needed, the check switches to <code>COUNT &gt; 0</code> for OR groups. This should be validated against actual data before implementing.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>8. Supplier FK vs String Denormalization</h2>
+
+<div class="card">
+  <p>An earlier design used <code>supplier_name_denorm</code> (a string copy of the supplier name). This creates staleness: renaming a supplier breaks all rules referencing the old name.</p>
+
+  <h3>Decision: <code>project_supplier_id</code> FK</h3>
+  <ul>
+    <li><strong>Renames are free:</strong> FK points to the same row regardless of name changes</li>
+    <li><strong>Merges require one UPDATE:</strong> <code>reassignSupplierRules(losingIds, survivorId)</code></li>
+    <li><strong>No JSON sync needed:</strong> The <code>groupedConditions</code> JSON still has the old name for display, but the FK drives the JOIN</li>
+  </ul>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>9. Architecture Review &mdash; 9 Invariants</h2>
+
+<div class="arch-card">
+  <table>
+    <tr><th>#</th><th>Invariant</th><th>Verdict</th><th>Action</th></tr>
+    <tr><td>1</td><td>DI Container</td><td style="color:var(--green)">&check; Pass</td><td>All new methods on existing DI-wired services</td></tr>
+    <tr><td>2</td><td>IPC Contract</td><td style="color:var(--amber)">&ofcir; Concern</td><td>Add <code>rules:listByGroup</code>, <code>changelog:listForRule</code> to <code>IPCInvokeMap</code>. Update signatures. Remove <code>rules:delete</code>.</td></tr>
+    <tr><td>3</td><td>DuckDB Safety</td><td style="color:var(--amber)">&ofcir; Concern</td><td>Temp table uses UUID suffix. All queries through promise queue. Do NOT parallelize complex rule loop.</td></tr>
+    <tr><td>4</td><td>Virtual Dimensions</td><td style="color:var(--green)">&check; Pass</td><td>No classification_l1/l2/l3 references in new queries</td></tr>
+    <tr><td>5</td><td>column_priorities</td><td style="color:var(--green)">&check; Pass</td><td>No import path changes</td></tr>
+    <tr><td>6</td><td>Interface Discipline</td><td style="color:var(--red)">&cross; Fixed</td><td>All new public methods on interfaces in <code>services.ts</code> before implementation</td></tr>
+    <tr><td>7</td><td>Dynamic Schema</td><td style="color:var(--green)">&check; Pass</td><td>New queries only reference base columns</td></tr>
+    <tr><td>8</td><td>supplier_name Virtual</td><td style="color:var(--green)">&check; Pass</td><td>Bulk JOINs via <code>project_supplier_id</code> FK. Renames free. Merge sync is single UPDATE.</td></tr>
+    <tr><td>9</td><td>Service Delegation</td><td style="color:var(--red)">&cross; Fixed</td><td>Raw SQL in <code>RuleStore</code> methods, not <code>ClassificationRunner</code>. Unscoped IDs via <code>TransactionStore.getUnclassifiedIds()</code>.</td></tr>
+  </table>
+  <p><strong>Constraint:</strong> The complex rule loop (if ever needed as fallback) must remain sequential &mdash; DuckDB's node-api does not support concurrent queries on a single connection.</p>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────── -->
+<h2>10. Evolution Comparison</h2>
+
+<div class="card">
+  <table>
+    <tr><th>Dimension</th><th>Current System</th><th>Proposed System</th></tr>
+    <tr>
+      <td>Evaluation queries</td>
+      <td>500K sequential</td>
+      <td><strong>1</strong> (equi-JOIN CTEs)</td>
+    </tr>
+    <tr>
+      <td>Priority correctness</td>
+      <td>Correct (sequential)</td>
+      <td style="background:#f0fdf4"><strong>Correct</strong> (DISTINCT ON)</td>
+    </tr>
+    <tr>
+      <td>100K &times; 1K benchmark</td>
+      <td>547ms</td>
+      <td style="background:#f0fdf4"><strong>220ms</strong></td>
+    </tr>
+    <tr>
+      <td>Intermediate rows</td>
+      <td>N/A</td>
+      <td style="background:#f0fdf4">Only matches</td>
+    </tr>
+    <tr>
+      <td>JS memory for rules</td>
+      <td>~250MB</td>
+      <td><strong>~0</strong></td>
+    </tr>
+    <tr>
+      <td>New schema</td>
+      <td>&mdash;</td>
+      <td><code>rule_conditions</code> + temp table</td>
+    </tr>
+    <tr>
+      <td>Write overhead</td>
+      <td>&mdash;</td>
+      <td>Condition decomposition on create/update</td>
+    </tr>
+    <tr>
+      <td>Operator extensibility</td>
+      <td>JS function</td>
+      <td><strong>Auto-generated equi-JOIN CTEs</strong></td>
+    </tr>
+    <tr>
+      <td>Query planner visibility</td>
+      <td>Full (literal SQL)</td>
+      <td style="background:#f0fdf4"><strong>Full</strong> (proper join predicates)</td>
+    </tr>
+    <tr>
+      <td>Classification phase 1</td>
+      <td>5B queries</td>
+      <td><strong>1 query (fast)</strong></td>
+    </tr>
+    <tr>
+      <td>Conflict detection</td>
+      <td>500K queries</td>
+      <td><strong>1 scoped bulk query</strong></td>
+    </tr>
+  </table>
+</div>
+
+</div> <!-- end tab-decisions -->
+
+</div> <!-- end container -->
+
+<script>
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelector(`.tab-btn[onclick="switchTab('${name}')"]`).classList.add('active');
+  window.scrollTo(0, 0);
+}
+function toggle(el) {
+  const wasActive = el.classList.contains('active');
+  closeAll();
+  if (!wasActive) {
+    el.classList.add('active');
+    document.getElementById('overlay').classList.add('active');
+  }
+}
+function closeAll() {
+  document.querySelectorAll('.scale-warn.active').forEach(el => el.classList.remove('active'));
+  document.getElementById('overlay').classList.remove('active');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
+</script>
+</body>
+</html>

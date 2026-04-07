@@ -104,7 +104,7 @@ export function createContainer(): ServiceContainer {
   transactions.setProjectStore(project); // break circular dep: project → transactions; transactions lazily references project
   const taxonomy = new TaxonomyStore(db, project);
   const suppliers = new SupplierService(db, supplierUniverse);
-  const rules = new RuleStore(db, transactions, project);
+  const rules = new RuleStore(db, transactions, project, suppliers);
   const ingest = new IngestService(db, transactions, suppliers, project, columnMappingAgent, eventBus);
   const exportSvc = new ExportService(db);
 

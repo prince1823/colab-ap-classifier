@@ -46,10 +46,6 @@ export interface IAppConfigService extends ILLMConfig {
   clearLicenseKey(): Promise<void>;
   getLicenseData(): { lastResult?: LicenseStatus; lastChecked?: number } | null;
   setLicenseData(data: { lastResult?: LicenseStatus; lastChecked?: number }): Promise<void>;
-  getLicenseServerUrl(): string | null;
-  setLicenseServerUrl(url: string): Promise<void>;
-  getLicensePublicKey(): string | null;
-  setLicensePublicKey(key: string): Promise<void>;
 }
 
 // ─── Database Layer ──────────────────────────────────────────────────────────
@@ -197,12 +193,16 @@ export interface SupplierService {
   normalizeAllTransactions(onProgress?: (done: number, total: number, step: string) => void): Promise<void>;
   assignAlias(supplierId: string, rawName: string): Promise<void>;
   getProjectAliases(supplierId: string): Promise<string[]>;
+  getProjectAliasesWithSpend(supplierId: string): Promise<{ rawName: string; spend: number; txnCount: number }[]>;
+  getProjectAliasesWithSpendBatch(supplierIds: string[]): Promise<Record<string, { rawName: string; spend: number; txnCount: number }[]>>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
   mergeSuppliers(survivorId: string, losingIds: string[]): Promise<void>;
   deleteSupplier(supplierId: string): Promise<void>;
   updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void>;
   listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
+  listProjectSuppliersPaginated(params: import('./suppliers').SupplierPaginationParams): Promise<import('./suppliers').PaginatedSuppliers>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
+  getProjectSupplierByName(name: string): Promise<ProjectSupplier | null>;
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;
   isTailSpend(supplierId: string): Promise<boolean>;
@@ -228,6 +228,7 @@ export interface SupplierService {
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
   listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
+  listRulesByGroup(groupId: string, limit: number, offset: number): Promise<{ rules: OverrideRule[]; total: number }>;
   getRule(id: string): Promise<OverrideRule | null>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
   createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number; skippedCount: number; changelogId?: string }>;
@@ -236,9 +237,11 @@ export interface RuleStore {
   deleteRule(ruleId: string): Promise<void>;
   setCategoryA(ruleId: string, value: boolean): Promise<void>;
   evaluateRules(transactionIds?: string[], ruleIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
-  previewRules(ruleIds: string[]): Promise<{ affectedRowCount: number; matchingRuleCount: number }>;
-  applyRules(ruleIds: string[]): Promise<{ matchedCount: number; ruleCount: number }>;
+  evaluateRulesBulk(opts?: { scopeTable?: string; scopeIds?: string[] }): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
+  previewRules(ruleIds: string[]): Promise<{ token: string; affectedRowCount: number; matchingRuleCount: number }>;
+  applyRules(ruleIds: string[], token?: string): Promise<{ matchedCount: number; ruleCount: number }>;
   generate_rules_preview(): Promise<GenerateRulesResult>;
+  reassignSupplierRules(losingIds: string[], survivorId: string): Promise<void>;
   // Group operations
   listGroups(): Promise<RuleGroup[]>;
   createGroup(input: RuleGroupCreate): Promise<{ id: string }>;
@@ -256,7 +259,7 @@ export interface ChangelogStore {
   listChangesPaginated(filter?: ChangelogFilter): Promise<PaginatedChangelog>;
   getCount(filter?: ChangelogFilter): Promise<number>;
   logChange(entry: Omit<ChangeLog, 'id' | 'createdAt'>): Promise<string>;
-  revertChange(changeId: string): Promise<void>;
+  revertChange(changeId: string): Promise<string | undefined>;
   listByRuleId(ruleId: string): Promise<ChangeLog[]>;
 }
 

@@ -157,6 +157,50 @@ describe('ChangelogStore', () => {
         `Cannot revert change ${id}: no old_values recorded`
       );
     });
+
+
+    it('should return warning and mark reverted when all rows are missing', async () => {
+      // txn-1 never inserted
+      const changeId = await store.logChange({
+        source: 'manual', affectedTable: 'transactions',
+        affectedIds: ['txn-1'], affectedCount: 1,
+        oldValues: { taxonomy_node_id: 'original-node' },
+        newValues: { taxonomy_node_id: 'changed-node' },
+        description: 'Change with no surviving rows',
+      });
+
+      const warning = await store.revertChange(changeId);
+      expect(warning).toMatch(/1 of 1 affected rows no longer exist/);
+
+      const changes = await store.listChanges();
+      expect(changes[0].isReverted).toBe(true);
+    });
+
+    it('should return warning when some rows are missing', async () => {
+      await db.run(
+        `INSERT INTO transactions (id, row_index, taxonomy_node_id) VALUES (?, ?, ?)`,
+        'txn-1', 0, 'changed-node'
+      );
+
+      const changeId = await store.logChange({
+        source: 'manual', affectedTable: 'transactions',
+        affectedIds: ['txn-1', 'txn-2'], affectedCount: 2,
+        oldValues: { taxonomy_node_id: 'original-node' },
+        newValues: { taxonomy_node_id: 'changed-node' },
+        description: 'Bulk change',
+      });
+
+      const warning = await store.revertChange(changeId);
+      expect(warning).toMatch(/1 of 2 affected rows no longer exist/);
+
+      const txn1 = await db.get<{ taxonomy_node_id: string }>(
+        'SELECT taxonomy_node_id FROM transactions WHERE id = ?', 'txn-1'
+      );
+      expect(txn1?.taxonomy_node_id).toBe('original-node');
+
+      const changes = await store.listChanges();
+      expect(changes[0].isReverted).toBe(true);
+    });
   });
 
   describe('filterContext', () => {

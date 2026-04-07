@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { clsx } from 'clsx'
 import DataUploadStep from './data-steps/DataUploadStep'
 import DataMappingStep, { type ColumnState } from './data-steps/DataMappingStep'
@@ -29,6 +29,7 @@ const STEPS: { key: Step; label: string }[] = [
 
 export default function DataView() {
   const navigate = useNavigate()
+  const location = useLocation()
   const refreshMetadata = useWorkflowStore((s) => s.refreshMetadata)
   const refreshGateState = useWorkflowStore((s) => s.refreshGateState)
   const projectFilePath = useWorkflowStore((s) => s.projectFilePath)
@@ -36,7 +37,7 @@ export default function DataView() {
   const [step, setStep] = useState<Step>('upload')
   const [completedUploads, setCompletedUploads] = useState<CompletedUpload[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [uploadStats, setUploadStats] = useState<Record<string, { classifiedCount: number }>>({})
+  const [uploadStats, setUploadStats] = useState<Record<string, { classifiedCount: number; humanReviewedCount: number }>>({})
 
   // Active upload/mapping cycle state
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
@@ -82,10 +83,19 @@ export default function DataView() {
     }).catch((e) => {
       showError('Failed to load upload history', e)
     })
+  }, [projectFilePath])
+
+  // Refresh upload stats whenever the user navigates back to /data.
+  // DataView is keep-alive (never unmounts), so the mount effect above only
+  // runs once per project. Without this, classifiedCount goes stale after
+  // the user classifies rows on another page, causing the delete dialog to
+  // skip the force flag and the backend to reject the deletion.
+  useEffect(() => {
+    if (location.pathname !== '/data' || !projectFilePath) return
     ipc.ingest.getUploadStatsBatch().then(setUploadStats).catch((e) => {
       showError('Failed to load upload stats', e)
     })
-  }, [projectFilePath])
+  }, [location.pathname, projectFilePath])
 
   // Listen for import progress events from the backend
   useEffect(() => {
@@ -203,7 +213,7 @@ export default function DataView() {
         },
       ])
       // New imports have no classified rows yet — seed stats so the delete button shows
-      setUploadStats((prev) => ({ ...prev, [result.uploadId]: { classifiedCount: 0 } }))
+      setUploadStats((prev) => ({ ...prev, [result.uploadId]: { classifiedCount: 0, humanReviewedCount: 0 } }))
       // Track so we can delete if user goes back and re-imports
       setActiveUploadId(result.uploadId)
 

@@ -6,7 +6,7 @@ import type { CSVPreview, DeriveMappingsSource, CompletedUpload, DerivedMappings
 
 interface Props {
   completedUploads: CompletedUpload[]
-  uploadStats: Record<string, { classifiedCount: number }>
+  uploadStats: Record<string, { classifiedCount: number; humanReviewedCount: number }>
   onFileReady: (filePath: string, preview: CSVPreview, source: DeriveMappingsSource) => void
   onDeleteUpload: (uploadId: string, force?: boolean) => Promise<void>
   onProceedToPriority: () => void

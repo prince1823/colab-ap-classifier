@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import type {
   Database,
   TaxonomyStore as ITaxonomyStore,
@@ -92,6 +93,10 @@ export class ClassificationRunner implements IClassificationRunner {
     this.isRunningFlag = true;
     this.isStopped = false;
 
+    // Scope temp table — created once for filtered runs, reused in Phase 1 to avoid
+    // spreading large ID arrays as function arguments (causes call stack overflow).
+    let scopeTempTable: string | null = null;
+
     try {
       const scopedIds = await this.resolveScopedIds(groupedFilter);
 
@@ -111,14 +116,23 @@ export class ClassificationRunner implements IClassificationRunner {
           return;
         }
 
-        const placeholders = Array.from(scopedIds).map(() => '?').join(',');
+        // Build scope temp table once — reused for supplier lookup and Phase 1
+        const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+        scopeTempTable = `_target_txns_${runId}`;
+        await this.db.run(`CREATE TEMP TABLE ${scopeTempTable} (id VARCHAR PRIMARY KEY)`);
+        const scopeArr = Array.from(scopedIds);
+        for (let i = 0; i < scopeArr.length; i += 10_000) {
+          const chunk = scopeArr.slice(i, i + 10_000);
+          const ph = chunk.map(() => '(?)').join(',');
+          await this.db.run(`INSERT INTO ${scopeTempTable} VALUES ${ph}`, ...chunk);
+        }
+
         supplierRows = await this.db.all<{ id: string; supplier_name: string }>(
           `SELECT DISTINCT ps.id, ps.supplier_name
            FROM project_suppliers ps
            JOIN transactions t ON t.project_supplier_id = ps.id
-           WHERE t.id IN (${placeholders})
-           ORDER BY ps.supplier_name`,
-          ...Array.from(scopedIds)
+           WHERE t.id IN (SELECT id FROM ${scopeTempTable})
+           ORDER BY ps.supplier_name`
         );
       } else {
         supplierRows = await this.db.all<{ id: string; supplier_name: string }>(
@@ -185,49 +199,82 @@ export class ClassificationRunner implements IClassificationRunner {
         );
       }
 
-      // ── Phase 1: Apply override rules per supplier ──
-      // First pass: apply rules and collect non-tail-spend suppliers that still have unclassified txns
+      // ── Phase 1: Bulk rule evaluation (single SQL pass) ──
+      {
+        // Reuse scopeTempTable if already built (filtered run), otherwise build from unclassified
+        let phase1Table: string | null = scopeTempTable;
+        let phase1OwnedTable = false;
+
+        if (!phase1Table) {
+          const unclassifiedIds = (await this.db.all<{ id: string }>(
+            "SELECT id FROM transactions WHERE classification_status = 'unclassified'"
+          )).map(r => r.id);
+
+          if (unclassifiedIds.length > 0) {
+            const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+            phase1Table = `_target_txns_${runId}`;
+            phase1OwnedTable = true;
+            await this.db.run(`CREATE TEMP TABLE ${phase1Table} (id VARCHAR PRIMARY KEY)`);
+            for (let i = 0; i < unclassifiedIds.length; i += 10_000) {
+              const chunk = unclassifiedIds.slice(i, i + 10_000);
+              const ph = chunk.map(() => '(?)').join(',');
+              await this.db.run(`INSERT INTO ${phase1Table} VALUES ${ph}`, ...chunk);
+            }
+          }
+        }
+
+        if (phase1Table) {
+          const scopeTable = phase1Table;
+          try {
+            // Single bulk evaluation
+            const ruleMatches = await this.rules.evaluateRulesBulk({ scopeTable });
+
+            // Batch UPDATE by target node
+            const txnsByRuleAndNode = new Map<string, { ruleId: string; targetNodeId: string; ids: string[] }>();
+            for (const [txnId, match] of ruleMatches.entries()) {
+              const key = `${match.ruleId}::${match.targetTaxonomyNodeId}`;
+              let entry = txnsByRuleAndNode.get(key);
+              if (!entry) {
+                entry = { ruleId: match.ruleId, targetNodeId: match.targetTaxonomyNodeId, ids: [] };
+                txnsByRuleAndNode.set(key, entry);
+              }
+              entry.ids.push(txnId);
+            }
+
+            for (const { ruleId, targetNodeId, ids } of txnsByRuleAndNode.values()) {
+              await this.transactions.updateTransactions(
+                { ids, taxonomyNodeId: targetNodeId, classificationStatus: 'classified_by_rule', appliedRuleId: ruleId },
+                'rule'
+              );
+            }
+          } finally {
+            // Only drop if we created this table (not scopeTempTable, which is cleaned up in outer finally)
+            if (phase1OwnedTable) {
+              try { await this.db.run(`DROP TABLE IF EXISTS ${scopeTable}`); } catch { /* ignore */ }
+            }
+          }
+        }
+      }
+
+      if (this.isStopped) return;
+
+      // ── After Phase 1: Collect suppliers that still have unclassified transactions ──
       const nonTailSpendSuppliers: Array<{ id: string; supplier_name: string; l1_l2_paths: string[] | null }> = [];
       const tailSpendSuppliers: Array<{ id: string; supplier_name: string; l1_l2_paths: string[] | null }> = [];
 
       for (const supplier of supplierRows) {
         if (this.isStopped) break;
 
-        // Get transactions for this supplier
+        // Get remaining unmatched transactions for this supplier
         const txnRows = await this.getSupplierTransactions(supplier.id, scopedIds);
         if (txnRows.length === 0) {
           processedSuppliers++;
           continue;
         }
 
-        // Apply override rules
-        const txnIds = txnRows.map((r) => String(r.id));
-        const ruleMatches = await this.rules.evaluateRules(txnIds);
-
-        const txnsByRuleAndNode = new Map<string, { ruleId: string; targetNodeId: string; ids: string[] }>();
-        const matchedTxnIds = new Set<string>();
-
-        for (const [txnId, match] of ruleMatches.entries()) {
-          const key = `${match.ruleId}::${match.targetTaxonomyNodeId}`;
-          let entry = txnsByRuleAndNode.get(key);
-          if (!entry) {
-            entry = { ruleId: match.ruleId, targetNodeId: match.targetTaxonomyNodeId, ids: [] };
-            txnsByRuleAndNode.set(key, entry);
-          }
-          entry.ids.push(txnId);
-          matchedTxnIds.add(txnId);
-        }
-
-        for (const { ruleId, targetNodeId, ids } of txnsByRuleAndNode.values()) {
-          await this.transactions.updateTransactions(
-            { ids, taxonomyNodeId: targetNodeId, classificationStatus: 'classified_by_rule', appliedRuleId: ruleId },
-            'rule'
-          );
-        }
-
-        // Check if any unmatched transactions remain
-        const unmatchedCount = txnIds.length - matchedTxnIds.size;
-        if (unmatchedCount === 0) {
+        // Check if any unclassified remain (rules may have classified them all)
+        const unclassifiedTxns = txnRows.filter(r => r.classification_status === 'unclassified');
+        if (unclassifiedTxns.length === 0) {
           processedSuppliers++;
           continue;
         }
@@ -509,6 +556,9 @@ export class ClassificationRunner implements IClassificationRunner {
     } finally {
       this.isRunningFlag = false;
       this.isStopped = false;
+      if (scopeTempTable) {
+        try { await this.db.run(`DROP TABLE IF EXISTS ${scopeTempTable}`); } catch { /* ignore */ }
+      }
     }
   }
 

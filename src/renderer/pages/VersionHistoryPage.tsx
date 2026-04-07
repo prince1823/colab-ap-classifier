@@ -65,11 +65,30 @@ function getChangedFields(
     ...Object.keys(newVals || {}),
   ])
 
+  // Build a set of distinct old values per field from per-transaction data (if available)
+  const perTxn = oldVals?._perTransaction as Record<string, Record<string, unknown>> | undefined
+
   for (const key of allKeys) {
-    if (key === 'id' || key === 'updated_at' || key === 'created_at') continue
+    if (key === 'id' || key === 'updated_at' || key === 'created_at' || key === '_perTransaction') continue
     const oldVal = oldVals?.[key]
     const newVal = newVals?.[key]
-    const oldStr = formatValue(oldVal, taxonomyMap)
+
+    // Determine "from" display: show distinct old values when per-transaction data exists
+    let oldStr: string
+    if (perTxn) {
+      const distinctOldStrs = new Set(
+        Object.values(perTxn).map((row) => formatValue(row[key], taxonomyMap))
+      )
+      if (distinctOldStrs.size > 1) {
+        const vals = [...distinctOldStrs].slice(0, 3).join(', ')
+        oldStr = distinctOldStrs.size > 3 ? `Mixed (${vals}, …)` : `Mixed (${vals})`
+      } else {
+        oldStr = formatValue(oldVal, taxonomyMap)
+      }
+    } else {
+      oldStr = formatValue(oldVal, taxonomyMap)
+    }
+
     const newStr = formatValue(newVal, taxonomyMap)
     if (oldStr !== newStr) {
       changes.push({ field: humanizeField(key), from: oldStr, to: newStr })

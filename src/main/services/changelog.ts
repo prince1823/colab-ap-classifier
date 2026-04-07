@@ -168,10 +168,10 @@ export class ChangelogStore implements IChangelogStore {
     } else {
       // Revert: restore the old values
       if (!change.oldValues) throw new Error(`Cannot revert change ${changeId}: no old_values recorded`);
-      const columns = Object.keys(change.oldValues);
+
+      // Determine which columns to revert (exclude internal metadata key)
+      const columns = Object.keys(change.oldValues).filter((k) => k !== '_perTransaction');
       if (columns.length > 0 && change.affectedIds.length > 0) {
-        const setClauses = columns.map((col) => `${col} = ?`).join(', ');
-        const setValues = columns.map((col) => change.oldValues![col]);
         const existingPlaceholders = change.affectedIds.map(() => '?').join(', ');
 
         const existingRows = await this.db.all<{ id: string }>(
@@ -183,12 +183,36 @@ export class ChangelogStore implements IChangelogStore {
         const revertableIds = change.affectedIds.filter((id) => existingIds.has(id));
 
         if (revertableIds.length > 0) {
-          const revertPlaceholders = revertableIds.map(() => '?').join(', ');
-          await this.db.run(
-            `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${revertPlaceholders})`,
-            ...setValues,
-            ...revertableIds
-          );
+          const perTransaction = change.oldValues._perTransaction as
+            | Record<string, Record<string, unknown>>
+            | undefined;
+
+          if (perTransaction) {
+            // Per-row revert: restore each transaction to its own prior state
+            for (const id of revertableIds) {
+              const rowOld = perTransaction[id];
+              if (!rowOld) continue;
+              const rowCols = Object.keys(rowOld);
+              if (rowCols.length === 0) continue;
+              const rowSetClauses = rowCols.map((col) => `${col} = ?`).join(', ');
+              const rowSetValues = rowCols.map((col) => rowOld[col]);
+              await this.db.run(
+                `UPDATE ${change.affectedTable} SET ${rowSetClauses} WHERE id = ?`,
+                ...rowSetValues,
+                id
+              );
+            }
+          } else {
+            // Legacy fallback: apply same old values to all rows
+            const setClauses = columns.map((col) => `${col} = ?`).join(', ');
+            const setValues = columns.map((col) => change.oldValues![col]);
+            const revertPlaceholders = revertableIds.map(() => '?').join(', ');
+            await this.db.run(
+              `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${revertPlaceholders})`,
+              ...setValues,
+              ...revertableIds
+            );
+          }
         }
 
         await this.db.run('UPDATE change_log SET is_reverted = TRUE WHERE id = ?', changeId);

@@ -172,11 +172,11 @@ function ChangeTransactionPanel({
     return cols
   })()
 
-  // All column keys: supplier, classification, then dynamic cols
-  const allCols = ['__supplier', '__classification', ...displayCols]
+  // All column keys: supplier, before classification, current classification, then dynamic cols
+  const allCols = ['__supplier', '__before_classification', '__classification', ...displayCols]
 
   // Column widths state (resizable)
-  const defaultWidths: Record<string, number> = { __supplier: 180, __classification: 220 }
+  const defaultWidths: Record<string, number> = { __supplier: 180, __before_classification: 220, __classification: 220 }
   for (const col of displayCols) defaultWidths[col] = 150
 
   const [colWidths, setColWidths] = useState<Record<string, number>>(defaultWidths)
@@ -184,7 +184,7 @@ function ChangeTransactionPanel({
 
   // Reset widths when columns change
   useEffect(() => {
-    const widths: Record<string, number> = { __supplier: 180, __classification: 220 }
+    const widths: Record<string, number> = { __supplier: 180, __before_classification: 220, __classification: 220 }
     for (const col of displayCols) widths[col] = 150
     setColWidths(widths)
   }, [displayCols.join(',')])
@@ -213,14 +213,41 @@ function ChangeTransactionPanel({
     document.body.style.userSelect = 'none'
   }
 
+  // Build a lookup from transaction ID → before classification path using _perTransaction
+  const perTxn = entry.oldValues?._perTransaction as Record<string, Record<string, unknown>> | undefined
+  const [taxonomyMap, setTaxonomyMap] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    ipc.taxonomy.getNodes().then(nodes => {
+      setTaxonomyMap(new Map(nodes.map(n => [n.id, n.fullPath])))
+    }).catch(() => {})
+  }, [])
+
+  const getBeforeClassification = (txId: string): string => {
+    if (!perTxn) {
+      // Legacy: all had the same old value
+      const oldTaxId = entry.oldValues?.taxonomy_node_id as string | null
+      if (!oldTaxId) return 'unclassified'
+      const path = taxonomyMap.get(oldTaxId)
+      return path ? path.split('|').map(s => s.trim()).join(' > ') : 'unclassified'
+    }
+    const rowOld = perTxn[txId]
+    if (!rowOld) return '-'
+    const taxId = rowOld.taxonomy_node_id as string | null
+    if (!taxId) return 'unclassified'
+    const path = taxonomyMap.get(taxId)
+    return path ? path.split('|').map(s => s.trim()).join(' > ') : 'unclassified'
+  }
+
   const colLabel = (col: string) => {
     if (col === '__supplier') return 'Supplier'
+    if (col === '__before_classification') return 'Before Classification'
     if (col === '__classification') return 'Classification'
     return col.replace(/_/g, ' ')
   }
 
   const cellValue = (tx: Transaction, col: string) => {
     if (col === '__supplier') return String(tx.canonicalFields.supplier_name ?? '-')
+    if (col === '__before_classification') return getBeforeClassification(tx.id)
     if (col === '__classification') return tx.classificationPath?.split('|').map(s => s.trim()).join(' > ') ?? '-'
     return String(tx.canonicalFields[col] ?? '-')
   }

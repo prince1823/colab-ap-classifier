@@ -189,10 +189,12 @@ export class ChangelogStore implements IChangelogStore {
 
           if (perTransaction) {
             // Per-row revert: restore each transaction to its own prior state
+            // Skip display-only keys that aren't physical columns
+            const skipKeys = new Set(['supplier_name']);
             for (const id of revertableIds) {
               const rowOld = perTransaction[id];
               if (!rowOld) continue;
-              const rowCols = Object.keys(rowOld);
+              const rowCols = Object.keys(rowOld).filter((k) => !skipKeys.has(k));
               if (rowCols.length === 0) continue;
               const rowSetClauses = rowCols.map((col) => `${col} = ?`).join(', ');
               const rowSetValues = rowCols.map((col) => rowOld[col]);

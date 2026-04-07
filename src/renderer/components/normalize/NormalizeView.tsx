@@ -767,8 +767,17 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
       )}
 
       {/* Table */}
-      <div ref={tableRef} className="flex-1 overflow-auto outline-none" tabIndex={-1} onClick={focusOuter}>
-        {totalFiltered === 0 ? (
+      <div ref={tableRef} className="flex-1 overflow-auto outline-none relative" tabIndex={-1} onClick={focusOuter}>
+        {/* Page loading overlay */}
+        {pageLoading && !data.csvMode && (
+          <div className="absolute inset-0 bg-white/60 z-20 flex items-center justify-center">
+            <svg className="h-5 w-5 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+        )}
+        {totalFiltered === 0 && !pageLoading ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
             {searchQuery ? 'No suppliers match your search' : 'No suppliers found'}
           </div>

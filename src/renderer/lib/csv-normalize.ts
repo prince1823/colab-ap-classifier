@@ -167,6 +167,8 @@ export function parseCsvToNormalizeData(csvString: string): CsvModeData {
       mappedTaxonomyPaths: null,
       universeMatch: false,
       isResearched: false,
+      l1L2Path: null,
+      categoryASupplier: false,
       createdAt: new Date().toISOString(),
       transactionCount: info?.txns ?? 0,
       totalSpend: info?.spend ?? 0,

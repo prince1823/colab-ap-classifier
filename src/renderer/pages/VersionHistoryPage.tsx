@@ -709,7 +709,7 @@ export default function VersionHistoryPage() {
                             {(entry.newValues.targetPath as string).replace(/\|/g, ' > ')}
                           </p>
                         </div>
-                        {entry.newValues.conditions && Array.isArray(entry.newValues.conditions) && (
+                        {Array.isArray(entry.newValues.conditions) && (
                           <div>
                             <p className="text-[10px] font-medium text-gray-500 uppercase mb-1">Conditions</p>
                             <div className="space-y-1">

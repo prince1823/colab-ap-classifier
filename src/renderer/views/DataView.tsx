@@ -36,7 +36,7 @@ export default function DataView() {
   const [step, setStep] = useState<Step>('upload')
   const [completedUploads, setCompletedUploads] = useState<CompletedUpload[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [uploadStats, setUploadStats] = useState<Record<string, { classifiedCount: number }>>({})
+  const [uploadStats, setUploadStats] = useState<Record<string, { classifiedCount: number; humanReviewedCount: number }>>({})
 
   // Active upload/mapping cycle state
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
@@ -203,7 +203,7 @@ export default function DataView() {
         },
       ])
       // New imports have no classified rows yet — seed stats so the delete button shows
-      setUploadStats((prev) => ({ ...prev, [result.uploadId]: { classifiedCount: 0 } }))
+      setUploadStats((prev) => ({ ...prev, [result.uploadId]: { classifiedCount: 0, humanReviewedCount: 0 } }))
       // Track so we can delete if user goes back and re-imports
       setActiveUploadId(result.uploadId)
 

@@ -149,6 +149,7 @@ export interface IPCInvokeMap {
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };
   'changelog:revert': { args: [changeId: string]; result: string | undefined };
+  'changelog:listByRule': { args: [ruleId: string]; result: ChangeLog[] };
 
   // Feedback
   'feedback:analyze': { args: [input: FeedbackAnalyzeInput]; result: FeedbackRecommendation };

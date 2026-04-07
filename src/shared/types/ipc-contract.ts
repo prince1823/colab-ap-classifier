@@ -106,6 +106,7 @@ export interface IPCInvokeMap {
   'suppliers:distinctValues':  { args: [field: string, limit?: number]; result: string[] };
   'suppliers:getAliases':      { args: [supplierId: string]; result: string[] };
   'suppliers:getAliasesWithSpend': { args: [supplierId: string]; result: { rawName: string; spend: number; txnCount: number }[] };
+  'suppliers:getAliasesWithSpendBatch': { args: [supplierIds: string[]]; result: Record<string, { rawName: string; spend: number; txnCount: number }[]> };
   'suppliers:assignAlias':     { args: [supplierId: string, rawName: string]; result: void };
   'suppliers:rename':          { args: [supplierId: string, newName: string]; result: void };
   'suppliers:merge':           { args: [survivorId: string, losingIds: string[]]; result: void };

@@ -105,26 +105,25 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Auto-load aliases in batches (project mode only)
-  const ALIAS_BATCH_SIZE = 50
+  // Auto-load aliases in batches (project mode only) — single batched IPC per chunk
+  const ALIAS_BATCH_SIZE = 500
   const loadAliasesInBatches = useCallback(async (supplierIds: string[]) => {
     for (let i = 0; i < supplierIds.length; i += ALIAS_BATCH_SIZE) {
       const batch = supplierIds.slice(i, i + ALIAS_BATCH_SIZE)
-      const results = await Promise.all(
-        batch.map(async (id) => {
-          try {
-            const aliases = await ipc.suppliers.getAliasesWithSpend(id) as AliasData[]
-            return [id, aliases] as const
-          } catch {
-            return [id, [] as AliasData[]] as const
-          }
+      try {
+        const result = await ipc.suppliers.getAliasesWithSpendBatch(batch) as Record<string, AliasData[]>
+        setProjAliasCache(prev => {
+          const next = new Map(prev)
+          for (const id of batch) next.set(id, result[id] ?? [])
+          return next
         })
-      )
-      setProjAliasCache(prev => {
-        const next = new Map(prev)
-        for (const [id, data] of results) next.set(id, data)
-        return next
-      })
+      } catch {
+        setProjAliasCache(prev => {
+          const next = new Map(prev)
+          for (const id of batch) next.set(id, [])
+          return next
+        })
+      }
     }
   }, [])
 

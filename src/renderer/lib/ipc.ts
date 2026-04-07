@@ -160,6 +160,7 @@ export const ipc = {
     distinctValues: (field: string, limit?: number) => invoke('suppliers:distinctValues', field, limit),
     getAliases: (supplierId: string) => invoke('suppliers:getAliases', supplierId),
     getAliasesWithSpend: (supplierId: string) => invoke('suppliers:getAliasesWithSpend', supplierId),
+    getAliasesWithSpendBatch: (supplierIds: string[]) => invoke('suppliers:getAliasesWithSpendBatch', supplierIds),
     assignAlias: (supplierId: string, rawName: string) => invoke('suppliers:assignAlias', supplierId, rawName),
     rename: (supplierId: string, newName: string) => invoke('suppliers:rename', supplierId, newName),
     merge: (survivorId: string, losingIds: string[]) => invoke('suppliers:merge', survivorId, losingIds),

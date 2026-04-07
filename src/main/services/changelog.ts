@@ -153,7 +153,7 @@ export class ChangelogStore implements IChangelogStore {
     return id;
   }
 
-  async revertChange(changeId: string): Promise<void> {
+  async revertChange(changeId: string): Promise<string | undefined> {
     const row = await this.db.get<ChangeLogRow>(
       'SELECT * FROM change_log WHERE id = ?',
       changeId
@@ -172,14 +172,33 @@ export class ChangelogStore implements IChangelogStore {
       if (columns.length > 0 && change.affectedIds.length > 0) {
         const setClauses = columns.map((col) => `${col} = ?`).join(', ');
         const setValues = columns.map((col) => change.oldValues![col]);
-        const placeholders = change.affectedIds.map(() => '?').join(', ');
-        await this.db.run(
-          `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
-          ...setValues,
+        const existingPlaceholders = change.affectedIds.map(() => '?').join(', ');
+
+        const existingRows = await this.db.all<{ id: string }>(
+          `SELECT CAST(id AS VARCHAR) as id FROM ${change.affectedTable} WHERE id IN (${existingPlaceholders})`,
           ...change.affectedIds
         );
+        const existingIds = new Set(existingRows.map((r) => r.id));
+        const missingIds = change.affectedIds.filter((id) => !existingIds.has(id));
+        const revertableIds = change.affectedIds.filter((id) => existingIds.has(id));
+
+        if (revertableIds.length > 0) {
+          const revertPlaceholders = revertableIds.map(() => '?').join(', ');
+          await this.db.run(
+            `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${revertPlaceholders})`,
+            ...setValues,
+            ...revertableIds
+          );
+        }
+
+        await this.db.run('UPDATE change_log SET is_reverted = TRUE WHERE id = ?', changeId);
+
+        if (missingIds.length > 0) {
+          return `${missingIds.length} of ${change.affectedIds.length} affected rows no longer exist and were skipped`;
+        }
+      } else {
+        await this.db.run('UPDATE change_log SET is_reverted = TRUE WHERE id = ?', changeId);
       }
-      await this.db.run('UPDATE change_log SET is_reverted = TRUE WHERE id = ?', changeId);
     }
   }
 

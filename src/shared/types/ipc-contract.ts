@@ -147,7 +147,7 @@ export interface IPCInvokeMap {
 
   // Changelog
   'changelog:list':   { args: [filter?: ChangelogFilter]; result: PaginatedChangelog };
-  'changelog:revert': { args: [changeId: string]; result: void };
+  'changelog:revert': { args: [changeId: string]; result: string | undefined };
 
   // Feedback
   'feedback:analyze': { args: [input: FeedbackAnalyzeInput]; result: FeedbackRecommendation };

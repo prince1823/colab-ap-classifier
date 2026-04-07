@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 import { ipc } from '../lib/ipc'
-import { showError } from '../lib/toast-errors'
+import { showError, showWarning } from '../lib/toast-errors'
 
 interface UndoEntry {
   type: 'reclassify';
@@ -40,7 +40,8 @@ export function useUndoRedo({ onUndoRedo }: UseUndoRedoOptions = {}) {
     if (!entry) return
 
     try {
-      await ipc.changelog.revert(entry.changelogId)
+      const warning = await ipc.changelog.revert(entry.changelogId)
+      if (warning) showWarning('Undo', warning)
       redoStack.current.push(entry)
       capStack(redoStack.current)
       updateFlags()
@@ -57,7 +58,8 @@ export function useUndoRedo({ onUndoRedo }: UseUndoRedoOptions = {}) {
     if (!entry) return
 
     try {
-      await ipc.changelog.revert(entry.changelogId)
+      const warning = await ipc.changelog.revert(entry.changelogId)
+      if (warning) showWarning('Redo', warning)
       undoStack.current.push(entry)
       capStack(undoStack.current)
       updateFlags()

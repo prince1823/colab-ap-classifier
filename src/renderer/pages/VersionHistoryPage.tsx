@@ -6,6 +6,7 @@ import type { Transaction } from '../../shared/types/transactions'
 import type { FeedbackRecommendation } from '../../shared/types/feedback'
 import SystemFeedbackModal from '../components/review/SystemFeedbackModal'
 import SystemFeedbackDialog from '../components/review/SystemFeedbackDialog'
+import { showWarning } from '../lib/toast-errors'
 
 /** Friendly labels for known fields */
 const FIELD_LABELS: Record<string, string> = {
@@ -352,7 +353,8 @@ export default function VersionHistoryPage() {
     setReverting(changeId)
     setError(null)
     try {
-      await ipc.changelog.revert(changeId)
+      const warning = await ipc.changelog.revert(changeId)
+      if (warning) showWarning('Revert', warning)
       await fetchPage(page)
       if (expandedTxId === changeId) setExpandedTxId(null)
     } catch (e) {

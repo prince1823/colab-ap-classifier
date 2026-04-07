@@ -258,7 +258,7 @@ export interface ChangelogStore {
   listChangesPaginated(filter?: ChangelogFilter): Promise<PaginatedChangelog>;
   getCount(filter?: ChangelogFilter): Promise<number>;
   logChange(entry: Omit<ChangeLog, 'id' | 'createdAt'>): Promise<string>;
-  revertChange(changeId: string): Promise<void>;
+  revertChange(changeId: string): Promise<string | undefined>;
   listByRuleId(ruleId: string): Promise<ChangeLog[]>;
 }
 

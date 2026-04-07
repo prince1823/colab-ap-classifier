@@ -371,10 +371,34 @@ export class TransactionStore implements ITransactionStore {
   async updateTransactions(update: TransactionUpdate, source: ChangeSource = 'manual'): Promise<string | undefined> {
     if (!update.ids || update.ids.length === 0) return undefined;
 
-    const placeholders = update.ids.map(() => '?').join(',');
+    // For large ID sets, avoid spreading thousands of args (causes call stack overflow).
+    // Instead, insert IDs into a temp table and use a subquery.
+    const BULK_THRESHOLD = 5_000;
+    const useTempTable = update.ids.length > BULK_THRESHOLD;
+    let tempTableName: string | null = null;
+    let idsCondition: string;
+    let idsParams: unknown[];
+
+    if (useTempTable) {
+      const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+      tempTableName = `_upd_ids_${runId}`;
+      await this.db.run(`CREATE TEMP TABLE ${tempTableName} (id VARCHAR PRIMARY KEY)`);
+      for (let i = 0; i < update.ids.length; i += 10_000) {
+        const chunk = update.ids.slice(i, i + 10_000);
+        const ph = chunk.map(() => '(?)').join(',');
+        await this.db.run(`INSERT INTO ${tempTableName} VALUES ${ph}`, ...chunk);
+      }
+      idsCondition = `id IN (SELECT id FROM ${tempTableName})`;
+      idsParams = [];
+    } else {
+      idsCondition = `id IN (${update.ids.map(() => '?').join(',')})`;
+      idsParams = update.ids;
+    }
+
+    try {
     const oldRows = await this.db.all<Record<string, unknown>>(
-      `SELECT id, taxonomy_node_id, classification_status FROM transactions WHERE id IN (${placeholders})`,
-      ...update.ids
+      `SELECT id, taxonomy_node_id, classification_status FROM transactions WHERE ${idsCondition}`,
+      ...idsParams
     );
 
     const oldValues: Record<string, unknown> = {};
@@ -411,8 +435,8 @@ export class TransactionStore implements ITransactionStore {
     setClauses.push('updated_at = CURRENT_TIMESTAMP');
 
     await this.db.run(
-      `UPDATE transactions SET ${setClauses.join(', ')} WHERE id IN (${placeholders})`,
-      ...params, ...update.ids
+      `UPDATE transactions SET ${setClauses.join(', ')} WHERE ${idsCondition}`,
+      ...params, ...idsParams
     );
 
     // Only log classification changes (taxonomy / status) — not internal signals like flagged_for_review
@@ -426,8 +450,8 @@ export class TransactionStore implements ITransactionStore {
       const supplierRows = await this.db.all<{ supplier_name: string }>(
         `SELECT DISTINCT ps.supplier_name FROM transactions t
          LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
-         WHERE t.id IN (${placeholders}) AND ps.supplier_name IS NOT NULL`,
-        ...update.ids
+         WHERE t.${idsCondition} AND ps.supplier_name IS NOT NULL`,
+        ...idsParams
       );
       // Get target classification path
       let classPath: string | null = null;
@@ -465,6 +489,11 @@ export class TransactionStore implements ITransactionStore {
       ruleId: update.appliedRuleId ?? null,
     });
     return changelogId;
+    } finally {
+      if (tempTableName) {
+        try { await this.db.run(`DROP TABLE IF EXISTS ${tempTableName}`); } catch { /* ignore */ }
+      }
+    }
   }
 
   /**

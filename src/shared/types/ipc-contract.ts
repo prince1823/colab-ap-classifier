@@ -125,14 +125,15 @@ export interface IPCInvokeMap {
   // Rules
   'rules:list':     { args: []; result: OverrideRule[] };
   'rules:listPaginated': { args: [opts: { limit: number; offset: number; search?: string }]; result: { rules: OverrideRule[]; total: number } };
+  'rules:listByGroup':   { args: [groupId: string, limit: number, offset: number]; result: { rules: OverrideRule[]; total: number } };
   'rules:create':         { args: [input: OverrideRuleCreate]; result: { id: string } };
   'rules:createAndApply': { args: [input: OverrideRuleCreate]; result: { id: string; matchedCount: number; skippedCount: number; changelogId?: string } };
   'rules:previewConflicts': { args: [candidateIds: string[], newRuleGroupId?: string | null]; result: { covered: ConflictRow[]; eligibleIds: string[] } };
   'rules:update':         { args: [ruleId: string, updates: OverrideRuleUpdate]; result: void };
   'rules:delete':   { args: [ruleId: string]; result: void };
   'rules:generate':      { args: []; result: GenerateRulesResult };
-  'rules:previewApply':  { args: [ruleIds: string[]]; result: { affectedRowCount: number; matchingRuleCount: number } };
-  'rules:apply':         { args: [ruleIds: string[]]; result: { matchedCount: number; ruleCount: number } };
+  'rules:previewApply':  { args: [ruleIds: string[]]; result: { token: string; affectedRowCount: number; matchingRuleCount: number } };
+  'rules:apply':         { args: [ruleIds: string[], token?: string]; result: { matchedCount: number; ruleCount: number } };
 
   // Rule Groups
   'rules:listGroups':       { args: []; result: RuleGroup[] };

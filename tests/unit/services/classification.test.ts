@@ -111,7 +111,7 @@ describe('ClassificationRunner', () => {
     vi.mocked(transactions.getColumns).mockResolvedValue([
       'id', 'row_index', 'spend_amount', 'gl_description', 'classification_status', 'supplier_name',
     ]);
-    vi.mocked(rules.evaluateRules).mockResolvedValue(new Map());
+    vi.mocked(rules.evaluateRulesBulk).mockResolvedValue(new Map());
     vi.mocked(classificationAgent.classifyL3).mockResolvedValue({
       classifications: [{ id: 1, classificationPath: 'Indirect|IT|Software' }],
       assignments: { '1': [1] },
@@ -185,10 +185,20 @@ describe('ClassificationRunner', () => {
     it('should apply override rules before AI classification', async () => {
       setupBasicMocks();
 
+      // Phase 1 calls db.all for unclassified txn IDs — override setupBasicMocks
+      vi.mocked(db.all).mockImplementation(async (sql: string) => {
+        if (sql.includes('DISTINCT')) return [{ id: 'sup1', supplier_name: 'Acme' }];
+        if (sql.includes('unclassified')) return [{ id: 'tx1' }];
+        return [];
+      });
+
       const ruleMatch = new Map([
         ['tx1', { ruleId: 'rule-1', targetTaxonomyNodeId: 'tid1' }],
       ]);
-      vi.mocked(rules.evaluateRules).mockResolvedValue(ruleMatch);
+      vi.mocked(rules.evaluateRulesBulk).mockResolvedValue(ruleMatch);
+
+      // After Phase 1 classifies tx1, queryBySupplier('unclassified') should return empty
+      vi.mocked(transactions.queryBySupplier).mockResolvedValue([]);
 
       await runner.classifyAll();
 
@@ -275,16 +285,12 @@ describe('ClassificationRunner', () => {
       );
     });
 
-    it('should mark transactions as error when l1_l2_path is null', async () => {
+    it('should throw when all suppliers have null l1_l2_path', async () => {
       setupBasicMocks({ l1L2Path: null });
 
-      await runner.classifyAll();
+      // All suppliers missing paths → throws after marking as error
+      await expect(runner.classifyAll()).rejects.toThrow('missing category paths');
 
-      // Should mark as error since l1_l2_path is null
-      expect(transactions.updateTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({ classificationStatus: 'classification_error' }),
-        'pipeline'
-      );
       // classifyL3 should not be called
       expect(classificationAgent.classifyL3).not.toHaveBeenCalled();
     });
@@ -319,16 +325,13 @@ describe('ClassificationRunner', () => {
       ]);
     });
 
-    it('should mark supplier as error when l1_l2_path is null and log warning', async () => {
+    it('should throw when l1_l2_path is null and log warning', async () => {
       setupBasicMocks({ l1L2Path: null });
 
-      await runner.classifyAll();
+      // All suppliers missing paths → throws
+      await expect(runner.classifyAll()).rejects.toThrow('missing category paths');
 
       expect(classificationAgent.classifyL3).not.toHaveBeenCalled();
-      expect(transactions.updateTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({ classificationStatus: 'classification_error' }),
-        'pipeline'
-      );
       expect(debugLog).toHaveBeenCalledWith(
         'WARN',
         expect.stringContaining('l1_l2_paths missing')
@@ -348,15 +351,12 @@ describe('ClassificationRunner', () => {
       expect(classificationAgent.classifyL3ForTailSpend).toHaveBeenCalled();
     });
 
-    it('should mark tail spend as error when l1_l2_path is null', async () => {
+    it('should throw when tail spend l1_l2_path is null', async () => {
       setupBasicMocks({ isTailSpend: true, l1L2Path: null });
 
-      await runner.classifyAll();
+      // All suppliers missing paths → throws
+      await expect(runner.classifyAll()).rejects.toThrow('missing category paths');
 
-      expect(transactions.updateTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({ classificationStatus: 'classification_error' }),
-        'pipeline'
-      );
       expect(debugLog).toHaveBeenCalledWith(
         'WARN',
         expect.stringContaining('l1_l2_paths missing')
@@ -467,7 +467,7 @@ describe('ClassificationRunner', () => {
       );
     });
 
-    it('should increment progress even when both classification and error marking fail', async () => {
+    it('should throw when all suppliers fail classification and error marking', async () => {
       setupBasicMocks();
       // classifyL3 always fails (3 retries exhausted)
       vi.mocked(classificationAgent.classifyL3).mockRejectedValue(new Error('LLM failure'));
@@ -478,13 +478,8 @@ describe('ClassificationRunner', () => {
         }
       });
 
-      await runner.classifyAll();
-
-      // Should still complete — processedSuppliers incremented via finally
-      expect(eventBus.emit).toHaveBeenCalledWith(
-        'classification:progress',
-        expect.objectContaining({ status: 'completed' })
-      );
+      // All suppliers failed → surfaces the error
+      await expect(runner.classifyAll()).rejects.toThrow();
     });
   });
 

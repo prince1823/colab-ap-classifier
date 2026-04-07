@@ -2,6 +2,7 @@
  * Tests for Cat A IPC handler changes:
  * - rules:setCategoryA writes to project supplier (not universe)
  * - rules:delete cascade writes to project supplier (not universe)
+ * Uses getProjectSupplierByName (not listProjectSuppliers) via syncCatAState helper.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -113,7 +114,7 @@ describe('rules IPC handlers — Cat A (project-only writes)', () => {
         categoryASupplier: false,
         mappedTaxonomyPaths: [],
       });
-      vi.mocked(suppliers.listProjectSuppliers).mockResolvedValue([projectSupplier] as any);
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue(projectSupplier as any);
 
       const handler = handlers.get('rules:setCategoryA')!;
       await handler({}, 'rule-1', true);
@@ -137,7 +138,7 @@ describe('rules IPC handlers — Cat A (project-only writes)', () => {
         categoryASupplier: true,
         mappedTaxonomyPaths: ['Corporate Services|IT|Software', 'Some|Other|Path'],
       });
-      vi.mocked(suppliers.listProjectSuppliers).mockResolvedValue([projectSupplier] as any);
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue(projectSupplier as any);
 
       const handler = handlers.get('rules:setCategoryA')!;
       await handler({}, 'rule-1', false);
@@ -161,7 +162,7 @@ describe('rules IPC handlers — Cat A (project-only writes)', () => {
         categoryASupplier: false,
         mappedTaxonomyPaths: ['Corporate Services|IT|Software'],
       });
-      vi.mocked(suppliers.listProjectSuppliers).mockResolvedValue([projectSupplier] as any);
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue(projectSupplier as any);
 
       const handler = handlers.get('rules:setCategoryA')!;
       await handler({}, 'rule-1', true);
@@ -206,7 +207,7 @@ describe('rules IPC handlers — Cat A (project-only writes)', () => {
       const rule = makeCatARule();
       vi.mocked(rules.getRule).mockResolvedValue(rule);
       const projectSupplier = makeProjectSupplier();
-      vi.mocked(suppliers.listProjectSuppliers).mockResolvedValue([projectSupplier] as any);
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue(projectSupplier as any);
       vi.mocked(rules.getCatARuleForSupplier).mockResolvedValue(null); // no remaining
 
       const handler = handlers.get('rules:delete')!;
@@ -228,7 +229,7 @@ describe('rules IPC handlers — Cat A (project-only writes)', () => {
       const rule = makeCatARule();
       vi.mocked(rules.getRule).mockResolvedValue(rule);
       const projectSupplier = makeProjectSupplier();
-      vi.mocked(suppliers.listProjectSuppliers).mockResolvedValue([projectSupplier] as any);
+      vi.mocked(suppliers.getProjectSupplierByName).mockResolvedValue(projectSupplier as any);
       vi.mocked(rules.getCatARuleForSupplier).mockResolvedValue(
         makeCatARule({ id: 'rule-other' }) // another cat A rule remains
       );

@@ -669,6 +669,51 @@ export class SupplierService implements ISupplierService {
     };
   }
 
+  async getProjectSupplierByName(name: string): Promise<ProjectSupplier | null> {
+    const row = await this.db.get<{
+      id: string;
+      supplier_name: string;
+      confirmation_status: string;
+      is_tail_spend: boolean;
+      parent_supplier_id: string | null;
+      parent_name: string | null;
+      universe_match: boolean;
+      is_researched: boolean;
+      category_a_supplier: boolean;
+      supplier_info: string | null;
+      mapped_taxonomy_paths: string | null;
+      l1_l2_path: string | null;
+      created_at: string;
+    }>(
+      `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
+              ps.parent_supplier_id, sp.name AS parent_name,
+              ps.universe_match, ps.is_researched, ps.category_a_supplier,
+              ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at
+       FROM project_suppliers ps
+       LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
+       WHERE LOWER(ps.supplier_name) = LOWER(?)`,
+      name
+    );
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      supplierName: row.supplier_name,
+      confirmationStatus: row.confirmation_status as SupplierConfirmationStatus,
+      isTailSpend: Boolean(row.is_tail_spend),
+      parentSupplierId: row.parent_supplier_id,
+      parentName: row.parent_name,
+      supplierInfo: safeParseJSON(row.supplier_info),
+      mappedTaxonomyPaths: safeParseJSON<string[]>(row.mapped_taxonomy_paths),
+      l1L2Path: safeParseStringArray(row.l1_l2_path),
+      universeMatch: Boolean(row.universe_match),
+      isResearched: Boolean(row.is_researched),
+      categoryASupplier: Boolean(row.category_a_supplier),
+      createdAt: String(row.created_at),
+    };
+  }
+
   async confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void> {
     await this.db.run(
       'UPDATE project_suppliers SET confirmation_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',

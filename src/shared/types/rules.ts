@@ -62,3 +62,16 @@ export interface RuleGroupUpdate {
   name?: string;
   priority?: number;
 }
+
+// ─── Rule Conditions (relational projection of grouped_conditions) ──────────
+
+export interface ConditionRow {
+  rule_id: string;
+  group_idx: number;
+  condition_idx: number;
+  field: string;
+  operator: string;
+  value: string | null;
+  group_connector: string;
+  condition_connector: string;
+}

@@ -205,6 +205,7 @@ export interface SupplierService {
   listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
   listProjectSuppliersPaginated(params: import('./suppliers').SupplierPaginationParams): Promise<import('./suppliers').PaginatedSuppliers>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
+  getProjectSupplierByName(name: string): Promise<ProjectSupplier | null>;
   confirmSupplier(id: string, status: SupplierConfirmationStatus): Promise<void>;
   filterTailSpend(threshold: number): Promise<string[]>;
   isTailSpend(supplierId: string): Promise<boolean>;
@@ -230,6 +231,7 @@ export interface SupplierService {
 export interface RuleStore {
   listRules(): Promise<OverrideRule[]>;
   listRulesPaginated(opts: { limit: number; offset: number; search?: string }): Promise<{ rules: OverrideRule[]; total: number }>;
+  listRulesByGroup(groupId: string, limit: number, offset: number): Promise<{ rules: OverrideRule[]; total: number }>;
   getRule(id: string): Promise<OverrideRule | null>;
   createRule(input: OverrideRuleCreate): Promise<{ id: string }>;
   createAndApplyRule(input: OverrideRuleCreate): Promise<{ id: string; matchedCount: number; skippedCount: number; changelogId?: string }>;
@@ -238,9 +240,11 @@ export interface RuleStore {
   deleteRule(ruleId: string): Promise<void>;
   setCategoryA(ruleId: string, value: boolean): Promise<void>;
   evaluateRules(transactionIds?: string[], ruleIds?: string[]): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
-  previewRules(ruleIds: string[]): Promise<{ affectedRowCount: number; matchingRuleCount: number }>;
-  applyRules(ruleIds: string[]): Promise<{ matchedCount: number; ruleCount: number }>;
+  evaluateRulesBulk(opts?: { scopeTable?: string; scopeIds?: string[] }): Promise<Map<string, { ruleId: string; targetTaxonomyNodeId: string }>>;
+  previewRules(ruleIds: string[]): Promise<{ token: string; affectedRowCount: number; matchingRuleCount: number }>;
+  applyRules(ruleIds: string[], token?: string): Promise<{ matchedCount: number; ruleCount: number }>;
   generate_rules_preview(): Promise<GenerateRulesResult>;
+  reassignSupplierRules(losingIds: string[], survivorId: string): Promise<void>;
   // Group operations
   listGroups(): Promise<RuleGroup[]>;
   createGroup(input: RuleGroupCreate): Promise<{ id: string }>;

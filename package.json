@@ -20,6 +20,7 @@
     "test:mock": "vitest run tests/integration/classifier-mock.test.ts",
     "test:run": "vitest run tests/integration/classifier-real-run.test.ts",
     "test:integration": "vitest run tests/integration/",
+    "test:heavy": "RUN_HEAVY=1 vitest run tests/integration/classification-scope-stack.test.ts --pool=forks --poolOptions.forks.singleFork=true",
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.renderer.json",
     "script:inspect": "tsx scripts/inspect-c91.ts",
     "script:verify-llm": "tsx scripts/verify-llm-config.ts",

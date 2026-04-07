@@ -199,8 +199,9 @@ export const ipc = {
     assignToGroup: (ruleIds: string[], groupId: string | null) => invoke('rules:assignToGroup', ruleIds, groupId),
     filterAssign: (filter: import('../../shared/types/transactions').GroupedFilter, targetGroupId: string | null) => invoke('rules:filterAssign', filter, targetGroupId),
     previewConflicts: (candidateIds: string[], newRuleGroupId?: string | null) => invoke('rules:previewConflicts', candidateIds, newRuleGroupId),
+    listByGroup: (groupId: string, limit: number, offset: number) => invoke('rules:listByGroup', groupId, limit, offset),
     previewApply: (ruleIds: string[]) => invoke('rules:previewApply', ruleIds),
-    apply: (ruleIds: string[]) => invoke('rules:apply', ruleIds),
+    apply: (ruleIds: string[], token?: string) => invoke('rules:apply', ruleIds, token),
     setCategoryA: (ruleId: string, value: boolean) => invoke('rules:setCategoryA', ruleId, value),
   },
 

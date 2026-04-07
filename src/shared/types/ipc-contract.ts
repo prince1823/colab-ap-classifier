@@ -23,7 +23,7 @@ import type {
 } from './transactions';
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from './classification';
 import type { TaxonomyNode } from './taxonomy';
-import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
+import type { ProjectSupplierView, SupplierConfirmationStatus, SupplierInfo, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult, SupplierPaginationParams, PaginatedSuppliers } from './suppliers';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate, ConflictRow } from './rules';
 import type { ChangeLog, ChangelogFilter, PaginatedChangelog } from './changelog';
 import type { UploadRecord } from './services';
@@ -94,6 +94,7 @@ export interface IPCInvokeMap {
 
   // Suppliers
   'suppliers:list':           { args: [filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }]; result: ProjectSupplierView[] };
+  'suppliers:listPaginated':  { args: [params: SupplierPaginationParams]; result: PaginatedSuppliers };
   'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };
   'suppliers:researchAll':    { args: [supplierIds?: string[]]; result: void };
@@ -104,6 +105,7 @@ export interface IPCInvokeMap {
   'suppliers:getFilterFields': { args: []; result: FieldDefinition[] };
   'suppliers:distinctValues':  { args: [field: string, limit?: number]; result: string[] };
   'suppliers:getAliases':      { args: [supplierId: string]; result: string[] };
+  'suppliers:getAliasesWithSpend': { args: [supplierId: string]; result: { rawName: string; spend: number; txnCount: number }[] };
   'suppliers:assignAlias':     { args: [supplierId: string, rawName: string]; result: void };
   'suppliers:rename':          { args: [supplierId: string, newName: string]; result: void };
   'suppliers:merge':           { args: [survivorId: string, losingIds: string[]]; result: void };

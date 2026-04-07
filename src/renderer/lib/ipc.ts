@@ -142,6 +142,7 @@ export const ipc = {
   // ── Suppliers (3 channels + research) ──
   suppliers: {
     list: (filter?: { conditions?: FilterCondition[]; groupedConditions?: import('../../shared/types/transactions').GroupedFilter }) => invoke('suppliers:list', filter),
+    listPaginated: (params: import('../../shared/types/suppliers').SupplierPaginationParams) => invoke('suppliers:listPaginated', params),
     update: (supplierId: string, updates: SupplierUpdateInput) =>
       invoke('suppliers:update', supplierId, updates),
     confirm: (id: string, status: SupplierConfirmationStatus) =>
@@ -158,6 +159,7 @@ export const ipc = {
     getFilterFields: () => invoke('suppliers:getFilterFields'),
     distinctValues: (field: string, limit?: number) => invoke('suppliers:distinctValues', field, limit),
     getAliases: (supplierId: string) => invoke('suppliers:getAliases', supplierId),
+    getAliasesWithSpend: (supplierId: string) => invoke('suppliers:getAliasesWithSpend', supplierId),
     assignAlias: (supplierId: string, rawName: string) => invoke('suppliers:assignAlias', supplierId, rawName),
     rename: (supplierId: string, newName: string) => invoke('suppliers:rename', supplierId, newName),
     merge: (survivorId: string, losingIds: string[]) => invoke('suppliers:merge', survivorId, losingIds),

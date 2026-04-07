@@ -16,6 +16,8 @@ import type {
   CsvApplyRow,
   CsvApplyDiff,
   CsvApplyResult,
+  SupplierPaginationParams,
+  PaginatedSuppliers,
 } from '../../shared/types/suppliers';
 import type { FilterCondition, GroupedFilter, FieldDefinition } from '../../shared/types/transactions';
 
@@ -38,11 +40,70 @@ function safeParseStringArray(value: string | null | undefined): string[] | null
 }
 import { buildWhereClause, buildGroupedWhereClause, type ColumnResolver } from '../utils/query-builder';
 
+interface SupplierBaseRow {
+  id: string;
+  supplier_name: string;
+  confirmation_status: string;
+  is_tail_spend: boolean;
+  parent_supplier_id: string | null;
+  parent_name: string | null;
+  universe_match: boolean;
+  is_researched: boolean;
+  category_a_supplier: boolean;
+  supplier_info: string | null;
+  mapped_taxonomy_paths: string | null;
+  l1_l2_path: string | null;
+  created_at: string;
+  transaction_count: number | bigint;
+  total_spend: number | bigint;
+}
+
 export class SupplierService implements ISupplierService {
   constructor(
     private db: Database,
     private supplierUniverse: SupplierUniverse
   ) {}
+
+  // ── Shared supplier query helpers ──────────────────────────────────
+
+  private async buildSupplierBaseQuery(whereSQL = ''): Promise<{ sql: string; spendExpr: string }> {
+    const hasSpend = await this.transactionColumnExists('spend_amount');
+    const spendExpr = hasSpend ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)' : '0';
+    const sql = `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
+        ps.parent_supplier_id, sp.name AS parent_name,
+        ps.data_source, ps.universe_match, ps.is_researched, ps.category_a_supplier,
+        ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at, ps.updated_at,
+        COUNT(t.id) as transaction_count,
+        ${spendExpr} as total_spend
+      FROM project_suppliers ps
+      LEFT JOIN transactions t ON t.project_supplier_id = ps.id
+      LEFT JOIN uploads upl ON t.upload_id = upl.id
+      LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
+      ${whereSQL}
+      GROUP BY ALL`;
+    return { sql, spendExpr };
+  }
+
+  private static mapSupplierRow(row: SupplierBaseRow, aliases: string[]): ProjectSupplierView {
+    return {
+      id: row.id,
+      supplierName: row.supplier_name,
+      confirmationStatus: row.confirmation_status as SupplierConfirmationStatus,
+      isTailSpend: Boolean(row.is_tail_spend),
+      parentSupplierId: row.parent_supplier_id,
+      parentName: row.parent_name,
+      supplierInfo: safeParseJSON(row.supplier_info),
+      mappedTaxonomyPaths: safeParseJSON<string[]>(row.mapped_taxonomy_paths),
+      l1L2Path: safeParseStringArray(row.l1_l2_path),
+      universeMatch: Boolean(row.universe_match),
+      isResearched: Boolean(row.is_researched),
+      categoryASupplier: Boolean(row.category_a_supplier),
+      createdAt: String(row.created_at),
+      transactionCount: Number(row.transaction_count),
+      totalSpend: Number(row.total_spend),
+      aliases,
+    };
+  }
 
   /**
    * Core find-or-create: check existing by cleaned name → check universe variants → create.
@@ -233,6 +294,24 @@ export class SupplierService implements ISupplierService {
     return rows.map(r => r.original_supplier_name);
   }
 
+  async getProjectAliasesWithSpend(supplierId: string): Promise<{ rawName: string; spend: number; txnCount: number }[]> {
+    const hasSpend = await this.transactionColumnExists('spend_amount');
+    const spendExpr = hasSpend ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)' : '0';
+
+    const rows = await this.db.all<{ original_supplier_name: string; total_spend: number; txn_count: number }>(
+      `SELECT t.original_supplier_name,
+              ${spendExpr} as total_spend,
+              COUNT(t.id) as txn_count
+       FROM transactions t
+       WHERE t.project_supplier_id = ?
+       AND t.original_supplier_name IS NOT NULL
+       GROUP BY t.original_supplier_name
+       ORDER BY t.original_supplier_name`,
+      supplierId
+    );
+    return rows.map(r => ({ rawName: r.original_supplier_name, spend: Number(r.total_spend), txnCount: Number(r.txn_count) }));
+  }
+
   async renameSupplier(supplierId: string, newName: string): Promise<void> {
     await this.db.run(
       'UPDATE project_suppliers SET supplier_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
@@ -353,6 +432,7 @@ export class SupplierService implements ISupplierService {
     universe_match: 'ps.universe_match',
     parent_name: 'sp.name',
     data_source: 'ps.data_source',
+    source_file: "upl.file_name || ' (' || strftime(upl.created_at, '%Y-%m-%d %H:%M') || ')'",
     // Aggregate fields — resolved on the outer subquery alias
     total_spend: 'sub.total_spend',
     transaction_count: 'sub.transaction_count',
@@ -367,6 +447,7 @@ export class SupplierService implements ISupplierService {
     { name: 'universe_match', label: 'Universe Match', type: 'boolean' },
     { name: 'parent_name', label: 'Parent Supplier', type: 'string' },
     { name: 'data_source', label: 'Data Source', type: 'string' },
+    { name: 'source_file', label: 'Source File', type: 'string', group: 'Upload' },
     { name: 'total_spend', label: 'Total Spend', type: 'number', group: 'Aggregates' },
     { name: 'transaction_count', label: 'Transaction Count', type: 'number', group: 'Aggregates' },
   ];
@@ -385,6 +466,12 @@ export class SupplierService implements ISupplierService {
       );
       return rows.map(r => String(r.val));
     }
+    if (field === 'source_file') {
+      const colExpr = SupplierService.SUPPLIER_COLUMNS[field];
+      const sql = `SELECT DISTINCT ${colExpr} as val FROM uploads upl WHERE upl.file_name IS NOT NULL ORDER BY val LIMIT ?`;
+      const rows = await this.db.all<{ val: string }>(sql, limit);
+      return rows.map(r => String(r.val));
+    }
     const colExpr = SupplierService.SUPPLIER_COLUMNS[field];
     if (!colExpr) return [];
     // For supplier-level fields, query project_suppliers directly
@@ -401,9 +488,6 @@ export class SupplierService implements ISupplierService {
   };
 
   async listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }): Promise<ProjectSupplierView[]> {
-    const hasSpend = await this.transactionColumnExists('spend_amount');
-    const spendExpr = hasSpend ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)' : '0';
-
     // Flatten grouped conditions for aggregate-field detection, or use flat conditions
     const conditions = filter?.conditions ?? [];
 
@@ -445,18 +529,7 @@ export class SupplierService implements ISupplierService {
     const innerWhereSQL = innerWhere ? `WHERE ${innerWhere.sql}` : '';
     const innerParams = innerWhere?.params ?? [];
 
-    // Build inner query
-    const innerSQL = `SELECT ps.id, ps.supplier_name, ps.confirmation_status, ps.is_tail_spend,
-        ps.parent_supplier_id, sp.name AS parent_name,
-        ps.data_source, ps.universe_match, ps.is_researched, ps.category_a_supplier,
-        ps.supplier_info, ps.mapped_taxonomy_paths, ps.l1_l2_path, ps.created_at, ps.updated_at,
-        COUNT(t.id) as transaction_count,
-        ${spendExpr} as total_spend
-      FROM project_suppliers ps
-      LEFT JOIN transactions t ON t.project_supplier_id = ps.id
-      LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
-      ${innerWhereSQL}
-      GROUP BY ALL`;
+    const { sql: innerSQL } = await this.buildSupplierBaseQuery(innerWhereSQL);
 
     const outerWhereSQL = outerWhere ? `WHERE ${outerWhere.sql}` : '';
     const outerParams = outerWhere?.params ?? [];
@@ -467,23 +540,7 @@ export class SupplierService implements ISupplierService {
 
     const allParams = [...innerParams, ...outerParams];
 
-    const rows = await this.db.all<{
-      id: string;
-      supplier_name: string;
-      confirmation_status: string;
-      is_tail_spend: boolean;
-      parent_supplier_id: string | null;
-      parent_name: string | null;
-      universe_match: boolean;
-      is_researched: boolean;
-      category_a_supplier: boolean;
-      supplier_info: string | null;
-      mapped_taxonomy_paths: string | null;
-      l1_l2_path: string | null;
-      created_at: string;
-      transaction_count: number | bigint;
-      total_spend: number | bigint;
-    }>(sql, ...allParams);
+    const rows = await this.db.all<SupplierBaseRow>(sql, ...allParams);
 
     // Bulk-fetch project-local aliases (all distinct raw names per supplier)
     const aliasRows = await this.db.all<{ project_supplier_id: string; original_supplier_name: string }>(
@@ -499,24 +556,72 @@ export class SupplierService implements ISupplierService {
       aliasMap.set(r.project_supplier_id, arr);
     }
 
-    return rows.map((row) => ({
-      id: row.id,
-      supplierName: row.supplier_name,
-      confirmationStatus: row.confirmation_status as SupplierConfirmationStatus,
-      isTailSpend: Boolean(row.is_tail_spend),
-      parentSupplierId: row.parent_supplier_id,
-      parentName: row.parent_name,
-      supplierInfo: safeParseJSON(row.supplier_info),
-      mappedTaxonomyPaths: safeParseJSON<string[]>(row.mapped_taxonomy_paths),
-      l1L2Path: safeParseStringArray(row.l1_l2_path),
-      universeMatch: Boolean(row.universe_match),
-      isResearched: Boolean(row.is_researched),
-      categoryASupplier: Boolean(row.category_a_supplier),
-      createdAt: String(row.created_at),
-      transactionCount: Number(row.transaction_count),
-      totalSpend: Number(row.total_spend),
-      aliases: aliasMap.get(row.id) ?? [],
-    }));
+    return rows.map((row) => SupplierService.mapSupplierRow(row, aliasMap.get(row.id) ?? []));
+  }
+
+  async listProjectSuppliersPaginated(params: SupplierPaginationParams): Promise<PaginatedSuppliers> {
+    const { limit, offset, search, sortBy, sortDir = 'asc' } = params;
+
+    const { sql: innerSQL } = await this.buildSupplierBaseQuery();
+
+    // Wrap inner query so we can filter + sort + paginate on computed columns
+    const queryParams: unknown[] = [];
+    let searchClause = '';
+    if (search && search.trim()) {
+      const pattern = `%${search.trim().toLowerCase()}%`;
+      searchClause = `WHERE LOWER(sub.supplier_name) LIKE ? OR LOWER(sub.parent_name) LIKE ?`;
+      queryParams.push(pattern, pattern);
+    }
+
+    // Sort mapping
+    const sortMap: Record<string, string> = {
+      supplier_name: 'sub.supplier_name',
+      parent_name: 'sub.parent_name',
+      total_spend: 'sub.total_spend',
+      transaction_count: 'sub.transaction_count',
+      created_at: 'sub.created_at',
+    };
+    const orderCol = sortBy ? (sortMap[sortBy] ?? 'sub.supplier_name') : 'sub.supplier_name';
+    const direction = sortDir === 'desc' ? 'DESC' : 'ASC';
+
+    // For parent_name sort: put NULLs last
+    const nullsLast = sortBy === 'parent_name' ? ' NULLS LAST' : '';
+    const orderClause = `ORDER BY ${orderCol} ${direction}${nullsLast}`;
+
+    // Count query
+    const countSQL = `SELECT COUNT(*) as cnt FROM (${innerSQL}) sub ${searchClause}`;
+    const countRow = await this.db.get<{ cnt: number | bigint }>(countSQL, ...queryParams);
+    const total = Number(countRow?.cnt ?? 0);
+
+    // Data query with LIMIT/OFFSET
+    const dataSQL = `SELECT * FROM (${innerSQL}) sub ${searchClause} ${orderClause} LIMIT ? OFFSET ?`;
+    const dataParams = [...queryParams, limit, offset];
+
+    const rows = await this.db.all<SupplierBaseRow>(dataSQL, ...dataParams);
+
+    // Bulk-fetch aliases only for the returned page of suppliers
+    const supplierIds = rows.map(r => r.id);
+    const aliasMap = new Map<string, string[]>();
+    if (supplierIds.length > 0) {
+      const placeholders = supplierIds.map(() => '?').join(',');
+      const aliasRows = await this.db.all<{ project_supplier_id: string; original_supplier_name: string }>(
+        `SELECT DISTINCT t.project_supplier_id, t.original_supplier_name
+         FROM transactions t
+         WHERE t.project_supplier_id IN (${placeholders})
+         AND t.original_supplier_name IS NOT NULL`,
+        ...supplierIds
+      );
+      for (const r of aliasRows) {
+        const arr = aliasMap.get(r.project_supplier_id) ?? [];
+        arr.push(r.original_supplier_name);
+        aliasMap.set(r.project_supplier_id, arr);
+      }
+    }
+
+    return {
+      total,
+      rows: rows.map((row) => SupplierService.mapSupplierRow(row, aliasMap.get(row.id) ?? [])),
+    };
   }
 
   async getProjectSupplier(id: string): Promise<ProjectSupplier | null> {

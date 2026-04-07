@@ -18,8 +18,8 @@ export function suppliersToCSV(
   const rows: Record<string, string | number>[] = []
 
   for (const s of suppliers) {
-    const aliases = (aliasCache.get(s.id) ?? []).map(a => a.rawName)
-    if (aliases.length === 0) {
+    const aliasDataList = aliasCache.get(s.id) ?? []
+    if (aliasDataList.length === 0) {
       // Supplier with no aliases — still emit one row
       rows.push({
         parent_name: s.parentName ?? '',
@@ -27,22 +27,24 @@ export function suppliersToCSV(
         alias: '',
         total_spend: s.totalSpend,
         transaction_count: s.transactionCount,
+        created_at: s.createdAt.split(/[T ]/)[0],
       })
     } else {
-      for (const alias of aliases) {
+      for (const ad of aliasDataList) {
         rows.push({
           parent_name: s.parentName ?? '',
           supplier_name: s.supplierName,
-          alias,
-          total_spend: s.totalSpend,
-          transaction_count: s.transactionCount,
+          alias: ad.rawName,
+          total_spend: ad.spend,
+          transaction_count: ad.txnCount,
+          created_at: s.createdAt.split(/[T ]/)[0],
         })
       }
     }
   }
 
   return Papa.unparse(rows, {
-    columns: ['parent_name', 'supplier_name', 'alias', 'total_spend', 'transaction_count'],
+    columns: ['parent_name', 'supplier_name', 'alias', 'total_spend', 'transaction_count', 'created_at'],
   })
 }
 

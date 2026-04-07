@@ -3,7 +3,6 @@ import {
   Trash2, Plus, Search, X,
   Merge, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Clock,
 } from 'lucide-react'
 import type { ProjectSupplierView } from '../../../shared/types/suppliers'
 import MergeModal from './MergeModal'
@@ -741,28 +740,6 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
 
         {/* CSV upload/download */}
         <CsvToolbar data={data} onIngestComplete={onDataChange} onExportCsv={handleExportCsv} />
-
-        {/* Newest first toggle */}
-        <button
-          onClick={() => {
-            if (sortColumn === 'created' && sortDir === 'desc') {
-              setSortColumn(null)
-              setSortDir('asc')
-            } else {
-              setSortColumn('created')
-              setSortDir('desc')
-            }
-          }}
-          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors flex-shrink-0 ${
-            sortColumn === 'created' && sortDir === 'desc'
-              ? 'border-blue-400 bg-blue-50 text-blue-700'
-              : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
-          }`}
-          title="Sort by newest first"
-        >
-          <Clock size={12} />
-          Newest first
-        </button>
 
         {/* Right: search */}
         <div className="relative w-48">

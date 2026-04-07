@@ -58,8 +58,8 @@ function getChangedFields(
   oldVals: Record<string, unknown> | null,
   newVals: Record<string, unknown> | null,
   taxonomyMap: Map<string, string>,
-): { field: string; from: string; to: string }[] {
-  const changes: { field: string; from: string; to: string }[] = []
+): { field: string; from: React.ReactNode; to: string }[] {
+  const changes: { field: string; from: React.ReactNode; to: string }[] = []
   const allKeys = new Set([
     ...Object.keys(oldVals || {}),
     ...Object.keys(newVals || {}),
@@ -80,8 +80,31 @@ function getChangedFields(
         Object.values(perTxn).map((row) => formatValue(row[key], taxonomyMap))
       )
       if (distinctOldStrs.size > 1) {
-        const vals = [...distinctOldStrs].slice(0, 3).join(', ')
-        oldStr = distinctOldStrs.size > 3 ? `Mixed (${vals}, …)` : `Mixed (${vals})`
+        // Group transactions by their old value and collect supplier names per group
+        const groupedByVal = new Map<string, Set<string>>()
+        for (const row of Object.values(perTxn)) {
+          const val = formatValue(row[key], taxonomyMap)
+          const supplier = (row.supplier_name as string) || 'unknown'
+          if (!groupedByVal.has(val)) groupedByVal.set(val, new Set())
+          groupedByVal.get(val)!.add(supplier)
+        }
+        const entries = [...groupedByVal.entries()]
+        const fromNode = (
+          <span>
+            Mixed:{' '}
+            {entries.map(([val, suppliers], i) => (
+              <span key={i}>
+                {i > 0 && '; '}
+                <strong>{[...suppliers].join(', ')}</strong> → {val === '-' ? 'unclassified' : val}
+              </span>
+            ))}
+          </span>
+        )
+        const newStr2 = formatValue(newVal, taxonomyMap)
+        if (formatValue(oldVal, taxonomyMap) !== newStr2) {
+          changes.push({ field: humanizeField(key), from: fromNode, to: newStr2 })
+        }
+        continue
       } else {
         oldStr = formatValue(oldVal, taxonomyMap)
       }

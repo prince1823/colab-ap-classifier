@@ -397,7 +397,10 @@ export class TransactionStore implements ITransactionStore {
 
     try {
     const oldRows = await this.db.all<Record<string, unknown>>(
-      `SELECT id, taxonomy_node_id, classification_status FROM transactions WHERE ${idsCondition}`,
+      `SELECT t.id, t.taxonomy_node_id, t.classification_status, ps.supplier_name
+       FROM transactions t
+       LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+       WHERE t.${idsCondition}`,
       ...idsParams
     );
 
@@ -413,6 +416,7 @@ export class TransactionStore implements ITransactionStore {
         perTransaction[row.id as string] = {
           taxonomy_node_id: row.taxonomy_node_id,
           classification_status: row.classification_status,
+          supplier_name: row.supplier_name ?? null,
         };
       }
       oldValues._perTransaction = perTransaction;

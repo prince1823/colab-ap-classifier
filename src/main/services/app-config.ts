@@ -18,8 +18,6 @@ interface ConfigFileShape {
   // License — key encrypted same as API keys; data is plaintext (no secrets)
   licenseKey?: string;
   licenseData?: LicenseDataShape;
-  licenseServerUrl?: string;
-  licensePublicKey?: string;
 }
 
 function isConfigFileShape(v: unknown): v is ConfigFileShape {
@@ -35,8 +33,6 @@ function isConfigFileShape(v: unknown): v is ConfigFileShape {
   }
   if (obj.supplierUniversePath !== undefined && typeof obj.supplierUniversePath !== 'string') return false;
   if (obj.licenseKey !== undefined && typeof obj.licenseKey !== 'string') return false;
-  if (obj.licenseServerUrl !== undefined && typeof obj.licenseServerUrl !== 'string') return false;
-  if (obj.licensePublicKey !== undefined && typeof obj.licensePublicKey !== 'string') return false;
   return true;
 }
 
@@ -224,21 +220,4 @@ export class AppConfigService implements IAppConfigService {
     this.save();
   }
 
-  getLicenseServerUrl(): string | null {
-    return this.config.licenseServerUrl || process.env.LICENSE_SERVER_URL || null;
-  }
-
-  async setLicenseServerUrl(url: string): Promise<void> {
-    this.config.licenseServerUrl = url;
-    this.save();
-  }
-
-  getLicensePublicKey(): string | null {
-    return this.config.licensePublicKey || process.env.LICENSE_PUBLIC_KEY || null;
-  }
-
-  async setLicensePublicKey(key: string): Promise<void> {
-    this.config.licensePublicKey = key;
-    this.save();
-  }
 }

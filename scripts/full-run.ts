@@ -358,10 +358,6 @@ async function main() {
     clearLicenseKey: async () => {},
     getLicenseData: () => null,
     setLicenseData: async (_data: unknown) => {},
-    getLicenseServerUrl: () => null,
-    setLicenseServerUrl: async (_url: string) => {},
-    getLicensePublicKey: () => null,
-    setLicensePublicKey: async (_key: string) => {},
   } as any;
   const supplierUniverse = new DuckDBSupplierUniverse(scriptAppConfig);
   const eventBus = new EventEmitter();

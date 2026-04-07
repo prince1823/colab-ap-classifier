@@ -46,10 +46,6 @@ export interface IAppConfigService extends ILLMConfig {
   clearLicenseKey(): Promise<void>;
   getLicenseData(): { lastResult?: LicenseStatus; lastChecked?: number } | null;
   setLicenseData(data: { lastResult?: LicenseStatus; lastChecked?: number }): Promise<void>;
-  getLicenseServerUrl(): string | null;
-  setLicenseServerUrl(url: string): Promise<void>;
-  getLicensePublicKey(): string | null;
-  setLicensePublicKey(key: string): Promise<void>;
 }
 
 // ─── Database Layer ──────────────────────────────────────────────────────────

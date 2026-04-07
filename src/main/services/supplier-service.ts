@@ -569,8 +569,13 @@ export class SupplierService implements ISupplierService {
     let searchClause = '';
     if (search && search.trim()) {
       const pattern = `%${search.trim().toLowerCase()}%`;
-      searchClause = `WHERE LOWER(sub.supplier_name) LIKE ? OR LOWER(sub.parent_name) LIKE ?`;
-      queryParams.push(pattern, pattern);
+      // Search supplier name, parent name, AND aliases (original_supplier_name on transactions)
+      searchClause = `WHERE (LOWER(sub.supplier_name) LIKE ? OR LOWER(sub.parent_name) LIKE ? OR sub.id IN (
+        SELECT DISTINCT t2.project_supplier_id FROM transactions t2
+        WHERE t2.project_supplier_id IS NOT NULL
+        AND LOWER(t2.original_supplier_name) LIKE ?
+      ))`;
+      queryParams.push(pattern, pattern, pattern);
     }
 
     // Sort mapping

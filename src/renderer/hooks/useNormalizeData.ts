@@ -105,35 +105,10 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Auto-load aliases in batches (project mode only)
-  const ALIAS_BATCH_SIZE = 50
-  const loadAliasesInBatches = useCallback(async (supplierIds: string[]) => {
-    for (let i = 0; i < supplierIds.length; i += ALIAS_BATCH_SIZE) {
-      const batch = supplierIds.slice(i, i + ALIAS_BATCH_SIZE)
-      const results = await Promise.all(
-        batch.map(async (id) => {
-          try {
-            const aliases = await ipc.suppliers.getAliasesWithSpend(id) as AliasData[]
-            return [id, aliases] as const
-          } catch {
-            return [id, [] as AliasData[]] as const
-          }
-        })
-      )
-      setProjAliasCache(prev => {
-        const next = new Map(prev)
-        for (const [id, data] of results) next.set(id, data)
-        return next
-      })
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!csvMode && projSuppliers.length > 0) {
-      const unloaded = projSuppliers.filter(s => !projAliasCache.has(s.id))
-      if (unloaded.length > 0) loadAliasesInBatches(unloaded.map(s => s.id))
-    }
-  }, [csvMode, projSuppliers, projAliasCache, loadAliasesInBatches])
+  // Alias batch-loading is no longer needed in project mode:
+  // - The paginated endpoint already returns aliases per page
+  // - ProjectSupplierView.aliases (from list()) has string aliases for modals
+  // In CSV mode, aliases come from the parsed CSV data directly.
 
   // ── Paginated fetch (project mode — server-side pagination) ────────
 

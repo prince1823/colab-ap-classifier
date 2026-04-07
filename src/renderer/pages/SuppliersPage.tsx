@@ -4,7 +4,7 @@ import type { ProjectSupplierView, SupplierInfo } from '../../shared/types/suppl
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import { useWorkflowStore } from '../stores/workflowStore'
-import { researchSingle, isResearchRunning } from '../lib/researchRunner'
+import { researchSingle, isResearchRunning, cancelResearch } from '../lib/researchRunner'
 import { showError } from '../lib/toast-errors'
 import { groupedToConditions, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import type { FilterOperator } from '../../shared/types/transactions'
@@ -710,13 +710,23 @@ export default function SuppliersPage() {
           {researchProgress && researchProgress.status === 'running' && (
             <div className="suppliers-progress">
               <div className="flex items-center justify-between mb-1">
-                {researchProgress.currentSupplier
-                  ? <span>Researching: <strong>{researchProgress.currentSupplier}</strong></span>
-                  : <span>{researchProgress.currentStep}</span>
-                }
-                {researchProgress.totalSuppliers > 0 && (
-                  <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
-                )}
+                <div className="flex items-center gap-2 min-w-0">
+                  {researchProgress.currentSupplier
+                    ? <span className="truncate">Researching: <strong>{researchProgress.currentSupplier}</strong></span>
+                    : <span className="truncate">{researchProgress.currentStep}</span>
+                  }
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {researchProgress.totalSuppliers > 0 && (
+                    <span className="text-xs">{researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}</span>
+                  )}
+                  <button
+                    onClick={cancelResearch}
+                    className="px-2 py-0.5 text-[10px] font-medium text-red-600 hover:text-white hover:bg-red-600 border border-red-300 rounded transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
               <div className="progress-bar">
                 <div

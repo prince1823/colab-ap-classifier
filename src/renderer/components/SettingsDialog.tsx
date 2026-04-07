@@ -266,31 +266,6 @@ export default function SettingsDialog({ open, onClose }: Props) {
                   placeholder={keyIsSet ? 'Enter new key to replace…' : 'Enter API key…'}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
                 />
-                {form.validationResult && (
-                  <div
-                    className={`mt-1 flex items-center gap-1 text-xs ${
-                      form.validationResult.valid ? 'text-green-600' : 'text-red-600'
-                    }`}
-                  >
-                    {form.validationResult.valid ? (
-                      <CheckCircleIcon className="h-3.5 w-3.5" />
-                    ) : (
-                      <ExclamationCircleIcon className="h-3.5 w-3.5" />
-                    )}
-                    {form.validationResult.valid ? 'Key is valid' : (form.validationResult.error ?? 'Invalid key')}
-                  </div>
-                )}
-                {(form.apiKey.trim() || keyIsSet) && (
-                  <div className="mt-2">
-                    <button
-                      onClick={handleValidate}
-                      disabled={form.isValidating || isSaving}
-                      className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {form.isValidating ? 'Validating…' : 'Validate'}
-                    </button>
-                  </div>
-                )}
               </div>
 
               {/* ── Exa Web Search ── */}

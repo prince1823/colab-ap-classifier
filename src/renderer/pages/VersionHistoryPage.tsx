@@ -241,7 +241,7 @@ function ChangeTransactionPanel({
   const colLabel = (col: string) => {
     if (col === '__supplier') return 'Supplier'
     if (col === '__before_classification') return 'Before Classification'
-    if (col === '__classification') return 'Classification'
+    if (col === '__classification') return 'After Classification'
     return col.replace(/_/g, ' ')
   }
 

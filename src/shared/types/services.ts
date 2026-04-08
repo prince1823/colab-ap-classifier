@@ -287,6 +287,7 @@ export interface SupplierResearcher {
   categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<{ categorized: number; skippedNoInfo: number; invalidPaths: number }>;
   categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], supplierIds?: string[]): Promise<{ categorized: number; invalidPaths: number }>;
   cancel(): void;
+  resetCancel(): void;
 }
 
 export interface ClassificationRunner {

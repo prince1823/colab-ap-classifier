@@ -41,6 +41,9 @@ export function registerSupplierResearchHandlers(
     const columnPriorities = (await project.getSetting('column_priorities') as string[] | null) ?? [];
 
     // Fire-and-forget: categorize non-tail-spend → categorize tail-spend → completed
+    // Reset cancel flag so a previous cancel doesn't block this run
+    researcher.resetCancel();
+
     (async () => {
       eventBus.emit('suppliers:research:progress', {
         status: 'running',
@@ -63,6 +66,19 @@ export function registerSupplierResearchHandlers(
         errors.push(`Supplier categorization: ${msg}`);
       }
 
+      // Check if cancelled before proceeding to tail spend
+      if (researcher.wasCancelled()) {
+        eventBus.emit('suppliers:research:progress', {
+          status: 'cancelled',
+          totalSuppliers: 0,
+          processedSuppliers: 0,
+          percentage: 0,
+          currentSupplier: null,
+          currentStep: 'Categorization cancelled',
+        } satisfies ResearchProgress);
+        return;
+      }
+
       let tailResult = { categorized: 0, invalidPaths: 0 };
       if (columnPriorities.length > 0) {
         try {
@@ -74,6 +90,19 @@ export function registerSupplierResearchHandlers(
         }
       } else {
         warnings.push('Tail spend categorization skipped — no column priorities configured. Set them in the Data step.');
+      }
+
+      // Check if cancelled after all work
+      if (researcher.wasCancelled()) {
+        eventBus.emit('suppliers:research:progress', {
+          status: 'cancelled',
+          totalSuppliers: 0,
+          processedSuppliers: 0,
+          percentage: 0,
+          currentSupplier: null,
+          currentStep: 'Categorization cancelled',
+        } satisfies ResearchProgress);
+        return;
       }
 
       // Build warnings from counts

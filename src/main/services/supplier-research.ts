@@ -540,6 +540,14 @@ export class SupplierResearcher implements ISupplierResearcher {
   cancel(): void {
     this.isCancelled = true;
   }
+
+  resetCancel(): void {
+    this.isCancelled = false;
+  }
+
+  wasCancelled(): boolean {
+    return this.isCancelled;
+  }
 }
 
 function determineSupplierType(result: SupplierInfo): 'company' | 'individual' | 'government' | null {

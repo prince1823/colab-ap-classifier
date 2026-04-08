@@ -31,8 +31,6 @@ export function registerSupplierResearchHandlers(
   // Categorize all suppliers without L1/L2: non-tail (using research data) + tail (using transactions)
   registerHandler('suppliers:categorizeAll', async (_event, supplierIds?: unknown) => {
     const ids = Array.isArray(supplierIds) ? (supplierIds as string[]) : undefined;
-    // Reset cancel flag so a previous cancel doesn't silently skip categorization
-    researcher.resetCancel();
     const taxonomyNodes = await taxonomy.getNodes();
     let context;
     try {

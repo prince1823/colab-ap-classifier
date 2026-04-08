@@ -224,7 +224,7 @@ export class SupplierResearcher implements ISupplierResearcher {
   async categorizeWithSupplierInfo(
     taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]
   ): Promise<{ categorized: number; skippedNoInfo: number; invalidPaths: number }> {
-    if (this.isCancelled) return { categorized: 0, skippedNoInfo: 0, invalidPaths: 0 };
+    this.isCancelled = false;
 
     // Fetch candidates: non-tail-spend, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
@@ -325,7 +325,7 @@ export class SupplierResearcher implements ISupplierResearcher {
     columnPriorities: string[],
     supplierIds?: string[]
   ): Promise<{ categorized: number; invalidPaths: number }> {
-    if (this.isCancelled) return { categorized: 0, invalidPaths: 0 };
+    this.isCancelled = false;
 
     // Fetch candidates: tail spend, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
@@ -539,10 +539,6 @@ export class SupplierResearcher implements ISupplierResearcher {
 
   cancel(): void {
     this.isCancelled = true;
-  }
-
-  resetCancel(): void {
-    this.isCancelled = false;
   }
 }
 

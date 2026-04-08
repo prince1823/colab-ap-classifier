@@ -96,19 +96,23 @@ export class ChangelogStore implements IChangelogStore {
         for (const id of e.affectedIds) allIds.add(id);
       }
 
+      // Batch lookups to avoid exceeding max call stack with large spreads
       const idArray = Array.from(allIds);
-      const placeholders = idArray.map(() => '?').join(',');
-      const txRows = await this.db.all<{ id: string; supplier_name: string | null }>(
-        `SELECT CAST(t.id AS VARCHAR) as id, ps.supplier_name
-         FROM transactions t
-         LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
-         WHERE t.id IN (${placeholders})`,
-        ...idArray
-      );
-
+      const BATCH = 500;
       const txSupplierMap = new Map<string, string>();
-      for (const r of txRows) {
-        if (r.supplier_name) txSupplierMap.set(r.id, r.supplier_name);
+      for (let i = 0; i < idArray.length; i += BATCH) {
+        const chunk = idArray.slice(i, i + BATCH);
+        const placeholders = chunk.map(() => '?').join(',');
+        const txRows = await this.db.all<{ id: string; supplier_name: string | null }>(
+          `SELECT CAST(t.id AS VARCHAR) as id, ps.supplier_name
+           FROM transactions t
+           LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+           WHERE t.id IN (${placeholders})`,
+          ...chunk
+        );
+        for (const r of txRows) {
+          if (r.supplier_name) txSupplierMap.set(r.id, r.supplier_name);
+        }
       }
 
       for (const entry of txEntries) {
@@ -172,13 +176,18 @@ export class ChangelogStore implements IChangelogStore {
       // Determine which columns to revert (exclude internal metadata key)
       const columns = Object.keys(change.oldValues).filter((k) => k !== '_perTransaction');
       if (columns.length > 0 && change.affectedIds.length > 0) {
-        const existingPlaceholders = change.affectedIds.map(() => '?').join(', ');
-
-        const existingRows = await this.db.all<{ id: string }>(
-          `SELECT CAST(id AS VARCHAR) as id FROM ${change.affectedTable} WHERE id IN (${existingPlaceholders})`,
-          ...change.affectedIds
-        );
-        const existingIds = new Set(existingRows.map((r) => r.id));
+        // Batch existence check to avoid exceeding max call stack with large spreads
+        const BATCH = 500;
+        const existingIds = new Set<string>();
+        for (let i = 0; i < change.affectedIds.length; i += BATCH) {
+          const chunk = change.affectedIds.slice(i, i + BATCH);
+          const placeholders = chunk.map(() => '?').join(', ');
+          const rows = await this.db.all<{ id: string }>(
+            `SELECT CAST(id AS VARCHAR) as id FROM ${change.affectedTable} WHERE id IN (${placeholders})`,
+            ...chunk
+          );
+          for (const r of rows) existingIds.add(r.id);
+        }
         const missingIds = change.affectedIds.filter((id) => !existingIds.has(id));
         const revertableIds = change.affectedIds.filter((id) => existingIds.has(id));
 
@@ -205,15 +214,18 @@ export class ChangelogStore implements IChangelogStore {
               );
             }
           } else {
-            // Legacy fallback: apply same old values to all rows
+            // Legacy fallback: apply same old values to all rows (batched)
             const setClauses = columns.map((col) => `${col} = ?`).join(', ');
             const setValues = columns.map((col) => change.oldValues![col]);
-            const revertPlaceholders = revertableIds.map(() => '?').join(', ');
-            await this.db.run(
-              `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${revertPlaceholders})`,
-              ...setValues,
-              ...revertableIds
-            );
+            for (let i = 0; i < revertableIds.length; i += BATCH) {
+              const chunk = revertableIds.slice(i, i + BATCH);
+              const revertPlaceholders = chunk.map(() => '?').join(', ');
+              await this.db.run(
+                `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${revertPlaceholders})`,
+                ...setValues,
+                ...chunk
+              );
+            }
           }
         }
 

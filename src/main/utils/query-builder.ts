@@ -44,6 +44,12 @@ export function conditionToSQL(
     case 'in_list': {
       const values = Array.isArray(value) ? value : String(value).split(',').map(v => v.trim());
       if (values.length === 0) return null;
+      // For large lists, inline values directly into SQL to avoid exceeding
+      // the max call stack size when spreading thousands of params
+      if (values.length > 500) {
+        const escaped = values.map(v => `'${String(v).replace(/'/g, "''")}'`).join(', ');
+        return `${col} IN (${escaped})`;
+      }
       const placeholders = values.map(v => { params.push(v); return '?'; }).join(', ');
       return `${col} IN (${placeholders})`;
     }

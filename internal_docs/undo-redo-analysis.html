@@ -28,7 +28,7 @@
 <body>
 
 <h1>Undo / Redo Deep Dive</h1>
-<p><em>Generated 2026-04-07 — analysis of all state-mutating user actions in the Colab AP Classifier and their undo support.</em></p>
+<p><em>Generated 2026-04-07 — last verified 2026-04-08 — analysis of all state-mutating user actions in the Colab AP Classifier and their undo support.</em></p>
 
 <div class="summary">
   <strong>TL;DR:</strong> The codebase has full undo/redo <em>infrastructure</em> (changelog table, revert service, keyboard-shortcut hook), but only <strong>1 of ~42 user actions</strong> is actually wired into the undo stack: <code>rules:createAndApply</code> (the reclassification modal). Several other actions write changelog entries but never push to the renderer-side undo stack. Most write paths don't log at all.
@@ -47,10 +47,9 @@ description, is_reverted, filter_context, rule_id, created_at</pre>
 <p><code>src/main/services/changelog.ts</code></p>
 <ul>
   <li><code>logChange()</code> (line 137) — single insertion entry point; returns the new entry id.</li>
-  <li><code>revertChange()</code> (line 156) — restores <code>old_values</code> onto the affected rows and flips <code>is_reverted=TRUE</code>. Per commit <code>c7c4123</code>, missing rows no longer throw — they return a warning string so the undo stack stays consistent.</li>
+  <li><code>revertChange()</code> (line 156) — restores <code>old_values</code> onto the affected rows and flips <code>is_reverted=TRUE</code>. Per commit <code>c7c4123</code>, missing rows no longer throw — they return a warning string so the undo stack stays consistent. <strong>Undo works; redo does not</strong> — <code>revertChange()</code> throws on an already-reverted entry, so redo always errors out. Fix: make it a toggle (if already reverted, apply <code>new_values</code> and clear the flag).</li>
   <li><code>listChanges()</code> / <code>listChangesPaginated()</code> / <code>listByRuleId()</code> — read APIs used by Version History and rule deactivation modal.</li>
 </ul>
-<div class="warn"><strong>One-way revert:</strong> <code>is_reverted</code> is a flag, not a counter. An entry can be reverted only once. Redo works because the renderer keeps the entry on a separate stack and re-calls revert — but the backend treats it as idempotent.</div>
 
 <h3>1.3 Renderer hook: <code>useUndoRedo</code></h3>
 <p><code>src/renderer/hooks/useUndoRedo.ts</code></p>
@@ -65,7 +64,7 @@ description, is_reverted, filter_context, rule_id, created_at</pre>
 <p><code>src/main/ipc/changelog.ts</code> exposes <code>changelog:list</code>, <code>changelog:revert</code>, <code>changelog:listByRule</code>. The Version History page (<code>src/renderer/pages/VersionHistoryPage.tsx</code>) and <code>RuleDeactivationModal</code> use these for manual revert UI.</p>
 
 <h3>1.5 Where undo is actually wired</h3>
-<p>Only one place: <code>src/renderer/hooks/useReclassification.ts:37-39</code> calls <code>pushUndo({ type: 'reclassify', changelogId })</code> after <code>rules:createAndApply</code>.</p>
+<p>Only one place: <code>src/renderer/hooks/useReclassification.ts:188</code> calls <code>pushUndo({ type: 'reclassify', changelogId })</code> after <code>rules:createAndApply</code>. (Line 37 is where <code>useUndoRedo</code> is initialised; the actual stack push is inside <code>confirmApply</code>.)</p>
 
 <h2>2. Action-by-Action Audit</h2>
 

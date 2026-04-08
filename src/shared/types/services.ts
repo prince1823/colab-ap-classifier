@@ -193,8 +193,7 @@ export interface SupplierService {
   normalizeAllTransactions(onProgress?: (done: number, total: number, step: string) => void): Promise<void>;
   assignAlias(supplierId: string, rawName: string): Promise<void>;
   getProjectAliases(supplierId: string): Promise<string[]>;
-  getProjectAliasesWithSpend(supplierId: string): Promise<{ rawName: string; spend: number; txnCount: number }[]>;
-  getProjectAliasesWithSpendBatch(supplierIds: string[]): Promise<Record<string, { rawName: string; spend: number; txnCount: number }[]>>;
+  getAllProjectAliasesWithSpend(): Promise<Record<string, { rawName: string; spend: number; txnCount: number }[]>>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;
   mergeSuppliers(survivorId: string, losingIds: string[]): Promise<void>;
   deleteSupplier(supplierId: string): Promise<void>;

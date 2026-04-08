@@ -254,11 +254,27 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     return csvSorted.slice(pageStart, pageEnd)
   }, [data.csvMode, normalizedRows, csvSorted, pageStart, pageEnd])
 
-  // Export CSV respecting current sort/filter order
+  // Export CSV respecting current sort/filter order.
+  // Project mode fetches the alias spend map on demand (single full-scan query),
+  // so we don't pay for it on every page mount.
   const handleExportCsv = useCallback(async () => {
     const allRows = data.csvMode ? csvSorted : normalizedRows.map(r => ({ normalized: r }))
     const orderedSuppliers = allRows.map(r => r.normalized.supplier)
-    const csvString = suppliersToCSV(orderedSuppliers, parents, aliasCache)
+
+    let cacheForExport: Map<string, AliasData[]>
+    if (data.csvMode) {
+      cacheForExport = aliasCache
+    } else {
+      try {
+        const result = await ipc.suppliers.getAllAliasesWithSpend() as Record<string, AliasData[]>
+        cacheForExport = new Map(Object.entries(result))
+      } catch (e) {
+        data.setError(e instanceof Error ? e.message : 'Failed to fetch supplier aliases')
+        return
+      }
+    }
+
+    const csvString = suppliersToCSV(orderedSuppliers, parents, cacheForExport)
     const fileName = data.csvMode ? (data.csvFileName ?? 'normalized-suppliers.csv') : 'normalized-suppliers.csv'
     try {
       await ipc.export.saveContent(csvString, fileName)

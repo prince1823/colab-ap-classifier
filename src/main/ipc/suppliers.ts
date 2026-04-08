@@ -48,12 +48,8 @@ export function registerSuppliersHandlers(
     return suppliers.getProjectAliases(supplierId as string);
   });
 
-  registerHandler('suppliers:getAliasesWithSpend', async (_event, supplierId: unknown) => {
-    return suppliers.getProjectAliasesWithSpend(supplierId as string);
-  });
-
-  registerHandler('suppliers:getAliasesWithSpendBatch', async (_event, supplierIds: unknown) => {
-    return suppliers.getProjectAliasesWithSpendBatch(supplierIds as string[]);
+  registerHandler('suppliers:getAllAliasesWithSpend', async () => {
+    return suppliers.getAllProjectAliasesWithSpend();
   });
 
   registerHandler('suppliers:assignAlias', async (_event, supplierId: unknown, rawName: unknown) => {

@@ -183,6 +183,7 @@ export function createMockSupplierService(): SupplierService {
     normalizeAllTransactions: vi.fn(),
     assignAlias: vi.fn(),
     getProjectAliases: vi.fn().mockResolvedValue([]),
+    getAllProjectAliasesWithSpend: vi.fn().mockResolvedValue({}),
     renameSupplier: vi.fn(),
     mergeSuppliers: vi.fn(),
     deleteSupplier: vi.fn(),

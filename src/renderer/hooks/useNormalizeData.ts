@@ -3,10 +3,11 @@ import { v4 as uuidv4 } from 'uuid'
 import { ipc } from '../lib/ipc'
 import { showError } from '../lib/toast-errors'
 import type { ProjectSupplierView, SupplierParent, SupplierPaginationParams, PaginatedSuppliers } from '../../shared/types/suppliers'
-import { suppliersToCSV } from '../lib/csv-normalize'
 import type { AliasData, CsvModeData } from '../lib/csv-normalize'
 
 export type { AliasData }
+
+const EMPTY_ALIAS_CACHE: Map<string, AliasData[]> = new Map()
 
 interface UseNormalizeDataOptions {
   onDataChange?: () => void
@@ -40,14 +41,12 @@ export interface NormalizeDataSource {
   fetchPage(params: SupplierPaginationParams): Promise<PaginatedSuppliers>
 
   refresh(): Promise<void>
-  exportCsv(): Promise<void>
 }
 
 export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {}): NormalizeDataSource {
   // ── Project mode state ───────────────────────────────────────────────
   const [projSuppliers, setProjSuppliers] = useState<ProjectSupplierView[]>([])
   const [projParents, setProjParents] = useState<SupplierParent[]>([])
-  const [projAliasCache, setProjAliasCache] = useState<Map<string, AliasData[]>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -61,12 +60,9 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
   // ── Active data (switches based on mode) ─────────────────────────────
   const suppliers = csvMode ? csvSuppliers : projSuppliers
   const parents = csvMode ? csvParents : projParents
-  const aliasCache = csvMode ? csvAliasCache : projAliasCache
-
-  // Setters that target the active mode
-  const setSuppliers = csvMode ? setCsvSuppliers : setProjSuppliers
-  const setParents = csvMode ? setCsvParents : setProjParents
-  const setAliasCache = csvMode ? setCsvAliasCache : setProjAliasCache
+  // Project mode does not maintain a per-alias cache — `serverRows[].aliases`
+  // already powers in-page rendering. `aliasCache` is only used by CSV mode.
+  const aliasCache = csvMode ? csvAliasCache : EMPTY_ALIAS_CACHE
 
   // ── CSV mode controls ────────────────────────────────────────────────
   const enterCsvMode = useCallback((data: CsvModeData, fileName: string) => {
@@ -105,35 +101,6 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Auto-load aliases in batches (project mode only) — single batched IPC per chunk
-  const ALIAS_BATCH_SIZE = 500
-  const loadAliasesInBatches = useCallback(async (supplierIds: string[]) => {
-    for (let i = 0; i < supplierIds.length; i += ALIAS_BATCH_SIZE) {
-      const batch = supplierIds.slice(i, i + ALIAS_BATCH_SIZE)
-      try {
-        const result = await ipc.suppliers.getAliasesWithSpendBatch(batch) as Record<string, AliasData[]>
-        setProjAliasCache(prev => {
-          const next = new Map(prev)
-          for (const id of batch) next.set(id, result[id] ?? [])
-          return next
-        })
-      } catch {
-        setProjAliasCache(prev => {
-          const next = new Map(prev)
-          for (const id of batch) next.set(id, [])
-          return next
-        })
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!csvMode && projSuppliers.length > 0) {
-      const unloaded = projSuppliers.filter(s => !projAliasCache.has(s.id))
-      if (unloaded.length > 0) loadAliasesInBatches(unloaded.map(s => s.id))
-    }
-  }, [csvMode, projSuppliers, projAliasCache, loadAliasesInBatches])
-
   // ── Paginated fetch (project mode — server-side pagination) ────────
 
   const fetchPage = useCallback(async (params: SupplierPaginationParams): Promise<PaginatedSuppliers> => {
@@ -150,20 +117,8 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    setProjAliasCache(new Map())
     await loadData()
   }, [loadData])
-
-  // ── Export ──────────────────────────────────────────────────────────
-
-  const exportCsv = useCallback(async () => {
-    const csvString = suppliersToCSV(suppliers, parents, aliasCache)
-    try {
-      await ipc.export.saveContent(csvString, csvMode ? (csvFileName ?? 'normalized-suppliers.csv') : 'normalized-suppliers.csv')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save CSV')
-    }
-  }, [suppliers, parents, aliasCache, csvMode, csvFileName])
 
   // ── Mutations ─────────────────────────────────────────────────────
 
@@ -193,7 +148,6 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
       try {
         await ipc.suppliers.delete(supplierId)
         setProjSuppliers(prev => prev.filter(s => s.id !== supplierId))
-        setProjAliasCache(prev => { const n = new Map(prev); n.delete(supplierId); return n })
         onDataChange?.()
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Delete failed')
@@ -202,13 +156,14 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
   }, [csvMode, onDataChange])
 
   const deleteAlias = useCallback((alias: AliasData, normalizedId: string) => {
-    setAliasCache(prev => {
+    if (!csvMode) return
+    setCsvAliasCache(prev => {
       const next = new Map(prev)
       const aliases = next.get(normalizedId) ?? []
       next.set(normalizedId, aliases.filter(a => a.rawName !== alias.rawName))
       return next
     })
-  }, [setAliasCache])
+  }, [csvMode])
 
   const changeParent = useCallback(async (supplierId: string, parentId: string | null) => {
     if (csvMode) {
@@ -327,15 +282,6 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
         const losingSet = new Set(losingIds)
         await ipc.suppliers.merge(survivorId, losingIds)
         setProjSuppliers(prev => prev.filter(s => !losingSet.has(s.id)))
-        setProjAliasCache(prev => {
-          const n = new Map(prev)
-          losingSet.forEach(id => n.delete(id))
-          n.delete(survivorId)
-          return n
-        })
-        ipc.suppliers.getAliasesWithSpend(survivorId).then(aliases => {
-          setProjAliasCache(c => new Map(c).set(survivorId, aliases as AliasData[]))
-        }).catch((e) => showError('Failed to reload supplier aliases', e))
         ipc.suppliers.list().then(fresh => {
           setProjSuppliers(fresh as ProjectSupplierView[])
         }).catch((e) => showError('Failed to refresh supplier list', e))
@@ -395,15 +341,6 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
     } else {
       try {
         await ipc.suppliers.assignAlias(toId, aliasName)
-        setProjAliasCache(prev => {
-          const next = new Map(prev)
-          const fromAliases = next.get(fromId) ?? []
-          const movedAlias = fromAliases.find(a => a.rawName === aliasName)
-          next.set(fromId, fromAliases.filter(a => a.rawName !== aliasName))
-          const toAliases = next.get(toId) ?? []
-          next.set(toId, [...toAliases, movedAlias ?? { rawName: aliasName, spend: 0, txnCount: 0 }])
-          return next
-        })
         ipc.suppliers.list().then(fresh => {
           setProjSuppliers(fresh as ProjectSupplierView[])
         }).catch((e) => showError('Failed to refresh supplier list after alias reassign', e))
@@ -437,6 +374,5 @@ export function useNormalizeData({ onDataChange }: UseNormalizeDataOptions = {})
     reassignAlias,
     fetchPage,
     refresh,
-    exportCsv,
   }
 }

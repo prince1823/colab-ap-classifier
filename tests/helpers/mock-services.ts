@@ -269,6 +269,7 @@ export function createMockSupplierResearcher(): SupplierResearcher {
     researchAll: vi.fn(),
     categorizeWithSupplierInfo: vi.fn(),
     categorizeTailSpend: vi.fn(),
+    categorizeAll: vi.fn(),
     cancel: vi.fn(),
   };
 }

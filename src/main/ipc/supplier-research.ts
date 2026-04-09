@@ -40,70 +40,9 @@ export function registerSupplierResearchHandlers(
     }
     const columnPriorities = (await project.getSetting('column_priorities') as string[] | null) ?? [];
 
-    // Fire-and-forget: categorize non-tail-spend → categorize tail-spend → completed
+    // Fire-and-forget: categorizeAll owns its own lifecycle and emits terminal events
     (async () => {
-      eventBus.emit('suppliers:research:progress', {
-        status: 'running',
-        totalSuppliers: 0,
-        processedSuppliers: 0,
-        percentage: 0,
-        currentSupplier: null,
-        currentStep: 'Categorizing suppliers...',
-      } satisfies ResearchProgress);
-
-      const errors: string[] = [];
-      const warnings: string[] = [];
-
-      let infoResult = { categorized: 0, skippedNoInfo: 0, invalidPaths: 0 };
-      try {
-        infoResult = await researcher.categorizeWithSupplierInfo(taxonomyNodes, context, ids);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error('[IPC] Non-tail-spend categorization failed:', err);
-        errors.push(`Supplier categorization: ${msg}`);
-      }
-
-      let tailResult = { categorized: 0, invalidPaths: 0 };
-      if (columnPriorities.length > 0) {
-        try {
-          tailResult = await researcher.categorizeTailSpend(taxonomyNodes, context, columnPriorities, ids);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error('[IPC] Tail spend categorization failed:', err);
-          errors.push(`Tail spend categorization: ${msg}`);
-        }
-      } else {
-        warnings.push('Tail spend categorization skipped — no column priorities configured. Set them in the Data step.');
-      }
-
-      // Build warnings from counts
-      if (infoResult.skippedNoInfo > 0) {
-        warnings.push(`${infoResult.skippedNoInfo} supplier${infoResult.skippedNoInfo > 1 ? 's' : ''} skipped (need research first)`);
-      }
-      const totalInvalidPaths = infoResult.invalidPaths + tailResult.invalidPaths;
-      if (totalInvalidPaths > 0) {
-        warnings.push(`${totalInvalidPaths} invalid category path${totalInvalidPaths > 1 ? 's' : ''} returned by LLM`);
-      }
-
-      if (errors.length > 0) {
-        eventBus.emit('suppliers:research:progress', {
-          status: 'failed',
-          totalSuppliers: 0,
-          processedSuppliers: 0,
-          percentage: 0,
-          currentSupplier: null,
-          currentStep: errors.join('; '),
-        } satisfies ResearchProgress);
-      } else {
-        eventBus.emit('suppliers:research:progress', {
-          status: 'completed',
-          totalSuppliers: 0,
-          processedSuppliers: 0,
-          percentage: 100,
-          currentSupplier: null,
-          currentStep: warnings.length > 0 ? warnings.join('; ') : 'Complete',
-        } satisfies ResearchProgress);
-      }
+      await researcher.categorizeAll(taxonomyNodes, context, columnPriorities, ids);
     })().catch((err) => {
       eventBus.emit('suppliers:research:progress', {
         status: 'failed',

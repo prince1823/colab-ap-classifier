@@ -286,6 +286,7 @@ export interface SupplierResearcher {
   researchAll(supplierIds?: string[], options?: { suppressTerminal?: boolean }): Promise<void>;
   categorizeWithSupplierInfo(taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]): Promise<{ categorized: number; skippedNoInfo: number; invalidPaths: number }>;
   categorizeTailSpend(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], supplierIds?: string[]): Promise<{ categorized: number; invalidPaths: number }>;
+  categorizeAll(taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], supplierIds?: string[]): Promise<void>;
   cancel(): void;
 }
 

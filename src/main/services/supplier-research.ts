@@ -220,12 +220,16 @@ export class SupplierResearcher implements ISupplierResearcher {
   /**
    * Categorize non-tail-spend suppliers that have supplier_info but no l1_l2_path.
    * Uses the existing selectCategories agent method.
+   *
+   * NOTE: This is an internal phase used by `categorizeAll`, which owns the cancel
+   * lifecycle (resets `isCancelled` at entry, checks it between phases). This method
+   * does not manage cancellation on its own — calling it directly will neither reset
+   * a stale cancel flag nor honor a `cancel()` issued mid-run. For user-facing
+   * categorization, call `categorizeAll`.
    */
   async categorizeWithSupplierInfo(
     taxonomy: TaxonomyNode[], companyContext: CompanyContext, supplierIds?: string[]
   ): Promise<{ categorized: number; skippedNoInfo: number; invalidPaths: number }> {
-    if (this.isCancelled) return { categorized: 0, skippedNoInfo: 0, invalidPaths: 0 };
-
     // Fetch candidates: non-tail-spend, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
     const idSet = supplierIds ? new Set(supplierIds) : null;
@@ -318,6 +322,12 @@ export class SupplierResearcher implements ISupplierResearcher {
   /**
    * Categorize tail spend suppliers using their transaction groups.
    * Batches: max 10 suppliers, max 300 groups per call. Supplier never split.
+   *
+   * NOTE: This is an internal phase used by `categorizeAll`, which owns the cancel
+   * lifecycle (resets `isCancelled` at entry, checks it between phases). This method
+   * does not manage cancellation on its own — calling it directly will neither reset
+   * a stale cancel flag nor honor a `cancel()` issued mid-run. For user-facing
+   * categorization, call `categorizeAll`.
    */
   async categorizeTailSpend(
     taxonomy: TaxonomyNode[],
@@ -325,8 +335,6 @@ export class SupplierResearcher implements ISupplierResearcher {
     columnPriorities: string[],
     supplierIds?: string[]
   ): Promise<{ categorized: number; invalidPaths: number }> {
-    if (this.isCancelled) return { categorized: 0, invalidPaths: 0 };
-
     // Fetch candidates: tail spend, no l1_l2_path
     const allSuppliers = await this.supplierService.listProjectSuppliers();
     const idSet = supplierIds ? new Set(supplierIds) : null;
@@ -535,6 +543,84 @@ export class SupplierResearcher implements ISupplierResearcher {
     }
 
     return ruleCreated;
+  }
+
+  async categorizeAll(
+    taxonomy: TaxonomyNode[],
+    companyContext: CompanyContext,
+    columnPriorities: string[],
+    supplierIds?: string[]
+  ): Promise<void> {
+    this.isCancelled = false;
+
+    const emitTerminal = (status: 'completed' | 'cancelled' | 'failed', step: string): void => {
+      this.eventBus.emit('suppliers:research:progress', {
+        status,
+        totalSuppliers: 0,
+        processedSuppliers: 0,
+        percentage: status === 'completed' ? 100 : 0,
+        currentSupplier: null,
+        currentStep: step,
+      } satisfies ResearchProgress);
+    };
+
+    this.eventBus.emit('suppliers:research:progress', {
+      status: 'running',
+      totalSuppliers: 0,
+      processedSuppliers: 0,
+      percentage: 0,
+      currentSupplier: null,
+      currentStep: 'Categorizing suppliers...',
+    } satisfies ResearchProgress);
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    let infoResult = { categorized: 0, skippedNoInfo: 0, invalidPaths: 0 };
+    try {
+      infoResult = await this.categorizeWithSupplierInfo(taxonomy, companyContext, supplierIds);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Research] Non-tail-spend categorization failed:', err);
+      errors.push(`Supplier categorization: ${msg}`);
+    }
+
+    if (this.isCancelled) {
+      emitTerminal('cancelled', 'Cancelled');
+      return;
+    }
+
+    let tailResult = { categorized: 0, invalidPaths: 0 };
+    if (columnPriorities.length > 0) {
+      try {
+        tailResult = await this.categorizeTailSpend(taxonomy, companyContext, columnPriorities, supplierIds);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[Research] Tail spend categorization failed:', err);
+        errors.push(`Tail spend categorization: ${msg}`);
+      }
+    } else {
+      warnings.push('Tail spend categorization skipped — no column priorities configured. Set them in the Data step.');
+    }
+
+    if (this.isCancelled) {
+      emitTerminal('cancelled', 'Cancelled');
+      return;
+    }
+
+    if (infoResult.skippedNoInfo > 0) {
+      warnings.push(`${infoResult.skippedNoInfo} supplier${infoResult.skippedNoInfo > 1 ? 's' : ''} skipped (need research first)`);
+    }
+    const totalInvalidPaths = infoResult.invalidPaths + tailResult.invalidPaths;
+    if (totalInvalidPaths > 0) {
+      warnings.push(`${totalInvalidPaths} invalid category path${totalInvalidPaths > 1 ? 's' : ''} returned by LLM`);
+    }
+
+    if (errors.length > 0) {
+      emitTerminal('failed', errors.join('; '));
+    } else {
+      emitTerminal('completed', warnings.length > 0 ? warnings.join('; ') : 'Complete');
+    }
   }
 
   cancel(): void {

@@ -18,9 +18,9 @@ Electron desktop app for automated classification of accounts payable transactio
 Renderer (React + Zustand) <-- IPC --> Main Process (Node.js)
                                             ├── createContainer() → ServiceContainer
                                             ├── IPC Handlers (receive services as args)
-                                            ├── Orchestrators (ClassificationRunner, SupplierResearcher)
+                                            ├── Orchestrators (ClassificationRunner, SupplierResearcher, QCRunner)
                                             ├── Data Services (stores, ingest, export)
-                                            ├── Agents (Classification, Research, ColumnMapping) → OpenRouter
+                                            ├── Agents (Classification, Research, ColumnMapping, Feedback, QC, CatA) → OpenRouter
                                             ├── Leaf Layer (DuckDB, LLMClient, ExaWebSearch)
                                             └── EventBus → webContents.send (progress events)
                                        ┌────────┼────────────┐
@@ -30,10 +30,11 @@ Renderer (React + Zustand) <-- IPC --> Main Process (Node.js)
 
 - **Renderer:** React UI with two route groups — **workflow steps** (Upload → DataReview → Classification → Review → Output) and **project views** (CompanyContext, Taxonomy, Suppliers, OverrideRules, VersionHistory). State managed via Zustand (`workflowStore`) and `useIPC<T>` hook.
 - **Main process:** DI container (`container.ts`), IPC handlers, orchestrators, DB access. No git sync.
-- **3 LLM agents:** ClassificationAgent, ResearchAgent, ColumnMappingAgent
+- **6 LLM agents:** ClassificationAgent, ResearchAgent, ColumnMappingAgent, FeedbackAgent, QCAgent, CatAAgent
+- **Orchestrators:** ClassificationRunner, SupplierResearcher, QCRunner
 - **DI Container:** `createContainer()` in `src/main/container.ts` — lightweight factory, no framework. All services receive dependencies via constructor.
 - **EventBus:** single typed event emitter for async progress (classification, supplier research). Services emit events; entry point forwards to renderer via `webContents.send`.
-- **Storage:** each project is a single `.c91` DuckDB file (portable, self-contained). Default location: `./projects/` (gitignored). Recent projects tracked in `~/.config/Colab91 Classifier/recent-projects.json`. Shared `supplier_universe.db` in `colabip/` holds global supplier data across projects.
+- **Storage:** each project is a single `.c91` DuckDB file (portable, self-contained). Project location is user-chosen via Electron's save dialog (no app-managed default directory) — the OS remembers the last-used location. The shared `supplier_universe.db` path is also user-chosen — `AppConfig.getSupplierUniversePath()` returns whatever the user configured (or `null` if unset); there is no built-in default. The repo's `./projects/` and `./colabip/` directories are dev/test conventions only (gitignored) — the packaged app does not write to or read from them.
 - **ColabIP:** local directory with master taxonomy files imported into projects. No runtime sync or git integration in the app.
 
 ## Project Structure
@@ -47,7 +48,7 @@ colab-ap-classifier/
 │   └── issues/             # Archive only (S1 artifacts in archive/sprint-1/)
 ├── internal_docs/          # Architecture docs, refactor notes
 │   └── refactor/           # Post-refactor architecture HTML
-├── projects/               # .c91 project files (gitignored)
+├── projects/               # dev/test scratch dir for .c91 files (gitignored; not used at runtime)
 ├── colabip/                # Local ColabIP clone + supplier_universe.db
 ├── src/
 │   ├── main/               # Electron main process
@@ -84,8 +85,8 @@ colab-ap-classifier/
 - Each project has its own copy of the taxonomy (imported from ColabIP)
 
 ### Override Rules
-- Priority is a simple integer ordering (lower = higher priority), no predefined bands
-- Conditions: JSON array of `{field, operator, value}` — AND logic, first match wins
+- Priority is a simple integer ordering (higher = evaluated first; rules sorted `ORDER BY priority DESC`), no predefined bands
+- Conditions use `GroupedFilter` (`src/shared/types/transactions.ts`): groups of `{field, operator, value, connector}` conditions, where conditions within a group and groups themselves are joined by per-level AND/OR connectors. Highest-priority matching rule wins.
 
 ### Canonical Columns
 - CSV columns are mapped to snake_case canonical names (`supplier_name`, `spend_amount`, `gl_description`, etc.)
@@ -104,7 +105,7 @@ colab-ap-classifier/
 - FK-based: `project_suppliers` table holds canonical supplier names per project
 - Transactions reference suppliers via `project_supplier_id` FK — no supplier name string on transactions
 - `original_supplier_name` on transactions preserves the raw CSV value as audit trail
-- `SupplierUniverse` (`colabip/supplier_universe.db`) is a shared DB with global supplier data, aliases, and research info
+- `SupplierUniverse` is a shared DuckDB file with global supplier data, aliases, and research info; its path is user-configured via `AppConfig.setSupplierUniversePath()` (no built-in default)
 
 ### LLM Configuration
 - Default model: `claude-3-5-haiku-latest`, default provider: `openrouter`
@@ -117,8 +118,7 @@ colab-ap-classifier/
 
 ### Branches
 - `main` — stable
-- `dev` — integration branch (remote); PRs may target here or directly to main
-- `v2-merge` — current active development branch
+- `dev` — integration branch and current active development branch; PRs may target here or directly to main
 - Feature/fix/docs branches: short descriptive names
 
 ### Development Workflow

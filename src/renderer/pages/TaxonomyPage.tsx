@@ -807,7 +807,10 @@ export default function TaxonomyPage() {
                               : 'No items'}
                           </td>
                           <td className="px-4 py-2 border-r border-gray-100 border-b border-gray-100">
-                            <span className="text-xs text-gray-200">—</span>
+                            <DescriptionCell
+                              value={row.l2Node?.description ?? ''}
+                              onSave={(d) => handleUpdateDescription(row.l2Node!.id, d)}
+                            />
                           </td>
                           <td className="px-2 py-2 text-center border-b border-gray-100">
                             <div className="flex items-center justify-center gap-0.5 ">

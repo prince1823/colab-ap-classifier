@@ -45,7 +45,7 @@ const VIRTUAL_COLS = new Set([
 ])
 
 /** Columns excluded from pivot dropdowns but still available in advanced filters. */
-const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched', 'classification_status', 'human_reviewed', 'source_file'])
+const PIVOT_ONLY_EXCLUDE = new Set(['is_tail_spend', 'is_researched', 'classification_status', 'human_reviewed'])
 
 const COLUMN_LABELS: Record<string, string> = {
   classification_l1: 'Classification L1',
@@ -213,17 +213,21 @@ export default function PivotPage() {
     onSuccess: refetch,
   })
 
-  const availableColumns = useMemo(() => [
-    'classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
-    'applied_rule_name',
-    ...columns.filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
-  ], [columns])
+  const availableColumns = useMemo(() => {
+    const manual = ['classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
+      'applied_rule_name', 'source_file']
+    const dynamic = columns.filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c))
+    return [...new Set([...manual, ...dynamic])]
+  }, [columns])
 
   /** All columns available for advanced filters (includes boolean virtual cols excluded from pivot). */
-  const filterableColumns = useMemo(() => [
-    ...availableColumns,
-    ...columns.filter(c => PIVOT_ONLY_EXCLUDE.has(c)),
-  ], [availableColumns, columns])
+  const filterableColumns = useMemo(() => {
+    const combined = [
+      ...availableColumns,
+      ...columns.filter(c => PIVOT_ONLY_EXCLUDE.has(c)),
+    ]
+    return [...new Set(combined)]
+  }, [availableColumns, columns])
 
   const BOOLEAN_COLS = new Set(['is_tail_spend', 'is_researched', 'human_reviewed'])
 

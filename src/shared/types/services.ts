@@ -159,6 +159,7 @@ export interface TransactionStore {
   invalidateColumnCache(): void;
   queryGroupedByColumn(column: string, filters?: TransactionFilter): Promise<GroupedTransactionsResult>;
   queryDistinctValues(column: string, limit?: number): Promise<string[]>;
+  countDistinctValues(column: string): Promise<number>;
   getTransactionIdsByColumnValue(column: string, value: string, filters?: TransactionFilter): Promise<string[]>;
   queryPivotAggregation(dimensions: string[], valueDimension?: string, filters?: TransactionFilter): Promise<PivotAggregationResult>;
   getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;

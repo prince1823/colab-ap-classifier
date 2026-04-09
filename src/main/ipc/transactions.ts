@@ -33,6 +33,10 @@ export function registerTransactionsHandlers(transactions: TransactionStore): vo
     );
   });
 
+  registerHandler('transactions:countDistinct', async (_event, column: unknown) => {
+    return transactions.countDistinctValues(column as string);
+  });
+
   registerHandler('transactions:getIdsByValue', async (_event, column: unknown, value: unknown, filters: unknown) => {
     return transactions.getTransactionIdsByColumnValue(
       column as string,

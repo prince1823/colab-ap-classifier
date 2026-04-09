@@ -192,7 +192,7 @@ export class TransactionStore implements ITransactionStore {
   }
 
   async queryTransactions(filters?: TransactionFilter): Promise<Transaction[]> {
-    const { whereSQL, params } = this.buildFilterSQL(filters);
+    const { whereSQL, params, needsSupplierParentJoin, needsUploadJoin } = this.buildFilterSQL(filters);
 
     const sortBy = filters?.sortBy || 'row_index';
     const sortOrder = filters?.sortOrder || 'asc';
@@ -207,12 +207,17 @@ export class TransactionStore implements ITransactionStore {
 
     const dynamicCols = validColumns.filter((c) => !BASE_COLUMNS.includes(c));
 
+    const supplierParentJoin = needsSupplierParentJoin ? SUPPLIER_PARENT_JOIN : '';
+    const uploadJoin = needsUploadJoin ? UPLOAD_JOIN : '';
+
     const sql = `
       SELECT t.*, ps.supplier_name, tax.full_path as classification_path, ar.name as applied_rule_name
       FROM transactions t
       ${SUPPLIER_JOIN}
+      ${supplierParentJoin}
       LEFT JOIN taxonomy tax ON t.taxonomy_node_id = tax.id
       ${RULES_JOIN}
+      ${uploadJoin}
       ${whereSQL}
       ORDER BY ${filters?.randomize ? 'RANDOM()' : `t.${safeSortBy} ${safeOrder}`}
       ${limitClause}
@@ -608,6 +613,35 @@ export class TransactionStore implements ITransactionStore {
 
     const rows = await this.db.all<{ value: string }>(sql);
     return rows.map((r) => String(r.value));
+  }
+
+  /**
+   * Return the count of distinct non-null values for a column.
+   */
+  async countDistinctValues(column: string): Promise<number> {
+    const validCols = await this.getColumns();
+    if (!this.isValidColumn(column, validCols)) return 0;
+
+    const colExpr = this.resolveColumn(column);
+    const supplierJoin = this.needsSupplierJoin([column]) ? SUPPLIER_JOIN : '';
+    const supplierParentJoin = this.needsSupplierParentJoin([column]) ? SUPPLIER_PARENT_JOIN : '';
+    const taxonomyJoin = this.needsTaxonomyJoinForColumns([column]) ? TAXONOMY_JOIN : '';
+    const rulesJoin = this.needsRulesJoin([column]) ? RULES_JOIN : '';
+    const uploadJoin = this.needsUploadJoin([column]) ? UPLOAD_JOIN : '';
+
+    const sql = `
+      SELECT COUNT(DISTINCT CAST(${colExpr} AS VARCHAR)) as cnt
+      FROM transactions t
+      ${supplierJoin}
+      ${supplierParentJoin}
+      ${taxonomyJoin}
+      ${rulesJoin}
+      ${uploadJoin}
+      WHERE ${colExpr} IS NOT NULL
+    `;
+
+    const rows = await this.db.all<{ cnt: number }>(sql);
+    return rows.length > 0 ? Number(rows[0].cnt) : 0;
   }
 
   /**

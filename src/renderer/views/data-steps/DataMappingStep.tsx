@@ -285,6 +285,7 @@ function MergePreviewContent({
   const [existingTotalCount, setExistingTotalCount] = useState(0)
   const [loading, setLoading] = useState(!isFirstUpload)
 
+
   const includedColumns = useMemo(() => columns.filter((c) => c.included), [columns])
   const canonicalNames = useMemo(() => [...new Set(includedColumns.map((c) => c.canonical))], [includedColumns])
   const filteredCanonicalNames = useMemo(() => {
@@ -474,15 +475,20 @@ function MergePreviewContent({
         </div>
       )}
 
-      {/* Mismatch warnings */}
+      {/* Mismatch warnings — show 3 visible, scroll for more */}
       {warnings.length > 0 && (
-        <div className="flex-shrink-0 mx-1 mb-2 space-y-1">
+        <div className="flex-shrink-0 mx-1 mb-1 max-h-[102px] overflow-y-auto space-y-1 pr-1">
           {warnings.map((w, i) => (
             <div key={i} className="rounded-md bg-amber-50 border border-amber-200 px-3 py-1.5 text-[11px] text-amber-700 flex items-start gap-1.5">
               <span className="flex-shrink-0 mt-0.5">&#9888;</span>
               <span>{w} &mdash; check your column mapping</span>
             </div>
           ))}
+        </div>
+      )}
+      {warnings.length > 3 && (
+        <div className="flex-shrink-0 mx-1 mb-1 text-[9px] text-gray-400 text-center select-none">
+          Scroll for {warnings.length - 3} more warning{warnings.length - 3 !== 1 ? 's' : ''}
         </div>
       )}
 

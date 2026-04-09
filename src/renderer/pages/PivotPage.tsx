@@ -215,7 +215,7 @@ export default function PivotPage() {
 
   const availableColumns = useMemo(() => [
     'classification_l1', 'classification_l2', 'classification_l3', 'classification_path',
-    'applied_rule_name',
+    'applied_rule_name', 'source_file',
     ...columns.filter(c => !INTERNAL_COLS.has(c) && !VIRTUAL_COLS.has(c)),
   ], [columns])
 

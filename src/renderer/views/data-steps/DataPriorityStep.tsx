@@ -78,8 +78,8 @@ export default function DataPriorityStep({ allMappings, onSave, onBack }: Props)
     if (allCanonicals.length === 0) return
     Promise.all(
       allCanonicals.map(async (col) => {
-        const values = await ipc.transactions.distinctValues(col)
-        return [col, values.length] as const
+        const count = await ipc.transactions.countDistinct(col)
+        return [col, count] as const
       })
     ).then((entries) => {
       setValueCounts(Object.fromEntries(entries))

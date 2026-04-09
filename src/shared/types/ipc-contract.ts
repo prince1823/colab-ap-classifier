@@ -61,6 +61,7 @@ export interface IPCInvokeMap {
   'transactions:update':            { args: [update: TransactionUpdate]; result: string | undefined };
   'transactions:queryGrouped':      { args: [column: string, filters?: TransactionFilter]; result: GroupedTransactionsResult };
   'transactions:distinctValues':    { args: [column: string, limit?: number]; result: string[] };
+  'transactions:countDistinct':     { args: [column: string]; result: number };
   'transactions:getIdsByValue':     { args: [column: string, value: string, filters?: TransactionFilter]; result: string[] };
   'transactions:pivotAggregation':  { args: [dimensions: string[], valueDimension: string, filters?: TransactionFilter]; result: PivotAggregationResult };
   'transactions:getIdsByConditions': { args: [conditions: FilterCondition[]]; result: string[] };

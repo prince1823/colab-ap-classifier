@@ -109,6 +109,8 @@ export const ipc = {
       invoke('transactions:queryGrouped', column, filters),
     distinctValues: (column: string, limit?: number) =>
       invoke('transactions:distinctValues', column, limit),
+    countDistinct: (column: string) =>
+      invoke('transactions:countDistinct', column),
     getIdsByValue: (column: string, value: string, filters?: TransactionFilter) =>
       invoke('transactions:getIdsByValue', column, value, filters),
     pivotAggregation: (dimensions: string[], valueDimension: string, filters?: TransactionFilter) =>

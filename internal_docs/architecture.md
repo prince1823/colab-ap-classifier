@@ -708,7 +708,7 @@ Every service has an interface defined here; implementations live in `src/main/s
 
 ### Project Files (`.c91`)
 
-Each project is a single DuckDB file. Default location: `./projects/` (gitignored). Key tables:
+Each project is a single DuckDB file. Location is user-chosen via Electron's save dialog (no app-managed default directory); the repo's `./projects/` is a dev/test scratch dir only. Key tables:
 
 - `project_settings` — key-value store for project metadata and config
 - `transactions` — dynamic schema; canonical columns added via ALTER TABLE at import time
@@ -722,11 +722,7 @@ Each project is a single DuckDB file. Default location: `./projects/` (gitignore
 
 ### Supplier Universe (`supplier_universe.db`)
 
-Shared DuckDB file in `colabip/` directory. Holds global supplier data, aliases, and research info across all projects. Configured per-machine via `AppConfigService`.
-
-### Recent Projects
-
-`~/.config/Colab91 Classifier/recent-projects.json` — tracks recently opened project file paths for the launch screen.
+Shared DuckDB file holding global supplier data, aliases, and research info across all projects. Path is user-configured per-machine via `AppConfigService.setSupplierUniversePath()` — there is no built-in default location (the repo's `colabip/` directory is a dev convention only).
 
 ---
 

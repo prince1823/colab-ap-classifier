@@ -507,6 +507,7 @@ export default function VersionHistoryPage() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Version History</h2>
           <p className="mt-1 text-sm text-gray-500">{totalCount} changes recorded</p>
+          <p className="mt-1 text-sm text-gray-400">Revert restores only the transactions in that change — other transactions classified by the same rule are unaffected and can be managed from the Rules page.</p>
         </div>
         <div className="flex items-center gap-2">
           <button

@@ -772,6 +772,18 @@ export default function SuppliersPage() {
               </div>
             </div>
           )}
+          {researchProgress && researchProgress.status === 'cancelled' && (
+            <div className="suppliers-progress">
+              <div className="flex items-center gap-2 py-1">
+                <span className="text-amber-600 font-semibold text-sm">
+                  ⚠ {researchProgress.currentStep || 'Operation cancelled'}
+                </span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill bg-amber-500" style={{ width: '100%' }} />
+              </div>
+            </div>
+          )}
 
           {/* Two-panel layout */}
           <div className="suppliers-content">

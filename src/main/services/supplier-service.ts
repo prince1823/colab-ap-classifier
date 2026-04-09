@@ -294,15 +294,9 @@ export class SupplierService implements ISupplierService {
     return rows.map(r => r.original_supplier_name);
   }
 
-  async getProjectAliasesWithSpend(supplierId: string): Promise<{ rawName: string; spend: number; txnCount: number }[]> {
-    return (await this.getProjectAliasesWithSpendBatch([supplierId]))[supplierId] ?? [];
-  }
-
-  async getProjectAliasesWithSpendBatch(supplierIds: string[]): Promise<Record<string, { rawName: string; spend: number; txnCount: number }[]>> {
-    if (supplierIds.length === 0) return {};
+  async getAllProjectAliasesWithSpend(): Promise<Record<string, { rawName: string; spend: number; txnCount: number }[]>> {
     const hasSpend = await this.transactionColumnExists('spend_amount');
     const spendExpr = hasSpend ? 'COALESCE(SUM(TRY_CAST(t.spend_amount AS DOUBLE)), 0)' : '0';
-    const placeholders = supplierIds.map(() => '?').join(',');
 
     const rows = await this.db.all<{ project_supplier_id: string; original_supplier_name: string; total_spend: number; txn_count: number }>(
       `SELECT t.project_supplier_id,
@@ -310,21 +304,21 @@ export class SupplierService implements ISupplierService {
               ${spendExpr} as total_spend,
               COUNT(t.id) as txn_count
        FROM transactions t
-       WHERE t.project_supplier_id IN (${placeholders})
+       WHERE t.project_supplier_id IS NOT NULL
        AND t.original_supplier_name IS NOT NULL
        GROUP BY t.project_supplier_id, t.original_supplier_name
-       ORDER BY t.project_supplier_id, t.original_supplier_name`,
-      ...supplierIds
+       ORDER BY t.project_supplier_id, t.original_supplier_name`
     );
 
     const result: Record<string, { rawName: string; spend: number; txnCount: number }[]> = {};
-    for (const id of supplierIds) result[id] = [];
     for (const r of rows) {
-      result[r.project_supplier_id].push({
+      const arr = result[r.project_supplier_id] ?? [];
+      arr.push({
         rawName: r.original_supplier_name,
         spend: Number(r.total_spend),
         txnCount: Number(r.txn_count),
       });
+      result[r.project_supplier_id] = arr;
     }
     return result;
   }

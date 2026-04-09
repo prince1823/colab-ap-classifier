@@ -343,7 +343,7 @@ All handlers are registered in `src/main/ipc/index.ts` via `registerAllHandlers(
 | `suppliers:getFilterFields` | Get available filter fields for supplier queries |
 | `suppliers:distinctValues` | Get distinct values for a supplier field |
 | `suppliers:getAliases` | Get aliases for a supplier |
-| `suppliers:getAliasesWithSpend` | Get aliases with transaction count + spend aggregates |
+| `suppliers:getAllAliasesWithSpend` | Get aliases with transaction count + spend aggregates for all suppliers (keyed by supplier id) |
 | `suppliers:assignAlias` | Assign an alias to a supplier |
 | `suppliers:rename` | Rename a supplier |
 | `suppliers:merge` | Merge multiple suppliers into one |

@@ -176,6 +176,54 @@ describe('ChangelogStore', () => {
       expect(changes[0].isReverted).toBe(true);
     });
 
+    it('should restore per-row old values via _perTransaction', async () => {
+      // Mirrors the shape produced by transactions.bulkUpdateClassification:
+      // oldValues holds a representative top-level value plus a _perTransaction
+      // map keyed by id. Revert must restore each row to its own prior state,
+      // not the representative top-level value.
+      await db.exec(
+        `INSERT INTO transactions (id, row_index, taxonomy_node_id, classification_status) VALUES
+         ('txn-1', 0, 'changed-node', 'classified'),
+         ('txn-2', 1, 'changed-node', 'classified'),
+         ('txn-3', 2, 'changed-node', 'classified')`
+      );
+
+      const perTransaction = {
+        'txn-1': { taxonomy_node_id: 'old-a', classification_status: 'unclassified', supplier_name: null },
+        'txn-2': { taxonomy_node_id: 'old-b', classification_status: 'classified',   supplier_name: null },
+        'txn-3': { taxonomy_node_id: 'old-c', classification_status: 'reviewed',     supplier_name: null },
+      };
+
+      const changeId = await store.logChange({
+        source: 'manual', affectedTable: 'transactions',
+        affectedIds: ['txn-1', 'txn-2', 'txn-3'], affectedCount: 3,
+        oldValues: {
+          // Representative top-level values (from first row) — not what revert
+          // should apply; revert must use _perTransaction per row.
+          taxonomy_node_id: 'old-a',
+          classification_status: 'unclassified',
+          _perTransaction: perTransaction,
+        },
+        newValues: { taxonomy_node_id: 'changed-node', classification_status: 'classified' },
+        description: 'Bulk reclassify with per-row old values',
+      });
+
+      const warning = await store.revertChange(changeId);
+      expect(warning).toBeUndefined();
+
+      const rows = await db.all<{ id: string; taxonomy_node_id: string; classification_status: string }>(
+        `SELECT id, taxonomy_node_id, classification_status FROM transactions ORDER BY id`
+      );
+      expect(rows).toEqual([
+        { id: 'txn-1', taxonomy_node_id: 'old-a', classification_status: 'unclassified' },
+        { id: 'txn-2', taxonomy_node_id: 'old-b', classification_status: 'classified' },
+        { id: 'txn-3', taxonomy_node_id: 'old-c', classification_status: 'reviewed' },
+      ]);
+
+      const changes = await store.listChanges();
+      expect(changes[0].isReverted).toBe(true);
+    });
+
     it('should return warning when some rows are missing', async () => {
       await db.run(
         `INSERT INTO transactions (id, row_index, taxonomy_node_id) VALUES (?, ?, ?)`,
@@ -201,6 +249,79 @@ describe('ChangelogStore', () => {
       const changes = await store.listChanges();
       expect(changes[0].isReverted).toBe(true);
     });
+  });
+
+  describe('revertChange — large sets', () => {
+    // Regression: reverting a change with a very large number of affected ids
+    // used to crash with "Maximum call stack size exceeded" because the
+    // implementation spread the entire id array as function arguments to
+    // db.run/db.all. Empirically the JS spread limit (Node 22, vitest stack
+    // depth) sits at ~106k args; N is chosen comfortably above that so any
+    // reintroduction of the single-spread pattern reliably crashes here.
+    const N = 150000;
+    const TIMEOUT = 60000;
+
+    it('legacy fallback: reverts N rows in one bulk change without stack overflow', async () => {
+      // Bulk-insert via INSERT...SELECT FROM range() — server-side, zero JS params,
+      // so the setup itself does not exercise the spread path under test.
+      await db.exec(
+        `INSERT INTO transactions (id, row_index, taxonomy_node_id)
+         SELECT 'txn-' || i, i, 'changed-node' FROM range(0, ${N}) t(i)`
+      );
+
+      const ids = Array.from({ length: N }, (_, i) => `txn-${i}`);
+      const changeId = await store.logChange({
+        source: 'manual',
+        affectedTable: 'transactions',
+        affectedIds: ids,
+        affectedCount: N,
+        oldValues: { taxonomy_node_id: 'original-node' }, // no _perTransaction → legacy fallback
+        newValues: { taxonomy_node_id: 'changed-node' },
+        description: `Bulk reclassify ${N} rows`,
+      });
+
+      const warning = await store.revertChange(changeId);
+      expect(warning).toBeUndefined();
+
+      const restored = await db.get<{ cnt: number | bigint }>(
+        `SELECT COUNT(*) as cnt FROM transactions WHERE taxonomy_node_id = 'original-node'`
+      );
+      expect(Number(restored?.cnt)).toBe(N);
+
+      const changes = await store.listChanges();
+      expect(changes[0].isReverted).toBe(true);
+    }, TIMEOUT);
+
+    it('existence check: returns warning and reverts only surviving rows when half are missing', async () => {
+      // Insert only even-indexed rows → 750 survive, 750 are missing.
+      await db.exec(
+        `INSERT INTO transactions (id, row_index, taxonomy_node_id)
+         SELECT 'txn-' || i, i, 'changed-node' FROM range(0, ${N}) t(i) WHERE i % 2 = 0`
+      );
+
+      const ids = Array.from({ length: N }, (_, i) => `txn-${i}`);
+      const changeId = await store.logChange({
+        source: 'manual',
+        affectedTable: 'transactions',
+        affectedIds: ids,
+        affectedCount: N,
+        oldValues: { taxonomy_node_id: 'original-node' },
+        newValues: { taxonomy_node_id: 'changed-node' },
+        description: 'Bulk change with partial survival',
+      });
+
+      const half = N / 2;
+      const warning = await store.revertChange(changeId);
+      expect(warning).toMatch(new RegExp(`${half} of ${N} affected rows no longer exist`));
+
+      const restored = await db.get<{ cnt: number | bigint }>(
+        `SELECT COUNT(*) as cnt FROM transactions WHERE taxonomy_node_id = 'original-node'`
+      );
+      expect(Number(restored?.cnt)).toBe(half);
+
+      const changes = await store.listChanges();
+      expect(changes[0].isReverted).toBe(true);
+    }, TIMEOUT);
   });
 
   describe('filterContext', () => {

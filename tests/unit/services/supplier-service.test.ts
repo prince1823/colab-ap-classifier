@@ -81,6 +81,56 @@ describe('SupplierService', () => {
     });
   });
 
+  describe('getAllProjectAliasesWithSpend', () => {
+    it('groups (project_supplier_id, original_supplier_name) rows into a per-supplier alias map with spend + txn counts', async () => {
+      // hasSpendColumn() — information_schema lookup says spend_amount exists
+      vi.mocked(db.get).mockResolvedValue({ cnt: 1 });
+      vi.mocked(db.all).mockResolvedValue([
+        { project_supplier_id: 'sup1', original_supplier_name: 'ACME CORP',  total_spend: 1000, txn_count: 4 },
+        { project_supplier_id: 'sup1', original_supplier_name: 'ACME CO',    total_spend:  250, txn_count: 1 },
+        { project_supplier_id: 'sup2', original_supplier_name: 'WALMART',    total_spend: 5000, txn_count: 12 },
+      ]);
+
+      const result = await service.getAllProjectAliasesWithSpend();
+
+      expect(result).toEqual({
+        sup1: [
+          { rawName: 'ACME CORP', spend: 1000, txnCount: 4 },
+          { rawName: 'ACME CO',   spend:  250, txnCount: 1 },
+        ],
+        sup2: [
+          { rawName: 'WALMART', spend: 5000, txnCount: 12 },
+        ],
+      });
+
+      // The query must be a single full scan with no IN (?, …, ?) clause —
+      // that's the whole point of this method vs. the deleted batch one.
+      const sql = vi.mocked(db.all).mock.calls[0][0] as string;
+      expect(sql).toContain('FROM transactions');
+      expect(sql).toContain('GROUP BY t.project_supplier_id, t.original_supplier_name');
+      expect(sql).not.toMatch(/IN\s*\(/);
+    });
+
+    it('returns empty object when no transactions match', async () => {
+      vi.mocked(db.get).mockResolvedValue({ cnt: 1 });
+      vi.mocked(db.all).mockResolvedValue([]);
+      const result = await service.getAllProjectAliasesWithSpend();
+      expect(result).toEqual({});
+    });
+
+    it('falls back to spend=0 when transactions table has no spend_amount column', async () => {
+      vi.mocked(db.get).mockResolvedValue({ cnt: 0 });  // hasSpendColumn → false
+      vi.mocked(db.all).mockResolvedValue([
+        { project_supplier_id: 'sup1', original_supplier_name: 'ACME', total_spend: 0, txn_count: 3 },
+      ]);
+      const result = await service.getAllProjectAliasesWithSpend();
+      expect(result.sup1).toEqual([{ rawName: 'ACME', spend: 0, txnCount: 3 }]);
+
+      const sql = vi.mocked(db.all).mock.calls[0][0] as string;
+      expect(sql).not.toContain('TRY_CAST');
+    });
+  });
+
   describe('confirmSupplier', () => {
     it('should update confirmation status', async () => {
       await service.confirmSupplier('sup1', 'confirmed');

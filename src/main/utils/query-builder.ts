@@ -5,6 +5,9 @@ export type ColumnResolver = (field: string) => string;
 
 const defaultResolver: ColumnResolver = (field) => `"${field}"`;
 
+/** Max parameters per IN-clause chunk — keeps spreads below the JS call-stack limit. */
+const IN_CLAUSE_BATCH = 500;
+
 export function conditionToSQL(
   condition: FilterCondition,
   params: unknown[],
@@ -44,8 +47,15 @@ export function conditionToSQL(
     case 'in_list': {
       const values = Array.isArray(value) ? value : String(value).split(',').map(v => v.trim());
       if (values.length === 0) return null;
-      const placeholders = values.map(v => { params.push(v); return '?'; }).join(', ');
-      return `${col} IN (${placeholders})`;
+      // Always parameterize. For large lists, chunk into multiple IN clauses
+      // joined by OR so we never spread thousands of params into one call.
+      const chunks: string[] = [];
+      for (let i = 0; i < values.length; i += IN_CLAUSE_BATCH) {
+        const chunk = values.slice(i, i + IN_CLAUSE_BATCH);
+        const placeholders = chunk.map(v => { params.push(v); return '?'; }).join(', ');
+        chunks.push(`${col} IN (${placeholders})`);
+      }
+      return chunks.length === 1 ? chunks[0] : `(${chunks.join(' OR ')})`;
     }
     case 'greater_than':
       params.push(value);

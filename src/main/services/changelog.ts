@@ -18,6 +18,9 @@ interface ChangeLogRow {
   created_at: string;
 }
 
+/** Max parameters per IN-clause chunk — keeps spreads below the JS call-stack limit. */
+const IN_CLAUSE_BATCH = 500;
+
 function safeParse(json: string | null): unknown {
   if (!json) return null;
   try { return JSON.parse(json); } catch { return null; }
@@ -96,19 +99,22 @@ export class ChangelogStore implements IChangelogStore {
         for (const id of e.affectedIds) allIds.add(id);
       }
 
+      // Batch lookups to avoid exceeding max call stack with large spreads
       const idArray = Array.from(allIds);
-      const placeholders = idArray.map(() => '?').join(',');
-      const txRows = await this.db.all<{ id: string; supplier_name: string | null }>(
-        `SELECT CAST(t.id AS VARCHAR) as id, ps.supplier_name
-         FROM transactions t
-         LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
-         WHERE t.id IN (${placeholders})`,
-        ...idArray
-      );
-
       const txSupplierMap = new Map<string, string>();
-      for (const r of txRows) {
-        if (r.supplier_name) txSupplierMap.set(r.id, r.supplier_name);
+      for (let i = 0; i < idArray.length; i += IN_CLAUSE_BATCH) {
+        const chunk = idArray.slice(i, i + IN_CLAUSE_BATCH);
+        const placeholders = chunk.map(() => '?').join(',');
+        const txRows = await this.db.all<{ id: string; supplier_name: string | null }>(
+          `SELECT CAST(t.id AS VARCHAR) as id, ps.supplier_name
+           FROM transactions t
+           LEFT JOIN project_suppliers ps ON t.project_supplier_id = ps.id
+           WHERE t.id IN (${placeholders})`,
+          ...chunk
+        );
+        for (const r of txRows) {
+          if (r.supplier_name) txSupplierMap.set(r.id, r.supplier_name);
+        }
       }
 
       for (const entry of txEntries) {
@@ -172,13 +178,17 @@ export class ChangelogStore implements IChangelogStore {
       // Determine which columns to revert (exclude internal metadata key)
       const columns = Object.keys(change.oldValues).filter((k) => k !== '_perTransaction');
       if (columns.length > 0 && change.affectedIds.length > 0) {
-        const existingPlaceholders = change.affectedIds.map(() => '?').join(', ');
-
-        const existingRows = await this.db.all<{ id: string }>(
-          `SELECT CAST(id AS VARCHAR) as id FROM ${change.affectedTable} WHERE id IN (${existingPlaceholders})`,
-          ...change.affectedIds
-        );
-        const existingIds = new Set(existingRows.map((r) => r.id));
+        // Existence check: batch parameterized lookups to avoid stack overflow
+        const existingIds = new Set<string>();
+        for (let i = 0; i < change.affectedIds.length; i += IN_CLAUSE_BATCH) {
+          const chunk = change.affectedIds.slice(i, i + IN_CLAUSE_BATCH);
+          const placeholders = chunk.map(() => '?').join(', ');
+          const rows = await this.db.all<{ id: string }>(
+            `SELECT CAST(id AS VARCHAR) as id FROM ${change.affectedTable} WHERE id IN (${placeholders})`,
+            ...chunk
+          );
+          for (const r of rows) existingIds.add(r.id);
+        }
         const missingIds = change.affectedIds.filter((id) => !existingIds.has(id));
         const revertableIds = change.affectedIds.filter((id) => existingIds.has(id));
 
@@ -189,31 +199,48 @@ export class ChangelogStore implements IChangelogStore {
 
           if (perTransaction) {
             // Per-row revert: restore each transaction to its own prior state
-            // Skip display-only keys that aren't physical columns
+            // Group by unique old-value signature to batch identical updates
             const skipKeys = new Set(['supplier_name']);
+            const groups = new Map<string, { cols: string[]; vals: unknown[]; ids: string[] }>();
             for (const id of revertableIds) {
               const rowOld = perTransaction[id];
               if (!rowOld) continue;
               const rowCols = Object.keys(rowOld).filter((k) => !skipKeys.has(k));
               if (rowCols.length === 0) continue;
-              const rowSetClauses = rowCols.map((col) => `${col} = ?`).join(', ');
-              const rowSetValues = rowCols.map((col) => rowOld[col]);
-              await this.db.run(
-                `UPDATE ${change.affectedTable} SET ${rowSetClauses} WHERE id = ?`,
-                ...rowSetValues,
-                id
-              );
+              const key = rowCols.map((c) => `${c}=${JSON.stringify(rowOld[c])}`).join('|');
+              let group = groups.get(key);
+              if (!group) {
+                group = { cols: rowCols, vals: rowCols.map((c) => rowOld[c]), ids: [] };
+                groups.set(key, group);
+              }
+              group.ids.push(id);
+            }
+            // Execute one batched UPDATE per unique old-value combination
+            for (const group of groups.values()) {
+              const setClauses = group.cols.map((col) => `${col} = ?`).join(', ');
+              for (let i = 0; i < group.ids.length; i += IN_CLAUSE_BATCH) {
+                const chunk = group.ids.slice(i, i + IN_CLAUSE_BATCH);
+                const placeholders = chunk.map(() => '?').join(', ');
+                await this.db.run(
+                  `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${placeholders})`,
+                  ...group.vals,
+                  ...chunk
+                );
+              }
             }
           } else {
-            // Legacy fallback: apply same old values to all rows
+            // Legacy fallback: apply same old values to all rows (batched)
             const setClauses = columns.map((col) => `${col} = ?`).join(', ');
             const setValues = columns.map((col) => change.oldValues![col]);
-            const revertPlaceholders = revertableIds.map(() => '?').join(', ');
-            await this.db.run(
-              `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${revertPlaceholders})`,
-              ...setValues,
-              ...revertableIds
-            );
+            for (let i = 0; i < revertableIds.length; i += IN_CLAUSE_BATCH) {
+              const chunk = revertableIds.slice(i, i + IN_CLAUSE_BATCH);
+              const revertPlaceholders = chunk.map(() => '?').join(', ');
+              await this.db.run(
+                `UPDATE ${change.affectedTable} SET ${setClauses} WHERE id IN (${revertPlaceholders})`,
+                ...setValues,
+                ...chunk
+              );
+            }
           }
         }
 

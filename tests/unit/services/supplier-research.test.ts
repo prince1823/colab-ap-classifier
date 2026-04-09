@@ -286,6 +286,95 @@ describe('SupplierResearcher', () => {
     });
   });
 
+  describe('categorizeAll', () => {
+    const taxonomy = [
+      { id: 't1', fullPath: 'L1|L2', l1: 'L1', l2: 'L2', l3: null, depth: 2, description: null, parentPath: 'L1', createdAt: '' },
+    ];
+    const ctx = { industry: 'Tech' };
+
+    it('should run after a previous cancel (resets isCancelled at entry)', async () => {
+      // Simulate prior cancellation
+      researcher.cancel();
+
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([
+        {
+          id: 'sup1', supplierName: 'Acme', confirmationStatus: 'pending',
+          isTailSpend: false, parentSupplierId: null, parentName: null,
+          supplierInfo: { industry: 'Tech' }, mappedTaxonomyPaths: null,
+          l1L2Path: null, universeMatch: false, isResearched: true,
+          createdAt: '', transactionCount: 5, totalSpend: 1000, aliases: [],
+        },
+      ] as any);
+      vi.mocked(classificationAgent.selectCategories).mockResolvedValue(new Map([[1, ['L1|L2']]]));
+
+      await researcher.categorizeAll(taxonomy as any, ctx, []);
+
+      expect(classificationAgent.selectCategories).toHaveBeenCalledTimes(1);
+      // Terminal event should be 'completed', not 'cancelled'
+      const terminalCalls = vi.mocked(eventBus.emit).mock.calls
+        .filter((c) => c[0] === 'suppliers:research:progress')
+        .map((c) => (c[1] as any).status);
+      expect(terminalCalls).toContain('completed');
+      expect(terminalCalls).not.toContain('cancelled');
+    });
+
+    it('should skip tail spend phase and emit cancelled if cancel called between phases', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([
+        {
+          id: 'sup1', supplierName: 'Acme', confirmationStatus: 'pending',
+          isTailSpend: false, parentSupplierId: null, parentName: null,
+          supplierInfo: { industry: 'Tech' }, mappedTaxonomyPaths: null,
+          l1L2Path: null, universeMatch: false, isResearched: true,
+          createdAt: '', transactionCount: 5, totalSpend: 1000, aliases: [],
+        },
+      ] as any);
+
+      // Cancel mid-phase by triggering it inside the LLM call
+      vi.mocked(classificationAgent.selectCategories).mockImplementation(async () => {
+        researcher.cancel();
+        return new Map([[1, ['L1|L2']]]);
+      });
+
+      await researcher.categorizeAll(taxonomy as any, ctx, ['gl_description']);
+
+      // Tail spend phase must NOT have been entered
+      expect(classificationAgent.selectCategoriesForTailSpend).not.toHaveBeenCalled();
+
+      const statuses = vi.mocked(eventBus.emit).mock.calls
+        .filter((c) => c[0] === 'suppliers:research:progress')
+        .map((c) => (c[1] as any).status);
+      expect(statuses).toContain('cancelled');
+      expect(statuses).not.toContain('completed');
+    });
+
+    it('should emit failed when categorizeWithSupplierInfo throws', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockRejectedValue(new Error('db down'));
+
+      await researcher.categorizeAll(taxonomy as any, ctx, []);
+
+      const terminal = vi.mocked(eventBus.emit).mock.calls
+        .filter((c) => c[0] === 'suppliers:research:progress')
+        .map((c) => c[1] as any)
+        .pop();
+      expect(terminal.status).toBe('failed');
+      expect(terminal.currentStep).toMatch(/Supplier categorization/);
+    });
+
+    it('should warn when columnPriorities is empty (skips tail spend)', async () => {
+      vi.mocked(supplierService.listProjectSuppliers).mockResolvedValue([]);
+
+      await researcher.categorizeAll(taxonomy as any, ctx, []);
+
+      expect(classificationAgent.selectCategoriesForTailSpend).not.toHaveBeenCalled();
+      const terminal = vi.mocked(eventBus.emit).mock.calls
+        .filter((c) => c[0] === 'suppliers:research:progress')
+        .map((c) => c[1] as any)
+        .pop();
+      expect(terminal.status).toBe('completed');
+      expect(terminal.currentStep).toMatch(/Tail spend categorization skipped/);
+    });
+  });
+
   describe('resolveCatASupplier (via researchAll)', () => {
     const taxonomy = [
       { id: 't1', fullPath: 'Corporate|IT', l1: 'Corporate', l2: 'IT', l3: null, depth: 2, description: null, parentPath: 'Corporate', createdAt: '' },

@@ -4,12 +4,12 @@ import type { NormalizeDataSource } from '../../hooks/useNormalizeData'
 import type { CsvApplyRow } from '../../../shared/types/suppliers'
 import SupplierImportModal from './SupplierImportModal'
 import CsvApplyModal from './CsvApplyModal'
-import { parseNormalizeCsv, csvHasApplyColumns, parseCsvToNormalizeData, suppliersToCSV } from '../../lib/csv-normalize'
+import { csvHasApplyColumns, parseCsvToNormalizeData } from '../../lib/csv-normalize'
 
 interface CsvToolbarProps {
   data: NormalizeDataSource
   onIngestComplete?: () => void
-  onExportCsv?: () => Promise<void>
+  onExportCsv: () => Promise<void>
 }
 
 export default function CsvToolbar({ data, onIngestComplete, onExportCsv }: CsvToolbarProps) {
@@ -113,7 +113,7 @@ export default function CsvToolbar({ data, onIngestComplete, onExportCsv }: CsvT
         {/* Download current data */}
         {data.suppliers.length > 0 && (
           <button
-            onClick={onExportCsv ?? data.exportCsv}
+            onClick={onExportCsv}
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50 transition-colors"
             title="Download as CSV"
           >

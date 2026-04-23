@@ -259,6 +259,34 @@ describe('TaxonomyStore', () => {
       expect(software!.description).toBeNull();
     });
 
+    it('should unwrap CSV-quoted path lines whose values contain commas', async () => {
+      const text = [
+        'Direct|Aviation|Air Traffic Control',
+        '"Direct|Equipment|Cabling, Cabling Supplies & Racks"',
+        '"Indirect|Human Resources|Medical, Dental And Life Insurance"',
+      ].join('\n');
+
+      await store.createFromText(text);
+      const nodes = await store.getNodes();
+
+      const cabling = nodes.find(
+        (n) => n.fullPath === 'Direct|Equipment|Cabling, Cabling Supplies & Racks'
+      );
+      expect(cabling).toBeDefined();
+      expect(cabling!.l1).toBe('Direct');
+      expect(cabling!.l3).toBe('Cabling, Cabling Supplies & Racks');
+
+      const medical = nodes.find(
+        (n) => n.fullPath === 'Indirect|Human Resources|Medical, Dental And Life Insurance'
+      );
+      expect(medical).toBeDefined();
+      expect(medical!.l1).toBe('Indirect');
+
+      // No stray quoted L1s leaked through
+      expect(nodes.some((n) => n.l1.startsWith('"'))).toBe(false);
+      expect(nodes.some((n) => (n.l3 ?? '').endsWith('"'))).toBe(false);
+    });
+
     it('should load fixture file via importFromFile', async () => {
       const fixturePath = path.join(
         __dirname, '..', '..', 'fixtures', 'colabip', 'taxonomies', 'general', 'taxonomy.txt'

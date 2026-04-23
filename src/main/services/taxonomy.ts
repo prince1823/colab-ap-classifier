@@ -389,7 +389,12 @@ export class TaxonomyStore implements ITaxonomyStore {
       }
 
       // Path line: strip markdown list prefixes
-      const trimmed = raw.replace(/^[-*]\s*/, '').trim();
+      let trimmed = raw.replace(/^[-*]\s*/, '').trim();
+      // Unwrap CSV-style quoting (exporters wrap values containing commas in double quotes,
+      // escaping embedded quotes by doubling them)
+      if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        trimmed = trimmed.slice(1, -1).replace(/""/g, '"');
+      }
       if (!trimmed) continue;
 
       const { depth } = parsePath(trimmed);

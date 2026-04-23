@@ -272,11 +272,14 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   const currentViewCount = totalFiltered
 
   // Page through every row that matches the current search/sort (project mode).
+  // Termination is driven by the server-reported total; empty pages and an
+  // extreme hard cap guard against runaway loops on pathological inputs.
   const fetchAllFilteredSuppliers = useCallback(async (): Promise<ProjectSupplierView[]> => {
     const all: ProjectSupplierView[] = []
+    const HARD_MAX = 10_000_000
     let offset = 0
-    // Safety cap: bail out after ~1M rows to avoid runaway loops on pathological totals.
-    for (let guard = 0; guard < 1000; guard++) {
+    let total = Infinity
+    while (offset < total && all.length < HARD_MAX) {
       const page = await data.fetchPage({
         limit: EXPORT_CHUNK_SIZE,
         offset,
@@ -284,9 +287,10 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
         sortBy: serverSortBy,
         sortDir: sortDir,
       })
+      if (page.rows.length === 0) break
       all.push(...page.rows)
-      if (page.rows.length < EXPORT_CHUNK_SIZE || all.length >= page.total) break
-      offset += EXPORT_CHUNK_SIZE
+      total = page.total
+      offset += page.rows.length
     }
     return all
   }, [data, debouncedSearch, serverSortBy, sortDir])

@@ -694,6 +694,24 @@ export default function DataMappingStep({
     })
   }, [])
 
+  // Indices eligible for bulk include/exclude: unlocked and with a canonical assigned.
+  // If a search filter is active, scope to visible columns only.
+  const bulkToggleIndices = useMemo(() => {
+    const pool = columnSearch.trim() ? filteredColumnIndices : columns.map((_, i) => i)
+    return pool.filter((i) => !columns[i].locked && columns[i].canonical)
+  }, [columns, columnSearch, filteredColumnIndices])
+
+  const allBulkIncluded = bulkToggleIndices.length > 0 && bulkToggleIndices.every((i) => columns[i].included)
+
+  const handleBulkToggle = useCallback(() => {
+    setColumns((prev) => {
+      const eligible = new Set(bulkToggleIndices)
+      if (eligible.size === 0) return prev
+      const target = !allBulkIncluded
+      return prev.map((c, i) => (eligible.has(i) ? { ...c, included: target } : c))
+    })
+  }, [bulkToggleIndices, allBulkIncluded])
+
   const handleSetCanonical = useCallback((index: number, newCanonical: string) => {
     setColumns((prev) => prev.map((c, i) => {
       if (i === index) return { ...c, canonical: newCanonical }
@@ -792,6 +810,22 @@ export default function DataMappingStep({
               )}
             </button>
             <div className="ml-auto flex items-center gap-2 px-2 pb-1">
+              {activeTab === 'mapping' && (
+                <button
+                  onClick={handleBulkToggle}
+                  disabled={bulkToggleIndices.length === 0}
+                  className="rounded border border-blue-300 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  title={
+                    bulkToggleIndices.length === 0
+                      ? 'No eligible columns to toggle'
+                      : allBulkIncluded
+                        ? `Exclude all ${bulkToggleIndices.length} ${columnSearch.trim() ? 'visible ' : ''}columns (locked columns are skipped)`
+                        : `Include all ${bulkToggleIndices.length} ${columnSearch.trim() ? 'visible ' : ''}columns (locked columns are skipped)`
+                  }
+                >
+                  {allBulkIncluded ? 'Exclude All' : 'Include All'}
+                </button>
+              )}
               <button
                 onClick={() => setShuffleKey((k) => k + 1)}
                 className="rounded border border-blue-300 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-50"

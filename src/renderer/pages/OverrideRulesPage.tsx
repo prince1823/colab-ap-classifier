@@ -1181,6 +1181,14 @@ export default function OverrideRulesPage() {
                       return next
                     })
                   }}
+                  onGroupSelectAll={(ruleIds, selected) => {
+                    setSelectedGroupedIds(prev => {
+                      const next = new Set(prev)
+                      if (selected) ruleIds.forEach(id => next.add(id))
+                      else ruleIds.forEach(id => next.delete(id))
+                      return next
+                    })
+                  }}
                   handleGroupDragStart={handleGroupDragStart}
                   handleGroupDragEnd={handleGroupDragEnd}
                   handleGroupReorderDragOver={handleGroupReorderDragOver}
@@ -1378,6 +1386,7 @@ interface GroupSectionProps {
   setExpandedConditions: React.Dispatch<React.SetStateAction<Set<string>>>
   selectedGroupedIds: Set<string>
   onGroupRuleSelect: (ruleId: string, selected: boolean) => void
+  onGroupSelectAll: (ruleIds: string[], selected: boolean) => void
   handleGroupDragStart: (e: React.DragEvent, groupId: string) => void
   handleGroupDragEnd: (e: React.DragEvent) => void
   handleGroupReorderDragOver: (e: React.DragEvent, targetGroupId: string) => void
@@ -1393,9 +1402,11 @@ function GroupSection({
   handleGroupDragOver, setDragOverGroupId, handleGroupDrop,
   getNodePath, formatConditionSummary, openEdit, handleToggle, handleCategoryAToggle,
   handleRuleDragStart, handleRuleDragEnd, expandedConditions, setExpandedConditions,
-  selectedGroupedIds, onGroupRuleSelect,
+  selectedGroupedIds, onGroupRuleSelect, onGroupSelectAll,
   handleGroupDragStart, handleGroupDragEnd, handleGroupReorderDragOver, handleGroupReorderDrop, setDragOverGroupReorderId, isDragOverReorder,
 }: GroupSectionProps) {
+  const allGroupSelected = groupRules.length > 0 && groupRules.every(r => selectedGroupedIds.has(r.id))
+  const someGroupSelected = groupRules.some(r => selectedGroupedIds.has(r.id))
   return (
     <>
       {/* Group header row */}
@@ -1428,6 +1439,19 @@ function GroupSection({
             <svg className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>
+            <input
+              type="checkbox"
+              checked={allGroupSelected}
+              ref={(el) => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected }}
+              disabled={groupRules.length === 0}
+              onChange={(e) => {
+                e.stopPropagation()
+                onGroupSelectAll(groupRules.map(r => r.id), !allGroupSelected)
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-40"
+              title={groupRules.length === 0 ? 'No rules in this group' : `Select all rules in ${group.name}`}
+            />
 
             {editingGroupId === group.id ? (
               <input

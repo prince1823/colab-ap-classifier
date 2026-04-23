@@ -746,17 +746,24 @@ export class RuleStore implements IRuleStore {
     SELECT
       ce.rule_id, ce.txn_id, ce.group_idx,
       rc_meta.group_connector,
-      CASE WHEN COUNT(*) = MAX(rc_meta.total_conditions) THEN TRUE ELSE FALSE END AS group_matched
+      -- OR group matches if ANY condition matches; AND group requires ALL.
+      -- rc_meta.has_or_within is derived from condition_connector, which
+      -- decomposeConditions() writes per-condition at rule-creation time.
+      CASE
+        WHEN rc_meta.has_or_within THEN COUNT(*) >= 1
+        ELSE COUNT(*) = MAX(rc_meta.total_conditions)
+      END AS group_matched
     FROM condition_evals ce
     JOIN (
       SELECT rule_id, group_idx, group_connector,
-             COUNT(*) AS total_conditions
+             COUNT(*) AS total_conditions,
+             BOOL_OR(condition_connector = 'OR') AS has_or_within
       FROM rule_conditions
       GROUP BY rule_id, group_idx, group_connector
     ) rc_meta ON ce.rule_id = rc_meta.rule_id
             AND ce.group_idx = rc_meta.group_idx
     GROUP BY ce.rule_id, ce.txn_id, ce.group_idx, rc_meta.group_connector,
-             rc_meta.total_conditions
+             rc_meta.total_conditions, rc_meta.has_or_within
   ),
 
   rule_evals AS (

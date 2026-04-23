@@ -254,34 +254,83 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
     return csvSorted.slice(pageStart, pageEnd)
   }, [data.csvMode, normalizedRows, csvSorted, pageStart, pageEnd])
 
-  // Export CSV respecting current sort/filter order.
-  // Project mode fetches the alias spend map on demand (single full-scan query),
-  // so we don't pay for it on every page mount.
-  const handleExportCsv = useCallback(async () => {
-    const allRows = data.csvMode ? csvSorted : normalizedRows.map(r => ({ normalized: r }))
-    const orderedSuppliers = allRows.map(r => r.normalized.supplier)
+  // ── Export: split into "Current View" vs "Full Dataset" ───────────
+  //
+  // Current View:
+  //   - Project mode: ALL rows matching the active filter + sort (not just the
+  //     on-screen page). We chunk-paginate the server with the same search/sort
+  //     used by the UI so the export reflects what the user is looking at.
+  //   - CSV mode:     filter+sort-applied csvSorted (already in memory).
+  //
+  // Full Dataset:
+  //   - Project mode: delegates to ipc.export.csv (transactions-level CSV
+  //     with all columns — same as Sync & Export tab).
+  //   - CSV mode:     entire in-memory CSV data, ignoring the search filter.
+  const EXPORT_CHUNK_SIZE = 1000
+  const [exporting, setExporting] = useState(false)
 
-    let cacheForExport: Map<string, AliasData[]>
-    if (data.csvMode) {
-      cacheForExport = aliasCache
-    } else {
-      try {
-        const result = await ipc.suppliers.getAllAliasesWithSpend() as Record<string, AliasData[]>
-        cacheForExport = new Map(Object.entries(result))
-      } catch (e) {
-        data.setError(e instanceof Error ? e.message : 'Failed to fetch supplier aliases')
-        return
-      }
+  const currentViewCount = totalFiltered
+
+  // Page through every row that matches the current search/sort (project mode).
+  const fetchAllFilteredSuppliers = useCallback(async (): Promise<ProjectSupplierView[]> => {
+    const all: ProjectSupplierView[] = []
+    let offset = 0
+    // Safety cap: bail out after ~1M rows to avoid runaway loops on pathological totals.
+    for (let guard = 0; guard < 1000; guard++) {
+      const page = await data.fetchPage({
+        limit: EXPORT_CHUNK_SIZE,
+        offset,
+        search: debouncedSearch || undefined,
+        sortBy: serverSortBy,
+        sortDir: sortDir,
+      })
+      all.push(...page.rows)
+      if (page.rows.length < EXPORT_CHUNK_SIZE || all.length >= page.total) break
+      offset += EXPORT_CHUNK_SIZE
     }
+    return all
+  }, [data, debouncedSearch, serverSortBy, sortDir])
 
-    const csvString = suppliersToCSV(orderedSuppliers, parents, cacheForExport)
-    const fileName = data.csvMode ? (data.csvFileName ?? 'normalized-suppliers.csv') : 'normalized-suppliers.csv'
+  const runExport = useCallback(async (mode: 'current' | 'full') => {
+    if (exporting) return
+    setExporting(true)
     try {
-      await ipc.export.saveContent(csvString, fileName)
+      if (data.csvMode) {
+        const orderedSuppliers = mode === 'current'
+          ? csvSorted.map(r => r.normalized.supplier)
+          : suppliers  // all CSV suppliers, ignoring filter
+        const csvString = suppliersToCSV(orderedSuppliers, parents, aliasCache)
+        const baseName = data.csvFileName?.replace(/\.csv$/i, '') ?? 'normalized-suppliers'
+        const fileName = mode === 'full' ? `${baseName}-full.csv` : `${baseName}.csv`
+        await ipc.export.saveContent(csvString, fileName)
+      } else {
+        // Project mode
+        if (mode === 'current') {
+          // Fetch every row matching the active filter + sort (chunked), and the
+          // real per-alias spend map in parallel. The paginated payload only
+          // ships alias names, so without this extra query every alias row would
+          // emit spend=0 / txn=0.
+          const [allSuppliers, aliasResult] = await Promise.all([
+            fetchAllFilteredSuppliers(),
+            ipc.suppliers.getAllAliasesWithSpend() as Promise<Record<string, AliasData[]>>,
+          ])
+          const cacheForExport = new Map(Object.entries(aliasResult))
+          const csvString = suppliersToCSV(allSuppliers, parents, cacheForExport)
+          await ipc.export.saveContent(csvString, 'normalized-suppliers-current.csv')
+        } else {
+          // Full dataset → transactions-level CSV with all columns (all rows)
+          await ipc.export.csv(undefined, undefined)
+        }
+      }
     } catch (e) {
-      data.setError(e instanceof Error ? e.message : 'Failed to save CSV')
+      data.setError(e instanceof Error ? e.message : 'Failed to export CSV')
+    } finally {
+      setExporting(false)
     }
-  }, [data, csvSorted, normalizedRows, parents, aliasCache])
+  }, [exporting, data, csvSorted, suppliers, parents, aliasCache, fetchAllFilteredSuppliers])
+
+  const handleExportCurrentView = useCallback(() => runExport('current'), [runExport])
+  const handleExportFullDataset = useCallback(() => runExport('full'), [runExport])
 
   // Compute parent grouping for the current page only
   const parentGroupInfo = useMemo(() => {
@@ -755,7 +804,14 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
         </div>
 
         {/* CSV upload/download */}
-        <CsvToolbar data={data} onIngestComplete={onDataChange} onExportCsv={handleExportCsv} />
+        <CsvToolbar
+          data={data}
+          onIngestComplete={onDataChange}
+          onExportCurrentView={handleExportCurrentView}
+          onExportFullDataset={handleExportFullDataset}
+          currentViewCount={currentViewCount}
+          exporting={exporting}
+        />
 
         {/* Right: search */}
         <div className="relative w-48">

@@ -348,9 +348,19 @@ export default function HierarchicalPivotView({
     const headers = [...dimHeaders, 'Count', 'Total']
     lines.push(headers.map(escCSV).join(','))
 
+    // Tabular form: emit one row per "visible endpoint" (a true leaf with no children,
+    // OR a collapsed branch whose children aren't visible). Every dimension column up
+    // to the row's depth is filled in from its ancestor path — deeper columns stay blank.
+    // Intermediate rollup rows (expanded branches) are skipped because their descendants
+    // carry the same ancestor labels along with finer-grained values.
     for (const row of visibleRows) {
-      // Fill the correct dimension column based on depth
-      const dimValues = rowDimensions.map((_, i) => i === row.depth ? row.label : '')
+      const isVisibleEndpoint = !row.hasChildren || !row.isExpanded
+      if (!isVisibleEndpoint) continue
+
+      const dimValues = rowDimensions.map((_, i) => {
+        const seg = row.pathSegments[i]
+        return seg ? seg.value : ''
+      })
       const total = row.total === 0 ? '' : fmtAbbrev(row.total)
       const count = String(row.transactionCount)
       lines.push([...dimValues.map(escCSV), escCSV(count), escCSV(total)].join(','))

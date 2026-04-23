@@ -41,7 +41,35 @@ export class DuckDBSupplierUniverse implements SupplierUniverse {
     }
     await this.appConfig.setSupplierUniversePath(path);
     this.defaultPath = path;
-    await this.open(path);
+    await this.openOrCreate(path);
+  }
+
+  private async openOrCreate(filePath: string): Promise<{ created: boolean }> {
+    if (this.instance) {
+      await this.close();
+    }
+    try {
+      this.instance = await DuckDBInstance.create(filePath);
+      this.connection = await this.instance.connect();
+    } catch (err) {
+      const walPath = filePath + '.wal';
+      if (existsSync(walPath)) {
+        console.warn(`[SupplierUniverse] Removing corrupted WAL file: ${walPath}`);
+        try { unlinkSync(walPath); } catch { /* ignore */ }
+        this.instance = await DuckDBInstance.create(filePath);
+        this.connection = await this.instance.connect();
+      } else {
+        throw err;
+      }
+    }
+    this.filePath = filePath;
+    this.defaultPath = filePath;
+    const tables = await this.allRaw<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'suppliers'"
+    );
+    const created = tables.length === 0;
+    await this.initializeSchema();
+    return { created };
   }
 
   async open(filePath?: string): Promise<{ created: boolean }> {

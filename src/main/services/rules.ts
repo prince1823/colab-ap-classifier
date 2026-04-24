@@ -766,19 +766,29 @@ export class RuleStore implements IRuleStore {
              rc_meta.total_conditions, rc_meta.has_or_within
   ),
 
+  rule_group_counts AS (
+    -- Needed because group_evals only contains rows for (txn, group) pairs
+    -- where at least one condition matched. An AND-rule must match EVERY
+    -- group, so we count matched groups vs total groups in the rule rather
+    -- than BOOL_AND over present rows (which silently ignores missing groups).
+    SELECT rule_id, COUNT(DISTINCT group_idx) AS total_groups
+    FROM rule_conditions GROUP BY rule_id
+  ),
+
   rule_evals AS (
-    SELECT rule_id, txn_id,
-      BOOL_OR(group_matched) AS any_group_matched,
-      BOOL_AND(group_matched) AS all_groups_matched,
-      BOOL_OR(group_connector = 'OR') AS has_or_connector
-    FROM group_evals
-    GROUP BY rule_id, txn_id
+    SELECT ge.rule_id, ge.txn_id,
+      COUNT(DISTINCT CASE WHEN ge.group_matched THEN ge.group_idx END) AS matched_groups,
+      rgc.total_groups,
+      BOOL_OR(ge.group_connector = 'OR') AS has_or_connector
+    FROM group_evals ge
+    JOIN rule_group_counts rgc ON ge.rule_id = rgc.rule_id
+    GROUP BY ge.rule_id, ge.txn_id, rgc.total_groups
   ),
 
   rule_matches AS (
     SELECT rule_id, txn_id FROM rule_evals
-    WHERE CASE WHEN has_or_connector THEN any_group_matched
-               ELSE all_groups_matched END
+    WHERE CASE WHEN has_or_connector THEN matched_groups >= 1
+               ELSE matched_groups = total_groups END
   )
 
 SELECT DISTINCT ON (rm.txn_id)

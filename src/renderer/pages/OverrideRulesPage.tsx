@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Zap, X, CheckCircle2 } from 'lucide-react'
 import { ipc } from '../lib/ipc'
 import { showError } from '../lib/toast-errors'
-import { makeEmptyGroup, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
+import { makeEmptyGroup, normalizeGroupedFilter, OPERATOR_LABELS } from '../components/FilterConditionBuilder'
 import AdvancedFilterModal from '../components/review/AdvancedFilterModal'
 import type { OverrideRule, RuleGroup } from '../../shared/types/rules'
 import type { FieldDefinition, GroupedFilter } from '../../shared/types/transactions'
@@ -177,7 +177,7 @@ export default function OverrideRulesPage() {
   const openEdit = (rule: OverrideRule) => {
     setEditingRule(rule)
     setName(rule.name)
-    setGrouped(rule.groupedConditions?.groups?.length > 0 ? rule.groupedConditions : { groupConnector: 'AND', groups: [makeEmptyGroup()] })
+    setGrouped(normalizeGroupedFilter(rule.groupedConditions?.groups?.length > 0 ? rule.groupedConditions : null))
     setTargetNodeId(rule.targetTaxonomyNodeId)
     setEditorGroupId(rule.groupId)
     setTaxonomySearch('')
@@ -555,16 +555,18 @@ export default function OverrideRulesPage() {
     if (!gf?.groups?.length) return 'No conditions'
     const hasConditions = gf.groups.some(g => g.conditions.some(c => c.field))
     if (!hasConditions) return 'No conditions configured'
+    // Use group.connector and gf.groupConnector exclusively — per-condition
+    // and per-group connectors are no longer authored (see normalizeGroupedFilter).
     return gf.groups.map((g, gi) => {
       const groupStr = g.conditions
         .filter(c => c.field)
         .map((c, ci, arr) => {
           const part = `${c.field} ${OPERATOR_LABELS[c.operator]} "${c.value}"`
-          if (ci < arr.length - 1) return `${part} ${c.connector || g.connector}`
+          if (ci < arr.length - 1) return `${part} ${g.connector ?? 'AND'}`
           return part
         })
         .join(' ')
-      const prefix = gi > 0 ? ` ${g.groupConnector || gf.groupConnector} ` : ''
+      const prefix = gi > 0 ? ` ${gf.groupConnector ?? 'AND'} ` : ''
       return gf.groups.length > 1 ? `${prefix}(${groupStr})` : `${prefix}${groupStr}`
     }).join('')
   }

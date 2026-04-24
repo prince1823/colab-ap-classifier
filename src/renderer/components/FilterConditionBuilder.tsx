@@ -389,7 +389,9 @@ function normalizeFields(fields: string[] | FieldDefinition[]): FieldDefinition[
 }
 
 function makeEmptyCondition(): FilterCondition {
-  const c: FilterCondition = { field: '', operator: 'contains' as FilterOperator, value: '', connector: 'AND' }
+  // Per-condition `connector` is no longer authored — the group-level
+  // connector is the single source of truth within a group.
+  const c: FilterCondition = { field: '', operator: 'contains' as FilterOperator, value: '' }
   stableKey(c) // pre-assign a stable key
   return c
 }
@@ -410,11 +412,17 @@ interface ConditionRowProps {
   onChange: (c: FilterCondition) => void
   onRemove: () => void
   canRemove: boolean
+  /** Whether this row has a connector slot above it (true for every row after the first). */
   showConnector: boolean
-  /** The connector value for the link above this row (from the previous condition) */
+  /** The group's connector — displayed in every within-group connector slot. */
   connectorValue: 'AND' | 'OR'
-  /** Toggle the connector for the link above this row */
-  onToggleConnector: () => void
+  /**
+   * Only the FIRST connector slot in a group is settable; the rest echo the
+   * group's value as a read-only label. Guarantees within-group homogeneity.
+   */
+  editable: boolean
+  /** Toggle the group's connector. Only invoked on the editable slot. */
+  onToggleGroupConnector: () => void
 }
 
 function ConditionRow({
@@ -427,7 +435,8 @@ function ConditionRow({
   canRemove,
   showConnector,
   connectorValue,
-  onToggleConnector,
+  editable,
+  onToggleGroupConnector,
 }: ConditionRowProps) {
   const getFieldDef = (name: string): FieldDefinition =>
     fieldMap.get(name) ?? { name, label: name, type: 'string' }
@@ -460,17 +469,29 @@ function ConditionRow({
     <div>
       {showConnector && (
         <div className="flex items-center py-0.5 pl-1">
-          <button
-            type="button"
-            onClick={onToggleConnector}
-            className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              connectorValue === 'OR'
-                ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
-            }`}
-          >
-            {connectorValue}
-          </button>
+          {editable ? (
+            <button
+              type="button"
+              onClick={onToggleGroupConnector}
+              title="Toggle AND/OR for this group"
+              className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                connectorValue === 'OR'
+                  ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                  : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+              }`}
+            >
+              {connectorValue}
+            </button>
+          ) : (
+            <span
+              title="Within-group connector is set by the first slot"
+              className={`select-none rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider opacity-60 ${
+                connectorValue === 'OR' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'
+              }`}
+            >
+              {connectorValue}
+            </span>
+          )}
         </div>
       )}
       <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-1.5 py-1">
@@ -539,10 +560,15 @@ interface GroupBlockProps {
   onChange: (g: ConditionGroup) => void
   onRemove: () => void
   canRemove: boolean
-  /** Connector to the PREVIOUS group */
+  /** True when this group has a connector slot above it (every group after the first). */
   showGroupConnector: boolean
-  /** This group's connector to the previous group */
+  /** The top-level connector used to join every group. */
   topConnector: 'AND' | 'OR'
+  /**
+   * Only the FIRST between-group slot is settable; the rest echo the top-level
+   * value as read-only. Guarantees between-group homogeneity.
+   */
+  topConnectorEditable: boolean
   onToggleTopConnector: () => void
 }
 
@@ -556,6 +582,7 @@ function GroupBlock({
   canRemove,
   showGroupConnector,
   topConnector,
+  topConnectorEditable,
   onToggleTopConnector,
 }: GroupBlockProps) {
   const updateCondition = (idx: number, c: FilterCondition) => {
@@ -581,13 +608,9 @@ function GroupBlock({
     if (gk) _keyMap.set(newGroup, gk)
     onChange(newGroup)
   }
-  const toggleConditionConnector = (idx: number) => {
-    // Toggle the connector on condition[idx] — this is the link between condition[idx] and condition[idx+1]
-    const current = group.conditions[idx].connector ?? 'AND'
-    const updated = { ...group.conditions[idx], connector: current === 'AND' ? 'OR' as const : 'AND' as const }
-    const oldKey = _keyMap.get(group.conditions[idx])
-    if (oldKey) _keyMap.set(updated, oldKey)
-    const newGroup = { ...group, conditions: group.conditions.map((cc, i) => i === idx ? updated : cc) }
+  const toggleGroupConnector = () => {
+    const current = group.connector ?? 'AND'
+    const newGroup: ConditionGroup = { ...group, connector: current === 'AND' ? 'OR' : 'AND' }
     const gk = _keyMap.get(group)
     if (gk) _keyMap.set(newGroup, gk)
     onChange(newGroup)
@@ -596,20 +619,33 @@ function GroupBlock({
 
   return (
     <div>
-      {/* Top-level connector between groups — each one toggles independently */}
+      {/* Between-group connector slot. Only the first slot (group index 1) is
+          editable; subsequent slots echo the top-level value as read-only. */}
       {showGroupConnector && (
         <div className="flex items-center py-1.5 pl-1">
-          <button
-            type="button"
-            onClick={onToggleTopConnector}
-            className={`rounded px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              topConnector === 'OR'
-                ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
-            }`}
-          >
-            {topConnector}
-          </button>
+          {topConnectorEditable ? (
+            <button
+              type="button"
+              onClick={onToggleTopConnector}
+              title="Toggle AND/OR between all groups"
+              className={`rounded px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                topConnector === 'OR'
+                  ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                  : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+              }`}
+            >
+              {topConnector}
+            </button>
+          ) : (
+            <span
+              title="Between-group connector is set by the first slot"
+              className={`select-none rounded px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider opacity-60 ${
+                topConnector === 'OR' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'
+              }`}
+            >
+              {topConnector}
+            </span>
+          )}
         </div>
       )}
 
@@ -643,8 +679,9 @@ function GroupBlock({
               onRemove={() => removeCondition(ci)}
               canRemove={totalConditions > 1}
               showConnector={ci > 0}
-              connectorValue={ci > 0 ? (group.conditions[ci - 1].connector ?? 'AND') : 'AND'}
-              onToggleConnector={() => ci > 0 && toggleConditionConnector(ci - 1)}
+              connectorValue={group.connector ?? 'AND'}
+              editable={ci === 1}
+              onToggleGroupConnector={toggleGroupConnector}
             />
           ))}
         </div>
@@ -711,15 +748,18 @@ export function GroupedFilterBuilder({
     if (gk) _keyMap.set(updatedLast, gk)
     onChange({ ...value, groups: value.groups.map((g, i) => i === lastIdx ? updatedLast : g) })
   }
-  const toggleTopConnector = (groupIdx: number) => {
-    // Toggle the connector on this specific group (how it connects to the previous group)
-    const currentConnector = value.groups[groupIdx]?.groupConnector ?? value.groupConnector
-    const newConnector = currentConnector === 'AND' ? 'OR' : 'AND'
+  const toggleTopConnector = () => {
+    // Between-group connector is top-level only; strip any per-group
+    // groupConnector values so the invariant is visibly enforced in the data.
+    const current = value.groupConnector ?? 'AND'
+    const newConnector: 'AND' | 'OR' = current === 'AND' ? 'OR' : 'AND'
     onChange({
       ...value,
-      groups: value.groups.map((g, i) => {
-        if (i !== groupIdx) return g
-        const newG = { ...g, groupConnector: newConnector as 'AND' | 'OR' }
+      groupConnector: newConnector,
+      groups: value.groups.map(g => {
+        if (g.groupConnector === undefined) return g
+        const { groupConnector: _dropped, ...rest } = g
+        const newG: ConditionGroup = { ...rest }
         const gk = _keyMap.get(g)
         if (gk) _keyMap.set(newG, gk)
         return newG
@@ -743,8 +783,9 @@ export function GroupedFilterBuilder({
             onRemove={() => removeGroup(gi)}
             canRemove={value.groups.length > 1}
             showGroupConnector={gi > 0}
-            topConnector={group.groupConnector ?? value.groupConnector}
-            onToggleTopConnector={() => toggleTopConnector(gi)}
+            topConnector={value.groupConnector ?? 'AND'}
+            topConnectorEditable={gi === 1}
+            onToggleTopConnector={toggleTopConnector}
           />
         ))}
       </div>
@@ -766,11 +807,111 @@ export function GroupedFilterBuilder({
           <span className="text-sm leading-none">⊞</span> Add Group
         </button>
       </div>
+
+      {/* Formula preview — compiled WHERE clause for the current filter. */}
+      <FormulaPreview value={value} fieldMap={fieldMap} />
+    </div>
+  )
+}
+
+/* ---------- Formula preview ---------- */
+
+function formatValue(v: string | number | string[] | undefined): string {
+  if (v === undefined || v === '') return '""'
+  if (Array.isArray(v)) return `[${v.map(x => `"${x}"`).join(', ')}]`
+  return typeof v === 'number' ? String(v) : `"${v}"`
+}
+
+/**
+ * Render a GroupedFilter as a compact logical formula using the group-level
+ * and top-level connectors only — mirrors what the backend now evaluates.
+ */
+export function formatGroupedFilter(
+  value: GroupedFilter,
+  fieldMap?: Map<string, FieldDefinition>,
+): string {
+  if (!value?.groups?.length) return ''
+  const labelFor = (field: string) => fieldMap?.get(field)?.label ?? field
+  const groupStrs = value.groups
+    .map(g => {
+      const parts = g.conditions
+        .filter(c => c.field)
+        .map(c => {
+          const label = labelFor(c.field)
+          const op = OPERATOR_LABELS[c.operator] ?? c.operator
+          return NO_VALUE_OPERATORS.has(c.operator)
+            ? `${label} ${op}`
+            : `${label} ${op} ${formatValue(c.value)}`
+        })
+      if (parts.length === 0) return ''
+      if (parts.length === 1) return parts[0]
+      return `(${parts.join(` ${g.connector ?? 'AND'} `)})`
+    })
+    .filter(s => s.length > 0)
+  if (groupStrs.length === 0) return ''
+  if (groupStrs.length === 1) return groupStrs[0]
+  return groupStrs.join(` ${value.groupConnector ?? 'AND'} `)
+}
+
+function FormulaPreview({
+  value,
+  fieldMap,
+}: {
+  value: GroupedFilter
+  fieldMap: Map<string, FieldDefinition>
+}) {
+  const text = formatGroupedFilter(value, fieldMap)
+  if (!text) return null
+  return (
+    <div className="mt-3 rounded-md border border-gray-200 bg-gray-50/70 px-3 py-2">
+      <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-wider text-gray-400">
+        Preview
+      </div>
+      <code className="block break-words font-mono text-[11px] text-gray-700">
+        {text}
+      </code>
     </div>
   )
 }
 
 /* ---------- Utility exports ---------- */
+
+/**
+ * Normalize a GroupedFilter to the UI's homogeneity invariants:
+ *   - Within each group, conditions use a single `group.connector` —
+ *     any per-condition `connector` is dropped on load.
+ *   - Between groups, a single top-level `groupConnector` is used —
+ *     per-group `groupConnector` values are dropped on load.
+ *
+ * When legacy data conflicts (e.g. groups with differing groupConnector),
+ * the first non-default per-group value wins so the most specific existing
+ * choice survives; otherwise the top-level value is kept.
+ */
+export function normalizeGroupedFilter(
+  g: GroupedFilter | null | undefined,
+): GroupedFilter {
+  if (!g || !g.groups || g.groups.length === 0) {
+    return { groupConnector: 'AND', groups: [makeEmptyGroup()] }
+  }
+  const explicitPerGroup = g.groups
+    .slice(1)
+    .map(grp => grp.groupConnector)
+    .filter((c): c is 'AND' | 'OR' => c === 'AND' || c === 'OR')
+  const topLevel: 'AND' | 'OR' =
+    explicitPerGroup[0] ?? g.groupConnector ?? 'AND'
+  return {
+    groupConnector: topLevel,
+    groups: g.groups.map(grp => ({
+      connector: grp.connector ?? 'AND',
+      conditions: (grp.conditions ?? []).map(c => {
+        // Drop any per-condition connector; group.connector is source of truth.
+        const { connector: _ignored, ...rest } = c
+        return rest as FilterCondition
+      }),
+      // grp.groupConnector is intentionally not copied — only top-level is used.
+    })),
+  }
+}
 
 /** Convert a flat FilterCondition[] to GroupedFilter (single group, all AND). */
 export function conditionsToGrouped(conditions: FilterCondition[]): GroupedFilter {
@@ -808,12 +949,13 @@ export function groupedToConditions(grouped: GroupedFilter): FilterCondition[] {
     const group = grouped.groups[gi]
     for (let ci = 0; ci < group.conditions.length; ci++) {
       const c = { ...group.conditions[ci] }
-      // Within a group, use the per-condition connector (falling back to group.connector)
+      // Emit per-condition connectors so the flat form encodes the grouped
+      // structure for SQL precedence: within a group use group.connector,
+      // at the last condition of a non-final group use grouped.groupConnector.
       if (ci < group.conditions.length - 1) {
-        c.connector = c.connector ?? group.connector
+        c.connector = group.connector ?? 'AND'
       } else if (gi < grouped.groups.length - 1) {
-        // Last condition in group — connector to next group
-        c.connector = grouped.groupConnector
+        c.connector = grouped.groupConnector ?? 'AND'
       }
       result.push(c)
     }
@@ -855,5 +997,6 @@ export default function FilterConditionBuilder({
 }
 
 export { OPERATOR_LABELS, ALL_OPERATORS as OPERATORS, NO_VALUE_OPERATORS, makeEmptyGroup }
+// normalizeGroupedFilter and formatGroupedFilter are already exported above at their definitions.
 export type { FieldDefinition, FieldType } from '../../shared/types/transactions'
 export type { GroupedFilter, ConditionGroup } from '../../shared/types/transactions'

@@ -232,7 +232,9 @@ export function decomposeConditions(
         operator: c.operator,
         value: c.value != null ? String(c.value) : null,
         group_connector: group.groupConnector ?? grouped.groupConnector ?? 'AND',
-        condition_connector: c.connector ?? group.connector ?? 'AND',
+        // Groups are homogeneous — ignore per-condition c.connector and take
+        // the group-level connector so eval and filter paths agree.
+        condition_connector: group.connector ?? 'AND',
       });
     }
   }

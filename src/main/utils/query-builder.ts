@@ -115,22 +115,15 @@ export function buildGroupedWhereClause(
     const validConditions = group.conditions.filter(c => c.field);
     if (validConditions.length === 0) continue;
 
-    // Build an index mapping from validConditions back to original indices
-    // so we can look up the correct per-condition connector
-    const originalIndices: number[] = [];
-    for (let i = 0; i < group.conditions.length; i++) {
-      if (group.conditions[i].field) originalIndices.push(i);
-    }
-
     const parts: string[] = [];
     for (let vi = 0; vi < validConditions.length; vi++) {
       const fragment = conditionToSQL(validConditions[vi], params, resolveColumn);
       if (!fragment) continue;
       if (parts.length > 0) {
-        // Use the previous condition's connector (per-condition), falling back to group.connector
-        const prevOrigIdx = originalIndices[vi - 1];
-        const connector = group.conditions[prevOrigIdx]?.connector ?? group.connector;
-        parts.push(connector);
+        // Groups are homogeneous (type invariant, enforced by UI) — use the
+        // group's connector, not per-condition. Keeps filter semantics aligned
+        // with rule evaluation, which collapses per-condition connectors.
+        parts.push(group.connector);
       }
       parts.push(fragment);
     }

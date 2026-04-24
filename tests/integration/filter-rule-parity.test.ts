@@ -123,50 +123,24 @@ const SCENARIOS: Scenario[] = [
       grp('AND', [eq(SUP, 'Gamma')], 'OR'),
     ]) },
 
-  // ── Group E: between-group MIXED AND/OR — SQL precedence (AND binds
-  //    tighter than OR) vs rule eval's "any OR anywhere → any_group_matched"
-  { name: 'E1 three groups: G1 AND G2 OR G3 — only G2 matches',
-    filter: filt('AND', [
-      grp('AND', [eq(SUP, 'Zeta')]),                    // G1: never matches
-      grp('AND', [eq(ST, 'unclassified')], 'AND'),      // G2: tx1,3,5,7,9
-      grp('AND', [eq(SUP, 'Omega')], 'OR'),             // G3: never matches
-    ]),
-    note: 'filter: (G1 AND G2) OR G3 = {} ∪ {} = {}; rule eval has an OR → any_group_matched = G2 rows' },
-  { name: 'E2 three groups: G1 AND G2 OR G3 — G1∩G2 matches some; G3 matches others',
-    filter: filt('AND', [
-      grp('AND', [eq(SUP, 'Acme')]),                    // G1: tx1,2
-      grp('AND', [eq(ST, 'unclassified')], 'AND'),      // G2: tx1,3,5,7,9
-      grp('AND', [eq(SUP, 'Gamma')], 'OR'),             // G3: tx5,6
-    ]),
-    note: 'filter: (Acme AND unclassified) OR Gamma = {tx1} ∪ {tx5,tx6} = {tx1,tx5,tx6}' },
-  { name: 'E3 three groups: G1 OR G2 AND G3',
-    filter: filt('AND', [
-      grp('AND', [eq(SUP, 'Zeta')]),                    // G1: never matches
-      grp('AND', [eq(SUP, 'Acme')], 'OR'),              // G2: tx1,2
-      grp('AND', [eq(ST, 'unclassified')], 'AND'),      // G3: tx1,3,5,7,9
-    ]),
-    note: 'filter: G1 OR (G2 AND G3) = {} ∪ {tx1} = {tx1}' },
-  { name: 'E4 four groups: G1 AND G2 OR G3 AND G4',
-    filter: filt('AND', [
-      grp('AND', [eq(SUP, 'Acme')]),                    // G1: tx1,2
-      grp('AND', [eq(ST, 'unclassified')], 'AND'),      // G2: tx1,3,5,7,9
-      grp('AND', [eq(SUP, 'Gamma')], 'OR'),             // G3: tx5,6
-      grp('AND', [eq(ST, 'classified_by_ai')], 'AND'),  // G4: tx2,4,6
-    ]),
-    note: 'filter: (G1 AND G2) OR (G3 AND G4) = {tx1} ∪ {tx6} = {tx1,tx6}' },
-
-  // ── Group F: within-group MIXED condition-level connectors
-  //    decomposeConditions faithfully stores per-condition connectors, but
-  //    the PR's fix uses BOOL_OR(condition_connector='OR') — any OR → whole
-  //    group is OR. buildGroupedWhereClause emits literal SQL and leans on
-  //    SQL precedence.
-  { name: 'F1 one group, mixed condition connectors: A AND B OR C',
+  // ── Group F: homogeneity invariant. The type docstring says within-group
+  //    connectors are homogeneous (all AND or all OR); the UI is the source
+  //    of truth. Per-condition `connector` values on FilterCondition are
+  //    tolerated as input but must not influence semantics — both paths
+  //    must fall through to group.connector. These guard against drift if
+  //    bad input ever reaches the backend.
+  { name: 'F1 mixed per-condition connectors ignored, group.connector=AND wins',
     filter: filt('AND', [grp('AND', [
-      eq(SUP, 'Acme', 'AND'),              // A
-      eq(SUP, 'Beta', 'OR'),               // B  — connector to C is OR
-      eq(ST, 'unclassified'),              // C
+      eq(SUP, 'Acme', 'OR'),               // per-condition OR — must be ignored
+      eq(ST, 'unclassified', 'OR'),        // per-condition OR — must be ignored
     ])]),
-    note: 'filter: (Acme AND Beta) OR unclassified = {} ∪ {tx1,3,5,7,9}; rule: any condition matches → {tx1,2,3,5,7,9}' },
+    note: 'group.connector=AND → both conditions must match → {tx1}' },
+  { name: 'F2 mixed per-condition connectors ignored, group.connector=OR wins',
+    filter: filt('AND', [grp('OR', [
+      eq(SUP, 'Acme', 'AND'),              // per-condition AND — must be ignored
+      eq(ST, 'classified_by_qc_agent', 'AND'), // per-condition AND — must be ignored
+    ])]),
+    note: 'group.connector=OR → either condition matches → {tx1,tx2,tx8}' },
 ];
 
 // ── Harness ───────────────────────────────────────────────────────────────

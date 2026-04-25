@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { GroupedFilterBuilder, conditionsToGrouped, makeEmptyGroup } from '../FilterConditionBuilder'
+import { GroupedFilterBuilder, conditionsToGrouped, makeEmptyGroup, normalizeGroupedFilter } from '../FilterConditionBuilder'
 import { ipc } from '../../lib/ipc'
 import { showError } from '../../lib/toast-errors'
 import type { FilterCondition, GroupedFilter } from '../../../shared/types/transactions'
@@ -67,15 +67,17 @@ export default function AdvancedFilterModal({
     }
 
     if (groupedFilter && groupedFilter.groups.some(g => g.conditions.some(c => c.field))) {
-      // We have a persisted grouped filter — prepend pill conditions as a group if any
+      // We have a persisted grouped filter — prepend pill conditions as a group if any.
+      // Normalize external data to enforce within-group and between-group homogeneity.
+      const normalized = normalizeGroupedFilter(groupedFilter)
       if (pillConditions.length > 0) {
         const pillGroup = { connector: 'AND' as const, conditions: pillConditions }
         setGrouped({
-          groupConnector: groupedFilter.groupConnector,
-          groups: [pillGroup, ...groupedFilter.groups],
+          groupConnector: normalized.groupConnector,
+          groups: [pillGroup, ...normalized.groups],
         })
       } else {
-        setGrouped(groupedFilter)
+        setGrouped(normalized)
       }
     } else if (pillConditions.length > 0) {
       // Only pill filters, wrap in a single group

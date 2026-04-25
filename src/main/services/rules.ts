@@ -232,7 +232,9 @@ export function decomposeConditions(
         operator: c.operator,
         value: c.value != null ? String(c.value) : null,
         group_connector: group.groupConnector ?? grouped.groupConnector ?? 'AND',
-        condition_connector: c.connector ?? group.connector ?? 'AND',
+        // Groups are homogeneous — ignore per-condition c.connector and take
+        // the group-level connector so eval and filter paths agree.
+        condition_connector: group.connector ?? 'AND',
       });
     }
   }
@@ -746,32 +748,49 @@ export class RuleStore implements IRuleStore {
     SELECT
       ce.rule_id, ce.txn_id, ce.group_idx,
       rc_meta.group_connector,
-      CASE WHEN COUNT(*) = MAX(rc_meta.total_conditions) THEN TRUE ELSE FALSE END AS group_matched
+      -- OR group matches if ANY condition matches; AND group requires ALL.
+      -- rc_meta.has_or_within is derived from condition_connector, which
+      -- decomposeConditions() writes per-condition at rule-creation time.
+      CASE
+        WHEN rc_meta.has_or_within THEN COUNT(*) >= 1
+        ELSE COUNT(*) = MAX(rc_meta.total_conditions)
+      END AS group_matched
     FROM condition_evals ce
     JOIN (
       SELECT rule_id, group_idx, group_connector,
-             COUNT(*) AS total_conditions
+             COUNT(*) AS total_conditions,
+             BOOL_OR(condition_connector = 'OR') AS has_or_within
       FROM rule_conditions
       GROUP BY rule_id, group_idx, group_connector
     ) rc_meta ON ce.rule_id = rc_meta.rule_id
             AND ce.group_idx = rc_meta.group_idx
     GROUP BY ce.rule_id, ce.txn_id, ce.group_idx, rc_meta.group_connector,
-             rc_meta.total_conditions
+             rc_meta.total_conditions, rc_meta.has_or_within
+  ),
+
+  rule_group_counts AS (
+    -- Needed because group_evals only contains rows for (txn, group) pairs
+    -- where at least one condition matched. An AND-rule must match EVERY
+    -- group, so we count matched groups vs total groups in the rule rather
+    -- than BOOL_AND over present rows (which silently ignores missing groups).
+    SELECT rule_id, COUNT(DISTINCT group_idx) AS total_groups
+    FROM rule_conditions GROUP BY rule_id
   ),
 
   rule_evals AS (
-    SELECT rule_id, txn_id,
-      BOOL_OR(group_matched) AS any_group_matched,
-      BOOL_AND(group_matched) AS all_groups_matched,
-      BOOL_OR(group_connector = 'OR') AS has_or_connector
-    FROM group_evals
-    GROUP BY rule_id, txn_id
+    SELECT ge.rule_id, ge.txn_id,
+      COUNT(DISTINCT CASE WHEN ge.group_matched THEN ge.group_idx END) AS matched_groups,
+      rgc.total_groups,
+      BOOL_OR(ge.group_connector = 'OR') AS has_or_connector
+    FROM group_evals ge
+    JOIN rule_group_counts rgc ON ge.rule_id = rgc.rule_id
+    GROUP BY ge.rule_id, ge.txn_id, rgc.total_groups
   ),
 
   rule_matches AS (
     SELECT rule_id, txn_id FROM rule_evals
-    WHERE CASE WHEN has_or_connector THEN any_group_matched
-               ELSE all_groups_matched END
+    WHERE CASE WHEN has_or_connector THEN matched_groups >= 1
+               ELSE matched_groups = total_groups END
   )
 
 SELECT DISTINCT ON (rm.txn_id)

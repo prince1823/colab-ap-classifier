@@ -682,6 +682,26 @@ describe('RuleStore', () => {
       const result = await store.evaluateRules();
       expect(result.get('tx-1')).toEqual({ ruleId: 'r1', targetTaxonomyNodeId: 'tid1' });
     });
+
+    it('OR-within-group groups match on >= 1 condition (regression)', async () => {
+      // Guard against the bug where group_evals treated every group as AND,
+      // silently dropping OR-rules during bulk classification.
+      mockBulkEval(db,
+        [{ field: 'supplier_name', operator: 'equals' }],
+        [{ txn_id: 'tx-1', rule_id: 'r1', target_taxonomy_node_id: 'tid1' }],
+      );
+
+      await store.evaluateRules();
+
+      const evalCall = vi.mocked(db.all).mock.calls[1];
+      const sql = evalCall[0] as string;
+      // rc_meta must surface a per-group OR flag derived from condition_connector…
+      expect(sql).toContain('condition_connector');
+      expect(sql).toMatch(/BOOL_OR\(\s*condition_connector\s*=\s*'OR'\s*\)/);
+      // …and group_matched must branch on it rather than always requiring COUNT = total.
+      expect(sql).toMatch(/has_or_within/);
+      expect(sql).toMatch(/COUNT\(\*\)\s*>=\s*1/);
+    });
   });
 
   // ─── listRulesByGroup ──────────────────────────────────────────────────────

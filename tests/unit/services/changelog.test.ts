@@ -1,12 +1,31 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DuckDBDatabase } from '../../../src/main/services/database';
 import { ChangelogStore } from '../../../src/main/services/changelog';
+import type { Database } from '../../../src/shared/types/services';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
 function tempDbPath(): string {
   return path.join(os.tmpdir(), `test-changelog-${Date.now()}-${Math.random().toString(36).slice(2)}.c91`);
+}
+
+function wrapDb(
+  realDb: DuckDBDatabase,
+  overrides: Partial<Pick<Database, 'run' | 'exec' | 'all' | 'get'>> = {}
+): Database {
+  return {
+    openDatabase: (filePath) => realDb.openDatabase(filePath),
+    closeDatabase: () => realDb.closeDatabase(),
+    isOpen: () => realDb.isOpen(),
+    getFilePath: () => realDb.getFilePath(),
+    getExpectedTables: () => realDb.getExpectedTables(),
+    run: overrides.run ?? ((sql, ...params) => realDb.run(sql, ...params)),
+    exec: overrides.exec ?? ((sql) => realDb.exec(sql)),
+    all: overrides.all ?? (<T = Record<string, unknown>>(sql: string, ...params: unknown[]) => realDb.all<T>(sql, ...params)),
+    get: overrides.get ?? (<T = Record<string, unknown>>(sql: string, ...params: unknown[]) => realDb.get<T>(sql, ...params)),
+    tx: (fn) => realDb.tx(fn),
+  };
 }
 
 describe('ChangelogStore', () => {
@@ -248,6 +267,100 @@ describe('ChangelogStore', () => {
 
       const changes = await store.listChanges();
       expect(changes[0].isReverted).toBe(true);
+    });
+
+    it('rolls back restored rows if marking the changelog entry reverted fails', async () => {
+      await db.run(
+        `INSERT INTO transactions (id, row_index, taxonomy_node_id) VALUES (?, ?, ?)`,
+        'txn-1', 0, 'changed-node'
+      );
+
+      const changeId = await store.logChange({
+        source: 'manual',
+        affectedTable: 'transactions',
+        affectedIds: ['txn-1'],
+        affectedCount: 1,
+        oldValues: { taxonomy_node_id: 'original-node' },
+        newValues: { taxonomy_node_id: 'changed-node' },
+        description: 'Changed classification',
+      });
+
+      const failingStore = new ChangelogStore(wrapDb(db, {
+        run: async (sql, ...params) => {
+          if (sql.includes('UPDATE change_log SET is_reverted = TRUE')) {
+            throw new Error('audit update failed');
+          }
+          return db.run(sql, ...params);
+        },
+      }));
+
+      await expect(failingStore.revertChange(changeId)).rejects.toThrow('audit update failed');
+
+      const txn = await db.get<{ taxonomy_node_id: string }>(
+        'SELECT taxonomy_node_id FROM transactions WHERE id = ?',
+        'txn-1'
+      );
+      expect(txn?.taxonomy_node_id).toBe('changed-node');
+
+      const change = await db.get<{ is_reverted: boolean }>(
+        'SELECT is_reverted FROM change_log WHERE id = ?',
+        changeId
+      );
+      expect(change?.is_reverted).toBe(false);
+    });
+
+    it('rolls back earlier per-transaction updates if a later update batch fails', async () => {
+      await db.exec(
+        `INSERT INTO transactions (id, row_index, taxonomy_node_id, classification_status) VALUES
+         ('txn-1', 0, 'changed-node', 'classified'),
+         ('txn-2', 1, 'changed-node', 'classified')`
+      );
+
+      const changeId = await store.logChange({
+        source: 'manual',
+        affectedTable: 'transactions',
+        affectedIds: ['txn-1', 'txn-2'],
+        affectedCount: 2,
+        oldValues: {
+          taxonomy_node_id: 'old-a',
+          classification_status: 'unclassified',
+          _perTransaction: {
+            'txn-1': { taxonomy_node_id: 'old-a', classification_status: 'unclassified' },
+            'txn-2': { taxonomy_node_id: 'old-b', classification_status: 'reviewed' },
+          },
+        },
+        newValues: { taxonomy_node_id: 'changed-node', classification_status: 'classified' },
+        description: 'Bulk change with distinct old values',
+      });
+
+      let transactionUpdateCount = 0;
+      const failingStore = new ChangelogStore(wrapDb(db, {
+        run: async (sql, ...params) => {
+          if (sql.startsWith('UPDATE transactions SET')) {
+            transactionUpdateCount++;
+            if (transactionUpdateCount === 2) {
+              throw new Error('second transaction update failed');
+            }
+          }
+          return db.run(sql, ...params);
+        },
+      }));
+
+      await expect(failingStore.revertChange(changeId)).rejects.toThrow('second transaction update failed');
+
+      const rows = await db.all<{ id: string; taxonomy_node_id: string; classification_status: string }>(
+        'SELECT id, taxonomy_node_id, classification_status FROM transactions ORDER BY id'
+      );
+      expect(rows).toEqual([
+        { id: 'txn-1', taxonomy_node_id: 'changed-node', classification_status: 'classified' },
+        { id: 'txn-2', taxonomy_node_id: 'changed-node', classification_status: 'classified' },
+      ]);
+
+      const change = await db.get<{ is_reverted: boolean }>(
+        'SELECT is_reverted FROM change_log WHERE id = ?',
+        changeId
+      );
+      expect(change?.is_reverted).toBe(false);
     });
   });
 

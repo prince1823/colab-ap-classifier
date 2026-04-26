@@ -160,6 +160,10 @@ export class ChangelogStore implements IChangelogStore {
   }
 
   async revertChange(changeId: string): Promise<string | undefined> {
+    return this.db.tx(() => this.revertChangeInTransaction(changeId));
+  }
+
+  private async revertChangeInTransaction(changeId: string): Promise<string | undefined> {
     const row = await this.db.get<ChangeLogRow>(
       'SELECT * FROM change_log WHERE id = ?',
       changeId

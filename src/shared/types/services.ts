@@ -60,6 +60,7 @@ export interface Database {
   exec(sql: string): Promise<void>;
   all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T[]>;
   get<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T | undefined>;
+  tx<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 export interface SupplierUniverse {

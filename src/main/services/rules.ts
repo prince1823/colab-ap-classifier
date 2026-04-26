@@ -255,6 +255,7 @@ const OPERATOR_JOIN_TEMPLATES: Record<string, (col: string) => string> = {
   less_than:             col => `TRY_CAST(${col} AS DECIMAL) < TRY_CAST(rc.value AS DECIMAL)`,
   greater_than_or_equal: col => `TRY_CAST(${col} AS DECIMAL) >= TRY_CAST(rc.value AS DECIMAL)`,
   less_than_or_equal:    col => `TRY_CAST(${col} AS DECIMAL) <= TRY_CAST(rc.value AS DECIMAL)`,
+  in_list:               col => `${col} IS NOT NULL AND list_contains(list_transform(string_split(CAST(rc.value AS VARCHAR), ','), x -> trim(x)), CAST(${col} AS VARCHAR))`,
   is_null:               col => `${col} IS NULL`,
   is_true:               col => `${col} = TRUE`,
   is_false:              col => `${col} = FALSE`,
@@ -737,60 +738,133 @@ export class RuleStore implements IRuleStore {
     const unionAll = cteNames.map(n => `SELECT rule_id, group_idx, condition_idx, txn_id FROM ${n}`).join('\n    UNION ALL\n    ');
 
     // 7. Build full evaluation query
-    const sql = `WITH
+    const sql = `WITH RECURSIVE
   ${scopedCtes.join(',\n  ')},
 
   condition_evals AS (
     ${unionAll}
   ),
 
+  rule_txns AS (
+    SELECT DISTINCT rule_id, txn_id
+    FROM condition_evals
+  ),
+
+  condition_status AS (
+    SELECT
+      rt.rule_id,
+      rt.txn_id,
+      rc.group_idx,
+      rc.condition_idx,
+      rc.group_connector,
+      rc.condition_connector,
+      ce.txn_id IS NOT NULL AS condition_matched
+    FROM rule_txns rt
+    JOIN rule_conditions rc ON rc.rule_id = rt.rule_id
+    LEFT JOIN condition_evals ce
+      ON ce.rule_id = rc.rule_id
+     AND ce.group_idx = rc.group_idx
+     AND ce.condition_idx = rc.condition_idx
+     AND ce.txn_id = rt.txn_id
+  ),
+
+  group_eval_steps AS (
+    SELECT
+      rule_id,
+      txn_id,
+      group_idx,
+      condition_idx,
+      condition_matched AS result
+    FROM condition_status
+    WHERE condition_idx = 0
+
+    UNION ALL
+
+    SELECT
+      step.rule_id,
+      step.txn_id,
+      step.group_idx,
+      next_condition.condition_idx,
+      CASE
+        WHEN prev_condition.condition_connector = 'OR'
+          THEN step.result OR next_condition.condition_matched
+        ELSE step.result AND next_condition.condition_matched
+      END AS result
+    FROM group_eval_steps step
+    JOIN condition_status prev_condition
+      ON prev_condition.rule_id = step.rule_id
+     AND prev_condition.txn_id = step.txn_id
+     AND prev_condition.group_idx = step.group_idx
+     AND prev_condition.condition_idx = step.condition_idx
+    JOIN condition_status next_condition
+      ON next_condition.rule_id = step.rule_id
+     AND next_condition.txn_id = step.txn_id
+     AND next_condition.group_idx = step.group_idx
+     AND next_condition.condition_idx = step.condition_idx + 1
+  ),
+
+  group_meta AS (
+    SELECT rule_id, group_idx,
+           MIN(group_connector) AS group_connector,
+           MAX(condition_idx) AS last_condition_idx
+    FROM rule_conditions
+    GROUP BY rule_id, group_idx
+  ),
+
   group_evals AS (
     SELECT
-      ce.rule_id, ce.txn_id, ce.group_idx,
-      rc_meta.group_connector,
-      -- OR group matches if ANY condition matches; AND group requires ALL.
-      -- rc_meta.has_or_within is derived from condition_connector, which
-      -- decomposeConditions() writes per-condition at rule-creation time.
+      step.rule_id,
+      step.txn_id,
+      step.group_idx,
+      meta.group_connector,
+      step.result AS group_matched
+    FROM group_eval_steps step
+    JOIN group_meta meta
+      ON meta.rule_id = step.rule_id
+     AND meta.group_idx = step.group_idx
+     AND meta.last_condition_idx = step.condition_idx
+  ),
+
+  rule_eval_steps AS (
+    SELECT
+      rule_id,
+      txn_id,
+      group_idx,
+      group_matched AS result
+    FROM group_evals
+    WHERE group_idx = 0
+
+    UNION ALL
+
+    SELECT
+      step.rule_id,
+      step.txn_id,
+      next_group.group_idx,
       CASE
-        WHEN rc_meta.has_or_within THEN COUNT(*) >= 1
-        ELSE COUNT(*) = MAX(rc_meta.total_conditions)
-      END AS group_matched
-    FROM condition_evals ce
-    JOIN (
-      SELECT rule_id, group_idx, group_connector,
-             COUNT(*) AS total_conditions,
-             BOOL_OR(condition_connector = 'OR') AS has_or_within
-      FROM rule_conditions
-      GROUP BY rule_id, group_idx, group_connector
-    ) rc_meta ON ce.rule_id = rc_meta.rule_id
-            AND ce.group_idx = rc_meta.group_idx
-    GROUP BY ce.rule_id, ce.txn_id, ce.group_idx, rc_meta.group_connector,
-             rc_meta.total_conditions, rc_meta.has_or_within
+        WHEN next_group.group_connector = 'OR'
+          THEN step.result OR next_group.group_matched
+        ELSE step.result AND next_group.group_matched
+      END AS result
+    FROM rule_eval_steps step
+    JOIN group_evals next_group
+      ON next_group.rule_id = step.rule_id
+     AND next_group.txn_id = step.txn_id
+     AND next_group.group_idx = step.group_idx + 1
   ),
 
-  rule_group_counts AS (
-    -- Needed because group_evals only contains rows for (txn, group) pairs
-    -- where at least one condition matched. An AND-rule must match EVERY
-    -- group, so we count matched groups vs total groups in the rule rather
-    -- than BOOL_AND over present rows (which silently ignores missing groups).
-    SELECT rule_id, COUNT(DISTINCT group_idx) AS total_groups
-    FROM rule_conditions GROUP BY rule_id
-  ),
-
-  rule_evals AS (
-    SELECT ge.rule_id, ge.txn_id,
-      COUNT(DISTINCT CASE WHEN ge.group_matched THEN ge.group_idx END) AS matched_groups,
-      rgc.total_groups,
-      BOOL_OR(ge.group_connector = 'OR') AS has_or_connector
-    FROM group_evals ge
-    JOIN rule_group_counts rgc ON ge.rule_id = rgc.rule_id
-    GROUP BY ge.rule_id, ge.txn_id, rgc.total_groups
+  rule_meta AS (
+    SELECT rule_id, MAX(group_idx) AS last_group_idx
+    FROM rule_conditions
+    GROUP BY rule_id
   ),
 
   rule_matches AS (
-    SELECT rule_id, txn_id FROM rule_evals
-    WHERE CASE WHEN has_or_connector THEN matched_groups >= 1
-               ELSE matched_groups = total_groups END
+    SELECT step.rule_id, step.txn_id
+    FROM rule_eval_steps step
+    JOIN rule_meta meta
+      ON meta.rule_id = step.rule_id
+     AND meta.last_group_idx = step.group_idx
+    WHERE step.result
   )
 
 SELECT DISTINCT ON (rm.txn_id)

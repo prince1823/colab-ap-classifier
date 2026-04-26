@@ -721,9 +721,11 @@ export class ClassificationRunner implements IClassificationRunner {
   private async markSupplierError(projectSupplierId: string, scopedIds: Set<string> | null): Promise<void> {
     let failedIds: string[];
     if (scopedIds) {
-      // Get all transactions for the supplier, then intersect with scoped IDs
-      const allIds = await this.transactions.getIdsBySupplier(projectSupplierId);
-      failedIds = allIds.filter((id) => scopedIds.has(id));
+      const unclassifiedRows = await this.transactions.queryBySupplier(projectSupplierId, 'unclassified');
+      failedIds = unclassifiedRows
+        .filter((row) => String(row.classification_status ?? 'unclassified') === 'unclassified')
+        .map((row) => String(row.id))
+        .filter((id) => scopedIds.has(id));
     } else {
       failedIds = await this.transactions.getIdsBySupplier(projectSupplierId, { statuses: ['unclassified'] });
     }

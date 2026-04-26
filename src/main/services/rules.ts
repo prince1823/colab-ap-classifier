@@ -3,6 +3,7 @@ import type { Database, RuleStore as IRuleStore, TransactionStore as ITransactio
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleSource, RuleGroup, RuleGroupCreate, RuleGroupUpdate, ConflictRow, ConditionRow } from '../../shared/types/rules';
 import type { GroupedFilter } from '../../shared/types/transactions';
 import { VIRTUAL_COLUMN_NAMES, VIRTUAL_COLUMN_REGISTRY } from '../../shared/virtual-columns';
+import { buildGroupedWhereClause } from '../utils/query-builder';
 
 interface RuleRow {
   id: string;
@@ -1212,28 +1213,37 @@ ORDER BY rm.txn_id, COALESCE(rg.priority, 0) DESC, r.created_at DESC`;
   }
 
   async filterAndAssignToGroup(filter: GroupedFilter, targetGroupId: string | null): Promise<{ matched: number }> {
-    // Analyze filter: can we push it entirely to SQL?
-    const { propertyClauses, hasContentFilters } = analyzeFilterConditions(filter);
+    const hasContentFilters = hasRuleContentFilters(filter);
 
-    if (!hasContentFilters && propertyClauses.length > 0) {
-      // Fast path: pure SQL update — no JS loading needed
-      const sqlWhere = propertyClauses.join(' AND ');
+    if (!hasContentFilters) {
+      const built = buildRulePropertyWhere(filter);
+      if (!built) return { matched: 0 };
+      const sqlWhere = built.sql;
       const countResult = await this.db.get<{ cnt: number }>(
-        `SELECT COUNT(*) AS cnt FROM override_rules WHERE ${sqlWhere}`
+        `SELECT COUNT(*) AS cnt
+         FROM override_rules r
+         LEFT JOIN rule_groups rg ON r.group_id = rg.id
+         WHERE ${sqlWhere}`,
+        ...built.params
       );
       await this.db.run(
-        `UPDATE override_rules SET group_id = CAST(? AS VARCHAR) WHERE ${sqlWhere}`,
-        targetGroupId
+        `UPDATE override_rules SET group_id = CAST(? AS VARCHAR)
+         WHERE id IN (
+           SELECT r.id
+           FROM override_rules r
+           LEFT JOIN rule_groups rg ON r.group_id = rg.id
+           WHERE ${sqlWhere}
+         )`,
+        targetGroupId,
+        ...built.params
       );
-      return { matched: countResult?.cnt ?? 0 };
+      return { matched: Number(countResult?.cnt ?? 0) };
     }
 
-    // Slow path: pre-filter with SQL, then in-memory match for content filters
-    const sqlWhere = propertyClauses.length ? propertyClauses.join(' AND ') : '1=1';
+    // Content-aware path: evaluate against full rule set to preserve grouped boolean semantics.
     const preFiltered = await this.db.all<RuleRow>(
       `SELECT r.*, rg.priority AS group_priority FROM override_rules r
        LEFT JOIN rule_groups rg ON r.group_id = rg.id
-       WHERE ${sqlWhere}
        ORDER BY COALESCE(rg.priority, 0) DESC, r.created_at DESC`
     );
     const rules = preFiltered.map(rowToRule);
@@ -1412,58 +1422,21 @@ const RULE_PROPERTY_SQL: Record<string, string> = {
   rule_source: 'r.source',
   rule_is_active: 'r.is_active',
   rule_category_a: 'r.category_a_supplier',
-  rule_group: 'r.group_id',
+  rule_group: "COALESCE(rg.name, 'Ungrouped')",
 };
 
-/**
- * Analyze a GroupedFilter to separate property-based conditions (translatable to SQL)
- * from content-based conditions (require in-memory matching).
- */
-function analyzeFilterConditions(filter: GroupedFilter): {
-  propertyClauses: string[];
-  hasContentFilters: boolean;
-} {
-  const propertyClauses: string[] = [];
-  let hasContentFilters = false;
+function hasRuleContentFilters(filter: GroupedFilter): boolean {
+  return filter.groups.some((group) =>
+    group.conditions.some((condition) => condition.field && !RULE_PROPERTY_SQL[condition.field])
+  );
+}
 
-  for (const group of filter.groups) {
-    for (const cond of group.conditions) {
-      if (!cond.field) continue;
-      const sqlCol = RULE_PROPERTY_SQL[cond.field];
-      if (!sqlCol) {
-        hasContentFilters = true;
-        continue;
-      }
-
-      // Translate property condition to SQL
-      const val = String(cond.value ?? '');
-      switch (cond.field) {
-        case 'rule_is_active':
-          propertyClauses.push(`${sqlCol} = ${cond.operator === 'is_true'}`);
-          break;
-        case 'rule_category_a':
-          propertyClauses.push(`${sqlCol} = ${cond.operator === 'is_true'}`);
-          break;
-        case 'rule_name':
-          if (cond.operator === 'contains') propertyClauses.push(`LOWER(${sqlCol}) LIKE LOWER('%${val.replace(/'/g, "''")}%')`);
-          else if (cond.operator === 'equals') propertyClauses.push(`LOWER(${sqlCol}) = LOWER('${val.replace(/'/g, "''")}')`);
-          break;
-        case 'rule_source':
-          if (cond.operator === 'equals') propertyClauses.push(`${sqlCol} = '${val.replace(/'/g, "''")}'`);
-          else if (cond.operator === 'in_list') {
-            const vals = Array.isArray(cond.value) ? cond.value : val.split(',').map(v => v.trim());
-            propertyClauses.push(`${sqlCol} IN (${vals.map(v => `'${String(v).replace(/'/g, "''")}'`).join(', ')})`);
-          }
-          break;
-        case 'rule_group':
-          if (cond.operator === 'is_null') propertyClauses.push(`${sqlCol} IS NULL`);
-          else if (cond.operator === 'equals') propertyClauses.push(`${sqlCol} = '${val.replace(/'/g, "''")}'`);
-          break;
-        default:
-          hasContentFilters = true;
-      }
+function buildRulePropertyWhere(filter: GroupedFilter): { sql: string; params: unknown[] } | null {
+  return buildGroupedWhereClause(filter, (field) => {
+    const expr = RULE_PROPERTY_SQL[field];
+    if (!expr) {
+      throw new Error(`Unsupported rule property filter field: ${field}`);
     }
-  }
-
-  return { propertyClauses, hasContentFilters };
+    return expr;
+  });
 }

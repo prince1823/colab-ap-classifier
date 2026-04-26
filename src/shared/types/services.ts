@@ -1,7 +1,7 @@
 import type { LicenseStatus, LicenseActivationResult } from './license';
 import type { SupplierInfo, SupplierRecord, SupplierRecordInput, ProjectSupplier, ProjectSupplierView, SupplierConfirmationStatus, SupplierUpdateInput, SupplierParent, CsvApplyRow, CsvApplyDiff, CsvApplyResult } from './suppliers';
 import type { TaxonomyNode } from './taxonomy';
-import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FilterCondition, FieldDefinition } from './transactions';
+import type { Transaction, TransactionFilter, TransactionStats, PaginatedTransactions, TransactionUpdate, GroupedTransactionsResult, PivotAggregationResult, FieldDefinition } from './transactions';
 import type { ColumnMapping, ColumnMappingResult, CSVPreview, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type { OverrideRule, OverrideRuleCreate, OverrideRuleUpdate, GenerateRulesResult, RuleGroup, RuleGroupCreate, RuleGroupUpdate, ConflictRow } from './rules';
 import type { ChangeLog, ChangeSource, ChangelogFilter, PaginatedChangelog } from './changelog';
@@ -162,7 +162,6 @@ export interface TransactionStore {
   countDistinctValues(column: string): Promise<number>;
   getTransactionIdsByColumnValue(column: string, value: string, filters?: TransactionFilter): Promise<string[]>;
   queryPivotAggregation(dimensions: string[], valueDimension?: string, filters?: TransactionFilter): Promise<PivotAggregationResult>;
-  getIdsByConditions(conditions: FilterCondition[], scopeToIds?: string[]): Promise<string[]>;
   getIdsByGroupedConditions(grouped: import('./transactions').GroupedFilter, scopeToIds?: string[]): Promise<string[]>;
   markAllReviewed(): Promise<number>;
   applyRule(ruleId: string, groupedConditions: import('./transactions').GroupedFilter, targetTaxonomyNodeId: string): Promise<number>;
@@ -199,7 +198,7 @@ export interface SupplierService {
   mergeSuppliers(survivorId: string, losingIds: string[]): Promise<void>;
   deleteSupplier(supplierId: string): Promise<void>;
   updateSupplier(supplierId: string, updates: SupplierUpdateInput): Promise<void>;
-  listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
+  listProjectSuppliers(filter?: { groupedConditions?: import('./transactions').GroupedFilter }): Promise<ProjectSupplierView[]>;
   listProjectSuppliersPaginated(params: import('./suppliers').SupplierPaginationParams): Promise<import('./suppliers').PaginatedSuppliers>;
   getProjectSupplier(id: string): Promise<ProjectSupplier | null>;
   getProjectSupplierByName(name: string): Promise<ProjectSupplier | null>;

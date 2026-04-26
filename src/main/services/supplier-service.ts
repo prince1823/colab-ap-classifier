@@ -19,7 +19,7 @@ import type {
   SupplierPaginationParams,
   PaginatedSuppliers,
 } from '../../shared/types/suppliers';
-import type { FilterCondition, GroupedFilter, FieldDefinition } from '../../shared/types/transactions';
+import type { GroupedFilter, FieldDefinition } from '../../shared/types/transactions';
 
 /** Safely parse a JSON string, returning null on failure */
 function safeParseJSON<T = unknown>(value: string | null | undefined): T | null {
@@ -38,7 +38,11 @@ function safeParseStringArray(value: string | null | undefined): string[] | null
     return [value];
   }
 }
-import { buildWhereClause, buildGroupedWhereClause, type ColumnResolver } from '../utils/query-builder';
+import { buildGroupedWhereClause, type ColumnResolver } from '../utils/query-builder';
+
+function aliasKey(alias: string): string {
+  return alias.trim().toLowerCase();
+}
 
 interface SupplierBaseRow {
   id: string;
@@ -498,11 +502,7 @@ export class SupplierService implements ISupplierService {
     return col;
   };
 
-  async listProjectSuppliers(filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }): Promise<ProjectSupplierView[]> {
-    // Flatten grouped conditions for aggregate-field detection, or use flat conditions
-    const conditions = filter?.conditions ?? [];
-
-    // Build WHERE clause — prefer groupedConditions (proper parenthesization) over flat conditions
+  async listProjectSuppliers(filter?: { groupedConditions?: GroupedFilter }): Promise<ProjectSupplierView[]> {
     let innerWhere: { sql: string; params: unknown[] } | null = null;
     let outerWhere: { sql: string; params: unknown[] } | null = null;
 
@@ -523,18 +523,39 @@ export class SupplierService implements ISupplierService {
         })).filter(g => g.conditions.length > 0),
       };
 
-      if (regularGroups.groups.length > 0) {
-        innerWhere = buildGroupedWhereClause(regularGroups, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+      const hasRegular = regularGroups.groups.length > 0;
+      const hasAggregate = aggregateGroups.groups.length > 0;
+      const hasMixedOr = filter.groupedConditions.groups.some((g) => {
+        const hasRegularInGroup = g.conditions.some((c) => c.field && !SupplierService.AGGREGATE_FIELDS.has(c.field));
+        const hasAggregateInGroup = g.conditions.some((c) => c.field && SupplierService.AGGREGATE_FIELDS.has(c.field));
+        return hasRegularInGroup && hasAggregateInGroup && g.connector === 'OR';
+      });
+
+      if (hasMixedOr || (hasRegular && hasAggregate && filter.groupedConditions.groupConnector === 'OR')) {
+        outerWhere = buildGroupedWhereClause(filter.groupedConditions, (field) => {
+          const outerMap: Record<string, string> = {
+            supplier_name: 'sub.supplier_name',
+            confirmation_status: 'sub.confirmation_status',
+            is_researched: 'sub.is_researched',
+            is_tail_spend: 'sub.is_tail_spend',
+            universe_match: 'sub.universe_match',
+            parent_name: 'sub.parent_name',
+            data_source: 'sub.data_source',
+            total_spend: 'sub.total_spend',
+            transaction_count: 'sub.transaction_count',
+          };
+          const col = outerMap[field];
+          if (!col) throw new Error(`Unknown supplier filter field: "${field}"`);
+          return col;
+        });
+      } else {
+        if (hasRegular) {
+          innerWhere = buildGroupedWhereClause(regularGroups, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+        }
+        if (hasAggregate) {
+          outerWhere = buildGroupedWhereClause(aggregateGroups, SupplierService.SUPPLIER_COLUMN_RESOLVER);
+        }
       }
-      if (aggregateGroups.groups.length > 0) {
-        outerWhere = buildGroupedWhereClause(aggregateGroups, SupplierService.SUPPLIER_COLUMN_RESOLVER);
-      }
-    } else {
-      // Flat conditions path (backward compatible)
-      const regularConditions = conditions.filter(c => !SupplierService.AGGREGATE_FIELDS.has(c.field));
-      const aggregateConditions = conditions.filter(c => SupplierService.AGGREGATE_FIELDS.has(c.field));
-      innerWhere = buildWhereClause(regularConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);
-      outerWhere = buildWhereClause(aggregateConditions, SupplierService.SUPPLIER_COLUMN_RESOLVER);
     }
 
     const innerWhereSQL = innerWhere ? `WHERE ${innerWhere.sql}` : '';
@@ -922,6 +943,7 @@ export class SupplierService implements ISupplierService {
 
     // Build lookup maps
     const dbAliasToSupplier = new Map<string, {
+      alias: string;
       supplierId: string; supplierName: string;
       parentId: string | null; parentName: string | null;
     }>();
@@ -930,7 +952,8 @@ export class SupplierService implements ISupplierService {
     const dbSupplierSpend = new Map<string, number>(); // id → rough spend proxy (alias count)
 
     for (const r of aliasRows) {
-      dbAliasToSupplier.set(r.original_supplier_name, {
+      dbAliasToSupplier.set(aliasKey(r.original_supplier_name), {
+        alias: r.original_supplier_name,
         supplierId: r.project_supplier_id,
         supplierName: r.supplier_name,
         parentId: r.parent_supplier_id,
@@ -951,6 +974,8 @@ export class SupplierService implements ISupplierService {
 
     // Phase 2 & 3: Validate CSV
     const csvAliasToRowIndex = new Map<string, number>();
+    const knownCsvAliasToRowIndex = new Map<string, number>();
+    const csvAliasDisplay = new Map<string, string>();
     const warnings: CsvApplyDiff['warnings'] = { unknownAliases: [], unmatchableRows: [], missingAliases: [] };
 
     for (let i = 0; i < rows.length; i++) {
@@ -960,17 +985,20 @@ export class SupplierService implements ISupplierService {
         continue;
       }
       for (const alias of row.aliases) {
-        if (csvAliasToRowIndex.has(alias)) {
-          const otherIdx = csvAliasToRowIndex.get(alias)!;
+        const key = aliasKey(alias);
+        if (csvAliasToRowIndex.has(key)) {
+          const otherIdx = csvAliasToRowIndex.get(key)!;
           throw new Error(
             `Alias "${alias}" appears in both "${rows[otherIdx].supplierName}" and "${row.supplierName}". Each alias must belong to exactly one supplier.`
           );
         }
-        if (!dbAliasToSupplier.has(alias)) {
+        if (!dbAliasToSupplier.has(key)) {
           warnings.unknownAliases.push({ alias, csvSupplierName: row.supplierName });
         } else {
-          csvAliasToRowIndex.set(alias, i);
+          knownCsvAliasToRowIndex.set(key, i);
         }
+        csvAliasToRowIndex.set(key, i);
+        csvAliasDisplay.set(key, alias);
       }
     }
 
@@ -981,7 +1009,7 @@ export class SupplierService implements ISupplierService {
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const knownAliases = row.aliases.filter(a => dbAliasToSupplier.has(a));
+      const knownAliases = row.aliases.map((a) => aliasKey(a)).filter((a) => dbAliasToSupplier.has(a));
       if (knownAliases.length === 0) {
         if (row.aliases.length > 0) {
           warnings.unmatchableRows.push({ supplierName: row.supplierName, reason: 'No aliases match existing transactions' });
@@ -1054,7 +1082,7 @@ export class SupplierService implements ISupplierService {
     }
 
     // Derive alias reassignments: compare each alias's current DB owner vs intended CSV owner
-    for (const [alias, rowIdx] of csvAliasToRowIndex) {
+    for (const [alias, rowIdx] of knownCsvAliasToRowIndex) {
       const intendedSurvivor = csvRowSurvivor.get(rowIdx);
       if (!intendedSurvivor) continue;
 
@@ -1070,7 +1098,7 @@ export class SupplierService implements ISupplierService {
 
       if (effectiveOwner !== intendedSurvivor) {
         diff.aliasReassignments.push({
-          alias,
+          alias: csvAliasDisplay.get(alias) ?? alias,
           fromSupplierId: effectiveOwner,
           fromName: dbSupplierNames.get(effectiveOwner) ?? '(unknown)',
           toSupplierId: intendedSurvivor,
@@ -1082,7 +1110,7 @@ export class SupplierService implements ISupplierService {
     // Detect missing aliases: any DB alias not present anywhere in the CSV
     for (const [alias, info] of dbAliasToSupplier) {
       if (!csvAliasToRowIndex.has(alias)) {
-        diff.warnings.missingAliases.push({ alias, supplierName: info.supplierName });
+        diff.warnings.missingAliases.push({ alias: info.alias, supplierName: info.supplierName });
       }
     }
 
@@ -1094,7 +1122,8 @@ export class SupplierService implements ISupplierService {
     for (const [rowIdx, survivorId] of csvRowSurvivor) {
       const row = rows[rowIdx];
       const csvParent = row.parentName?.trim() || null;
-      const currentInfo = dbAliasToSupplier.get(rows[rowIdx].aliases.find(a => dbAliasToSupplier.has(a))!);
+      const currentAliasKey = rows[rowIdx].aliases.map((a) => aliasKey(a)).find((a) => dbAliasToSupplier.has(a));
+      const currentInfo = currentAliasKey ? dbAliasToSupplier.get(currentAliasKey) : undefined;
       const currentParentName = currentInfo?.parentName ?? null;
       const currentParentId = currentInfo?.parentId ?? null;
 
@@ -1176,6 +1205,8 @@ export class SupplierService implements ISupplierService {
       return { applied: false, diff, noChanges: true };
     }
 
+    await this.db.run('BEGIN TRANSACTION');
+    try {
     // Apply in correct order to avoid cascading issues
 
     // 1. Create new parents
@@ -1234,7 +1265,12 @@ export class SupplierService implements ISupplierService {
       await this.assignParent([pc.supplierId], targetParentId);
     }
 
+    await this.db.run('COMMIT');
     return { applied: true, diff, noChanges: false };
+    } catch (error) {
+      await this.db.run('ROLLBACK');
+      throw error;
+    }
   }
 
   async syncToUniverse(supplierIds: string[]): Promise<{ synced: number; failed: number; errors: string[] }> {

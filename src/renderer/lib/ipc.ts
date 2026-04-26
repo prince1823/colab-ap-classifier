@@ -3,7 +3,7 @@ import type { IPCChannel, IPCArgs, IPCResult, IPCEventMap } from '../../shared/t
 import type { ClassificationProgress, ResearchProgress, QCProgress, IngestProgress, QCConfig, FilterConditionQC } from '../../shared/types/classification';
 import type { LicenseStatus, LicenseActivationResult } from '../../shared/types/license';
 import type { SupplierConfirmationStatus, SupplierUpdateInput, CsvApplyRow, CsvApplyDiff } from '../../shared/types/suppliers';
-import type { TransactionFilter, TransactionUpdate, FilterCondition, GroupedFilter } from '../../shared/types/transactions';
+import type { TransactionFilter, TransactionUpdate, GroupedFilter } from '../../shared/types/transactions';
 import type { OverrideRuleCreate, OverrideRuleUpdate, RuleGroupCreate, RuleGroupUpdate } from '../../shared/types/rules';
 import type { ProjectMetadataUpdate } from '../../shared/types/project';
 import type { ColumnMapping, DeriveMappingsSource } from '../../shared/types/column-mapping';
@@ -115,8 +115,6 @@ export const ipc = {
       invoke('transactions:getIdsByValue', column, value, filters),
     pivotAggregation: (dimensions: string[], valueDimension: string, filters?: TransactionFilter) =>
       invoke('transactions:pivotAggregation', dimensions, valueDimension, filters),
-    getIdsByConditions: (conditions: FilterCondition[]) =>
-      invoke('transactions:getIdsByConditions', conditions),
     getIdsByGroupedConditions: (grouped: GroupedFilter) =>
       invoke('transactions:getIdsByGroupedConditions', grouped),
     getFilterFields: () => invoke('transactions:getFilterFields'),
@@ -143,7 +141,7 @@ export const ipc = {
 
   // ── Suppliers (3 channels + research) ──
   suppliers: {
-    list: (filter?: { conditions?: FilterCondition[]; groupedConditions?: import('../../shared/types/transactions').GroupedFilter }) => invoke('suppliers:list', filter),
+    list: (filter?: { groupedConditions?: import('../../shared/types/transactions').GroupedFilter }) => invoke('suppliers:list', filter),
     listPaginated: (params: import('../../shared/types/suppliers').SupplierPaginationParams) => invoke('suppliers:listPaginated', params),
     update: (supplierId: string, updates: SupplierUpdateInput) =>
       invoke('suppliers:update', supplierId, updates),

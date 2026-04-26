@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronLeft, ChevronRight, X, RefreshCw } from 'lucide-react'
 import { ipc } from '../lib/ipc'
+import { conditionsToGroupedFilter } from '../../shared/filter-utils'
 import type { ChangeLog, ChangelogFilter } from '../../shared/types/changelog'
 import type { Transaction } from '../../shared/types/transactions'
 import type { FeedbackRecommendation } from '../../shared/types/feedback'
@@ -139,7 +140,7 @@ function ChangeTransactionPanel({
     setError(null)
     try {
       const result = await ipc.transactions.query({
-        conditions: [{ field: 'id', operator: 'in_list', value: entry.affectedIds }],
+        groupedConditions: conditionsToGroupedFilter([{ field: 'id', operator: 'in_list', value: entry.affectedIds }]),
         page: p,
         pageSize: PAGE_SIZE,
         sortBy: 'row_index',

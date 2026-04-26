@@ -1,7 +1,7 @@
 import { registerHandler } from './register';
 import type { SupplierService, SupplierResearcher, IngestService } from '../../shared/types/services';
 import type { SupplierConfirmationStatus, SupplierUpdateInput, CsvApplyRow, CsvApplyDiff, SupplierPaginationParams } from '../../shared/types/suppliers';
-import type { FilterCondition, GroupedFilter } from '../../shared/types/transactions';
+import type { GroupedFilter } from '../../shared/types/transactions';
 
 export function registerSuppliersHandlers(
   suppliers: SupplierService,
@@ -11,12 +11,11 @@ export function registerSuppliersHandlers(
   registerHandler('suppliers:list', async (_event, filter?: unknown) => {
     if (filter != null) {
       const f = filter as Record<string, unknown>;
-      // Accept either flat conditions or grouped conditions
-      if (!Array.isArray(f.conditions) && !f.groupedConditions) {
-        throw new Error('suppliers:list filter must have conditions array or groupedConditions');
+      if (!f.groupedConditions) {
+        throw new Error('suppliers:list filter must have groupedConditions');
       }
     }
-    return suppliers.listProjectSuppliers(filter as { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter } | undefined);
+    return suppliers.listProjectSuppliers(filter as { groupedConditions?: GroupedFilter } | undefined);
   });
 
   registerHandler('suppliers:listPaginated', async (_event, params: unknown) => {

@@ -2,7 +2,7 @@ import { dialog, BrowserWindow } from 'electron';
 import fs from 'fs';
 import type { Database, ExportService as IExportService } from '../../shared/types/services';
 import type { TransactionFilter } from '../../shared/types/transactions';
-import { buildWhereClause, buildGroupedWhereClause } from '../utils/query-builder';
+import { buildGroupedWhereClause } from '../utils/query-builder';
 // Virtual columns (supplier_name, parent_name, classification_*) are resolved via JOINs —
 // see VIRTUAL_COLUMN_REGISTRY in src/shared/virtual-columns.ts. The export header list below
 // is intentionally explicit: not every virtual column appears in the export output.
@@ -63,15 +63,8 @@ function buildExportFilterSQL(filters?: TransactionFilter): { whereSQL: string; 
     params.push(filters.spendMax);
   }
 
-  // Prefer groupedConditions over flat conditions
   if (filters.groupedConditions && filters.groupedConditions.groups.length > 0) {
     const built = buildGroupedWhereClause(filters.groupedConditions, resolver);
-    if (built) {
-      whereClauses.push(`(${built.sql})`);
-      params.push(...built.params);
-    }
-  } else if (filters.conditions && filters.conditions.length > 0) {
-    const built = buildWhereClause(filters.conditions, resolver);
     if (built) {
       whereClauses.push(`(${built.sql})`);
       params.push(...built.params);

@@ -11,6 +11,7 @@ import {
   createMockTransactionStore,
   createMockSupplierUniverse,
   createMockProjectStore,
+  createMockSupplierService,
 } from '../helpers/mock-services';
 import { RuleStore } from '../../src/main/services/rules';
 import { TransactionStore } from '../../src/main/services/transactions';
@@ -26,7 +27,7 @@ describe('Integration: Rules', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db = createMockDatabase();
-    rules = new RuleStore(db, createMockTransactionStore(), createMockProjectStore());
+    rules = new RuleStore(db, createMockTransactionStore(), createMockProjectStore(), createMockSupplierService());
   });
 
   it('should list rules with parsed conditions', async () => {
@@ -59,7 +60,10 @@ describe('Integration: Rules', () => {
 
     const result = await rules.createRule({
       name: 'Test Rule',
-      conditions: [{ field: 'supplier_name', operator: 'equals', value: 'Acme' }],
+      groupedConditions: {
+        groupConnector: 'AND',
+        groups: [{ connector: 'AND', conditions: [{ field: 'supplier_name', operator: 'equals', value: 'Acme' }] }],
+      },
       targetTaxonomyNodeId: 'tid1',
     });
     expect(result.id).toBeDefined();

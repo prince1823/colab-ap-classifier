@@ -3,6 +3,7 @@ import { X, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import type { ChangeLog } from '../../../shared/types/changelog'
 import type { Transaction } from '../../../shared/types/transactions'
+import { conditionsToGroupedFilter } from '../../../shared/filter-utils'
 import { showWarning } from '../../lib/toast-errors'
 
 const TX_PAGE_SIZE = 20
@@ -346,7 +347,7 @@ function TransactionPanel({ entry }: { entry: ChangeLog }) {
     setError(null)
     try {
       const result = await ipc.transactions.query({
-        conditions: [{ field: 'id', operator: 'in_list', value: entry.affectedIds }],
+        groupedConditions: conditionsToGroupedFilter([{ field: 'id', operator: 'in_list', value: entry.affectedIds }]),
         page: p,
         pageSize: TX_PAGE_SIZE,
         sortBy: 'row_index',

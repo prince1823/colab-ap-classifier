@@ -23,9 +23,7 @@ export interface TransactionFilter {
   spendMax?: number;
   /** If set, filters by human_reviewed flag. false = only unreviewed rows. */
   humanReviewed?: boolean;
-  /** Generic conditions using the same shape as override rules */
-  conditions?: FilterCondition[];
-  /** Grouped conditions with proper parenthesization (takes precedence over conditions if set) */
+  /** Grouped conditions with proper parenthesization. */
   groupedConditions?: GroupedFilter;
   page?: number;
   pageSize?: number;

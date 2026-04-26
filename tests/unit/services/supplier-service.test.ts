@@ -300,6 +300,30 @@ describe('SupplierService', () => {
       expect(diff.warnings.missingAliases).toHaveLength(0);
     });
 
+    it('matches CSV aliases case-insensitively to mirror supplier normalization', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME INC', project_supplier_id: 's1', supplier_name: 'Acme', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Acme', aliases: ['Acme Inc'], parentName: null },
+      ]);
+
+      expect(diff.warnings.unknownAliases).toHaveLength(0);
+      expect(diff.warnings.unmatchableRows).toHaveLength(0);
+      expect(diff.warnings.missingAliases).toHaveLength(0);
+      expect(diff.renames).toHaveLength(0);
+    });
+
+    it('detects duplicate CSV aliases case-insensitively', async () => {
+      setupDb([]);
+
+      await expect(service.computeCsvDiff([
+        { supplierName: 'Acme A', aliases: ['ACME INC'], parentName: null },
+        { supplierName: 'Acme B', aliases: ['Acme Inc'], parentName: null },
+      ])).rejects.toThrow('appears in both');
+    });
+
     it('detects a supplier merge, picking the name-matching supplier as survivor', async () => {
       setupDb([
         { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },

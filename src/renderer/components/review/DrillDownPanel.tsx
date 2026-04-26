@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import type { FlattenedPivotRow, PathSegment } from '../../types/pivot'
-import type { Transaction, FilterCondition } from '../../../shared/types/transactions'
+import type { Transaction, FilterCondition, GroupedFilter } from '../../../shared/types/transactions'
+import { conditionsToGroupedFilter } from '../../../shared/filter-utils'
 import { fmtAbbrev } from '../../utils/formatSpend'
 
 const UNCLASSIFIED_LABEL = '(Unclassified)'
@@ -19,6 +20,10 @@ function buildConditionsFromSegments(pathSegments: PathSegment[]): FilterConditi
     }
   }
   return conditions
+}
+
+function buildGroupedFromSegments(pathSegments: PathSegment[]): GroupedFilter {
+  return conditionsToGroupedFilter(buildConditionsFromSegments(pathSegments))
 }
 
 interface DrillDownPanelProps {
@@ -50,9 +55,9 @@ export default function DrillDownPanel({ row, onClose }: DrillDownPanelProps) {
     setLoading(true)
     setError(null)
     try {
-      const conditions = buildConditionsFromSegments(row.pathSegments)
+      const groupedConditions = buildGroupedFromSegments(row.pathSegments)
       const result = await ipc.transactions.query({
-        conditions,
+        groupedConditions,
         page: p,
         pageSize: PAGE_SIZE,
         sortBy: 'row_index',

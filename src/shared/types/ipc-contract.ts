@@ -12,7 +12,6 @@ export interface LLMConfigResponse {
 import type { CSVPreview, ColumnMapping, ColumnMappingResult, ColumnMappingWithPriority, DeriveMappingsSource, DerivedMappings } from './column-mapping';
 import type {
   TransactionFilter,
-  FilterCondition,
   FieldDefinition,
   TransactionStats,
   PaginatedTransactions,
@@ -64,7 +63,6 @@ export interface IPCInvokeMap {
   'transactions:countDistinct':     { args: [column: string]; result: number };
   'transactions:getIdsByValue':     { args: [column: string, value: string, filters?: TransactionFilter]; result: string[] };
   'transactions:pivotAggregation':  { args: [dimensions: string[], valueDimension: string, filters?: TransactionFilter]; result: PivotAggregationResult };
-  'transactions:getIdsByConditions': { args: [conditions: FilterCondition[]]; result: string[] };
   'transactions:getIdsByGroupedConditions': { args: [grouped: GroupedFilter]; result: string[] };
   'transactions:getFilterFields':    { args: []; result: FieldDefinition[] };
   'transactions:markAllReviewed':   { args: []; result: number };
@@ -94,7 +92,7 @@ export interface IPCInvokeMap {
   'taxonomy:importFromFile': { args: [filePath: string]; result: { nodeCount: number; fileName: string } };
 
   // Suppliers
-  'suppliers:list':           { args: [filter?: { conditions?: FilterCondition[]; groupedConditions?: GroupedFilter }]; result: ProjectSupplierView[] };
+  'suppliers:list':           { args: [filter?: { groupedConditions?: GroupedFilter }]; result: ProjectSupplierView[] };
   'suppliers:listPaginated':  { args: [params: SupplierPaginationParams]; result: PaginatedSuppliers };
   'suppliers:update':         { args: [supplierId: string, updates: SupplierUpdateInput]; result: void };
   'suppliers:confirm':        { args: [id: string, status: SupplierConfirmationStatus]; result: void };

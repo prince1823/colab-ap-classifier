@@ -10,6 +10,7 @@ import type {
 import type { FeedbackAnalyzeInput, FeedbackApplyInput, FeedbackRecommendation } from '../../shared/types/feedback';
 import type { CompanyContext } from '../../shared/types/project';
 import type { SupplierInfo } from '../../shared/types/suppliers';
+import { conditionsToGroupedFilter } from '../../shared/filter-utils';
 
 export function registerFeedbackHandlers(
   feedbackAgent: FeedbackAgent,
@@ -77,7 +78,7 @@ export function registerFeedbackHandlers(
 
       case 'update_supplier_info': {
         const supplierList = await suppliers.listProjectSuppliers({
-          conditions: [{ field: 'supplier_name', operator: 'equals', value: details.supplierName }],
+          groupedConditions: conditionsToGroupedFilter([{ field: 'supplier_name', operator: 'equals', value: details.supplierName }]),
         });
         const existing = supplierList[0];
         if (!existing) throw new Error(`Supplier not found: ${details.supplierName}`);

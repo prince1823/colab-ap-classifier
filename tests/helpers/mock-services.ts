@@ -153,7 +153,6 @@ export function createMockTransactionStore(): TransactionStore {
     getCount: vi.fn().mockResolvedValue(0),
     updateTransactions: vi.fn(),
     invalidateColumnCache: vi.fn(),
-    getIdsByConditions: vi.fn().mockResolvedValue([]),
     getIdsByGroupedConditions: vi.fn().mockResolvedValue([]),
     applyRule: vi.fn().mockResolvedValue(0),
     getSupplierAddress: vi.fn().mockResolvedValue(undefined),

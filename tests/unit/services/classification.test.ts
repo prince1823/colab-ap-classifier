@@ -294,6 +294,36 @@ describe('ClassificationRunner', () => {
       // classifyL3 should not be called
       expect(classificationAgent.classifyL3).not.toHaveBeenCalled();
     });
+
+    it('scoped missing category paths only mark scoped unclassified rows as classification_error', async () => {
+      setupBasicMocks({
+        l1L2Path: null,
+        txns: [
+          { id: 'tx-classified', project_supplier_id: 'sup1', spend_amount: 1000, classification_status: 'classified_by_ai' },
+          { id: 'tx-unclassified', project_supplier_id: 'sup1', spend_amount: 2000, classification_status: 'unclassified' },
+        ],
+      });
+      const scope = {
+        groupConnector: 'AND' as const,
+        groups: [{
+          connector: 'AND' as const,
+          conditions: [{ field: 'supplier_name', operator: 'equals' as const, value: 'Acme' }],
+        }],
+      };
+      vi.mocked(transactions.getIdsByGroupedConditions).mockResolvedValue(['tx-classified', 'tx-unclassified']);
+      vi.mocked(transactions.queryBySupplier).mockResolvedValue([
+        { id: 'tx-classified', project_supplier_id: 'sup1', spend_amount: 1000, classification_status: 'classified_by_ai' },
+        { id: 'tx-unclassified', project_supplier_id: 'sup1', spend_amount: 2000, classification_status: 'unclassified' },
+      ]);
+      vi.mocked(transactions.getIdsBySupplier).mockResolvedValue(['tx-classified', 'tx-unclassified']);
+
+      await expect(runner.classifyAll(scope)).rejects.toThrow('missing category paths');
+
+      const errorCalls = vi.mocked(transactions.updateTransactions).mock.calls
+        .filter(([update, source]) => source === 'pipeline' && update.classificationStatus === 'classification_error');
+      expect(errorCalls).toHaveLength(1);
+      expect(errorCalls[0][0].ids).toEqual(['tx-unclassified']);
+    });
   });
 
   describe('l1_l2_path-based classification', () => {

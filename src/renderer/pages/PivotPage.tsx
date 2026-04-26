@@ -16,17 +16,15 @@ import type { TransactionFilter, GroupedFilter } from '../../shared/types/transa
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import type { RuleGroup } from '../../shared/types/rules'
 import { groupedToConditions } from '../components/FilterConditionBuilder'
+import { andGroupedFilters, conditionsToGroupedFilter } from '../../shared/filter-utils'
 import { RefreshCw, ListFilter } from 'lucide-react'
 
-/**
- * Convert dimension pill filters into a TransactionFilter.
- */
-function buildTransactionFilter(pillState: Record<string, string[]>): TransactionFilter | undefined {
+function buildPillGroupedFilter(pillState: Record<string, string[]>): GroupedFilter | undefined {
   const conditions = Object.entries(pillState)
     .filter(([, values]) => values.length > 0)
     .map(([field, values]) => ({ field, operator: 'in_list' as const, value: values }))
 
-  return conditions.length > 0 ? { conditions } : undefined
+  return conditions.length > 0 ? conditionsToGroupedFilter(conditions) : undefined
 }
 
 /** Columns that are internal DB plumbing — never shown in the UI. */
@@ -173,29 +171,13 @@ export default function PivotPage() {
   }, [projectFilePath, loadRuleGroups, location.pathname])
 
   const filter = useMemo(() => {
-    const pillFilter = buildTransactionFilter(filterState)
-    const pillConditions = pillFilter?.conditions ?? []
-    const flaggedCondition = flaggedForReviewOnly
-      ? [{ field: 'flagged_for_review', operator: 'is_true' as const, value: '' }]
-      : []
-    const allConditions = [...pillConditions, ...advancedConditions, ...flaggedCondition]
-    if (allConditions.length === 0) return undefined
-
-    // If we have a grouped filter, merge pill conditions as an extra group
-    if (advancedGrouped && advancedGrouped.groups.some(g => g.conditions.some(c => c.field))) {
-      const pillGroup = pillConditions.length > 0
-        ? [{ connector: 'AND' as const, conditions: pillConditions }]
-        : []
-      const merged: GroupedFilter = {
-        groupConnector: 'AND',
-        groups: [...pillGroup, ...advancedGrouped.groups],
-      }
-      return { conditions: allConditions, groupedConditions: merged } as TransactionFilter
-    }
-
-    // Only pill filters, no grouping needed
-    return { conditions: allConditions } as TransactionFilter
-  }, [filterState, advancedConditions, advancedGrouped, flaggedForReviewOnly])
+    const pillGrouped = buildPillGroupedFilter(filterState)
+    const flaggedGrouped = flaggedForReviewOnly
+      ? conditionsToGroupedFilter([{ field: 'flagged_for_review', operator: 'is_true', value: '' }])
+      : undefined
+    const merged = andGroupedFilters(pillGrouped, advancedGrouped, flaggedGrouped)
+    return merged ? { groupedConditions: merged } as TransactionFilter : undefined
+  }, [filterState, advancedGrouped, flaggedForReviewOnly])
 
   const { pivotData, totalCount, refetch } = useServerPivotData(
     rowDimensions,

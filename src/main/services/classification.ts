@@ -22,6 +22,7 @@ import { buildDedupGroups, batchDedupGroups, extractSubBatch, DEFAULT_SAMPLE_COU
 import { VIRTUAL_COLUMN_NAMES } from '../../shared/virtual-columns';
 import { runPool } from '../utils/concurrency-pool';
 import { debugLog } from '../utils/debug-log';
+import { isAbortError } from '../utils/cancellation';
 
 const DEFAULT_CONCURRENCY = 5;
 const TAIL_SPEND_BATCH_SUPPLIERS = 5;
@@ -30,6 +31,7 @@ const TAIL_SPEND_BATCH_GROUPS = 150;
 export class ClassificationRunner implements IClassificationRunner {
   private isRunningFlag = false;
   private isStopped = false;
+  private abortController: AbortController | null = null;
 
   constructor(
     private db: Database,
@@ -54,6 +56,7 @@ export class ClassificationRunner implements IClassificationRunner {
 
   async stop(): Promise<void> {
     this.isStopped = true;
+    this.abortController?.abort();
     this.emitProgress({
       status: 'cancelled',
       totalSuppliers: 0,
@@ -92,6 +95,9 @@ export class ClassificationRunner implements IClassificationRunner {
 
     this.isRunningFlag = true;
     this.isStopped = false;
+    const runAbortController = new AbortController();
+    this.abortController = runAbortController;
+    const signal = runAbortController.signal;
 
     // Scope temp table — created once for filtered runs, reused in Phase 1 to avoid
     // spreading large ID arrays as function arguments (causes call stack overflow).
@@ -317,10 +323,11 @@ export class ClassificationRunner implements IClassificationRunner {
               await this.markSupplierError(supplier.id, scopedIds);
             } else {
               await this.classifySupplierTransactions(
-                supplier.id, supplier.l1_l2_paths, taxonomyNodes, companyContext, columnPriorities, sampleCount, scopedIds ?? undefined
+                supplier.id, supplier.l1_l2_paths, taxonomyNodes, companyContext, columnPriorities, sampleCount, scopedIds ?? undefined, signal
               );
             }
           } catch (err) {
+            if (this.isStopped || signal.aborted || isAbortError(err)) return;
             const errMsg = err instanceof Error ? err.message : String(err);
             debugLog('ERROR', `Classification failed for supplier "${supplier.supplier_name}"`, { error: errMsg });
             errorCount++;
@@ -462,15 +469,20 @@ export class ClassificationRunner implements IClassificationRunner {
                   groups: e.groups,
                 })),
                 companyContext,
+                signal,
               });
+
+              if (this.isStopped || signal.aborted) return;
 
               // Apply results: one L3 path per supplier → all their transactions
               for (let i = 0; i < task.batch.length; i++) {
+                if (this.isStopped || signal.aborted) return;
                 const classificationPath = result.get(i + 1);
                 if (classificationPath) {
                   const taxonomyNode = taxonomyNodes.find((n) => n.fullPath === classificationPath);
                   const txns = await this.getUnmatchedTransactions(task.batch[i].supplier.id, scopedIds ?? undefined);
                   if (txns.length > 0) {
+                    if (this.isStopped || signal.aborted) return;
                     await this.transactions.updateTransactions({
                       ids: txns.map((t) => String(t.id)),
                       taxonomyNodeId: taxonomyNode?.id ?? undefined,
@@ -483,6 +495,7 @@ export class ClassificationRunner implements IClassificationRunner {
                 processedSuppliers++;
               }
             } catch (err) {
+              if (this.isStopped || signal.aborted || isAbortError(err)) return;
               debugLog('ERROR', `Tail spend L3 classification failed for L2 group "${task.l2Path}"`, {
                 error: err instanceof Error ? err.message : String(err),
               });
@@ -556,6 +569,9 @@ export class ClassificationRunner implements IClassificationRunner {
     } finally {
       this.isRunningFlag = false;
       this.isStopped = false;
+      if (this.abortController === runAbortController) {
+        this.abortController = null;
+      }
       if (scopeTempTable) {
         try { await this.db.run(`DROP TABLE IF EXISTS ${scopeTempTable}`); } catch { /* ignore */ }
       }
@@ -572,7 +588,8 @@ export class ClassificationRunner implements IClassificationRunner {
     companyContext: CompanyContext,
     columnPriorities: string[],
     sampleCount: number,
-    scopedTxnIds?: Set<string>
+    scopedTxnIds?: Set<string>,
+    signal?: AbortSignal
   ): Promise<void> {
     // Get unmatched transactions (after rules)
     const txnRows = await this.getUnmatchedTransactions(projectSupplierId, scopedTxnIds);
@@ -643,14 +660,18 @@ export class ClassificationRunner implements IClassificationRunner {
             supplierName,
             supplierType: supplierResearch?.supplierType ?? null,
             sampleCount,
+            signal,
           });
+
+          if (this.isStopped || signal?.aborted) return;
 
           debugLog('INFO', `[L3] ${supplierName} attempt ${attempt}: classifyL3 returned ${result.classifications.length} classifications, ${Object.keys(result.assignments).length} assignment keys, groupCount=${remainingBatch.groupCount}`);
           const { validResult, missedGroups } = this.extractValidAssignments(result, remainingBatch.groupCount);
           debugLog('INFO', `[L3] ${supplierName} attempt ${attempt}: extractValidAssignments → ${Object.keys(validResult.assignments).length} valid assignment keys, ${missedGroups.length} missed groups`);
 
           if (Object.keys(validResult.assignments).length > 0) {
-            await this.applyMultiClassification(validResult, remainingBatch.groupToTransactionIds, taxonomy);
+            if (this.isStopped || signal?.aborted) return;
+            await this.applyMultiClassification(validResult, remainingBatch.groupToTransactionIds, taxonomy, signal);
             debugLog('INFO', `[L3] ${supplierName} attempt ${attempt}: applyMultiClassification completed`);
           }
 
@@ -670,6 +691,7 @@ export class ClassificationRunner implements IClassificationRunner {
               debugLog('ERROR', `All ${MAX_ATTEMPTS} attempts exhausted for supplier ${supplierName || projectSupplierId}`);
               const BATCH_SIZE = 10_000;
               for (let i = 0; i < failedTxnIds.length; i += BATCH_SIZE) {
+                if (this.isStopped || signal?.aborted) return;
                 await this.transactions.updateTransactions({
                   ids: failedTxnIds.slice(i, i + BATCH_SIZE),
                   classificationStatus: 'classification_error',
@@ -678,6 +700,7 @@ export class ClassificationRunner implements IClassificationRunner {
             }
           }
         } catch (err) {
+          if (this.isStopped || signal?.aborted || isAbortError(err)) return;
           const errMsg = err instanceof Error ? err.message : String(err);
           debugLog('WARN', `Classification attempt ${attempt}/${MAX_ATTEMPTS} failed for supplier ${supplierName || projectSupplierId}`, { error: errMsg });
           if (attempt === MAX_ATTEMPTS) {
@@ -685,6 +708,7 @@ export class ClassificationRunner implements IClassificationRunner {
             const failedIds = Array.from(allBatchTxnIds);
             const BATCH_SIZE = 10_000;
             for (let i = 0; i < failedIds.length; i += BATCH_SIZE) {
+              if (this.isStopped || signal?.aborted) return;
               await this.transactions.updateTransactions({
                 ids: failedIds.slice(i, i + BATCH_SIZE),
                 classificationStatus: 'classification_error',
@@ -793,9 +817,11 @@ export class ClassificationRunner implements IClassificationRunner {
   private async applyMultiClassification(
     result: ClassificationResult,
     groupToTransactionIds: Map<number, string[]>,
-    taxonomy: TaxonomyNode[]
+    taxonomy: TaxonomyNode[],
+    signal?: AbortSignal
   ): Promise<void> {
     for (const classification of result.classifications) {
+      if (this.isStopped || signal?.aborted) return;
       const assignedGroups = result.assignments[String(classification.id)];
       if (!assignedGroups || assignedGroups.length === 0) continue;
 
@@ -818,6 +844,7 @@ export class ClassificationRunner implements IClassificationRunner {
       // Batch updates to avoid stack overflow from spread operators in updateTransactions
       const BATCH_SIZE = 10_000;
       for (let i = 0; i < txnIds.length; i += BATCH_SIZE) {
+        if (this.isStopped || signal?.aborted) return;
         const chunk = txnIds.slice(i, i + BATCH_SIZE);
         await this.transactions.updateTransactions({
           ids: chunk,

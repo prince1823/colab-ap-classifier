@@ -89,6 +89,7 @@ export interface EventBus {
 export interface LLMClient {
   chat(systemPrompt: string, userPrompt: string, options?: {
     model?: string; maxTokens?: number; temperature?: number; provider?: string;
+    signal?: AbortSignal;
   }): Promise<string>;
 }
 
@@ -124,7 +125,7 @@ export interface FeedbackAgent {
 }
 
 export interface QCAgent {
-  review(input: { supplierSummary: string; rules: string }): Promise<QCResult>;
+  review(input: { supplierSummary: string; rules: string }, options?: { signal?: AbortSignal }): Promise<QCResult>;
 }
 
 export interface CatAAgent {
@@ -293,7 +294,7 @@ export interface SupplierResearcher {
 export interface ClassificationRunner {
   classifyAll(groupedFilter?: import('./transactions').GroupedFilter): Promise<void>;
   getScopeCount(groupedFilter?: import('./transactions').GroupedFilter): Promise<number>;
-  classifySupplierTransactions(projectSupplierId: string, categoryPaths: string[], taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], sampleCount: number, scopedTxnIds?: Set<string>): Promise<void>;
+  classifySupplierTransactions(projectSupplierId: string, categoryPaths: string[], taxonomy: TaxonomyNode[], companyContext: CompanyContext, columnPriorities: string[], sampleCount: number, scopedTxnIds?: Set<string>, signal?: AbortSignal): Promise<void>;
   getIsRunning(): boolean;
   stop(): Promise<void>;
 }

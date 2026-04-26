@@ -18,6 +18,7 @@ import type { ResearchProgress } from '../../shared/types/classification';
 import { buildDedupGroups, extractFields } from '../utils/dedup-groups';
 import { validateCategoryPath } from '../agents/classification-agent';
 import { cleanDescription } from '../utils/text';
+import { isAbortError } from '../utils/cancellation';
 
 export interface SupplierResearchResult extends SupplierInfo {
   confidence: 'high' | 'medium' | 'low';
@@ -28,6 +29,7 @@ const CONCURRENCY = 5;
 
 export class SupplierResearcher implements ISupplierResearcher {
   private isCancelled = false;
+  private abortController: AbortController | null = null;
 
   constructor(
     private supplierUniverse: SupplierUniverse,
@@ -271,9 +273,13 @@ export class SupplierResearcher implements ISupplierResearcher {
             })),
             taxonomy,
             companyContext,
+            signal: this.abortController?.signal,
           });
 
+          if (this.isCancelled || this.abortController?.signal.aborted) break;
+
           for (let i = 0; i < batch.length; i++) {
+            if (this.isCancelled || this.abortController?.signal.aborted) break;
             const paths = result.get(i + 1);
             if (paths && paths.length > 0) {
               const validatedPaths: string[] = [];
@@ -287,12 +293,14 @@ export class SupplierResearcher implements ISupplierResearcher {
                 }
               }
               if (validatedPaths.length > 0) {
+                if (this.isCancelled || this.abortController?.signal.aborted) break;
                 await this.supplierService.updateSupplier(batch[i].id, { l1L2Path: validatedPaths });
                 categorized++;
               }
             }
           }
         } catch (err) {
+          if (this.isCancelled || this.abortController?.signal.aborted || isAbortError(err)) break;
           console.error('[Research] categorizeWithSupplierInfo batch failed:', err);
           failedBatches++;
           lastError = err instanceof Error ? err : new Error(String(err));
@@ -438,13 +446,18 @@ export class SupplierResearcher implements ISupplierResearcher {
             })),
             taxonomy,
             companyContext,
+            signal: this.abortController?.signal,
           });
 
+          if (this.isCancelled || this.abortController?.signal.aborted) break;
+
           for (let i = 0; i < batch.length; i++) {
+            if (this.isCancelled || this.abortController?.signal.aborted) break;
             const path = result.get(i + 1);
             if (path) {
               const validated = validateCategoryPath(path, taxonomy);
               if (validated) {
+                if (this.isCancelled || this.abortController?.signal.aborted) break;
                 await this.supplierService.updateSupplier(batch[i].id, { l1L2Path: [validated] });
                 categorized++;
               } else {
@@ -454,6 +467,7 @@ export class SupplierResearcher implements ISupplierResearcher {
             }
           }
         } catch (err) {
+          if (this.isCancelled || this.abortController?.signal.aborted || isAbortError(err)) break;
           console.error('[Research] categorizeTailSpend batch failed:', err);
           failedBatches++;
           lastError = err instanceof Error ? err : new Error(String(err));
@@ -552,6 +566,8 @@ export class SupplierResearcher implements ISupplierResearcher {
     supplierIds?: string[]
   ): Promise<void> {
     this.isCancelled = false;
+    const runAbortController = new AbortController();
+    this.abortController = runAbortController;
 
     const emitTerminal = (status: 'completed' | 'cancelled' | 'failed', step: string): void => {
       this.eventBus.emit('suppliers:research:progress', {
@@ -587,6 +603,9 @@ export class SupplierResearcher implements ISupplierResearcher {
 
     if (this.isCancelled) {
       emitTerminal('cancelled', 'Cancelled');
+      if (this.abortController === runAbortController) {
+        this.abortController = null;
+      }
       return;
     }
 
@@ -605,6 +624,9 @@ export class SupplierResearcher implements ISupplierResearcher {
 
     if (this.isCancelled) {
       emitTerminal('cancelled', 'Cancelled');
+      if (this.abortController === runAbortController) {
+        this.abortController = null;
+      }
       return;
     }
 
@@ -621,10 +643,14 @@ export class SupplierResearcher implements ISupplierResearcher {
     } else {
       emitTerminal('completed', warnings.length > 0 ? warnings.join('; ') : 'Complete');
     }
+    if (this.abortController === runAbortController) {
+      this.abortController = null;
+    }
   }
 
   cancel(): void {
     this.isCancelled = true;
+    this.abortController?.abort();
   }
 }
 

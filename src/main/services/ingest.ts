@@ -338,7 +338,9 @@ export class IngestService implements IIngestService {
       csvColsSeen.add(csvCol);
     }
 
-    // Detect and store master_date format from the first 50 rows
+    // Detect master_date format from the first 50 rows. Persist it inside the
+    // import transaction so schema, settings, rows, and supplier links commit together.
+    let detectedMasterDateFormat: string | null = null;
     if (mapping['master_date']) {
       const masterDateCsvCol = mapping['master_date'];
       const dateSamples = await parseSampleRows(filePath, encoding, delimiter, 50);
@@ -352,7 +354,7 @@ export class IngestService implements IIngestService {
           'Please upload dates in one of these formats: YYYY-MM-DD, MM/DD/YYYY, DD/MM/YYYY, or DD-Mon-YYYY (e.g. 15-Jan-2024).'
         );
       }
-      await this.project.setSetting('master_date_format', fmt);
+      detectedMasterDateFormat = fmt;
     }
 
     // Virtual column names (supplier_name, parent_name, etc.) must never become physical
@@ -374,184 +376,212 @@ export class IngestService implements IIngestService {
       }
     }
 
-    // ALTER TABLE to add mapped canonical columns
-    const existingColumns = await this.db.all<{ column_name: string }>(
-      "SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = 'transactions'"
-    );
-    const existingSet = new Set(existingColumns.map((c) => c.column_name));
-
-    for (const canonical of canonicalNames) {
-      const col = dbColumn(canonical);
-      if (!existingSet.has(col)) {
-        await this.db.run(`ALTER TABLE transactions ADD COLUMN "${col}" VARCHAR`);
-      }
-    }
-
-    this.transactions.invalidateColumnCache();
-
-    // Build column list once for all batches
-    const colNames: string[] = ['id', 'upload_id', 'row_index'];
-    for (const canonical of canonicalNames) {
-      colNames.push(`"${dbColumn(canonical)}"`);
-    }
-
-    // Stream CSV and insert in batches
-    let rowsInserted = 0;
     const finalUploadId = uploadId || randomUUID();
-    let rowIndex = 0;
-    let batch: Record<string, string>[] = [];
+    let result: { rowsInserted: number; uploadId: string };
+    try {
+      // The whole import runs in one DB transaction so any failure rolls back
+      // schema, settings, rows, and supplier links together. Stream listeners
+      // registered inside this callback inherit the tx's AsyncLocalStorage
+      // context (captured at .on() registration), which is why batched INSERTs
+      // emitted from `parser.on('data', ...)` participate in the transaction.
+      result = await this.db.tx(async () => {
+      if (detectedMasterDateFormat) {
+        await this.project.setSetting('master_date_format', detectedMasterDateFormat);
+      }
 
-    const flushBatch = async (records: Record<string, string>[], startIndex: number) => {
-      if (records.length === 0) return;
+      // ALTER TABLE to add mapped canonical columns
+      const existingColumns = await this.db.all<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = 'transactions'"
+      );
+      const existingSet = new Set(existingColumns.map((c) => c.column_name));
 
-      const valueRows: string[] = [];
-      for (let i = 0; i < records.length; i++) {
-        const rec = records[i];
-        const idx = startIndex + i;
-        const id = randomUUID();
-        const vals: string[] = [`'${id}'`, `'${finalUploadId}'`, `${idx}`];
+      for (const canonical of canonicalNames) {
+        const col = dbColumn(canonical);
+        if (!existingSet.has(col)) {
+          await this.db.run(`ALTER TABLE transactions ADD COLUMN "${col}" VARCHAR`);
+        }
+      }
 
-        for (const canonical of canonicalNames) {
-          const rawValue = rec[mapping[canonical]];
-          vals.push(rawValue !== undefined && rawValue !== null
-            ? `'${String(rawValue).replace(/'/g, "''")}'`
-            : 'NULL');
+      this.transactions.invalidateColumnCache();
+
+      // Build column list once for all batches
+      const colNames: string[] = ['id', 'upload_id', 'row_index'];
+      for (const canonical of canonicalNames) {
+        colNames.push(`"${dbColumn(canonical)}"`);
+      }
+
+      // Stream CSV and insert in batches
+      let rowsInserted = 0;
+      let rowIndex = 0;
+      let batch: Record<string, string>[] = [];
+
+      const flushBatch = async (records: Record<string, string>[], startIndex: number) => {
+        if (records.length === 0) return;
+
+        const valueRows: string[] = [];
+        for (let i = 0; i < records.length; i++) {
+          const rec = records[i];
+          const idx = startIndex + i;
+          const id = randomUUID();
+          const vals: string[] = [`'${id}'`, `'${finalUploadId}'`, `${idx}`];
+
+          for (const canonical of canonicalNames) {
+            const rawValue = rec[mapping[canonical]];
+            vals.push(rawValue !== undefined && rawValue !== null
+              ? `'${String(rawValue).replace(/'/g, "''")}'`
+              : 'NULL');
+          }
+
+          valueRows.push(`(${vals.join(', ')})`);
         }
 
-        valueRows.push(`(${vals.join(', ')})`);
-      }
+        const sql = `INSERT INTO transactions (${colNames.join(', ')}) VALUES ${valueRows.join(',\n')}`;
+        await this.db.exec(sql);
+      };
 
-      const sql = `INSERT INTO transactions (${colNames.join(', ')}) VALUES ${valueRows.join(',\n')}`;
-      await this.db.exec(sql);
-    };
+      // Stream through the file row by row
+      await new Promise<void>((resolve, reject) => {
+        const readStream = fs.createReadStream(filePath, { encoding });
+        const parser = readStream.pipe(parseStream({
+          columns: true,
+          delimiter,
+          skip_empty_lines: true,
+          relax_column_count: true,
+          trim: true,
+          bom: true,
+        }));
 
-    // Stream through the file row by row
-    await new Promise<void>((resolve, reject) => {
-      const readStream = fs.createReadStream(filePath, { encoding });
-      const parser = readStream.pipe(parseStream({
-        columns: true,
-        delimiter,
-        skip_empty_lines: true,
-        relax_column_count: true,
-        trim: true,
-        bom: true,
-      }));
+        let streamError: Error | null = null;
 
-      let streamError: Error | null = null;
+        parser.on('data', (record: Record<string, string>) => {
+          batch.push(record);
 
-      parser.on('data', (record: Record<string, string>) => {
-        batch.push(record);
+          if (batch.length >= IMPORT_BATCH_SIZE) {
+            parser.pause();
+            const currentBatch = batch;
+            const batchStartIndex = rowIndex;
+            batch = [];
+            rowIndex += currentBatch.length;
 
-        if (batch.length >= IMPORT_BATCH_SIZE) {
-          parser.pause();
-          const currentBatch = batch;
+            flushBatch(currentBatch, batchStartIndex)
+              .then(() => {
+                rowsInserted += currentBatch.length;
+                this.emitProgress({
+                  status: 'running',
+                  totalRows: estimatedTotal,
+                  processedRows: rowsInserted,
+                  percentage: estimatedTotal > 0 ? Math.min(99, Math.round((rowsInserted / estimatedTotal) * 100)) : 0,
+                  currentStep: `Inserted ${rowsInserted.toLocaleString()} of ~${estimatedTotal.toLocaleString()} rows...`,
+                });
+                parser.resume();
+              })
+              .catch((err) => {
+                streamError = err instanceof Error ? err : new Error(String(err));
+                readStream.destroy();
+                parser.destroy();
+                reject(streamError);
+              });
+          }
+        });
+
+        parser.on('end', () => {
+          if (streamError) return; // already rejected in catch handler
+          // Flush remaining batch
+          const remaining = batch;
           const batchStartIndex = rowIndex;
           batch = [];
-          rowIndex += currentBatch.length;
 
-          flushBatch(currentBatch, batchStartIndex)
+          flushBatch(remaining, batchStartIndex)
             .then(() => {
-              rowsInserted += currentBatch.length;
-              this.emitProgress({
-                status: 'running',
-                totalRows: estimatedTotal,
-                processedRows: rowsInserted,
-                percentage: estimatedTotal > 0 ? Math.min(99, Math.round((rowsInserted / estimatedTotal) * 100)) : 0,
-                currentStep: `Inserted ${rowsInserted.toLocaleString()} of ~${estimatedTotal.toLocaleString()} rows...`,
-              });
-              parser.resume();
+              rowsInserted += remaining.length;
+              resolve();
             })
-            .catch((err) => {
-              streamError = err instanceof Error ? err : new Error(String(err));
-              readStream.destroy();
-              parser.destroy();
-              reject(streamError);
-            });
-        }
+            .catch(reject);
+        });
+
+        parser.on('error', (err) => {
+          if (!streamError) reject(err);
+        });
+        readStream.on('error', (err) => {
+          if (!streamError) reject(err);
+        });
       });
 
-      parser.on('end', () => {
-        if (streamError) return; // already rejected in catch handler
-        // Flush remaining batch
-        const remaining = batch;
-        const batchStartIndex = rowIndex;
-        batch = [];
+      if (rowsInserted === 0) {
+        throw new Error('CSV file contains no data rows');
+      }
 
-        flushBatch(remaining, batchStartIndex)
-          .then(() => {
-            rowsInserted += remaining.length;
-            resolve();
-          })
-          .catch(reject);
-      });
-
-      parser.on('error', (err) => {
-        if (!streamError) reject(err);
-      });
-      readStream.on('error', (err) => {
-        if (!streamError) reject(err);
-      });
-    });
-
-    if (rowsInserted === 0) {
-      throw new Error('CSV file contains no data rows');
-    }
-
-    this.emitProgress({
-      status: 'running',
-      totalRows: estimatedTotal,
-      processedRows: rowsInserted,
-      percentage: 95,
-      currentStep: 'Saving upload record...',
-    });
-
-    // Save upload record — mapping is unmutated, stores supplier_name (not original_supplier_name)
-    const fileName = path.basename(filePath);
-    const enrichedMapping = toEnrichedMapping(mapping);
-    await this.db.run(
-      `INSERT INTO uploads (id, file_name, file_path, column_mappings, row_count, status, created_at)
-       VALUES (?, ?, ?, ?, ?, 'imported', CURRENT_TIMESTAMP)`,
-      finalUploadId,
-      fileName,
-      filePath,
-      JSON.stringify(enrichedMapping),
-      rowsInserted
-    );
-
-    this.emitProgress({
-      status: 'running',
-      totalRows: estimatedTotal,
-      processedRows: rowsInserted,
-      percentage: 97,
-      currentStep: 'Normalizing suppliers...',
-    });
-
-    // Link transactions to project_suppliers via original_supplier_name
-    await this.suppliers.normalizeAllTransactions((done, total, step) => {
-      // Map supplier normalization progress to 97-99% range
-      const subPct = total > 0 ? Math.round((done / total) * 100) : 0;
-      const overallPct = 97 + Math.round((subPct / 100) * 2); // 97% → 99%
       this.emitProgress({
         status: 'running',
         totalRows: estimatedTotal,
         processedRows: rowsInserted,
-        percentage: Math.min(99, overallPct),
-        currentStep: step,
+        percentage: 95,
+        currentStep: 'Saving upload record...',
       });
-    });
 
-    // Auto-apply tail spend threshold to newly created suppliers
-    const threshold = await this.project.getSetting('tail_spend_threshold') as number | undefined;
-    if (threshold && threshold > 0) {
-      await this.suppliers.filterTailSpend(threshold);
+      // Save upload record — mapping is unmutated, stores supplier_name (not original_supplier_name)
+      const fileName = path.basename(filePath);
+      const enrichedMapping = toEnrichedMapping(mapping);
+      await this.db.run(
+        `INSERT INTO uploads (id, file_name, file_path, column_mappings, row_count, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'imported', CURRENT_TIMESTAMP)`,
+        finalUploadId,
+        fileName,
+        filePath,
+        JSON.stringify(enrichedMapping),
+        rowsInserted
+      );
+
+      this.emitProgress({
+        status: 'running',
+        totalRows: estimatedTotal,
+        processedRows: rowsInserted,
+        percentage: 97,
+        currentStep: 'Normalizing suppliers...',
+      });
+
+      // Link transactions to project_suppliers via original_supplier_name
+      await this.suppliers.normalizeAllTransactions((done, total, step) => {
+        // Map supplier normalization progress to 97-99% range
+        const subPct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const overallPct = 97 + Math.round((subPct / 100) * 2); // 97% → 99%
+        this.emitProgress({
+          status: 'running',
+          totalRows: estimatedTotal,
+          processedRows: rowsInserted,
+          percentage: Math.min(99, overallPct),
+          currentStep: step,
+        });
+      });
+
+      // Auto-apply tail spend threshold to newly created suppliers
+      const threshold = await this.project.getSetting('tail_spend_threshold') as number | undefined;
+      if (threshold && threshold > 0) {
+        await this.suppliers.filterTailSpend(threshold);
+      }
+
+      return { rowsInserted, uploadId: finalUploadId };
+      });
+    } catch (err) {
+      // Interim progress events emitted inside tx (e.g. "Saving upload record...",
+      // "Normalizing suppliers...") described work that has now been rolled back.
+      // Surface a final failed status so the UI can replace the stale messaging.
+      const message = err instanceof Error ? err.message : String(err);
+      this.emitProgress({
+        status: 'failed',
+        totalRows: estimatedTotal,
+        processedRows: 0,
+        percentage: 0,
+        currentStep: 'Import failed; changes rolled back',
+        error: message,
+      });
+      throw err;
     }
-
-    const result = { rowsInserted, uploadId: finalUploadId };
 
     this.emitProgress({
       status: 'completed',
-      totalRows: rowsInserted,
-      processedRows: rowsInserted,
+      totalRows: result.rowsInserted,
+      processedRows: result.rowsInserted,
       percentage: 100,
       currentStep: 'Import complete',
       result,

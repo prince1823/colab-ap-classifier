@@ -1,4 +1,5 @@
 import { DuckDBInstance, DuckDBConnection } from '@duckdb/node-api';
+import { AsyncLocalStorage } from 'async_hooks';
 import { existsSync, unlinkSync } from 'fs';
 import type { Database } from '../../shared/types/services';
 import { debugLog } from '../utils/debug-log';
@@ -47,11 +48,52 @@ export class DuckDBDatabase implements Database {
   private currentFilePath: string | null = null;
   // Serialize all queries — DuckDB single connection does not support concurrency
   private queue: Promise<unknown> = Promise.resolve();
+  private transactionContext = new AsyncLocalStorage<{ queue: Promise<unknown> }>();
 
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const tx = this.transactionContext.getStore();
+    if (tx) {
+      const next = tx.queue.then(fn, fn) as Promise<T>;
+      tx.queue = next.catch(() => {});
+      return next;
+    }
+
     const next = this.queue.then(fn, fn) as Promise<T>;
     this.queue = next.catch(() => {});
     return next;
+  }
+
+  // Run `fn` inside a DuckDB transaction. Queries issued from within `fn` —
+  // including those scheduled via Promise chains, microtasks, and stream
+  // event listeners registered while the context is active — share a private
+  // queue tracked by AsyncLocalStorage, so they all participate in the same
+  // BEGIN/COMMIT (or BEGIN/ROLLBACK) without blocking on the outer queue.
+  // Nested tx() calls reuse the outer transaction (DuckDB has no savepoints
+  // here); an inner throw rolls back the whole outer tx.
+  async tx<T>(fn: () => Promise<T>): Promise<T> {
+    const existing = this.transactionContext.getStore();
+    if (existing) {
+      return fn();
+    }
+
+    return this.serialize(async () => {
+      const conn = this.getConnection();
+      const context = { queue: Promise.resolve() };
+      await conn.run('BEGIN TRANSACTION');
+      try {
+        const result = await this.transactionContext.run(context, fn);
+        await context.queue;
+        await conn.run('COMMIT');
+        return result;
+      } catch (err) {
+        try {
+          await conn.run('ROLLBACK');
+        } catch (rollbackErr) {
+          debugLog('ERROR', '[DB] transaction rollback failed', rollbackErr);
+        }
+        throw err;
+      }
+    });
   }
 
   async openDatabase(filePath: string): Promise<void> {

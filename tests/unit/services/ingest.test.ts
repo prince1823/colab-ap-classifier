@@ -23,6 +23,7 @@ import { IngestService } from '../../../src/main/services/ingest';
 import { createMockDatabase, createMockTransactionStore, createMockColumnMappingAgent, createMockSupplierService, createMockProjectStore, createMockEventBus } from '../../helpers/mock-services';
 import type { Database, TransactionStore, ColumnMappingAgent, SupplierService, ProjectStore, EventBus } from '../../../src/shared/types/services';
 import type { ColumnMappingResult } from '../../../src/shared/types/column-mapping';
+import type { IngestProgress } from '../../../src/shared/types/classification';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../../fixtures/csv');
 
@@ -313,10 +314,49 @@ function tempDbPath(): string {
   return path.join(os.tmpdir(), `ingest-test-${Date.now()}-${Math.random().toString(36).slice(2)}.c91`);
 }
 
+function createDbBackedProject(db: DuckDBDatabase): ProjectStore {
+  return {
+    ...createMockProjectStore(),
+    setSetting: vi.fn(async (key: string, value: unknown) => {
+      await db.run(
+        `INSERT INTO project_settings (key, value) VALUES (?, ?)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+        key,
+        JSON.stringify(value)
+      );
+    }),
+    getSetting: vi.fn(async (key: string) => {
+      const row = await db.get<{ value: string }>(
+        'SELECT value FROM project_settings WHERE key = ?',
+        key
+      );
+      if (!row) return undefined;
+      return JSON.parse(row.value);
+    }),
+  };
+}
+
+async function tableCount(db: DuckDBDatabase, table: string): Promise<number> {
+  const row = await db.get<{ cnt: number | bigint }>(`SELECT COUNT(*) AS cnt FROM ${table}`);
+  return Number(row?.cnt ?? 0);
+}
+
+async function columnExists(db: DuckDBDatabase, table: string, column: string): Promise<boolean> {
+  const row = await db.get<{ cnt: number | bigint }>(
+    'SELECT COUNT(*) AS cnt FROM information_schema.columns WHERE table_name = ? AND column_name = ?',
+    table,
+    column
+  );
+  return Number(row?.cnt ?? 0) > 0;
+}
+
 describe('IngestService — importCSV (real DB)', () => {
   let realDb: DuckDBDatabase;
   let dbPath: string;
   let realService: IngestService;
+  let realSuppliers: SupplierService;
+  let realProject: ProjectStore;
+  let realEventBus: EventBus;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -324,10 +364,11 @@ describe('IngestService — importCSV (real DB)', () => {
     dbPath = tempDbPath();
     await realDb.openDatabase(dbPath);
     const transactions = createMockTransactionStore();
-    const suppliers = createMockSupplierService();
-    const project = createMockProjectStore();
+    realSuppliers = createMockSupplierService();
+    realProject = createDbBackedProject(realDb);
     const agent = createMockColumnMappingAgent();
-    realService = new IngestService(realDb, transactions, suppliers, project, agent);
+    realEventBus = createMockEventBus();
+    realService = new IngestService(realDb, transactions, realSuppliers, realProject, agent, realEventBus);
   });
 
   afterEach(async () => {
@@ -353,6 +394,87 @@ describe('IngestService — importCSV (real DB)', () => {
     );
     expect(distinctIds).toHaveLength(1);
     expect(distinctIds[0].upload_id).toBe(uploadId);
+  });
+
+  it('rolls back rows, upload metadata, settings, and dynamic columns when supplier normalization fails', async () => {
+    const csvPath = path.resolve(__dirname, '../../fixtures/csv/standard.csv');
+    vi.mocked(realSuppliers.normalizeAllTransactions).mockImplementation(async () => {
+      await realDb.run(
+        `INSERT INTO project_suppliers (id, supplier_name) VALUES (?, ?)`,
+        'sup-fail',
+        'Supplier Before Failure'
+      );
+      await realDb.run(
+        `UPDATE transactions SET project_supplier_id = ? WHERE project_supplier_id IS NULL`,
+        'sup-fail'
+      );
+      throw new Error('normalize exploded');
+    });
+
+    await expect(realService.importCSV(csvPath, {
+      supplier_name: 'Supplier',
+      spend_amount: 'Amount',
+      master_date: 'Date',
+      line_description: 'Description',
+    })).rejects.toThrow('normalize exploded');
+
+    expect(await tableCount(realDb, 'transactions')).toBe(0);
+    expect(await tableCount(realDb, 'uploads')).toBe(0);
+    expect(await tableCount(realDb, 'project_suppliers')).toBe(0);
+    expect(await realDb.get('SELECT value FROM project_settings WHERE key = ?', 'master_date_format')).toBeUndefined();
+    expect(await columnExists(realDb, 'transactions', 'spend_amount')).toBe(false);
+    expect(await columnExists(realDb, 'transactions', 'master_date')).toBe(false);
+    expect(await columnExists(realDb, 'transactions', 'line_description')).toBe(false);
+
+    // After rollback, the UI must see a final 'failed' event so the prior
+    // interim "Saving upload record..." / "Normalizing suppliers..." messages
+    // are clearly superseded.
+    const progressEvents = vi.mocked(realEventBus.emit).mock.calls
+      .filter(([channel]) => channel === 'ingest:progress')
+      .map(([, payload]) => payload as IngestProgress);
+    const last = progressEvents[progressEvents.length - 1];
+    expect(last.status).toBe('failed');
+    expect(last.processedRows).toBe(0);
+    expect(last.percentage).toBe(0);
+    expect(last.currentStep).toMatch(/rolled back/i);
+    expect(last.error).toMatch(/normalize exploded/);
+  });
+
+  it('rolls back a fully normalized import when tail-spend filtering fails', async () => {
+    const csvPath = path.resolve(__dirname, '../../fixtures/csv/standard.csv');
+    vi.mocked(realProject.getSetting).mockImplementation(async (key: string) => {
+      if (key === 'tail_spend_threshold') return 10000;
+      const row = await realDb.get<{ value: string }>(
+        'SELECT value FROM project_settings WHERE key = ?',
+        key
+      );
+      return row ? JSON.parse(row.value) : undefined;
+    });
+    vi.mocked(realSuppliers.normalizeAllTransactions).mockImplementation(async () => {
+      await realDb.run(
+        `INSERT INTO project_suppliers (id, supplier_name) VALUES (?, ?)`,
+        'sup-normalized',
+        'Normalized Supplier'
+      );
+      await realDb.run(
+        `UPDATE transactions SET project_supplier_id = ? WHERE project_supplier_id IS NULL`,
+        'sup-normalized'
+      );
+    });
+    vi.mocked(realSuppliers.filterTailSpend).mockRejectedValue(new Error('tail spend exploded'));
+
+    await expect(realService.importCSV(csvPath, {
+      supplier_name: 'Supplier',
+      spend_amount: 'Amount',
+      master_date: 'Date',
+    })).rejects.toThrow('tail spend exploded');
+
+    expect(await tableCount(realDb, 'transactions')).toBe(0);
+    expect(await tableCount(realDb, 'uploads')).toBe(0);
+    expect(await tableCount(realDb, 'project_suppliers')).toBe(0);
+    expect(await realDb.get('SELECT value FROM project_settings WHERE key = ?', 'master_date_format')).toBeUndefined();
+    expect(await columnExists(realDb, 'transactions', 'spend_amount')).toBe(false);
+    expect(await columnExists(realDb, 'transactions', 'master_date')).toBe(false);
   });
 });
 

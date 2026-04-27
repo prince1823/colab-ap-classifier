@@ -23,6 +23,7 @@ import { IngestService } from '../../../src/main/services/ingest';
 import { createMockDatabase, createMockTransactionStore, createMockColumnMappingAgent, createMockSupplierService, createMockProjectStore, createMockEventBus } from '../../helpers/mock-services';
 import type { Database, TransactionStore, ColumnMappingAgent, SupplierService, ProjectStore, EventBus } from '../../../src/shared/types/services';
 import type { ColumnMappingResult } from '../../../src/shared/types/column-mapping';
+import type { IngestProgress } from '../../../src/shared/types/classification';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../../fixtures/csv');
 
@@ -355,6 +356,7 @@ describe('IngestService — importCSV (real DB)', () => {
   let realService: IngestService;
   let realSuppliers: SupplierService;
   let realProject: ProjectStore;
+  let realEventBus: EventBus;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -365,7 +367,8 @@ describe('IngestService — importCSV (real DB)', () => {
     realSuppliers = createMockSupplierService();
     realProject = createDbBackedProject(realDb);
     const agent = createMockColumnMappingAgent();
-    realService = new IngestService(realDb, transactions, realSuppliers, realProject, agent);
+    realEventBus = createMockEventBus();
+    realService = new IngestService(realDb, transactions, realSuppliers, realProject, agent, realEventBus);
   });
 
   afterEach(async () => {
@@ -422,6 +425,19 @@ describe('IngestService — importCSV (real DB)', () => {
     expect(await columnExists(realDb, 'transactions', 'spend_amount')).toBe(false);
     expect(await columnExists(realDb, 'transactions', 'master_date')).toBe(false);
     expect(await columnExists(realDb, 'transactions', 'line_description')).toBe(false);
+
+    // After rollback, the UI must see a final 'failed' event so the prior
+    // interim "Saving upload record..." / "Normalizing suppliers..." messages
+    // are clearly superseded.
+    const progressEvents = vi.mocked(realEventBus.emit).mock.calls
+      .filter(([channel]) => channel === 'ingest:progress')
+      .map(([, payload]) => payload as IngestProgress);
+    const last = progressEvents[progressEvents.length - 1];
+    expect(last.status).toBe('failed');
+    expect(last.processedRows).toBe(0);
+    expect(last.percentage).toBe(0);
+    expect(last.currentStep).toMatch(/rolled back/i);
+    expect(last.error).toMatch(/normalize exploded/);
   });
 
   it('rolls back a fully normalized import when tail-spend filtering fails', async () => {

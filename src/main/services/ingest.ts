@@ -377,7 +377,14 @@ export class IngestService implements IIngestService {
     }
 
     const finalUploadId = uploadId || randomUUID();
-    const result = await this.db.tx(async () => {
+    let result: { rowsInserted: number; uploadId: string };
+    try {
+      // The whole import runs in one DB transaction so any failure rolls back
+      // schema, settings, rows, and supplier links together. Stream listeners
+      // registered inside this callback inherit the tx's AsyncLocalStorage
+      // context (captured at .on() registration), which is why batched INSERTs
+      // emitted from `parser.on('data', ...)` participate in the transaction.
+      result = await this.db.tx(async () => {
       if (detectedMasterDateFormat) {
         await this.project.setSetting('master_date_format', detectedMasterDateFormat);
       }
@@ -554,7 +561,22 @@ export class IngestService implements IIngestService {
       }
 
       return { rowsInserted, uploadId: finalUploadId };
-    });
+      });
+    } catch (err) {
+      // Interim progress events emitted inside tx (e.g. "Saving upload record...",
+      // "Normalizing suppliers...") described work that has now been rolled back.
+      // Surface a final failed status so the UI can replace the stale messaging.
+      const message = err instanceof Error ? err.message : String(err);
+      this.emitProgress({
+        status: 'failed',
+        totalRows: estimatedTotal,
+        processedRows: 0,
+        percentage: 0,
+        currentStep: 'Import failed; changes rolled back',
+        error: message,
+      });
+      throw err;
+    }
 
     this.emitProgress({
       status: 'completed',

@@ -63,6 +63,13 @@ export class DuckDBDatabase implements Database {
     return next;
   }
 
+  // Run `fn` inside a DuckDB transaction. Queries issued from within `fn` —
+  // including those scheduled via Promise chains, microtasks, and stream
+  // event listeners registered while the context is active — share a private
+  // queue tracked by AsyncLocalStorage, so they all participate in the same
+  // BEGIN/COMMIT (or BEGIN/ROLLBACK) without blocking on the outer queue.
+  // Nested tx() calls reuse the outer transaction (DuckDB has no savepoints
+  // here); an inner throw rolls back the whole outer tx.
   async tx<T>(fn: () => Promise<T>): Promise<T> {
     const existing = this.transactionContext.getStore();
     if (existing) {

@@ -14,6 +14,7 @@ import { buildDedupGroups } from '../utils/dedup-groups';
 import { findClosestTaxonomyMatch } from '../agents/classification-agent';
 import { DEFAULT_QC_RULES } from '../agents/qc-agent';
 import { debugLog } from '../utils/debug-log';
+import { isAbortError } from '../utils/cancellation';
 
 const CLASSIFIED_STATUSES = `('classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent')`;
 const CLASSIFIED_STATUS_LIST = ['classified_by_ai', 'classified_by_rule', 'classified_by_qc_agent'];
@@ -42,6 +43,7 @@ interface SupplierQCData {
 export class QCRunner implements IQCRunner {
   private isRunningFlag = false;
   private isStopped = false;
+  private abortController: AbortController | null = null;
 
   constructor(
     private db: Database,
@@ -60,6 +62,7 @@ export class QCRunner implements IQCRunner {
 
   stop(): void {
     this.isStopped = true;
+    this.abortController?.abort();
   }
 
   async getSupplierCount(scope?: FilterConditionQC[]): Promise<number> {
@@ -75,6 +78,9 @@ export class QCRunner implements IQCRunner {
     if (this.isRunningFlag) return;
     this.isRunningFlag = true;
     this.isStopped = false;
+    const runAbortController = new AbortController();
+    this.abortController = runAbortController;
+    const signal = runAbortController.signal;
 
     // Guard: spend_amount column must exist for QC spend calculations
     const columns = await this.transactions.getColumns();
@@ -85,6 +91,9 @@ export class QCRunner implements IQCRunner {
         percentage: 0, currentSupplier: null,
         currentStep: "QC requires the 'spend_amount' column but it was not found in the transactions table. Ensure your CSV import maps a column to spend_amount.",
       });
+      if (this.abortController === runAbortController) {
+        this.abortController = null;
+      }
       return;
     }
 
@@ -158,8 +167,9 @@ export class QCRunner implements IQCRunner {
           });
 
           try {
-            await this.runLLMPass(supplier, rules);
+            await this.runLLMPass(supplier, rules, signal);
           } catch (err) {
+            if (this.isStopped || signal.aborted || isAbortError(err)) break;
             debugLog('ERROR', `[QC] LLM pass failed for ${supplier.supplierName}`, {
               error: err instanceof Error ? err.message : String(err),
             });
@@ -179,6 +189,9 @@ export class QCRunner implements IQCRunner {
       });
     } finally {
       this.isRunningFlag = false;
+      if (this.abortController === runAbortController) {
+        this.abortController = null;
+      }
     }
   }
 
@@ -327,9 +340,11 @@ export class QCRunner implements IQCRunner {
     return { outcome: 'flagged' };
   }
 
-  private async runLLMPass(supplier: SupplierQCData, rules: string): Promise<void> {
+  private async runLLMPass(supplier: SupplierQCData, rules: string, signal?: AbortSignal): Promise<void> {
     const summary = await this.buildSupplierSummary(supplier);
-    const result = await this.qcAgent.review({ supplierSummary: summary, rules });
+    const result = await this.qcAgent.review({ supplierSummary: summary, rules }, { signal });
+
+    if (this.isStopped || signal?.aborted) return;
 
     if (result.noChangeNeeded || result.recommendations.length === 0) return;
 
@@ -362,6 +377,7 @@ export class QCRunner implements IQCRunner {
 
     // Apply recommendations
     for (const rec of result.recommendations) {
+      if (this.isStopped || signal?.aborted) return;
       const txnIds: string[] = [];
       for (const gn of rec.groupNumbers) {
         const ids = groupToTxnIds.get(gn);
@@ -381,6 +397,7 @@ export class QCRunner implements IQCRunner {
         continue;
       }
 
+      if (this.isStopped || signal?.aborted) return;
       await this.transactions.updateTransactions({
         ids: txnIds,
         taxonomyNodeId: targetNode.id,

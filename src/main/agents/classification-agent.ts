@@ -13,6 +13,7 @@ import type { ClassificationAgent, LLMClient } from '../../shared/types/services
 import type { CompanyContext } from '../../shared/types/project';
 import { extractFields, buildDedupGroups, DEFAULT_SAMPLE_COUNT } from '../utils/dedup-groups';
 import { traceLog } from '../utils/llm-trace';
+import { isAbortError } from '../utils/cancellation';
 
 // ─── Call 1: Category Selection ─────────────────────────────────────────────
 
@@ -819,6 +820,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       responseText = await this.llm.chat(systemPrompt, userPrompt, {
         temperature: 0,
         maxTokens: 4096,
+        signal: input.signal,
       });
     } catch (err) {
       traceLog({
@@ -925,6 +927,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       responseText = await this.llm.chat(systemPrompt, userPrompt, {
         temperature: 0,
         maxTokens: 16384,
+        signal: input.signal,
       });
     } catch (err) {
       traceLog({
@@ -990,6 +993,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       responseText = await this.llm.chat(systemPrompt, userPrompt, {
         temperature: 0,
         maxTokens: 4096,
+        signal: input.signal,
       });
     } catch (err) {
       traceLog({
@@ -1100,6 +1104,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
         responseText = await this.llm.chat(systemPrompt, userPrompt, {
           temperature: 0,
           maxTokens: 8192,
+          signal: input.signal,
         });
       } catch (err) {
         traceLog({
@@ -1113,6 +1118,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
           elapsedMs: Date.now() - start,
           error: err instanceof Error ? err.message : String(err),
         });
+        if (isAbortError(err)) throw err;
         if (attempt === MAX_ATTEMPTS) break;
         continue;
       }
@@ -1186,6 +1192,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       suppliers: [{ name: supplierName, research: supplierResearch, parentName: parentName ?? null }],
       taxonomy,
       companyContext,
+      signal: input.signal,
     });
 
     const categoryPaths = categoryMap.get(1);
@@ -1221,6 +1228,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       companyContext,
       supplierName,
       supplierType: supplierResearch?.supplierType ?? null,
+      signal: input.signal,
     });
   }
 
@@ -1236,6 +1244,7 @@ export class LLMClassificationAgent implements ClassificationAgent {
       responseText = await this.llm.chat(systemPrompt, userPrompt, {
         temperature: 0,
         maxTokens: 16384,
+        signal: input.signal,
       });
     } catch (err) {
       traceLog({

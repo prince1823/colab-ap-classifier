@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { GroupedFilterBuilder, conditionsToGrouped, makeEmptyGroup, normalizeGroupedFilter } from '../FilterConditionBuilder'
+import { GroupedFilterBuilder, makeEmptyGroup, normalizeGroupedFilter } from '../FilterConditionBuilder'
 import { ipc } from '../../lib/ipc'
 import { showError } from '../../lib/toast-errors'
 import type { FilterCondition, GroupedFilter } from '../../../shared/types/transactions'

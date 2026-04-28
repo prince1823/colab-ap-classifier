@@ -1,7 +1,6 @@
 import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { FilterCondition, FilterOperator, FieldType, FieldDefinition, ConditionGroup, GroupedFilter } from '../../shared/types/transactions'
-import { groupedToConditions } from '../../shared/filter-utils'
 
 /* ---------- Stable key helper ---------- */
 // React needs stable keys that survive add/remove operations.
@@ -912,68 +911,6 @@ export function normalizeGroupedFilter(
       // grp.groupConnector is intentionally not copied — only top-level is used.
     })),
   }
-}
-
-/** Convert a flat FilterCondition[] to GroupedFilter (single group, all AND). */
-export function conditionsToGrouped(conditions: FilterCondition[]): GroupedFilter {
-  if (conditions.length === 0) return { groupConnector: 'AND', groups: [makeEmptyGroup()] }
-
-  // Try to detect groups from connector boundaries:
-  // Consecutive conditions connected by the same connector form a group.
-  // When the connector changes, a new group starts.
-  const groups: ConditionGroup[] = []
-  let currentGroup: FilterCondition[] = [conditions[0]]
-  let currentConnector: 'AND' | 'OR' = conditions[0].connector || 'AND'
-
-  for (let i = 1; i < conditions.length; i++) {
-    const prevConnector = conditions[i - 1].connector || 'AND'
-    if (prevConnector === currentConnector) {
-      currentGroup.push(conditions[i])
-    } else {
-      groups.push({ connector: currentConnector, conditions: currentGroup })
-      currentGroup = [conditions[i]]
-      currentConnector = prevConnector
-    }
-  }
-  groups.push({ connector: currentConnector, conditions: currentGroup })
-
-  // Infer top-level connector: if all groups have the same internal connector, use the opposite
-  const groupConnector = groups.length > 1 ? (currentConnector === 'AND' ? 'OR' : 'AND') : 'AND'
-
-  return { groupConnector, groups }
-}
-
-/* ---------- Backward-compatible flat FilterConditionBuilder ---------- */
-
-/**
- * Legacy wrapper: accepts flat FilterCondition[] and renders via GroupedFilterBuilder.
- * Used by ClassificationPage, OverrideRulesPage, SuppliersPage.
- */
-interface FlatFilterConditionBuilderProps {
-  conditions: FilterCondition[]
-  onChange: (conditions: FilterCondition[]) => void
-  availableFields: string[] | FieldDefinition[]
-  compact?: boolean
-}
-
-export default function FilterConditionBuilder({
-  conditions,
-  onChange,
-  availableFields,
-}: FlatFilterConditionBuilderProps) {
-  const grouped = useMemo(() => conditionsToGrouped(conditions), [conditions])
-
-  const handleChange = useCallback((g: GroupedFilter) => {
-    onChange(groupedToConditions(g))
-  }, [onChange])
-
-  return (
-    <GroupedFilterBuilder
-      value={grouped}
-      onChange={handleChange}
-      availableFields={availableFields}
-    />
-  )
 }
 
 export { OPERATOR_LABELS, ALL_OPERATORS as OPERATORS, NO_VALUE_OPERATORS, makeEmptyGroup }

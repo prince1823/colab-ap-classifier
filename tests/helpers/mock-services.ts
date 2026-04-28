@@ -37,6 +37,7 @@ export function createMockDatabase(): Database {
     exec: vi.fn(),
     all: vi.fn().mockResolvedValue([]),
     get: vi.fn(),
+    tx: vi.fn(async (fn) => fn()),
   };
 }
 

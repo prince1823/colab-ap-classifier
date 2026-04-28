@@ -178,5 +178,63 @@ describe('DuckDBDatabase', () => {
         'No database is currently open'
       );
     });
+
+    it('should commit all writes in tx()', async () => {
+      await db.tx(async () => {
+        await db.run(
+          "INSERT INTO project_settings (key, value) VALUES (?, ?)",
+          'tx_key',
+          '"committed"'
+        );
+      });
+
+      const result = await db.get<{ value: string }>(
+        "SELECT value FROM project_settings WHERE key = 'tx_key'"
+      );
+      expect(result?.value).toBe('"committed"');
+    });
+
+    it('should roll back all writes when tx() throws', async () => {
+      await expect(db.tx(async () => {
+        await db.run(
+          "INSERT INTO project_settings (key, value) VALUES (?, ?)",
+          'tx_key',
+          '"rolled_back"'
+        );
+        throw new Error('force rollback');
+      })).rejects.toThrow('force rollback');
+
+      const result = await db.get<{ value: string }>(
+        "SELECT value FROM project_settings WHERE key = 'tx_key'"
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it('should queue outside writes until tx() completes', async () => {
+      const events: string[] = [];
+
+      const txPromise = db.tx(async () => {
+        events.push('tx-start');
+        await db.run(
+          "INSERT INTO project_settings (key, value) VALUES (?, ?)",
+          'inside_tx',
+          '"inside"'
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        events.push('tx-end');
+      });
+
+      const outsidePromise = db.run(
+        "INSERT INTO project_settings (key, value) VALUES (?, ?)",
+        'outside_tx',
+        '"outside"'
+      ).then(() => {
+        events.push('outside');
+      });
+
+      await Promise.all([txPromise, outsidePromise]);
+
+      expect(events).toEqual(['tx-start', 'tx-end', 'outside']);
+    });
   });
 });

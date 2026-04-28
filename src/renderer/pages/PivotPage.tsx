@@ -15,8 +15,7 @@ import type { FlattenedPivotRow } from '../types/pivot'
 import type { TransactionFilter, GroupedFilter } from '../../shared/types/transactions'
 import type { FieldDefinition } from '../components/FilterConditionBuilder'
 import type { RuleGroup } from '../../shared/types/rules'
-import { groupedToConditions } from '../components/FilterConditionBuilder'
-import { andGroupedFilters, conditionsToGroupedFilter } from '../../shared/filter-utils'
+import { andGroupedFilters, conditionsToGroupedFilter, groupedToConditions } from '../../shared/filter-utils'
 import { RefreshCw, ListFilter } from 'lucide-react'
 
 function buildPillGroupedFilter(pillState: Record<string, string[]>): GroupedFilter | undefined {

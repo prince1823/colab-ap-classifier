@@ -1,6 +1,7 @@
 import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { FilterCondition, FilterOperator, FieldType, FieldDefinition, ConditionGroup, GroupedFilter } from '../../shared/types/transactions'
+import { groupedToConditions } from '../../shared/filter-utils'
 
 /* ---------- Stable key helper ---------- */
 // React needs stable keys that survive add/remove operations.
@@ -940,27 +941,6 @@ export function conditionsToGrouped(conditions: FilterCondition[]): GroupedFilte
   const groupConnector = groups.length > 1 ? (currentConnector === 'AND' ? 'OR' : 'AND') : 'AND'
 
   return { groupConnector, groups }
-}
-
-/** Convert GroupedFilter back to flat FilterCondition[] for backward compat. */
-export function groupedToConditions(grouped: GroupedFilter): FilterCondition[] {
-  const result: FilterCondition[] = []
-  for (let gi = 0; gi < grouped.groups.length; gi++) {
-    const group = grouped.groups[gi]
-    for (let ci = 0; ci < group.conditions.length; ci++) {
-      const c = { ...group.conditions[ci] }
-      // Emit per-condition connectors so the flat form encodes the grouped
-      // structure for SQL precedence: within a group use group.connector,
-      // at the last condition of a non-final group use grouped.groupConnector.
-      if (ci < group.conditions.length - 1) {
-        c.connector = group.connector ?? 'AND'
-      } else if (gi < grouped.groups.length - 1) {
-        c.connector = grouped.groupConnector ?? 'AND'
-      }
-      result.push(c)
-    }
-  }
-  return result
 }
 
 /* ---------- Backward-compatible flat FilterConditionBuilder ---------- */

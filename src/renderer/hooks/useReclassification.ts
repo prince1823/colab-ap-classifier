@@ -6,7 +6,7 @@ import { buildGroupedConditionsFromRows } from '../utils/buildConditionsFromRows
 import type { FlattenedPivotRow } from '../types/pivot'
 import type { TaxonomyNode } from '../../shared/types/taxonomy'
 import type { ConflictRow } from '../../shared/types/rules'
-import type { PivotFilterState } from '../components/review/PivotFilterBar'
+import type { PivotFilterState } from '../types/pivot'
 
 interface UseReclassificationOptions {
   filterState: PivotFilterState

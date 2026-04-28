@@ -23,7 +23,6 @@
     "test:heavy": "RUN_HEAVY=1 vitest run tests/integration/classification-scope-stack.test.ts --pool=forks --poolOptions.forks.singleFork=true",
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.renderer.json",
     "script:inspect": "tsx scripts/inspect-c91.ts",
-    "script:verify-llm": "tsx scripts/verify-llm-config.ts",
     "script:test-llm": "tsx scripts/test-llm-config.ts"
   },
   "dependencies": {

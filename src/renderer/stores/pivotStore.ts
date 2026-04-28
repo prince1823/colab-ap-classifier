@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Aggregation, SpendDisplayMode } from '../types/pivot'
-import type { PivotFilterState } from '../components/review/PivotFilterBar'
+import type { PivotFilterState } from '../types/pivot'
 import type { GroupedFilter } from '../../shared/types/transactions'
 
 interface PivotState {

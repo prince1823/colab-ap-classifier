@@ -88,7 +88,7 @@ export function parseQCResponse(responseText: string): QCResult {
 export class LLMQCAgent implements QCAgent {
   constructor(private llm: LLMClient) {}
 
-  async review(input: { supplierSummary: string; rules: string }): Promise<QCResult> {
+  async review(input: { supplierSummary: string; rules: string }, options?: { signal?: AbortSignal }): Promise<QCResult> {
     const systemPrompt = buildQCSystemPrompt();
     const userPrompt = buildQCUserPrompt(input.supplierSummary, input.rules);
 
@@ -98,6 +98,7 @@ export class LLMQCAgent implements QCAgent {
       responseText = await this.llm.chat(systemPrompt, userPrompt, {
         temperature: 0,
         maxTokens: 4096,
+        signal: options?.signal,
       });
     } catch (err) {
       traceLog({

@@ -1,4 +1,5 @@
 import type { LLMClient, ILLMConfig } from '../../shared/types/services';
+import { isAbortError, throwIfAborted } from '../utils/cancellation';
 import { debugLog } from '../utils/debug-log';
 
 interface ChatOptions {
@@ -6,6 +7,7 @@ interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   provider?: string;
+  signal?: AbortSignal;
 }
 
 export class LLMClientError extends Error {
@@ -97,6 +99,23 @@ function retryDelay(attempt: number, retryAfterHeader?: string | null): number {
   return Math.min(base + jitter, MAX_RETRY_DELAY_MS);
 }
 
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => signal?.removeEventListener('abort', onAbort);
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timeoutId);
+      cleanup();
+      reject(new DOMException('Operation cancelled', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 function buildAnthropicBody(systemPrompt: string, userPrompt: string, model: string, maxTokens: number, temperature: number): object {
   return { model, max_tokens: maxTokens, temperature, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] };
 }
@@ -174,8 +193,16 @@ export class OpenRouterLLMClient implements LLMClient {
     let lastError: LLMClientError | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      throwIfAborted(options?.signal);
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      let timedOut = false;
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, REQUEST_TIMEOUT_MS);
+      const abortFromCaller = (): void => controller.abort();
+      options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
       const t0 = Date.now();
 
       debugLog('INFO', `[LLM] fetch attempt=${attempt + 1}/${MAX_RETRIES + 1} url=${config.url}`);
@@ -186,16 +213,22 @@ export class OpenRouterLLMClient implements LLMClient {
         });
       } catch (error: unknown) {
         clearTimeout(timeoutId);
-        const msg = error instanceof DOMException && error.name === 'AbortError'
-          ? `timed out after ${REQUEST_TIMEOUT_MS}ms`
+        options?.signal?.removeEventListener('abort', abortFromCaller);
+        const cancelled = options?.signal?.aborted === true;
+        const msg = isAbortError(error)
+          ? (cancelled ? 'cancelled by caller' : `timed out after ${REQUEST_TIMEOUT_MS}ms`)
           : `network error: ${error instanceof Error ? error.message : String(error)}`;
         debugLog('ERROR', `[LLM] fetch failed attempt=${attempt + 1} ${msg}`);
-        if (error instanceof DOMException && error.name === 'AbortError') {
+        if (cancelled) {
+          throw new DOMException('Operation cancelled', 'AbortError');
+        }
+        if (isAbortError(error)) {
           throw new LLMClientError(`Request to ${provider} timed out after ${REQUEST_TIMEOUT_MS}ms`, 'TIMEOUT');
         }
         throw new LLMClientError(`Network error calling ${provider}: ${error instanceof Error ? error.message : String(error)}`, 'API_ERROR');
       } finally {
         clearTimeout(timeoutId);
+        options?.signal?.removeEventListener('abort', abortFromCaller);
       }
 
       if (!response.ok) {
@@ -207,7 +240,7 @@ export class OpenRouterLLMClient implements LLMClient {
           debugLog('WARN', `[LLM] HTTP ${response.status} — retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`, errorBody.slice(0, 200));
           console.warn(`[LLM] ${provider} returned HTTP ${response.status}, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
           lastError = new LLMClientError(`${provider} API returned HTTP ${response.status}: ${errorBody}`, 'API_ERROR', response.status);
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await abortableDelay(delay, options?.signal);
           continue;
         }
 

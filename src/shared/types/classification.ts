@@ -84,6 +84,7 @@ export interface CategorySelectionInput {
   suppliers: Array<{ name: string; research: SupplierInfo | null; parentName: string | null }>;
   taxonomy: TaxonomyNode[];
   companyContext: CompanyContext;
+  signal?: AbortSignal;
 }
 
 export interface L3ClassificationInput {
@@ -95,6 +96,7 @@ export interface L3ClassificationInput {
   supplierName: string;
   supplierType: string | null;
   sampleCount?: number;
+  signal?: AbortSignal;
 }
 
 export interface TailSpendCategorySelectionInput {
@@ -104,6 +106,7 @@ export interface TailSpendCategorySelectionInput {
   }>;
   taxonomy: TaxonomyNode[];
   companyContext: CompanyContext;
+  signal?: AbortSignal;
 }
 
 export interface TailSpendL3Input {
@@ -114,6 +117,7 @@ export interface TailSpendL3Input {
     groups: Array<{ fields: Array<[string, string]>; count: number }>;
   }>;
   companyContext: CompanyContext;
+  signal?: AbortSignal;
 }
 
 export interface ClassificationInput {
@@ -124,6 +128,7 @@ export interface ClassificationInput {
   parentName?: string | null;
   columnPriorities: string[];
   sampleCount?: number;
+  signal?: AbortSignal;
 }
 
 export interface ClassificationEntry {

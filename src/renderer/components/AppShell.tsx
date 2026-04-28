@@ -12,6 +12,9 @@ import ReviewView from '../views/ReviewView'
 import OverrideRulesView from '../views/OverrideRulesView'
 import VersionHistoryView from '../views/VersionHistoryView'
 import SyncToUniverseView from '../views/SyncToUniverseView'
+import { cancelResearch } from '../lib/researchRunner'
+import { ipc } from '../lib/ipc'
+import { showError } from '../lib/toast-errors'
 
 /** Route config for keep-alive rendering */
 const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
@@ -28,7 +31,7 @@ const ROUTE_PAGES: { path: string; element: ReactNode }[] = [
 
 export default function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const { subscribeToClassificationProgress, subscribeToResearchProgress, subscribeToQCProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, researchProgress, projectFilePath } = useWorkflowStore()
+  const { subscribeToClassificationProgress, subscribeToResearchProgress, subscribeToQCProgress, hasProject, refreshMetadata, refreshGateState, setLastRoute, loadProject, closeProject, reset, classificationProgress, researchProgress, projectFilePath } = useWorkflowStore()
   const location = useLocation()
   // Track which routes have been visited so we mount them once and keep them alive
   const [visitedRoutes, setVisitedRoutes] = useState<Set<string>>(new Set([location.pathname]))
@@ -106,6 +109,7 @@ export default function AppShell() {
 
   // Show research progress on non-supplier pages
   const showGlobalResearchProgress = researchProgress?.status === 'running' && location.pathname !== '/suppliers'
+  const showGlobalClassificationProgress = classificationProgress?.status === 'running' && location.pathname !== '/classification'
 
   // Refresh metadata + gate state on every route change so views stay in sync.
   useEffect(() => {
@@ -136,6 +140,14 @@ export default function AppShell() {
     navigate('/project', { replace: true })
   }
 
+  const handleCancelClassification = async () => {
+    try {
+      await ipc.classification.stop()
+    } catch (e) {
+      showError('Failed to cancel classification', e)
+    }
+  }
+
   if (reopening) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
@@ -156,26 +168,60 @@ export default function AppShell() {
           onSwitchProject={handleSwitchProject}
         />
         <main className="flex flex-1 flex-col overflow-hidden relative">
+          {showGlobalClassificationProgress && classificationProgress && (
+            <div className="flex items-center gap-3 border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-xs" style={{ zIndex: 2 }}>
+              <div className="h-3 w-3 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-600" />
+              <span className="min-w-0 truncate font-medium text-indigo-800">
+                {classificationProgress.currentSupplier
+                  ? <>Classifying: <strong>{classificationProgress.currentSupplier}</strong></>
+                  : classificationProgress.currentStep
+                }
+              </span>
+              {classificationProgress.totalSuppliers > 0 && (
+                <span className="shrink-0 text-indigo-600 tabular-nums">
+                  {classificationProgress.processedSuppliers}/{classificationProgress.totalSuppliers}
+                </span>
+              )}
+              <div className="ml-auto h-1.5 w-32 shrink-0 overflow-hidden rounded-full bg-indigo-200">
+                <div
+                  className="h-full rounded-full bg-indigo-600 transition-all"
+                  style={{ width: `${classificationProgress.percentage}%` }}
+                />
+              </div>
+              <button
+                onClick={handleCancelClassification}
+                className="min-h-8 shrink-0 rounded-md border border-indigo-300 px-2.5 text-xs font-medium text-indigo-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 active:scale-[0.96]"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
           {showGlobalResearchProgress && researchProgress && (
             <div className="flex items-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs" style={{ zIndex: 2 }}>
               <div className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300 border-t-blue-600" />
-              <span className="font-medium text-blue-800">
+              <span className="min-w-0 truncate font-medium text-blue-800">
                 {researchProgress.currentSupplier
                   ? <>Researching: <strong>{researchProgress.currentSupplier}</strong></>
                   : researchProgress.currentStep
                 }
               </span>
               {researchProgress.totalSuppliers > 0 && (
-                <span className="text-blue-600">
+                <span className="shrink-0 text-blue-600 tabular-nums">
                   {researchProgress.processedSuppliers}/{researchProgress.totalSuppliers}
                 </span>
               )}
-              <div className="ml-auto h-1.5 w-32 overflow-hidden rounded-full bg-blue-200">
+              <div className="ml-auto h-1.5 w-32 shrink-0 overflow-hidden rounded-full bg-blue-200">
                 <div
                   className="h-full rounded-full bg-blue-600 transition-all"
                   style={{ width: `${researchProgress.totalSuppliers > 0 ? (researchProgress.processedSuppliers / researchProgress.totalSuppliers) * 100 : 0}%` }}
                 />
               </div>
+              <button
+                onClick={cancelResearch}
+                className="min-h-8 shrink-0 rounded-md border border-blue-300 px-2.5 text-xs font-medium text-blue-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 active:scale-[0.96]"
+              >
+                Cancel
+              </button>
             </div>
           )}
           {ROUTE_PAGES.map(({ path, element }) => {

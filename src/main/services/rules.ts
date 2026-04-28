@@ -196,14 +196,16 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 /**
  * Extract supplier_name from a rule's conditions — only when safe to scope.
- * Returns null when: multiple groups, OR group, or no supplier_name 'equals' condition.
+ * Returns null when: multiple groups, multi-condition OR group, or no
+ * supplier_name 'equals' condition. (For single-condition groups the
+ * connector is semantically a no-op, so it is ignored.)
  */
 export function extractSupplierNameCondition(
   input: OverrideRule | OverrideRuleCreate
 ): string | null {
   const groups = input.groupedConditions?.groups ?? [];
   if (groups.length !== 1) return null;
-  if (groups[0].connector === 'OR') return null;
+  if (groups[0].connector === 'OR' && groups[0].conditions.length > 1) return null;
   for (const cond of groups[0].conditions) {
     if (cond.field === 'supplier_name' && cond.operator === 'equals') {
       return String(cond.value);

@@ -53,10 +53,21 @@ describe('extractSupplierNameCondition', () => {
     expect(extractSupplierNameCondition(rule)).toBeNull();
   });
 
-  it('returns null for OR group connector', () => {
+  it('extracts supplier name when OR connector wraps a single condition (connector is a no-op)', () => {
     const rule = makeRule(makeGroupedFilter([{
       connector: 'OR',
       conditions: [{ field: 'supplier_name', operator: 'equals', value: 'Acme' }],
+    }]));
+    expect(extractSupplierNameCondition(rule)).toBe('Acme');
+  });
+
+  it('returns null for OR group connector with multiple conditions', () => {
+    const rule = makeRule(makeGroupedFilter([{
+      connector: 'OR',
+      conditions: [
+        { field: 'supplier_name', operator: 'equals', value: 'Acme' },
+        { field: 'supplier_name', operator: 'equals', value: 'Beta' },
+      ],
     }]));
     expect(extractSupplierNameCondition(rule)).toBeNull();
   });

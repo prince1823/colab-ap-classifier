@@ -62,7 +62,11 @@ export function buildGroupedConditionsFromRows(rows: FlattenedPivotRow[]): Group
         connector: 'OR' as const,
       }
     })
-    groups.push({ connector: 'OR', conditions })
+    // Single-condition groups: connector is a no-op semantically, but
+    // downstream consumers (e.g. extractSupplierNameCondition) treat OR as
+    // user intent for OR semantics. Use AND so single-supplier rules are
+    // recognized as supplier-only and Cat A is toggleable.
+    groups.push({ connector: conditions.length > 1 ? 'OR' : 'AND', conditions })
   }
 
   return { groupConnector: 'AND', groups }

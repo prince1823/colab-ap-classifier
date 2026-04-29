@@ -734,15 +734,6 @@ export class IngestService implements IIngestService {
 
     await this.db.run('DELETE FROM transactions WHERE upload_id = ?', uploadId);
     await this.db.run('DELETE FROM uploads WHERE id = ?', uploadId);
-    if (!force) {
-      await this.db.run(
-        `DELETE FROM project_suppliers
-         WHERE id NOT IN (
-           SELECT DISTINCT project_supplier_id FROM transactions
-           WHERE project_supplier_id IS NOT NULL
-         )`
-      );
-    }
 
     return { deletedRows };
   }

@@ -193,7 +193,7 @@ export interface TaxonomyStore {
 export interface SupplierService {
   normalizeSupplierName(rawName: string, aliasMap?: Map<string, string>): Promise<string>;
   normalizeAllTransactions(onProgress?: (done: number, total: number, step: string) => void): Promise<void>;
-  assignAlias(supplierId: string, rawName: string): Promise<void>;
+  assignAlias(supplierId: string, rawName: string, source?: 'manual' | 'csv_apply'): Promise<void>;
   getProjectAliases(supplierId: string): Promise<string[]>;
   getAllProjectAliasesWithSpend(): Promise<Record<string, { rawName: string; spend: number; txnCount: number }[]>>;
   renameSupplier(supplierId: string, newName: string): Promise<void>;

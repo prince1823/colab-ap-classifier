@@ -500,9 +500,13 @@ describe('IngestService — deleteUpload (real DB)', () => {
     if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
   });
 
-  it('deletes all transactions for the upload and removes orphaned suppliers', async () => {
+  it('deletes upload rows but preserves suppliers and durable aliases', async () => {
     await realDb.run(
       `INSERT INTO project_suppliers (id, supplier_name) VALUES ('sup-a', 'Supplier A')`
+    );
+    await realDb.run(
+      `INSERT INTO project_supplier_aliases (id, project_supplier_id, alias, alias_key, source)
+       VALUES ('alias-1', 'sup-a', 'Supplier A LLC', 'supplier a llc', 'raw_import')`
     );
     await realDb.run(
       `INSERT INTO uploads (id, file_name, column_mappings, row_count) VALUES ('upload-1', 'file1.csv', '{}', 2)`
@@ -519,7 +523,10 @@ describe('IngestService — deleteUpload (real DB)', () => {
     expect(txRows).toHaveLength(0);
 
     const supplierRows = await realDb.all('SELECT * FROM project_suppliers');
-    expect(supplierRows).toHaveLength(0);
+    expect(supplierRows).toHaveLength(1);
+
+    const aliasRows = await realDb.all('SELECT * FROM project_supplier_aliases');
+    expect(aliasRows).toHaveLength(1);
 
     const uploadRows = await realDb.all('SELECT * FROM uploads');
     expect(uploadRows).toHaveLength(0);
@@ -556,7 +563,7 @@ describe('IngestService — deleteUpload (real DB)', () => {
     const supplierIds = (await realDb.all<{ id: string }>('SELECT id FROM project_suppliers')).map((r) => r.id);
     expect(supplierIds).toContain('sup-a');
     expect(supplierIds).toContain('sup-b');
-    expect(supplierIds).not.toContain('sup-c');
+    expect(supplierIds).toContain('sup-c');
   });
 
   it('throws if any transactions in the upload are classified and makes no changes', async () => {
@@ -610,6 +617,6 @@ describe('IngestService — deleteUpload (real DB)', () => {
 
     const supplierIds = (await realDb.all<{ id: string }>('SELECT id FROM project_suppliers')).map((r) => r.id);
     expect(supplierIds).toContain('sup-b');
-    expect(supplierIds).not.toContain('sup-a');
+    expect(supplierIds).toContain('sup-a');
   });
 });

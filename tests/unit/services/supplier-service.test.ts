@@ -1,5 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
 import { SupplierService } from '../../../src/main/services/supplier-service';
+import { DuckDBDatabase } from '../../../src/main/services/database';
 import { createMockDatabase, createMockSupplierUniverse } from '../../helpers/mock-services';
 import type { Database, SupplierUniverse } from '../../../src/shared/types/services';
 
@@ -33,17 +37,17 @@ describe('SupplierService', () => {
     });
 
     it('should return existing supplier id if canonical already exists', async () => {
-      vi.mocked(db.get).mockResolvedValue({ id: 'existing-id' });
+      vi.mocked(db.get)
+        .mockResolvedValueOnce(undefined) // durable alias lookup
+        .mockResolvedValueOnce({ id: 'existing-id' }) // canonical lookup
+        .mockResolvedValueOnce(undefined); // alias upsert conflict check
 
       const id = await service.normalizeSupplierName('Walmart Inc');
       expect(id).toBe('existing-id');
     });
 
     it('should return existing supplier id if raw name matches an existing alias', async () => {
-      // First get (canonical lookup) returns nothing, second get (alias lookup) finds a match
-      vi.mocked(db.get)
-        .mockResolvedValueOnce(undefined)  // canonical lookup
-        .mockResolvedValueOnce({ project_supplier_id: 'alias-matched-id' }); // alias lookup
+      vi.mocked(db.get).mockResolvedValueOnce({ project_supplier_id: 'alias-matched-id' });
 
       const id = await service.normalizeSupplierName('WALMART INC');
       expect(id).toBe('alias-matched-id');
@@ -249,9 +253,10 @@ describe('SupplierService', () => {
   });
 
   // ── computeCsvDiff ──────────────────────────────────────────────────────────
-  // DB state is set via two sequential db.all calls:
-  //   1st: aliasRows  — transactions JOIN project_suppliers (alias → supplier mapping)
-  //   2nd: parentRows — supplier_parents table
+  // DB state is set via three sequential db.all calls:
+  //   1st: aliasRows    — project_supplier_aliases JOIN project_suppliers
+  //   2nd: parentRows   — supplier_parents table
+  //   3rd: supplierRows — all project_suppliers, including suppliers with no aliases
 
   describe('computeCsvDiff', () => {
     type AliasRow = {
@@ -262,11 +267,19 @@ describe('SupplierService', () => {
       parent_name: string | null;
     };
     type ParentRow = { id: string; name: string };
+    type SupplierRow = { id: string; supplier_name: string };
 
-    function setupDb(aliasRows: AliasRow[], parentRows: ParentRow[] = []) {
+    function setupDb(aliasRows: AliasRow[], parentRows: ParentRow[] = [], supplierRows?: SupplierRow[]) {
+      const suppliers = supplierRows ?? Array.from(
+        new Map(aliasRows.map((r) => [r.project_supplier_id, {
+          id: r.project_supplier_id,
+          supplier_name: r.supplier_name,
+        }])).values()
+      );
       vi.mocked(db.all)
         .mockResolvedValueOnce(aliasRows)
-        .mockResolvedValueOnce(parentRows);
+        .mockResolvedValueOnce(parentRows)
+        .mockResolvedValueOnce(suppliers);
     }
 
     it('detects a supplier rename', async () => {
@@ -324,20 +337,15 @@ describe('SupplierService', () => {
       ])).rejects.toThrow('appears in both');
     });
 
-    it('detects a supplier merge, picking the name-matching supplier as survivor', async () => {
+    it('rejects CSV rows that span multiple supplier alias owners', async () => {
       setupDb([
         { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
         { original_supplier_name: 'ACME CORPORATION', project_supplier_id: 's2', supplier_name: 'Acme Corporation', parent_supplier_id: null, parent_name: null },
       ]);
 
-      const diff = await service.computeCsvDiff([
+      await expect(service.computeCsvDiff([
         { supplierName: 'Acme Corporation', aliases: ['ACME CORP', 'ACME CORPORATION'], parentName: null },
-      ]);
-
-      expect(diff.merges).toHaveLength(1);
-      expect(diff.merges[0].survivorId).toBe('s2'); // name matches CSV
-      expect(diff.merges[0].loserIds).toEqual(['s1']);
-      expect(diff.renames).toHaveLength(0);
+      ])).rejects.toThrow('belong to multiple suppliers');
     });
 
     it('emits a retained alias warning when an alias is absent from the CSV', async () => {
@@ -358,54 +366,51 @@ describe('SupplierService', () => {
       });
     });
 
-    it('does NOT emit a retained alias warning when the absent alias appears on another row (move via merge)', async () => {
-      // DB: s1 "Acme" has one alias ["ACME LEGACY"], s2 "Beta" has ["BETA"]
-      // User moves "ACME LEGACY" to Beta's CSV row; Acme's row has no known aliases (unmatchable)
-      // → Beta's row touches {s2, s1} → merge (s1 loser). "ACME LEGACY" is in csvAliasToRowIndex,
-      //   so no retained alias warning is emitted for it.
+    it('rejects moving an alias by grouping it with a different supplier owner', async () => {
       setupDb([
         { original_supplier_name: 'ACME LEGACY', project_supplier_id: 's1', supplier_name: 'Acme', parent_supplier_id: null, parent_name: null },
         { original_supplier_name: 'BETA', project_supplier_id: 's2', supplier_name: 'Beta', parent_supplier_id: null, parent_name: null },
       ]);
 
-      const diff = await service.computeCsvDiff([
-        { supplierName: 'Acme', aliases: [], parentName: null },           // no known aliases → unmatchable
+      await expect(service.computeCsvDiff([
+        { supplierName: 'Acme', aliases: [], parentName: null },
         { supplierName: 'Beta', aliases: ['BETA', 'ACME LEGACY'], parentName: null },
-      ]);
-
-      expect(diff.warnings.missingAliases).toHaveLength(0);
-      // The move is captured as a merge (s1 absorbed into s2)
-      expect(diff.merges).toHaveLength(1);
-      expect(diff.merges[0]).toMatchObject({ survivorId: 's2', loserIds: ['s1'] });
+      ])).rejects.toThrow('belong to multiple suppliers');
     });
 
-    it('warns about unknown aliases (in CSV but not in DB)', async () => {
+    it('throws about unknown aliases in the CSV', async () => {
       setupDb([
         { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
       ]);
 
-      const diff = await service.computeCsvDiff([
+      await expect(service.computeCsvDiff([
         { supplierName: 'Acme Corp', aliases: ['ACME CORP', 'ACME NEW ENTITY'], parentName: null },
-      ]);
-
-      expect(diff.warnings.unknownAliases).toHaveLength(1);
-      expect(diff.warnings.unknownAliases[0]).toMatchObject({
-        alias: 'ACME NEW ENTITY',
-        csvSupplierName: 'Acme Corp',
-      });
+      ])).rejects.toThrow('Unknown supplier alias "ACME NEW ENTITY"');
     });
 
-    it('warns about unmatchable rows when all aliases are unknown', async () => {
+    it('throws when all CSV aliases are unknown', async () => {
       setupDb([
         { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
       ]);
 
-      const diff = await service.computeCsvDiff([
+      await expect(service.computeCsvDiff([
         { supplierName: 'New Supplier', aliases: ['NEW SUPPLIER INC'], parentName: null },
-      ]);
+      ])).rejects.toThrow('Unknown supplier alias "NEW SUPPLIER INC"');
+    });
 
-      expect(diff.warnings.unmatchableRows).toHaveLength(1);
-      expect(diff.warnings.unmatchableRows[0].supplierName).toBe('New Supplier');
+    it('rejects renaming an alias owner to an existing supplier name', async () => {
+      setupDb(
+        [{ original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null }],
+        [],
+        [
+          { id: 's1', supplier_name: 'Acme Corp' },
+          { id: 's2', supplier_name: 'Beta Inc' },
+        ]
+      );
+
+      await expect(service.computeCsvDiff([
+        { supplierName: 'Beta Inc', aliases: ['ACME CORP'], parentName: null },
+      ])).rejects.toThrow('already used by another supplier');
     });
 
     it('throws when the same alias appears in two CSV rows', async () => {
@@ -628,5 +633,91 @@ describe('SupplierService', () => {
       expect(result.errors).toContain('Supplier universe not configured');
       expect(supplierUniverse.upsertSupplierFull).not.toHaveBeenCalled();
     });
+  });
+});
+
+function tempDbPath(): string {
+  return path.join(os.tmpdir(), `supplier-alias-test-${Date.now()}-${Math.random().toString(36).slice(2)}.c91`);
+}
+
+describe('SupplierService durable aliases (real DB)', () => {
+  let realDb: DuckDBDatabase;
+  let dbPath: string;
+  let service: SupplierService;
+
+  beforeEach(async () => {
+    realDb = new DuckDBDatabase();
+    dbPath = tempDbPath();
+    await realDb.openDatabase(dbPath);
+    service = new SupplierService(realDb, createMockSupplierUniverse());
+  });
+
+  afterEach(async () => {
+    if (realDb.isOpen()) await realDb.closeDatabase();
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  });
+
+  it('records raw supplier aliases while normalizing transactions', async () => {
+    await realDb.run(
+      `INSERT INTO transactions (id, row_index, original_supplier_name)
+       VALUES ('tx-1', 0, 'Access Display Group, Inc.')`
+    );
+
+    await service.normalizeAllTransactions();
+
+    const tx = await realDb.get<{ project_supplier_id: string }>(
+      'SELECT project_supplier_id FROM transactions WHERE id = ?',
+      'tx-1'
+    );
+    const alias = await realDb.get<{ project_supplier_id: string; alias_key: string; source: string }>(
+      'SELECT project_supplier_id, alias_key, source FROM project_supplier_aliases WHERE alias = ?',
+      'Access Display Group, Inc.'
+    );
+
+    expect(tx?.project_supplier_id).toBeTruthy();
+    expect(alias?.project_supplier_id).toBe(tx?.project_supplier_id);
+    expect(alias?.alias_key).toBe('access display group, inc.');
+    expect(alias?.source).toBe('raw_import');
+  });
+
+  it('resolves durable raw aliases before cleaned supplier-name matches', async () => {
+    const rawName = 'Access Display Group, Inc.';
+
+    await realDb.run(
+      `INSERT INTO transactions (id, row_index, original_supplier_name)
+       VALUES ('tx-1', 0, ? )`,
+      rawName
+    );
+    await service.normalizeAllTransactions();
+
+    const first = await realDb.get<{ project_supplier_id: string }>(
+      'SELECT project_supplier_id FROM transactions WHERE id = ?',
+      'tx-1'
+    );
+    expect(first?.project_supplier_id).toBeTruthy();
+
+    await realDb.run(
+      'UPDATE project_suppliers SET supplier_name = ? WHERE id = ?',
+      rawName,
+      first!.project_supplier_id
+    );
+    await realDb.run(
+      `INSERT INTO project_suppliers (id, supplier_name)
+       VALUES ('cleaned-supplier', 'Access Display Group')`
+    );
+    await realDb.run('DELETE FROM transactions WHERE id = ?', 'tx-1');
+    await realDb.run(
+      `INSERT INTO transactions (id, row_index, original_supplier_name)
+       VALUES ('tx-2', 1, ? )`,
+      rawName
+    );
+
+    await service.normalizeAllTransactions();
+
+    const second = await realDb.get<{ project_supplier_id: string }>(
+      'SELECT project_supplier_id FROM transactions WHERE id = ?',
+      'tx-2'
+    );
+    expect(second?.project_supplier_id).toBe(first?.project_supplier_id);
   });
 });

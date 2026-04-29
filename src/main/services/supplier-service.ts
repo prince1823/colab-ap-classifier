@@ -41,7 +41,7 @@ function safeParseStringArray(value: string | null | undefined): string[] | null
 import { buildGroupedWhereClause, type ColumnResolver } from '../utils/query-builder';
 
 function aliasKey(alias: string): string {
-  return alias.trim().toLowerCase();
+  return alias.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 interface SupplierBaseRow {
@@ -149,33 +149,89 @@ export class SupplierService implements ISupplierService {
     return { id, created: true };
   }
 
+  private async lookupSupplierAlias(rawName: string): Promise<string | null> {
+    const key = aliasKey(rawName);
+    if (!key) return null;
+
+    const row = await this.db.get<{ project_supplier_id: string }>(
+      'SELECT project_supplier_id FROM project_supplier_aliases WHERE alias_key = ?',
+      key
+    );
+    if (!row) return null;
+
+    await this.db.run(
+      'UPDATE project_supplier_aliases SET last_seen_at = CURRENT_TIMESTAMP WHERE alias_key = ?',
+      key
+    );
+    return row.project_supplier_id;
+  }
+
+  private async recordSupplierAlias(
+    supplierId: string,
+    rawName: string,
+    source: 'raw_import' | 'csv_apply' | 'manual',
+    options: { allowReassign?: boolean } = {}
+  ): Promise<void> {
+    const alias = rawName.trim();
+    const key = aliasKey(alias);
+    if (!key) return;
+
+    const existing = await this.db.get<{ id: string; project_supplier_id: string }>(
+      'SELECT id, project_supplier_id FROM project_supplier_aliases WHERE alias_key = ?',
+      key
+    );
+
+    if (existing) {
+      if (existing.project_supplier_id !== supplierId && !options.allowReassign) {
+        throw new Error(`Alias "${rawName}" already belongs to a different supplier`);
+      }
+      await this.db.run(
+        `UPDATE project_supplier_aliases
+         SET project_supplier_id = ?, alias = ?, source = ?, last_seen_at = CURRENT_TIMESTAMP
+         WHERE alias_key = ?`,
+        supplierId,
+        alias,
+        source,
+        key
+      );
+      return;
+    }
+
+    await this.db.run(
+      `INSERT INTO project_supplier_aliases (id, project_supplier_id, alias, alias_key, source)
+       VALUES (?, ?, ?, ?, ?)`,
+      uuidv4(),
+      supplierId,
+      alias,
+      key,
+      source
+    );
+  }
+
   async normalizeSupplierName(rawName: string, aliasMap?: Map<string, string>): Promise<string> {
     const cleanedName = cleanSupplierName(rawName);
 
-    // Fast path: exact match by cleaned name
+    // Durable aliases win over cleaned-name matching so user-renamed suppliers survive
+    // upload/delete/re-import workflows.
+    if (aliasMap) {
+      const supplierId = aliasMap.get(aliasKey(rawName));
+      if (supplierId) {
+        await this.recordSupplierAlias(supplierId, rawName, 'raw_import');
+        return supplierId;
+      }
+    } else {
+      const supplierId = await this.lookupSupplierAlias(rawName);
+      if (supplierId) return supplierId;
+    }
+
+    // Fall back to the cleaned canonical supplier name.
     const existing = await this.db.get<{ id: string }>(
       'SELECT id FROM project_suppliers WHERE lower(supplier_name) = lower(?)',
       cleanedName
     );
-    if (existing) return existing.id;
-
-    // Check existing project-local aliases — if this raw name (case-insensitive) was
-    // already mapped to a supplier, link to that supplier without creating a new one.
-    // In bulk mode (normalizeAllTransactions), aliasMap is pre-built for O(1) lookup.
-    // In standalone mode, fall back to a DB query.
-    if (aliasMap) {
-      const supplierId = aliasMap.get(rawName.toLowerCase());
-      if (supplierId) return supplierId;
-    } else {
-      const aliasMatch = await this.db.get<{ project_supplier_id: string }>(
-        `SELECT DISTINCT t.project_supplier_id
-         FROM transactions t
-         WHERE lower(t.original_supplier_name) = lower(?)
-         AND t.project_supplier_id IS NOT NULL
-         LIMIT 1`,
-        rawName
-      );
-      if (aliasMatch) return aliasMatch.project_supplier_id;
+    if (existing) {
+      await this.recordSupplierAlias(existing.id, rawName, 'raw_import');
+      return existing.id;
     }
 
     // TODO: ingest aliases from supplier universe — when universe read is implemented,
@@ -184,6 +240,7 @@ export class SupplierService implements ISupplierService {
 
     // Delegate to shared find-or-create (universe check + create)
     const result = await this.findOrCreateSupplier(rawName);
+    await this.recordSupplierAlias(result.id, rawName, 'raw_import');
     return result.id;
   }
 
@@ -208,13 +265,15 @@ export class SupplierService implements ISupplierService {
     const totalSuppliers = supplierRows.length;
     report(0, totalSuppliers, `Resolving 0 / ${totalSuppliers.toLocaleString()} suppliers...`);
 
-    // Pre-fetch all existing alias mappings once for O(1) lookup per raw name
+    // Pre-fetch all existing durable alias mappings once for O(1) lookup per raw name.
+    const aliasMap = new Map<string, string>();
     const aliasRows = await this.db.all<{ key: string; project_supplier_id: string }>(
-      `SELECT lower(original_supplier_name) AS key, project_supplier_id
-       FROM transactions
-       WHERE original_supplier_name IS NOT NULL AND project_supplier_id IS NOT NULL`
+      `SELECT alias_key AS key, project_supplier_id
+       FROM project_supplier_aliases`
     );
-    const aliasMap = new Map(aliasRows.map(r => [r.key, r.project_supplier_id]));
+    for (const r of aliasRows) {
+      aliasMap.set(r.key, r.project_supplier_id);
+    }
 
     // Build a map of rawName → supplierId (this creates project_suppliers records as needed)
     const nameToSupplierId = new Map<string, string>();
@@ -222,6 +281,7 @@ export class SupplierService implements ISupplierService {
     for (const row of supplierRows) {
       const supplierId = await this.normalizeSupplierName(row.original_supplier_name, aliasMap);
       nameToSupplierId.set(row.original_supplier_name, supplierId);
+      aliasMap.set(aliasKey(row.original_supplier_name), supplierId);
       resolved++;
       // Report every 100 suppliers to avoid flooding the event bus
       if (resolved % 100 === 0 || resolved === totalSuppliers) {
@@ -268,7 +328,7 @@ export class SupplierService implements ISupplierService {
     report(totalSuppliers, totalSuppliers, 'Supplier normalization complete');
   }
 
-  async assignAlias(supplierId: string, rawName: string): Promise<void> {
+  async assignAlias(supplierId: string, rawName: string, source: 'manual' | 'csv_apply' = 'manual'): Promise<void> {
     const supplier = await this.db.get<{ id: string }>(
       'SELECT id FROM project_suppliers WHERE id = ?',
       supplierId
@@ -284,6 +344,7 @@ export class SupplierService implements ISupplierService {
       supplierId,
       rawName
     );
+    await this.recordSupplierAlias(supplierId, rawName, source, { allowReassign: true });
   }
 
   async getProjectAliases(supplierId: string): Promise<string[]> {
@@ -351,6 +412,11 @@ export class SupplierService implements ISupplierService {
       ...losingIds
     );
     await this.db.run(
+      `UPDATE project_supplier_aliases SET project_supplier_id = ?, last_seen_at = CURRENT_TIMESTAMP WHERE project_supplier_id IN (${placeholders})`,
+      survivorId,
+      ...losingIds
+    );
+    await this.db.run(
       `DELETE FROM project_suppliers WHERE id IN (${placeholders})`,
       ...losingIds
     );
@@ -388,6 +454,7 @@ export class SupplierService implements ISupplierService {
     if (Number(row?.cnt ?? 0) > 0) {
       throw new Error('Cannot delete supplier with transactions — reassign all aliases first');
     }
+    await this.db.run('DELETE FROM project_supplier_aliases WHERE project_supplier_id = ?', supplierId);
     await this.db.run('DELETE FROM project_suppliers WHERE id = ?', supplierId);
   }
 
@@ -928,17 +995,18 @@ export class SupplierService implements ISupplierService {
       parent_supplier_id: string | null;
       parent_name: string | null;
     }>(
-      `SELECT DISTINCT t.original_supplier_name, t.project_supplier_id,
+      `SELECT psa.alias AS original_supplier_name, psa.project_supplier_id,
               ps.supplier_name, ps.parent_supplier_id, sp.name as parent_name
-       FROM transactions t
-       JOIN project_suppliers ps ON ps.id = t.project_supplier_id
-       LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id
-       WHERE t.original_supplier_name IS NOT NULL
-         AND t.project_supplier_id IS NOT NULL`
+       FROM project_supplier_aliases psa
+       JOIN project_suppliers ps ON ps.id = psa.project_supplier_id
+       LEFT JOIN supplier_parents sp ON sp.id = ps.parent_supplier_id`
     );
 
     const dbParentRows = await this.db.all<{ id: string; name: string }>(
       'SELECT id, name FROM supplier_parents'
+    );
+    const allSupplierRows = await this.db.all<{ id: string; supplier_name: string }>(
+      'SELECT id, supplier_name FROM project_suppliers'
     );
 
     // Build lookup maps
@@ -965,6 +1033,13 @@ export class SupplierService implements ISupplierService {
       dbSupplierAliases.get(r.project_supplier_id)!.add(r.original_supplier_name);
       dbSupplierNames.set(r.project_supplier_id, r.supplier_name);
       dbSupplierSpend.set(r.project_supplier_id, (dbSupplierSpend.get(r.project_supplier_id) ?? 0) + 1);
+    }
+    for (const r of allSupplierRows) {
+      dbSupplierNames.set(r.id, r.supplier_name);
+    }
+    const dbSupplierNameToId = new Map<string, string>();
+    for (const [id, name] of dbSupplierNames) {
+      dbSupplierNameToId.set(name.toLowerCase(), id);
     }
 
     const dbParentsByName = new Map<string, { id: string; name: string }>();
@@ -1001,6 +1076,13 @@ export class SupplierService implements ISupplierService {
         csvAliasDisplay.set(key, alias);
       }
     }
+    if (warnings.unknownAliases.length > 0) {
+      const first = warnings.unknownAliases[0];
+      throw new Error(
+        `Unknown supplier alias "${first.alias}" for "${first.csvSupplierName}". ` +
+        'CSV apply requires aliases already recorded in this project.'
+      );
+    }
 
     // Phase 4: Compute diff
     // For each CSV row, find which DB suppliers it maps to via shared aliases
@@ -1012,7 +1094,7 @@ export class SupplierService implements ISupplierService {
       const knownAliases = row.aliases.map((a) => aliasKey(a)).filter((a) => dbAliasToSupplier.has(a));
       if (knownAliases.length === 0) {
         if (row.aliases.length > 0) {
-          warnings.unmatchableRows.push({ supplierName: row.supplierName, reason: 'No aliases match existing transactions' });
+          warnings.unmatchableRows.push({ supplierName: row.supplierName, reason: 'No aliases match recorded project aliases' });
         }
         continue;
       }
@@ -1020,6 +1102,12 @@ export class SupplierService implements ISupplierService {
       const supplierIds = new Set<string>();
       for (const alias of knownAliases) {
         supplierIds.add(dbAliasToSupplier.get(alias)!.supplierId);
+      }
+      if (supplierIds.size > 1) {
+        throw new Error(
+          `CSV row "${row.supplierName}" includes aliases that belong to multiple suppliers. ` +
+          'Merge recovery is not supported during CSV apply.'
+        );
       }
 
       // Check no DB supplier is claimed by two CSV rows
@@ -1077,6 +1165,12 @@ export class SupplierService implements ISupplierService {
       const survivorId = csvRowSurvivor.get(rowIdx)!;
       const currentName = dbSupplierNames.get(survivorId) ?? '';
       if (currentName !== row.supplierName) {
+        const existingTargetId = dbSupplierNameToId.get(row.supplierName.toLowerCase());
+        if (existingTargetId && existingTargetId !== survivorId) {
+          throw new Error(
+            `Cannot rename supplier "${currentName}" to "${row.supplierName}" because that name is already used by another supplier.`
+          );
+        }
         diff.renames.push({ supplierId: survivorId, oldName: currentName, newName: row.supplierName });
       }
     }
@@ -1238,7 +1332,7 @@ export class SupplierService implements ISupplierService {
 
     // 6. Reassign aliases
     for (const a of diff.aliasReassignments) {
-      await this.assignAlias(a.toSupplierId, a.alias);
+      await this.assignAlias(a.toSupplierId, a.alias, 'csv_apply');
     }
 
     // 7. Assign/change parents on suppliers

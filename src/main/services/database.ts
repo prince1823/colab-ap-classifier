@@ -38,7 +38,7 @@ function convertPlaceholders(sql: string): string {
   return result;
 }
 
-const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'supplier_parents', 'rule_groups', 'rule_conditions'];
+const EXPECTED_TABLES = ['project_settings', 'taxonomy', 'transactions', 'override_rules', 'change_log', 'uploads', 'project_suppliers', 'project_supplier_aliases', 'supplier_parents', 'rule_groups', 'rule_conditions'];
 
 export { convertPlaceholders };
 
@@ -716,7 +716,18 @@ export class DuckDBDatabase implements Database {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS project_supplier_aliases (
+        id VARCHAR PRIMARY KEY,
+        project_supplier_id VARCHAR NOT NULL,
+        alias VARCHAR NOT NULL,
+        alias_key VARCHAR NOT NULL UNIQUE,
+        source VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE INDEX IF NOT EXISTS idx_project_suppliers_name ON project_suppliers(supplier_name);
+      CREATE INDEX IF NOT EXISTS idx_project_supplier_aliases_supplier ON project_supplier_aliases(project_supplier_id);
       CREATE INDEX IF NOT EXISTS idx_transactions_taxonomy ON transactions(taxonomy_node_id);
       CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(classification_status);
       CREATE INDEX IF NOT EXISTS idx_transactions_upload ON transactions(upload_id);

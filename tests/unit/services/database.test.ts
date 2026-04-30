@@ -83,6 +83,7 @@ describe('DuckDBDatabase', () => {
       expect(tableNames).toContain('transactions');
       expect(tableNames).toContain('override_rules');
       expect(tableNames).toContain('change_log');
+      expect(tableNames).toContain('project_supplier_aliases');
     });
 
     it('should not reinitialize schema on reopen', async () => {

@@ -59,7 +59,15 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   const tableRef = useRef<HTMLDivElement>(null)  // scroll container
 
   const focusOuter = useCallback(() => {
-    setTimeout(() => outerRef.current?.focus(), 50)
+    setTimeout(() => {
+      // Don't steal focus from an inline-edit input (or any other text field).
+      // The table container's onClick queues this refocus on every click, so
+      // double-clicking a name cell would otherwise blur the just-mounted edit
+      // input and immediately commit/cancel.
+      const active = document.activeElement
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return
+      outerRef.current?.focus()
+    }, 50)
   }, [])
 
   // Inline editing — normalized name
@@ -511,6 +519,9 @@ export default function NormalizeView({ onDataChange }: NormalizeViewProps = {})
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Don't handle table shortcuts while a modal is open — let the modal own the keyboard
     if (showMergeModal || reassigningAlias || parentTypeahead) return
+    // Inline edit owns the keyboard: arrow keys must move the caret (and Alt/Cmd+Arrow
+    // jump words) inside the input instead of hopping cells.
+    if (editingId || editingParentId) return
 
     const row = pagedRows[focusedRowIndex]
     if (!row) return

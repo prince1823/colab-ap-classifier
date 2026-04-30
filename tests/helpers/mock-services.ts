@@ -31,6 +31,7 @@ export function createMockDatabase(): Database {
     getExpectedTables: vi.fn().mockReturnValue([
       'project_settings', 'taxonomy', 'transactions',
       'override_rules', 'change_log', 'uploads', 'project_suppliers',
+      'project_supplier_aliases',
       'rule_conditions',
     ]),
     run: vi.fn(),

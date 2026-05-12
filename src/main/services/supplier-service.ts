@@ -274,6 +274,17 @@ export class SupplierService implements ISupplierService {
     for (const r of aliasRows) {
       aliasMap.set(r.key, r.project_supplier_id);
     }
+    const linkedAliasRows = await this.db.all<{ original_supplier_name: string; project_supplier_id: string }>(
+      `SELECT DISTINCT original_supplier_name, project_supplier_id
+       FROM transactions
+       WHERE original_supplier_name IS NOT NULL AND project_supplier_id IS NOT NULL`
+    );
+    for (const r of linkedAliasRows) {
+      const key = aliasKey(r.original_supplier_name);
+      if (!aliasMap.has(key)) {
+        aliasMap.set(key, r.project_supplier_id);
+      }
+    }
 
     // Build a map of rawName → supplierId (this creates project_suppliers records as needed)
     const nameToSupplierId = new Map<string, string>();
@@ -1069,8 +1080,6 @@ export class SupplierService implements ISupplierService {
         }
         if (!dbAliasToSupplier.has(key)) {
           warnings.unknownAliases.push({ alias, csvSupplierName: row.supplierName });
-        } else {
-          knownCsvAliasToRowIndex.set(key, i);
         }
         csvAliasToRowIndex.set(key, i);
         csvAliasDisplay.set(key, alias);
@@ -1084,13 +1093,45 @@ export class SupplierService implements ISupplierService {
       );
     }
 
+    const groupedRows: CsvApplyRow[] = [];
+    const csvSupplierNameToGroupedRow = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.supplierName || row.supplierName.trim().length === 0) continue;
+
+      const groupKey = row.supplierName.trim().toLowerCase();
+      let groupIdx = csvSupplierNameToGroupedRow.get(groupKey);
+      if (groupIdx === undefined) {
+        groupIdx = groupedRows.length;
+        csvSupplierNameToGroupedRow.set(groupKey, groupIdx);
+        groupedRows.push({
+          parentName: row.parentName,
+          supplierName: row.supplierName,
+          aliases: [],
+        });
+      }
+
+      const grouped = groupedRows[groupIdx];
+      if (!grouped.parentName && row.parentName) {
+        grouped.parentName = row.parentName;
+      }
+      for (const alias of row.aliases) {
+        const key = aliasKey(alias);
+        if (!grouped.aliases.some((existing) => aliasKey(existing) === key)) {
+          grouped.aliases.push(alias);
+        }
+        if (dbAliasToSupplier.has(key)) {
+          knownCsvAliasToRowIndex.set(key, groupIdx);
+        }
+      }
+    }
+
     // Phase 4: Compute diff
     // For each CSV row, find which DB suppliers it maps to via shared aliases
     const csvRowToDbSuppliers = new Map<number, Set<string>>(); // rowIndex → Set<supplierId>
     const dbSupplierToCsvRow = new Map<string, number>(); // supplierId → rowIndex
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
+    for (let i = 0; i < groupedRows.length; i++) {
+      const row = groupedRows[i];
       const knownAliases = row.aliases.map((a) => aliasKey(a)).filter((a) => dbAliasToSupplier.has(a));
       if (knownAliases.length === 0) {
         if (row.aliases.length > 0) {
@@ -1103,19 +1144,13 @@ export class SupplierService implements ISupplierService {
       for (const alias of knownAliases) {
         supplierIds.add(dbAliasToSupplier.get(alias)!.supplierId);
       }
-      if (supplierIds.size > 1) {
-        throw new Error(
-          `CSV row "${row.supplierName}" includes aliases that belong to multiple suppliers. ` +
-          'Merge recovery is not supported during CSV apply.'
-        );
-      }
 
       // Check no DB supplier is claimed by two CSV rows
       for (const sid of supplierIds) {
         if (dbSupplierToCsvRow.has(sid)) {
           const otherIdx = dbSupplierToCsvRow.get(sid)!;
           throw new Error(
-            `Supplier "${dbSupplierNames.get(sid)}" is claimed by both "${rows[otherIdx].supplierName}" and "${row.supplierName}" via different aliases. Resolve the conflict.`
+            `Supplier "${dbSupplierNames.get(sid)}" is claimed by both "${groupedRows[otherIdx].supplierName}" and "${row.supplierName}" via different aliases. Resolve the conflict.`
           );
         }
         dbSupplierToCsvRow.set(sid, i);
@@ -1140,14 +1175,14 @@ export class SupplierService implements ISupplierService {
     const csvRowSurvivor = new Map<number, string>(); // rowIndex → survivorId
 
     for (const [rowIdx, supplierIds] of csvRowToDbSuppliers) {
-      const row = rows[rowIdx];
+      const row = groupedRows[rowIdx];
       const ids = [...supplierIds];
 
       if (ids.length === 1) {
         csvRowSurvivor.set(rowIdx, ids[0]);
       } else {
         // MERGE: pick survivor — prefer the one whose name matches CSV, else highest alias count
-        let survivorId = ids.find(id => dbSupplierNames.get(id) === row.supplierName)
+        let survivorId = ids.find(id => dbSupplierNames.get(id)?.toLowerCase() === row.supplierName.toLowerCase())
           ?? ids.sort((a, b) => (dbSupplierSpend.get(b) ?? 0) - (dbSupplierSpend.get(a) ?? 0))[0];
         const loserIds = ids.filter(id => id !== survivorId);
 
@@ -1166,7 +1201,7 @@ export class SupplierService implements ISupplierService {
       const currentName = dbSupplierNames.get(survivorId) ?? '';
       if (currentName !== row.supplierName) {
         const existingTargetId = dbSupplierNameToId.get(row.supplierName.toLowerCase());
-        if (existingTargetId && existingTargetId !== survivorId) {
+        if (existingTargetId && existingTargetId !== survivorId && !supplierIds.has(existingTargetId)) {
           throw new Error(
             `Cannot rename supplier "${currentName}" to "${row.supplierName}" because that name is already used by another supplier.`
           );
@@ -1196,7 +1231,7 @@ export class SupplierService implements ISupplierService {
           fromSupplierId: effectiveOwner,
           fromName: dbSupplierNames.get(effectiveOwner) ?? '(unknown)',
           toSupplierId: intendedSurvivor,
-          toName: rows[rowIdx].supplierName,
+          toName: groupedRows[rowIdx].supplierName,
         });
       }
     }
@@ -1214,9 +1249,9 @@ export class SupplierService implements ISupplierService {
     const csvParentOriginalCase = new Map<string, string>(); // lower → original case
 
     for (const [rowIdx, survivorId] of csvRowSurvivor) {
-      const row = rows[rowIdx];
+      const row = groupedRows[rowIdx];
       const csvParent = row.parentName?.trim() || null;
-      const currentAliasKey = rows[rowIdx].aliases.map((a) => aliasKey(a)).find((a) => dbAliasToSupplier.has(a));
+      const currentAliasKey = row.aliases.map((a) => aliasKey(a)).find((a) => dbAliasToSupplier.has(a));
       const currentInfo = currentAliasKey ? dbAliasToSupplier.get(currentAliasKey) : undefined;
       const currentParentName = currentInfo?.parentName ?? null;
       const currentParentId = currentInfo?.parentId ?? null;

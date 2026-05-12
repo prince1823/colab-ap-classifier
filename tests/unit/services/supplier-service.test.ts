@@ -337,15 +337,25 @@ describe('SupplierService', () => {
       ])).rejects.toThrow('appears in both');
     });
 
-    it('rejects CSV rows that span multiple supplier alias owners', async () => {
+    it('merges CSV rows that span multiple supplier alias owners', async () => {
       setupDb([
         { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
         { original_supplier_name: 'ACME CORPORATION', project_supplier_id: 's2', supplier_name: 'Acme Corporation', parent_supplier_id: null, parent_name: null },
       ]);
 
-      await expect(service.computeCsvDiff([
+      const diff = await service.computeCsvDiff([
         { supplierName: 'Acme Corporation', aliases: ['ACME CORP', 'ACME CORPORATION'], parentName: null },
-      ])).rejects.toThrow('belong to multiple suppliers');
+      ]);
+
+      expect(diff.merges).toHaveLength(1);
+      expect(diff.merges[0]).toMatchObject({
+        survivorId: 's2',
+        survivorName: 'Acme Corporation',
+        loserIds: ['s1'],
+        loserNames: ['Acme Corp'],
+      });
+      expect(diff.renames).toHaveLength(0);
+      expect(diff.aliasReassignments).toHaveLength(0);
     });
 
     it('emits a retained alias warning when an alias is absent from the CSV', async () => {
@@ -366,16 +376,96 @@ describe('SupplierService', () => {
       });
     });
 
-    it('rejects moving an alias by grouping it with a different supplier owner', async () => {
+    it('merges when moving an alias by grouping it with a different supplier owner', async () => {
       setupDb([
         { original_supplier_name: 'ACME LEGACY', project_supplier_id: 's1', supplier_name: 'Acme', parent_supplier_id: null, parent_name: null },
         { original_supplier_name: 'BETA', project_supplier_id: 's2', supplier_name: 'Beta', parent_supplier_id: null, parent_name: null },
       ]);
 
-      await expect(service.computeCsvDiff([
+      const diff = await service.computeCsvDiff([
         { supplierName: 'Acme', aliases: [], parentName: null },
         { supplierName: 'Beta', aliases: ['BETA', 'ACME LEGACY'], parentName: null },
-      ])).rejects.toThrow('belong to multiple suppliers');
+      ]);
+
+      expect(diff.merges).toHaveLength(1);
+      expect(diff.merges[0]).toMatchObject({
+        survivorId: 's2',
+        survivorName: 'Beta',
+        loserIds: ['s1'],
+        loserNames: ['Acme'],
+      });
+      expect(diff.renames).toHaveLength(0);
+      expect(diff.aliasReassignments).toHaveLength(0);
+    });
+
+    it('prefers a case-insensitive CSV supplier name match as merge survivor', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'ACME HOLDINGS', project_supplier_id: 's2', supplier_name: 'ACME HOLDINGS', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'acme holdings', aliases: ['ACME CORP', 'ACME HOLDINGS'], parentName: null },
+      ]);
+
+      expect(diff.merges).toHaveLength(1);
+      expect(diff.merges[0]).toMatchObject({
+        survivorId: 's2',
+        loserIds: ['s1'],
+      });
+      expect(diff.renames).toEqual([
+        { supplierId: 's2', oldName: 'ACME HOLDINGS', newName: 'acme holdings' },
+      ]);
+    });
+
+    it('prefers the supplier with the most aliases as merge survivor when no name matches', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'ACME CO', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'BETA', project_supplier_id: 's2', supplier_name: 'Beta', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const diff = await service.computeCsvDiff([
+        { supplierName: 'Combined Supplier', aliases: ['ACME CORP', 'ACME CO', 'BETA'], parentName: null },
+      ]);
+
+      expect(diff.merges).toHaveLength(1);
+      expect(diff.merges[0]).toMatchObject({
+        survivorId: 's1',
+        loserIds: ['s2'],
+      });
+      expect(diff.renames).toEqual([
+        { supplierId: 's1', oldName: 'Acme Corp', newName: 'Combined Supplier' },
+      ]);
+    });
+
+    it('is idempotent after a full normalize CSV merge export is re-applied', async () => {
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's1', supplier_name: 'Acme Corp', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'ACME CORPORATION', project_supplier_id: 's2', supplier_name: 'Acme Corporation', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const mergeDiff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corporation', aliases: ['ACME CORP'], parentName: null },
+        { supplierName: 'Acme Corporation', aliases: ['ACME CORPORATION'], parentName: null },
+      ]);
+
+      expect(mergeDiff.merges).toHaveLength(1);
+
+      setupDb([
+        { original_supplier_name: 'ACME CORP', project_supplier_id: 's2', supplier_name: 'Acme Corporation', parent_supplier_id: null, parent_name: null },
+        { original_supplier_name: 'ACME CORPORATION', project_supplier_id: 's2', supplier_name: 'Acme Corporation', parent_supplier_id: null, parent_name: null },
+      ]);
+
+      const roundTripDiff = await service.computeCsvDiff([
+        { supplierName: 'Acme Corporation', aliases: ['ACME CORP'], parentName: null },
+        { supplierName: 'Acme Corporation', aliases: ['ACME CORPORATION'], parentName: null },
+      ]);
+
+      expect(roundTripDiff.merges).toHaveLength(0);
+      expect(roundTripDiff.renames).toHaveLength(0);
+      expect(roundTripDiff.aliasReassignments).toHaveLength(0);
+      expect(roundTripDiff.parentChanges).toHaveLength(0);
     });
 
     it('throws about unknown aliases in the CSV', async () => {
